@@ -153,81 +153,70 @@ class UserController {
   }
 
 async googleLogin(req: Request, res: Response) {
-  const { idToken } = req.body;
+    const { idToken } = req.body;
 
-  if (!idToken) {
-    return res.status(400).json({ error: 'Token do Google é obrigatório.' });
-  }
-
-  try {
-    // Verificar o token do Google
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { uid, email, name } = decodedToken;
-
-    // Verificar se o usuário já existe
-    const [userRows] = await connectionUser.query(
-      'SELECT id, name, email FROM users WHERE firebase_uid = ? OR email = ?',
-      [uid, email]
-    );
-    
-    const users = userRows as any[];
-    let user;
-    let role = 'client'; // Default role
-
-    if (users.length > 0) {
-      // Usuário existe, atualizar firebase_uid se necessário
-      user = users[0];
-      if (!user.firebase_uid) {
-        await connectionUser.query(
-          'UPDATE users SET firebase_uid = ? WHERE id = ?',
-          [uid, user.id]
-        );
-      }
-      
-      // Verificar se é corretor
-      const [brokerRows] = await connectionUser.query(
-        'SELECT status FROM brokers WHERE user_id = ?',
-        [user.id]
-      );
-      
-      const brokers = brokerRows as any[];
-      if (brokers.length > 0) {
-        role = 'broker';
-      }
-    } else {
-      const [result] = await connectionUser.query(
-        'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
-        [uid, email, name || `User-${uid.substring(0, 8)}`]
-      );
-      user = {
-        id: (result as any).insertId,
-        name: name || `User-${uid.substring(0, 8)}`,
-        email
-      };
-      // Novo usuário é cliente por padrão
-      role = 'client';
+    if (!idToken) {
+        return res.status(400).json({ error: 'Token do Google é obrigatório.' });
     }
 
-    // Gerar JWT com a role correta
-    const token = jwt.sign(
-      { id: user.id, role: role }, // Inclui a role no token
-      process.env.JWT_SECRET || 'default_secret',
-      { expiresIn: '1d' }
-    );
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const { uid, email, name } = decodedToken;
 
-    return res.json({ 
-      user: { 
-        id: user.id, 
-        name: user.name, 
-        email: user.email,
-        role: role 
-      }, 
-      token 
-    });
-  } catch (error) {
-    console.error('Erro no login com Google:', error);
-    return res.status(401).json({ error: 'Token do Google inválido.' });
-  }
+        // ✅ CORREÇÃO: Query simplificada
+        const [userRows] = await connectionUser.query(
+            `SELECT u.id, u.name, u.email, u.firebase_uid, 
+                    CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END as role,
+                    b.status as broker_status
+             FROM users u
+             LEFT JOIN brokers b ON u.id = b.id
+             WHERE u.firebase_uid = ? OR u.email = ?`,
+            [uid, email]
+        );
+        
+        const users = userRows as any[];
+        let user;
+
+        if (users.length > 0) {
+            user = users[0];
+            if (!user.firebase_uid) {
+                await connectionUser.query(
+                    'UPDATE users SET firebase_uid = ? WHERE id = ?',
+                    [uid, user.id]
+                );
+            }
+        } else {
+            const [result] = await connectionUser.query(
+                'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
+                [uid, email, name || `User-${uid.substring(0, 8)}`]
+            );
+            user = {
+                id: (result as any).insertId,
+                name: name || `User-${uid.substring(0, 8)}`,
+                email,
+                role: 'client'
+            };
+        }
+
+        const token = jwt.sign(
+            { id: user.id, role: user.role },
+            process.env.JWT_SECRET || 'default_secret',
+            { expiresIn: '1d' }
+        );
+
+        return res.json({ 
+            user: { 
+                id: user.id, 
+                name: user.name, 
+                email: user.email,
+                role: user.role 
+            }, 
+            token 
+        });
+    } catch (error) {
+        console.error('Erro no login com Google:', error);
+        return res.status(401).json({ error: 'Token do Google inválido.' });
+    }
 }
 }
 

@@ -426,46 +426,43 @@ class PropertyController {
     }
   }
 
-  async listUserFavorites(req: AuthRequest, res: Response) {
+ async listUserFavorites(req: AuthRequest, res: Response) {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: "Usuario nao autenticado." });
+      return res.status(401).json({ error: 'Utilizador não autenticado.' });
     }
 
     try {
-      const [rows] = await connection.query(
-        `
-          SELECT
-            p.*,
-            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
-            u.name AS broker_name,
-            u.phone AS broker_phone,
-            u.email AS broker_email
-          FROM favoritos f
-          JOIN properties p ON p.id = f.imovel_id
-          LEFT JOIN property_images pi ON pi.property_id = p.id
-          LEFT JOIN users u ON u.id = p.broker_id
-          WHERE f.usuario_id = ?
-          GROUP BY p.id
-          ORDER BY f.created_at DESC
-        `,
-        [userId]
-      );
+      const query = `
+        SELECT
+          p.*,
+          GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
+          ANY_VALUE(u.name) AS broker_name,
+          ANY_VALUE(u.phone) AS broker_phone,
+          ANY_VALUE(u.email) AS broker_email
+        FROM favoritos f
+        JOIN properties p ON p.id = f.imovel_id
+        LEFT JOIN property_images pi ON pi.property_id = p.id
+        LEFT JOIN users u ON u.id = p.broker_id
+        WHERE f.usuario_id = ?
+        GROUP BY p.id
+        ORDER BY f.created_at DESC
+      `;
+      
+      const [rows] = await connection.query(query, [userId]);
 
-      const favorites = (rows as any[]).map((row) => ({
-        ...row,
-        images: row.images ? row.images.split(",") : [],
-        price: Number(row.price)
+      const properties = (rows as any[]).map(prop => ({
+        ...prop,
+        images: prop.images ? prop.images.split(',') : [],
       }));
 
-      return res.status(200).json(favorites);
+      return res.status(200).json(properties);
     } catch (error) {
-      console.error("Erro ao listar favoritos:", error);
-      return res.status(500).json({ error: "Ocorreu um erro no servidor." });
+      console.error('Erro ao listar favoritos:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
-
   async listPublicProperties(req: Request, res: Response) {
   try {
     const {

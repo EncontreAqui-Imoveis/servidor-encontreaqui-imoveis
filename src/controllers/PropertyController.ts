@@ -447,7 +447,7 @@ class PropertyController {
         LEFT JOIN users u ON u.id = p.broker_id
         WHERE f.usuario_id = ?
         GROUP BY p.id
-        ORDER BY f.created_at DESC
+        ORDER BY MAX(f.created_at) DESC
       `;
       
       const [rows] = await connection.query(query, [userId]);

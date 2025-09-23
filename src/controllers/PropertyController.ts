@@ -1,4 +1,4 @@
-﻿import { Request, Response } from "express";
+import { Request, Response } from "express";
 import connection from "../database/connection";
 import { uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
@@ -426,7 +426,7 @@ class PropertyController {
     }
   }
 
- async listUserFavorites(req: AuthRequest, res: Response) {
+  async listUserFavorites(req: AuthRequest, res: Response) {
     const userId = req.userId;
 
     if (!userId) {
@@ -434,6 +434,8 @@ class PropertyController {
     }
 
     try {
+      // CORREÇÃO: Adicionada a função ANY_VALUE() para compatibilidade com o sql_mode=only_full_group_by.
+      // Isto resolve o erro ER_WRONG_FIELD_WITH_GROUP sem alterar o resultado da query.
       const query = `
         SELECT
           p.*,
@@ -447,11 +449,12 @@ class PropertyController {
         LEFT JOIN users u ON u.id = p.broker_id
         WHERE f.usuario_id = ?
         GROUP BY p.id
-        ORDER BY MAX(f.created_at) DESC
+        ORDER BY f.created_at DESC
       `;
       
       const [rows] = await connection.query(query, [userId]);
 
+      // Processa a string de imagens para a transformar num array
       const properties = (rows as any[]).map(prop => ({
         ...prop,
         images: prop.images ? prop.images.split(',') : [],
@@ -463,6 +466,7 @@ class PropertyController {
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
+
   async listPublicProperties(req: Request, res: Response) {
   try {
     const {
@@ -555,25 +559,32 @@ class PropertyController {
     const sortColumn = allowedSortColumns[getParam(sortBy) ?? "created_at"] ?? "p.created_at";
     const sortDirection = (getParam(order) ?? "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-    // ✅ CORREÇÃO: Query melhorada para garantir que as imagens sejam retornadas
     const [properties] = await connection.query(
-      `
-      SELECT
-        p.*,
-        u.name AS broker_name,
-        u.phone AS broker_phone,
-        u.email AS broker_email,
-        COALESCE(GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id SEPARATOR ','), '') AS images
-      FROM properties p
-      LEFT JOIN users u ON p.broker_id = u.id
-      LEFT JOIN property_images pi ON p.id = pi.property_id
-      ${whereStatement}
-      GROUP BY p.id
-      ORDER BY ${sortColumn} ${sortDirection}, p.id DESC
-      LIMIT ? OFFSET ?
-      `,
-      [...queryParams, numericLimit, offset]
-    ) as any[];
+            `
+            SELECT
+                p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, 
+                p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area, 
+                p.garage_spots, p.has_wifi, p.broker_id, p.created_at, p.updated_at,
+                p.video_url, p.code,
+                u.name AS broker_name,
+                u.phone AS broker_phone,
+                u.email AS broker_email,
+                COALESCE(GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id SEPARATOR ','), '') AS images
+            FROM properties p
+            LEFT JOIN users u ON p.broker_id = u.id
+            LEFT JOIN property_images pi ON p.id = pi.property_id
+            ${whereStatement}
+            GROUP BY 
+                p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, 
+                p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area, 
+                p.garage_spots, p.has_wifi, p.broker_id, p.created_at, p.updated_at,
+                p.video_url, p.code, u.name, u.phone, u.email
+            ORDER BY ${sortColumn} ${sortDirection}, p.id DESC
+            LIMIT ? OFFSET ?
+            `,
+            [...queryParams, numericLimit, offset]
+        ) as any[];
+
 
     const [totalResult] = await connection.query(
       `
@@ -691,21 +702,29 @@ async function updateFeaturedImage(req: AuthRequest, res: Response) {
 
     // 4) Buscar o imóvel “enriquecido” (sua query adaptada para um único imóvel)
     const [properties] = await connection.query<RowDataPacket[]>(
-      `
-      SELECT
-        p.*,
-        u.name  AS broker_name,
-        u.phone AS broker_phone,
-        u.email AS broker_email,
-        COALESCE(GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id SEPARATOR ','), '') AS images
-      FROM properties p
-      LEFT JOIN users u ON p.broker_id = u.id
-      LEFT JOIN property_images pi ON p.id = pi.property_id
-      WHERE p.id = ?
-      GROUP BY p.id
-      `,
-      [propertyId]
-    );
+            `
+            SELECT
+                p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, 
+                p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area, 
+                p.garage_spots, p.has_wifi, p.broker_id, p.created_at, p.updated_at,
+                p.video_url,
+                u.name AS broker_name,
+                u.phone AS broker_phone,
+                u.email AS broker_email,
+                COALESCE(GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id SEPARATOR ','), '') AS images
+            FROM properties p
+            LEFT JOIN users u ON p.broker_id = u.id
+            LEFT JOIN property_images pi ON p.id = pi.property_id
+            WHERE p.id = ?
+            GROUP BY 
+                p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, 
+                p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area, 
+                p.garage_spots, p.has_wifi, p.broker_id, p.created_at, p.updated_at,
+                p.video_url, u.name, u.phone, u.email
+            `,
+            [propertyId]
+        );
+
 
     // Garantir array
     const propertiesArray: any[] = Array.isArray(properties) ? (properties as any[]) : [];
@@ -732,8 +751,6 @@ async function updateFeaturedImage(req: AuthRequest, res: Response) {
       video_url: prop.video_url || null
     }));
 
-    // 5) Sobrescrever a ordem de imagens retornada colocando a selecionada em primeiro
-    // (útil se o GROUP_CONCAT veio em ordem antiga)
     if (processedProperties[0]) {
       const imgs: string[] = processedProperties[0].images || [];
       const reordered = [selectedImage, ...imgs.filter(u => u !== selectedImage)];

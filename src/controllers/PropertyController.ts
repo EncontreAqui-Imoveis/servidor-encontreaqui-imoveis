@@ -185,51 +185,31 @@ class PropertyController {
         }
     }
 
-    async update(req: AuthRequest, res: Response) {
+     async update(req: AuthRequest, res: Response) {
     const { id } = req.params;
     const brokerId = req.userId;
-    
-    // Os dados do imóvel e as imagens a apagar vêm como campos de texto
-    const { propertyData, imagesToDelete } = req.body;
-    // Os novos ficheiros de imagem vêm em req.files
-    const newImageFiles = req.files as Express.Multer.File[];
+    // Os dados do imóvel agora vêm diretamente no corpo do pedido.
+    const propertyData = req.body;
 
     try {
-      const parsedData = JSON.parse(propertyData);
-      const parsedImagesToDelete = JSON.parse(imagesToDelete);
-
       // Passo 1: Verificar se o imóvel pertence ao corretor (Segurança)
       const [ownerCheck] = await connection.query<any[]>(
         "SELECT broker_id FROM properties WHERE id = ?",
         [id]
       );
-      if (ownerCheck.length === 0 || ownerCheck[0].broker_id !== brokerId) {
-        return res.status(403).json({ error: "Acesso não autorizado." });
+
+      if (ownerCheck.length === 0) {
+        return res.status(404).json({ error: "Imóvel não encontrado." });
+      }
+      if (ownerCheck[0].broker_id !== brokerId) {
+        return res.status(403).json({ error: "Acesso não autorizado a este imóvel." });
       }
 
-      // Passo 2: Atualizar os dados de texto do imóvel
-      await connection.query("UPDATE properties SET ? WHERE id = ?", [parsedData, id]);
-
-      // Passo 3: Apagar as imagens marcadas para remoção
-      if (parsedImagesToDelete && parsedImagesToDelete.length > 0) {
-        // NOTA: Esta query apaga com base na URL.
-        // Uma abordagem mais robusta seria apagar do Cloudinary também.
-        await connection.query(
-          "DELETE FROM property_images WHERE property_id = ? AND image_url IN (?)",
-          [id, parsedImagesToDelete]
-        );
-      }
-
-      // Passo 4: Fazer upload das novas imagens e guardá-las na base de dados
-      if (newImageFiles && newImageFiles.length > 0) {
-        for (const file of newImageFiles) {
-          const result = await uploadToCloudinary(file, 'properties');
-          await connection.query(
-            "INSERT INTO property_images (property_id, image_url) VALUES (?, ?)",
-            [id, result.url]
-          );
-        }
-      }
+      // Passo 2: Construir e executar a query de atualização simples
+      await connection.query(
+        "UPDATE properties SET ? WHERE id = ?",
+        [propertyData, id]
+      );
 
       res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
 
@@ -238,6 +218,7 @@ class PropertyController {
       return res.status(500).json({ error: "Erro interno do servidor." });
     }
   }
+}
 
     async updateStatus(req: AuthRequest, res: Response) {
         const { id } = req.params;

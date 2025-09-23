@@ -1,4 +1,4 @@
-﻿import { Request, Response } from "express";
+import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
@@ -220,50 +220,55 @@ class BrokerController {
     }
   }
 
-  async getMyProperties(req: AuthRequest, res: Response) {
+async getMyProperties(req: AuthRequest, res: Response) {
     const brokerId = req.userId;
 
     try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const offset = (page - 1) * limit;
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 10;
+        const offset = (page - 1) * limit;
 
-      const countQuery = "SELECT COUNT(*) as total FROM properties WHERE broker_id = ?";
-      const [totalResult] = await connection.query(countQuery, [brokerId]);
-      const total = (totalResult as any[])[0]?.total ?? 0;
+        const countQuery = "SELECT COUNT(*) as total FROM properties WHERE broker_id = ?";
+        const [totalResult] = await connection.query(countQuery, [brokerId]);
+        const total = (totalResult as any[])[0]?.total ?? 0;
 
-      const dataQuery = `
-        SELECT
-          p.*, 
-          GROUP_CONCAT(pi.image_url) AS images
-        FROM properties p
-        LEFT JOIN property_images pi ON p.id = pi.property_id
-        WHERE p.broker_id = ?
-        GROUP BY p.id
-        ORDER BY p.created_at DESC
-        LIMIT ? OFFSET ?
-      `;
-      const [dataRows] = await connection.query(dataQuery, [brokerId, limit, offset]);
-      const properties = (dataRows as any[]).map((row) => ({
-        ...row,
-        images: row.images ? row.images.split(",") : []
-      }));
+        const dataQuery = `
+            SELECT
+                p.id, p.title, p.type, p.status, p.price, p.address, p.city, p.state,
+                p.bedrooms, p.bathrooms, p.area, p.garage_spots, p.has_wifi,
+                p.broker_id, p.created_at, p.updated_at,
+                GROUP_CONCAT(pi.image_url) AS images
+            FROM properties p
+            LEFT JOIN property_images pi ON p.id = pi.property_id
+            WHERE p.broker_id = ?
+            GROUP BY 
+                p.id, p.title, p.type, p.status, p.price, p.address, p.city, p.state,
+                p.bedrooms, p.bathrooms, p.area, p.garage_spots, p.has_wifi,
+                p.broker_id, p.created_at, p.updated_at
+            ORDER BY p.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+        const [dataRows] = await connection.query(dataQuery, [brokerId, limit, offset]);
+        const properties = (dataRows as any[]).map((row) => ({
+            ...row,
+            images: row.images ? row.images.split(",") : []
+        }));
 
-      return res.json({
-        success: true,
-        data: properties,
-        total,
-        page,
-        totalPages: Math.ceil(total / limit)
-      });
+        return res.json({
+            success: true,
+            data: properties,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit)
+        });
     } catch (error) {
-      console.error("Erro ao buscar imoveis do corretor:", error);
-      return res.status(500).json({
-        success: false,
-        error: "Ocorreu um erro inesperado no servidor."
-      });
+        console.error("Erro ao buscar imoveis do corretor:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Ocorreu um erro inesperado no servidor."
+        });
     }
-  }
+}
 
   async getMyCommissions(req: AuthRequest, res: Response) {
     const brokerId = req.userId;

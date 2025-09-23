@@ -214,57 +214,55 @@ class BrokerController {
         }
     }
 
-   async getMyProperties(req: AuthRequest, res: Response) {
-    const brokerId = req.userId;
-    if (!brokerId) {
-      return res.status(401).json({ error: 'Corretor não autenticado.' });
+    async getMyProperties(req: AuthRequest, res: Response) {
+        const brokerId = req.userId;
+
+        try {
+            const page = parseInt(req.query.page as string) || 1;
+            const limit = parseInt(req.query.limit as string) || 10;
+            const offset = (page - 1) * limit;
+
+            const countQuery = "SELECT COUNT(*) as total FROM properties WHERE broker_id = ?";
+            const [totalResult] = await connection.query(countQuery, [brokerId]);
+            const total = (totalResult as any[])[0]?.total ?? 0;
+
+            const dataQuery = `
+                SELECT
+                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
+                    p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
+                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, p.updated_at,
+                    GROUP_CONCAT(pi.image_url) AS images
+                FROM properties p
+                LEFT JOIN property_images pi ON p.id = pi.property_id
+                WHERE p.broker_id = ?
+                GROUP BY 
+                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
+                    p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
+                    p.garage_spots, p.has_wifi, p.video_url, p.created_at
+                ORDER BY p.created_at DESC
+                LIMIT ? OFFSET ?
+            `;
+            const [dataRows] = await connection.query(dataQuery, [brokerId, limit, offset]);
+            const properties = (dataRows as any[]).map((row) => ({
+                ...row,
+                images: row.images ? row.images.split(",") : []
+            }));
+
+            return res.json({
+                success: true,
+                data: properties,
+                total,
+                page,
+                totalPages: Math.ceil(total / limit)
+            });
+        } catch (error) {
+            console.error("Erro ao buscar imóveis do corretor:", error);
+            return res.status(500).json({
+                success: false,
+                error: "Ocorreu um erro inesperado no servidor."
+            });
+        }
     }
-
-    try {
-      const page = parseInt(req.query.page as string || '1');
-      const limit = parseInt(req.query.limit as string || '10');
-      const offset = (page - 1) * limit;
-
-      const query = `
-        SELECT
-          p.*,
-          GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
-        FROM properties p
-        LEFT JOIN property_images pi ON p.id = pi.property_id
-        WHERE p.broker_id = ?
-        GROUP BY p.id
-        ORDER BY p.created_at DESC
-        LIMIT ? OFFSET ?
-      `;
-
-      const [rows] = await connection.query(query, [brokerId, limit, offset]);
-
-      const properties = (rows as any[]).map(prop => ({
-        ...prop,
-        images: prop.images ? prop.images.split(',') : [],
-      }));
-      
-      const [[{ total }]] = await connection.query(
-        "SELECT COUNT(*) as total FROM properties WHERE broker_id = ?",
-        [brokerId]
-      ) as any;
-
-      return res.json({
-        success: true,
-        data: properties,
-        total: total,
-        page: page,
-        totalPages: Math.ceil(total / limit)
-      });
-
-    } catch (error) {
-      console.error(`Erro ao buscar imóveis do corretor:`, error);
-      return res.status(500).json({ 
-        success: false,
-        error: 'Ocorreu um erro inesperado no servidor.' 
-      });
-    }
-  }
 
     async getMyCommissions(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
@@ -292,75 +290,58 @@ class BrokerController {
     }
 
     async getMyPerformanceReport(req: AuthRequest, res: Response) {
-        const brokerId = req.userId;
-        try {
-            const salesQuery = `
-                SELECT COUNT(*) as total_sales, SUM(commission_amount) as total_commission
-                FROM sales
-                WHERE broker_id = ?
-            `;
-            const [salesResult] = await connection.query(salesQuery, [brokerId]);
+    const brokerId = req.userId;
+    try {
+        // CORREÇÃO: A contagem de vendas agora vem diretamente da tabela de imóveis
+        const salesQuery = `
+            SELECT 
+                COUNT(CASE WHEN status = 'Vendido' THEN 1 END) as total_sales,
+                SUM(CASE WHEN status = 'Vendido' THEN commission_value ELSE 0 END) as total_commission
+            FROM properties
+            WHERE broker_id = ?
+        `;
+        const [salesResult] = await connection.query<any[]>(salesQuery, [brokerId]);
 
-            const statusQuery = `
-                SELECT status, COUNT(*) as total
-                FROM properties
-                WHERE broker_id = ?
-                GROUP BY status
-            `;
-            const [statusRows] = await connection.query(statusQuery, [brokerId]);
+        // A contagem de imóveis cadastrados continua a mesma
+        const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;
+        const [propertiesResult] = await connection.query<any[]>(propertiesQuery, [brokerId]);
+        
+        // CORREÇÃO ADICIONAL: Buscar breakdown por status para análise detalhada
+        const statusQuery = `
+            SELECT 
+                status,
+                COUNT(*) as count
+            FROM properties 
+            WHERE broker_id = ? 
+            GROUP BY status
+        `;
+        const [statusRows] = await connection.query<any[]>(statusQuery, [brokerId]);
 
-            const statusBreakdown = {
-                disponivel: 0,
-                negociando: 0,
-                alugado: 0,
-                vendido: 0
-            };
-
-            const normalize = (value: string) =>
-                value
-                    .toString()
-                    .trim()
-                    .toLowerCase()
-                    .normalize("NFD")
-                    .replace(/[^a-z]/g, "");
-
-            for (const row of statusRows as any[]) {
-                const normalizedStatus = normalize(row.status ?? "");
-                const count = Number(row.total) || 0;
-                if (normalizedStatus === "disponivel") {
-                    statusBreakdown.disponivel += count;
-                } else if (normalizedStatus === "negociando" || normalizedStatus === "negociacao") {
-                    statusBreakdown.negociando += count;
-                } else if (normalizedStatus === "alugado" || normalizedStatus === "aluguel") {
-                    statusBreakdown.alugado += count;
-                } else if (normalizedStatus === "vendido" || normalizedStatus === "venda") {
-                    statusBreakdown.vendido += count;
-                }
-            }
-
-            const totalProperties = Object.values(statusBreakdown).reduce((acc, value) => acc + value, 0);
-            const totalSales = (salesResult as any[])[0]?.total_sales || 0;
-            const totalCommission = (salesResult as any[])[0]?.total_commission || 0;
-
-            const report = {
-                totalSales,
-                totalCommission,
-                totalProperties,
-                statusBreakdown
-            };
-
-            return res.json({
-                success: true,
-                data: report
-            });
-        } catch (error) {
-            console.error("Erro ao gerar relatório de desempenho:", error);
-            return res.status(500).json({
-                success: false,
-                error: "Ocorreu um erro inesperado no servidor."
-            });
+        // Processar breakdown de status
+        const statusBreakdown: { [key: string]: number } = {};
+        for (const row of statusRows) {
+            statusBreakdown[row.status] = Number(row.count) || 0;
         }
+
+        const report = {
+            totalSales: Number(salesResult[0]?.total_sales || 0),
+            totalCommission: Number(salesResult[0]?.total_commission || 0),
+            totalProperties: Number(propertiesResult[0]?.total_properties || 0),
+            statusBreakdown: statusBreakdown
+        };
+
+        return res.json({
+            success: true,
+            data: report
+        });
+    } catch (error) {
+        console.error('Erro ao gerar relatório de desempenho:', error);
+        return res.status(500).json({ 
+            success: false,
+            error: 'Ocorreu um erro inesperado no servidor.' 
+        });
     }
+}
 
     async uploadVerificationDocs(req: AuthRequest, res: Response) {
         const brokerId = req.userId;

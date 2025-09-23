@@ -18,9 +18,6 @@ const connectionOptions: mysql.PoolOptions = {
     rejectUnauthorized: true,
   }
 };
-if (process.env.DATABASE_SSL_CA) {
-  connectionOptions.ssl!.ca = process.env.DATABASE_SSL_CA;
-}
 
 const connection = mysql.createPool(connectionOptions).promise();
 

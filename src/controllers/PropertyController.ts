@@ -445,7 +445,7 @@ class PropertyController {
                 GROUP BY 
                     p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
                     p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, p.updated_at,
+                    p.garage_spots, p.has_wifi, p.video_url, p.created_at
                     u.name, u.phone, u.email
                 ORDER BY f.created_at DESC
             `;

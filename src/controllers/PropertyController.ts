@@ -403,47 +403,51 @@ class PropertyController {
         }
     }
 
-    async listUserFavorites(req: AuthRequest, res: Response) {
-        const userId = req.userId;
+   async listUserFavorites(req: AuthRequest, res: Response) {
+  const userId = req.userId;
 
-        if (!userId) {
-            return res.status(401).json({ error: 'Utilizador não autenticado.' });
-        }
+  if (!userId) {
+    return res.status(401).json({ error: 'Utilizador não autenticado.' });
+  }
 
-        try {
-            const query = `
-                SELECT
-                    p.*,
-                    GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
-                    u.name AS broker_name,
-                    u.phone AS broker_phone,
-                    u.email AS broker_email
-                FROM favoritos f
-                JOIN properties p ON p.id = f.imovel_id
-                LEFT JOIN property_images pi ON pi.property_id = p.id
-                LEFT JOIN users u ON u.id = p.broker_id
-                WHERE f.usuario_id = ?
-                GROUP BY 
-                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
-                    p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at,
-                    u.name, u.phone, u.email
-                ORDER BY f.created_at DESC
-            `;
-            
-            const [rows] = await connection.query(query, [userId]);
+  try {
+    const query = `
+      SELECT
+        p.*,
+        ANY_VALUE(u.name)  AS broker_name,
+        ANY_VALUE(u.phone) AS broker_phone,
+        ANY_VALUE(u.email) AS broker_email,
+        GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
+        MAX(f.created_at) AS last_fav_at
+      FROM favoritos f
+      JOIN properties p        ON p.id = f.imovel_id
+      LEFT JOIN property_images pi ON pi.property_id = p.id
+      LEFT JOIN users u            ON u.id = p.broker_id
+      WHERE f.usuario_id = ?
+      GROUP BY p.id
+      ORDER BY last_fav_at DESC
+    `;
 
-            const properties = (rows as any[]).map(prop => ({
-                ...prop,
-                images: prop.images ? prop.images.split(',') : [],
-            }));
+    const [rows] = await connection.query(query, [userId]);
 
-            return res.status(200).json(properties);
-        } catch (error) {
-            console.error('Erro ao listar favoritos:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-        }
-    }
+    const properties = (rows as any[]).map((prop) => ({
+      ...prop,
+      images: prop.images ? String(prop.images).split(',') : [],
+      price: Number(prop.price),
+      has_wifi: Boolean(prop.has_wifi),
+      bedrooms: prop.bedrooms != null ? Number(prop.bedrooms) : null,
+      bathrooms: prop.bathrooms != null ? Number(prop.bathrooms) : null,
+      area: prop.area != null ? Number(prop.area) : null,
+      garage_spots: prop.garage_spots != null ? Number(prop.garage_spots) : null,
+    }));
+
+    return res.status(200).json(properties);
+  } catch (error) {
+    console.error('Erro ao listar favoritos:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+}
+
 
     async listPublicProperties(req: Request, res: Response) {
         try {

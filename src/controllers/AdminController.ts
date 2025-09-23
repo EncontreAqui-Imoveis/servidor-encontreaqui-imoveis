@@ -140,43 +140,43 @@ async updateProperty(req: Request, res: Response) {
     }
 }
 
-    async getAllBrokers(req: Request, res: Response) {
-        const page = parseInt(req.query.page as string) || 1;
-        const limit = parseInt(req.query.limit as string) || 10;
-        const offset = (page - 1) * limit;
-        const sortBy = req.query.sortBy as string || 'b.id';
-        const sortOrder = req.query.sortOrder as string || 'desc';
-    
-        const allowedSortColumns = ['b.id', 'b.name', 'b.email', 'b.creci', 'property_count'];
-        const safeSortBy = allowedSortColumns.includes(sortBy) ? sortBy : 'b.id';
-        const safeSortOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    
-        try {
-            const countQuery = `SELECT COUNT(*) as total FROM brokers`;
-            const [totalResult] = await connection.query(countQuery);
-            const total = (totalResult as any[])[0].total;
-    
-            const dataQuery = `
-                SELECT
-                    b.id, b.name, b.email, b.creci, b.created_at,
-                    COUNT(p.id) AS property_count
-                FROM
-                    brokers b
-                LEFT JOIN
-                    properties p ON b.id = p.broker_id
-                GROUP BY
-                    b.id
-                ORDER BY
-                    ${safeSortBy} ${safeSortOrder}
-                LIMIT ? OFFSET ?
-            `;
-            const [data] = await connection.query(dataQuery, [limit, offset]);
-            return res.json({ data, total });
-        } catch (error) {
-            console.error(`Erro ao buscar corretores:`, error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-        }
+async getAllBrokers(req: Request, res: Response) {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const offset = (page - 1) * limit;
+    const sortBy = req.query.sortBy as string || 'b.id';
+    const sortOrder = req.query.sortOrder as string || 'desc';
+
+    const allowedSortColumns = ['b.id', 'b.name', 'b.email', 'b.creci', 'property_count'];
+    const safeSortBy = allowedSortColumns.includes(sortBy) ? sortBy : 'b.id';
+    const safeSortOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    try {
+        const countQuery = `SELECT COUNT(*) as total FROM brokers`;
+        const [totalResult] = await connection.query(countQuery);
+        const total = (totalResult as any[])[0].total;
+
+        const dataQuery = `
+            SELECT
+                b.id, b.name, b.email, b.creci, b.created_at,
+                COUNT(p.id) AS property_count
+            FROM
+                brokers b
+            LEFT JOIN
+                properties p ON b.id = p.broker_id
+            GROUP BY
+                b.id, b.name, b.email, b.creci, b.created_at
+            ORDER BY
+                ${safeSortBy} ${safeSortOrder}
+            LIMIT ? OFFSET ?
+        `;
+        const [data] = await connection.query(dataQuery, [limit, offset]);
+        return res.json({ data, total });
+    } catch (error) {
+        console.error(`Erro ao buscar corretores:`, error);
+        return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
+}
 
     async getAllUsers(req: Request, res: Response) {
         const page = parseInt(req.query.page as string) || 1;

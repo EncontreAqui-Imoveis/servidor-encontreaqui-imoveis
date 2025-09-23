@@ -4,10 +4,12 @@ WORKDIR /usr/app
 
 COPY package*.json ./
 
-RUN npm install
+RUN npm install --omit=dev
 
 COPY . .
 
+RUN npm run build
+
 EXPOSE 3333
 
-CMD ["npm", "run", "dev"]
+CMD ["npm", "run", "start"]

@@ -6,7 +6,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 const connection = mysql.createPool({
-  host: process.env.DATABASE_HOST,
+  host: 127.0.0.1,
   user: process.env.DATABASE_USER, // Lê o User do Railway
   password: process.env.DATABASE_PASSWORD, // Lê a Password do Railway
   database: process.env.DATABASE_NAME, // Lê o nome da Database do Railway

@@ -186,62 +186,58 @@ class PropertyController {
     }
 
     async update(req: AuthRequest, res: Response) {
-        const { id } = req.params;
-        const {
-            title,
-            description,
-            type,
-            status,
-            purpose,
-            price,
-            address,
-            city,
-            state,
-            bedrooms,
-            bathrooms,
-            area
-        } = req.body;
-        const brokerIdFromToken = req.userId;
+    const { id } = req.params;
+    const brokerId = req.userId;
+    
+    // Os dados do imóvel e as imagens a apagar vêm como campos de texto
+    const { propertyData, imagesToDelete } = req.body;
+    // Os novos ficheiros de imagem vêm em req.files
+    const newImageFiles = req.files as Express.Multer.File[];
 
-        try {
-            const [propertyRows] = await connection.query("SELECT broker_id FROM properties WHERE id = ?", [id]);
-            const properties = propertyRows as any[];
-            if (properties.length === 0) {
-                return res.status(404).json({ error: "Imóvel não encontrado." });
-            }
-            const property = properties[0];
-            if (property.broker_id !== brokerIdFromToken) {
-                return res.status(403).json({ error: "Você não tem permissão para alterar este imóvel." });
-            }
+    try {
+      const parsedData = JSON.parse(propertyData);
+      const parsedImagesToDelete = JSON.parse(imagesToDelete);
 
-            const updateQuery = `
-                UPDATE properties
-                SET title = ?, description = ?, type = ?, status = ?, purpose = ?, price = ?, address = ?, city = ?, state = ?, bedrooms = ?, bathrooms = ?, area = ?
-                WHERE id = ?
-            `;
+      // Passo 1: Verificar se o imóvel pertence ao corretor (Segurança)
+      const [ownerCheck] = await connection.query<any[]>(
+        "SELECT broker_id FROM properties WHERE id = ?",
+        [id]
+      );
+      if (ownerCheck.length === 0 || ownerCheck[0].broker_id !== brokerId) {
+        return res.status(403).json({ error: "Acesso não autorizado." });
+      }
 
-            await connection.query(updateQuery, [
-                title,
-                description,
-                type,
-                status,
-                purpose,
-                price,
-                address,
-                city,
-                state,
-                bedrooms,
-                bathrooms,
-                area,
-                id
-            ]);
+      // Passo 2: Atualizar os dados de texto do imóvel
+      await connection.query("UPDATE properties SET ? WHERE id = ?", [parsedData, id]);
 
-            return res.status(200).json({ message: "Imóvel atualizado com sucesso!" });
-        } catch (error) {
-            console.error("Erro ao atualizar imóvel:", error);
-            return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });
+      // Passo 3: Apagar as imagens marcadas para remoção
+      if (parsedImagesToDelete && parsedImagesToDelete.length > 0) {
+        // NOTA: Esta query apaga com base na URL.
+        // Uma abordagem mais robusta seria apagar do Cloudinary também.
+        await connection.query(
+          "DELETE FROM property_images WHERE property_id = ? AND image_url IN (?)",
+          [id, parsedImagesToDelete]
+        );
+      }
+
+      // Passo 4: Fazer upload das novas imagens e guardá-las na base de dados
+      if (newImageFiles && newImageFiles.length > 0) {
+        for (const file of newImageFiles) {
+          const result = await uploadToCloudinary(file, 'properties');
+          await connection.query(
+            "INSERT INTO property_images (property_id, image_url) VALUES (?, ?)",
+            [id, result.url]
+          );
         }
+      }
+
+      res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
+
+    } catch (error) {
+      console.error("Erro ao atualizar imóvel:", error);
+      return res.status(500).json({ error: "Erro interno do servidor." });
     }
+  }
 
     async updateStatus(req: AuthRequest, res: Response) {
         const { id } = req.params;
@@ -449,7 +445,7 @@ class PropertyController {
                 GROUP BY 
                     p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
                     p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, 
+                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, p.updated_at,
                     u.name, u.phone, u.email
                 ORDER BY f.created_at DESC
             `;

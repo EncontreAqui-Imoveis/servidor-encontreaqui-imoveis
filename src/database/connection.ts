@@ -5,18 +5,24 @@ if (process.env.NODE_ENV !== 'production') {
   dotenv.config();
 }
 
-const connection = mysql.createPool({
-  host: 127.0.0.1,
-  user: process.env.DATABASE_USER, // Lê o User do Railway
-  password: process.env.DATABASE_PASSWORD, // Lê a Password do Railway
-  database: process.env.DATABASE_NAME, // Lê o nome da Database do Railway
-  port: 4000, 
-  ssl: {
-    rejectUnauthorized: true,
-  },
+const connectionOptions: mysql.PoolOptions = {
+  host: process.env.DATABASE_HOST,
+  user: process.env.DATABASE_USER,
+  password: process.env.DATABASE_PASSWORD,
+  database: process.env.DATABASE_NAME,
+  port: 4000,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
-}).promise();
+  queueLimit: 0,
+  ssl: {
+    rejectUnauthorized: true,
+  }
+};
+if (process.env.DATABASE_SSL_CA) {
+  connectionOptions.ssl!.ca = process.env.DATABASE_SSL_CA;
+}
+
+const connection = mysql.createPool(connectionOptions).promise();
 
 export default connection;
+

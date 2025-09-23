@@ -470,6 +470,7 @@ class PropertyController {
 
     async listPublicProperties(req: Request, res: Response) {
         try {
+            // 1. Lógica completa de extração de parâmetros e filtros
             const {
                 page = "1",
                 limit = "20",
@@ -485,13 +486,6 @@ class PropertyController {
                 status
             } = req.query;
 
-            const getParam = (value: unknown): string | undefined => {
-                if (Array.isArray(value) && value.length > 0) {
-                    return typeof value[0] === "string" ? (value[0] as string) : undefined;
-                }
-                return typeof value === "string" ? (value as string) : undefined;
-            };
-
             const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
             const numericPage = Math.max(Number(page) || 1, 1);
             const offset = (numericPage - 1) * numericLimit;
@@ -499,11 +493,9 @@ class PropertyController {
             const whereClauses: string[] = [];
             const queryParams: any[] = [];
 
-            const statusFilter = getParam(status);
-            if (statusFilter) {
-                whereClauses.push("p.status = ?");
-                queryParams.push(statusFilter);
-            }
+            // Por defeito, filtra por 'Disponível', mas permite outros status se enviados
+            whereClauses.push("p.status = ?");
+            queryParams.push(getParam(status) ?? 'Disponível');
 
             const typeFilter = getParam(type);
             if (typeFilter) {
@@ -523,19 +515,19 @@ class PropertyController {
                 queryParams.push(`%${cityFilter}%`);
             }
 
-            const minPriceValue = Number(getParam(minPrice) ?? minPrice);
+            const minPriceValue = Number(getParam(minPrice));
             if (!Number.isNaN(minPriceValue) && minPriceValue > 0) {
                 whereClauses.push("p.price >= ?");
                 queryParams.push(minPriceValue);
             }
 
-            const maxPriceValue = Number(getParam(maxPrice) ?? maxPrice);
+            const maxPriceValue = Number(getParam(maxPrice));
             if (!Number.isNaN(maxPriceValue) && maxPriceValue > 0) {
                 whereClauses.push("p.price <= ?");
                 queryParams.push(maxPriceValue);
             }
 
-            const bedroomsValue = Number(getParam(bedrooms) ?? bedrooms);
+            const bedroomsValue = Number(getParam(bedrooms));
             if (!Number.isNaN(bedroomsValue) && bedroomsValue > 0) {
                 whereClauses.push("p.bedrooms >= ?");
                 queryParams.push(Math.floor(bedroomsValue));
@@ -548,59 +540,49 @@ class PropertyController {
                 queryParams.push(term, term, term);
             }
 
-            const whereStatement = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
+            const whereStatement = `WHERE ${whereClauses.join(" AND ")}`;
 
             const allowedSortColumns: Record<string, string> = {
                 price: "p.price",
                 created_at: "p.created_at",
-                title: "p.title"
             };
             const sortColumn = allowedSortColumns[getParam(sortBy) ?? "created_at"] ?? "p.created_at";
             const sortDirection = (getParam(order) ?? "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-            const [properties] = await connection.query(
-                `
+            // 2. Query com a correção ANY_VALUE() aplicada
+            const query = `
                 SELECT
                     p.*,
-                    u.name AS broker_name,
-                    u.phone AS broker_phone,
-                    u.email AS broker_email,
-                    COALESCE(GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id SEPARATOR ','), '') AS images
+                    ANY_VALUE(u.name) AS broker_name,
+                    ANY_VALUE(u.phone) AS broker_phone,
+                    ANY_VALUE(u.email) AS broker_email,
+                    GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
                 FROM properties p
                 LEFT JOIN users u ON p.broker_id = u.id
                 LEFT JOIN property_images pi ON p.id = pi.property_id
                 ${whereStatement}
-                GROUP BY 
-                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
-                    p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, p.updated_at,
-                    u.name, u.phone, u.email
-                ORDER BY ${sortColumn} ${sortDirection}, p.id DESC
+                GROUP BY p.id
+                ORDER BY ${sortColumn} ${sortDirection}
                 LIMIT ? OFFSET ?
-                `,
-                [...queryParams, numericLimit, offset]
-            ) as any[];
+            `;
+            
+            const [properties] = await connection.query(query, [...queryParams, numericLimit, offset]) as any[];
 
             const [totalResult] = await connection.query(
-                `
-                SELECT COUNT(DISTINCT p.id) as total
-                FROM properties p
-                ${whereStatement}
-                `,
+                `SELECT COUNT(DISTINCT p.id) as total FROM properties p ${whereStatement}`,
                 queryParams
             ) as any[];
 
+            // 3. Processamento final dos dados
             const processedProperties = properties.map((prop: any) => ({
                 ...prop,
-                images: prop.images && prop.images.trim() !== '' 
-                    ? prop.images.split(',').filter((url: string) => url.trim() !== '')
-                    : [],
+                images: prop.images ? prop.images.split(',') : [],
                 price: Number(prop.price),
                 has_wifi: Boolean(prop.has_wifi),
                 bedrooms: prop.bedrooms ? Number(prop.bedrooms) : null,
                 bathrooms: prop.bathrooms ? Number(prop.bathrooms) : null,
                 area: prop.area ? Number(prop.area) : null,
-                garage_spots: prop.garage_spots ? Number(prop.garage_spots) : null
+                garage_spots: prop.garage_spots ? Number(prop.garage_spots) : null,
             }));
 
             return res.json({
@@ -614,6 +596,14 @@ class PropertyController {
             return res.status(500).json({ error: "Erro interno do servidor." });
         }
     }
+}
+
+// Função auxiliar para extrair o primeiro parâmetro, caso venha como um array
+function getParam(value: unknown): string | undefined {
+    if (Array.isArray(value) && value.length > 0) {
+        return String(value[0]);
+    }
+    return typeof value === "string" ? value : undefined;
 }
 
 export const propertyController = new PropertyController();

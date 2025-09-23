@@ -203,36 +203,107 @@ class PropertyController {
   }
 
   async update(req: AuthRequest, res: Response) {
-    const { id } = req.params;
-    const brokerId = req.userId;
-    const propertyData = req.body;
+  const { id } = req.params;
+  const brokerId = req.userId;
 
-    try {
-      const [ownerCheck] = (await connection.query<any[]>(
-        "SELECT broker_id FROM properties WHERE id = ?",
-        [id]
-      )) as any[];
-
-      if ((ownerCheck as any[]).length === 0) {
-        return res.status(404).json({ error: "Imóvel não encontrado." });
-      }
-      if ((ownerCheck as any[])[0].broker_id !== brokerId) {
-        return res
-          .status(403)
-          .json({ error: "Acesso não autorizado a este imóvel." });
-      }
-
-      await connection.query("UPDATE properties SET ? WHERE id = ?", [
-        propertyData,
-        id,
-      ]);
-
-      res.status(200).json({ message: "Imóvel atualizado com sucesso!" });
-    } catch (error) {
-      console.error("Erro ao atualizar imóvel:", error);
-      return res.status(500).json({ error: "Erro interno do servidor." });
+  try {
+    // 1) Segurança: valida dono
+    const [ownerRows] = await connection.query(
+      "SELECT broker_id FROM properties WHERE id = ?",
+      [id]
+    );
+    const owners = ownerRows as any[];
+    if (owners.length === 0) {
+      return res.status(404).json({ error: "Imóvel não encontrado." });
     }
+    if (owners[0].broker_id !== brokerId) {
+      return res.status(403).json({ error: "Acesso não autorizado a este imóvel." });
+    }
+
+    // 2) Campos aceitos em `properties`
+    const body = req.body ?? {};
+    const allowed: Record<string, any> = {};
+
+    // Só liste aqui colunas que EXISTEM na tabela `properties`
+    const allowList = new Set([
+      "title",
+      "description",
+      "type",
+      "status",
+      "purpose",
+      "price",
+      "address",
+      "city",
+      "state",
+      "bedrooms",
+      "bathrooms",
+      "area",
+      "garage_spots",
+      "has_wifi",
+      "video_url",
+      // "broker_id" // normalmente você NÃO deve permitir trocar o dono.
+    ]);
+
+    for (const key of Object.keys(body)) {
+      if (allowList.has(key)) {
+        allowed[key] = body[key];
+      }
+    }
+
+    // Normalizações
+    if (allowed.has_wifi !== undefined) {
+      allowed.has_wifi = allowed.has_wifi ? 1 : 0; // TiDB/MySQL
+    }
+    if (allowed.price !== undefined) {
+      const n = Number(allowed.price);
+      if (!Number.isFinite(n)) {
+        return res.status(400).json({ error: "Preço inválido." });
+      }
+      allowed.price = n;
+    }
+    ["bedrooms", "bathrooms", "area", "garage_spots"].forEach((k) => {
+      if (allowed[k] !== undefined && allowed[k] !== null && allowed[k] !== "") {
+        const n = Number(allowed[k]);
+        allowed[k] = Number.isFinite(n) ? n : null;
+      }
+    });
+
+    // 3) Atualiza apenas se houver algo permitido
+    if (Object.keys(allowed).length > 0) {
+      const setParts: string[] = [];
+      const params: any[] = [];
+      for (const k of Object.keys(allowed)) {
+        setParts.push(`\`${k}\` = ?`);
+        params.push(allowed[k]);
+      }
+      params.push(id);
+
+      const sql = `UPDATE properties SET ${setParts.join(", ")} WHERE id = ?`;
+      await connection.query(sql, params);
+    }
+
+    // 4) Tratamento de imagens (opcional) — se vierem no corpo como array `images`
+    //    Vamos substituir todas as imagens do imóvel (simples e direto).
+    if (Array.isArray(body.images)) {
+      const images: string[] = body.images.filter((u: any) => typeof u === "string" && u.trim() !== "");
+      // apaga todas as atuais
+      await connection.query("DELETE FROM property_images WHERE property_id = ?", [id]);
+      if (images.length > 0) {
+        const values = images.map((url) => [id, url]);
+        await connection.query(
+          "INSERT INTO property_images (property_id, image_url) VALUES ?",
+          [values]
+        );
+      }
+    }
+
+    return res.status(200).json({ message: "Imóvel atualizado com sucesso!" });
+  } catch (error) {
+    console.error("Erro ao atualizar imóvel:", error);
+    return res.status(500).json({ error: "Erro interno do servidor." });
   }
+}
+
 
   async updateStatus(req: AuthRequest, res: Response) {
     const { id } = req.params;

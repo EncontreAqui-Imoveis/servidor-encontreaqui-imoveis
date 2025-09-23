@@ -230,7 +230,7 @@ class BrokerController {
                 SELECT
                     p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
                     p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, p.updated_at,
+                    p.garage_spots, p.has_wifi, p.video_url, p.created_at,
                     GROUP_CONCAT(pi.image_url) AS images
                 FROM properties p
                 LEFT JOIN property_images pi ON p.id = pi.property_id

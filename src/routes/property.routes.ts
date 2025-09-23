@@ -1,12 +1,10 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { propertyController, AuthRequestWithFiles } from '../controllers/PropertyController';
-import { authMiddleware, isBroker } from '../middlewares/auth';
+import AuthRequest, { authMiddleware, isBroker } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 
 const propertyRoutes = Router();
 
-// ✅ Criação de imóvel com upload de imagens e vídeo
-// Ordem dos middlewares importa: autenticação -> regra de corretor -> upload -> controller
 propertyRoutes.post(
   '/',
   authMiddleware,
@@ -16,6 +14,13 @@ propertyRoutes.post(
     { name: 'video',  maxCount: 1  },
   ]),
   (req, res) => propertyController.create(req as AuthRequestWithFiles, res),
+);
+
+propertyRoutes.put(
+  '/:id',
+  authMiddleware,
+  isBroker,
+  (req, res) => propertyController.update(req as AuthRequest, res)
 );
 
 propertyRoutes.get('/public', (req, res) => propertyController.listPublicProperties(req, res));

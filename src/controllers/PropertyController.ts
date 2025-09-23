@@ -449,7 +449,7 @@ class PropertyController {
                 GROUP BY 
                     p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
                     p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at,
+                    p.garage_spots, p.has_wifi, p.video_url, p.created_at, p.updated_at,
                     u.name, u.phone, u.email
                 ORDER BY f.created_at DESC
             `;
@@ -470,7 +470,6 @@ class PropertyController {
 
     async listPublicProperties(req: Request, res: Response) {
         try {
-            // 1. Lógica completa de extração de parâmetros e filtros
             const {
                 page = "1",
                 limit = "20",
@@ -483,7 +482,7 @@ class PropertyController {
                 sortBy,
                 order,
                 searchTerm,
-                status
+                status // O filtro de status agora é opcional
             } = req.query;
 
             const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
@@ -493,9 +492,12 @@ class PropertyController {
             const whereClauses: string[] = [];
             const queryParams: any[] = [];
 
-            // Por defeito, filtra por 'Disponível', mas permite outros status se enviados
-            whereClauses.push("p.status = ?");
-            queryParams.push(getParam(status) ?? 'Disponível');
+            // CORREÇÃO: O filtro de status agora só é aplicado se for enviado pelo cliente
+            const statusFilter = getParam(status);
+            if (statusFilter) {
+                whereClauses.push("p.status = ?");
+                queryParams.push(statusFilter);
+            }
 
             const typeFilter = getParam(type);
             if (typeFilter) {
@@ -540,7 +542,7 @@ class PropertyController {
                 queryParams.push(term, term, term);
             }
 
-            const whereStatement = `WHERE ${whereClauses.join(" AND ")}`;
+            const whereStatement = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
             const allowedSortColumns: Record<string, string> = {
                 price: "p.price",
@@ -549,7 +551,6 @@ class PropertyController {
             const sortColumn = allowedSortColumns[getParam(sortBy) ?? "created_at"] ?? "p.created_at";
             const sortDirection = (getParam(order) ?? "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
 
-            // 2. Query com a correção ANY_VALUE() aplicada
             const query = `
                 SELECT
                     p.*,
@@ -573,7 +574,6 @@ class PropertyController {
                 queryParams
             ) as any[];
 
-            // 3. Processamento final dos dados
             const processedProperties = properties.map((prop: any) => ({
                 ...prop,
                 images: prop.images ? prop.images.split(',') : [],

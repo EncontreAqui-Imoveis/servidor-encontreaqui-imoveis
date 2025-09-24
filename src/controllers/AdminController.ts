@@ -333,6 +333,7 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
+
 }
 
 export const adminController = new AdminController();

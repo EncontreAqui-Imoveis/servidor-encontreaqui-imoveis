@@ -7,7 +7,6 @@ class AdminController {
     async login(req: Request, res: Response) {
     const { email, password } = req.body;
     console.log('Login attempt for email:', email);
-
     if (!email || !password) {
         console.log('Email or password missing');
         return res.status(400).json({ error: 'Email e senha são obrigatórios.' });

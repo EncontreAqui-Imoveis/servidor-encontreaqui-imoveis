@@ -8,6 +8,9 @@ RUN npm install
 
 COPY . .
 
-EXPOSE 3333
+RUN npm run build
+RUN npm prune --omit=dev
 
-CMD ["npm", "run", "dev"]
+EXPOSE 3333
+CMD ["npm", "run", "start"]
+

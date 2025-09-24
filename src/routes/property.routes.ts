@@ -1,4 +1,4 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { propertyController, AuthRequestWithFiles } from '../controllers/PropertyController';
 import AuthRequest, { authMiddleware, isBroker } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';

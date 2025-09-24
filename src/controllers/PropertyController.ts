@@ -4,64 +4,64 @@ import { uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
 
 interface MulterFiles {
-    [fieldname: string]: Express.Multer.File[];
+  [fieldname: string]: Express.Multer.File[];
 }
 
 export interface AuthRequestWithFiles extends AuthRequest {
-    files?: MulterFiles;
+  files?: MulterFiles;
 }
 
 const normalizeStatus = (value: string) =>
-    value
-        .toString()
-        .trim()
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[^a-z]/g, "");
+  value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[^a-z]/g, "");
 
 class PropertyController {
-    async index(req: Request, res: Response) {
-        try {
-            const page = parseInt(req.query.page as string) || 1;
-            const limit = parseInt(req.query.limit as string) || 10;
-            const offset = (page - 1) * limit;
+  async index(req: Request, res: Response) {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const offset = (page - 1) * limit;
 
-            const { type, purpose, city, minPrice, maxPrice, searchTerm } = req.query;
+      const { type, purpose, city, minPrice, maxPrice, searchTerm } = req.query;
 
-            const whereClauses: string[] = [];
-            const queryParams: (string | number)[] = [];
+      const whereClauses: string[] = [];
+      const queryParams: (string | number)[] = [];
 
-            if (type) {
-                whereClauses.push("type = ?");
-                queryParams.push(type as string);
-            }
-            if (purpose) {
-                whereClauses.push("purpose = ?");
-                queryParams.push(purpose as string);
-            }
-            if (city) {
-                whereClauses.push("city LIKE ?");
-                queryParams.push(`%${city}%`);
-            }
-            if (minPrice) {
-                whereClauses.push("price >= ?");
-                queryParams.push(parseFloat(minPrice as string));
-            }
-            if (maxPrice) {
-                whereClauses.push("price <= ?");
-                queryParams.push(parseFloat(maxPrice as string));
-            }
-            if (searchTerm) {
-                whereClauses.push("title LIKE ?");
-                queryParams.push(`%${searchTerm}%`);
-            }
+      if (type) {
+        whereClauses.push("type = ?");
+        queryParams.push(type as string);
+      }
+      if (purpose) {
+        whereClauses.push("purpose = ?");
+        queryParams.push(purpose as string);
+      }
+      if (city) {
+        whereClauses.push("city LIKE ?");
+        queryParams.push(`%${city}%`);
+      }
+      if (minPrice) {
+        whereClauses.push("price >= ?");
+        queryParams.push(parseFloat(minPrice as string));
+      }
+      if (maxPrice) {
+        whereClauses.push("price <= ?");
+        queryParams.push(parseFloat(maxPrice as string));
+      }
+      if (searchTerm) {
+        whereClauses.push("title LIKE ?");
+        queryParams.push(`%${searchTerm}%`);
+      }
 
       const whereStatement =
         whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
-            const countQuery = `SELECT COUNT(*) as total FROM properties ${whereStatement}`;
-            const [totalResult] = await connection.query(countQuery, queryParams);
-            const total = (totalResult as any[])[0].total;
+      const countQuery = `SELECT COUNT(*) as total FROM properties ${whereStatement}`;
+      const [totalResult] = await connection.query(countQuery, queryParams);
+      const total = (totalResult as any[])[0].total;
 
       const dataQuery = `SELECT id, title, type, status, price, address, city, bedrooms, bathrooms, area, garage_spots, has_wifi, broker_id, created_at FROM properties ${whereStatement} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
       const [data] = await connection.query(dataQuery, [
@@ -79,11 +79,11 @@ class PropertyController {
     }
   }
 
-    async show(req: Request, res: Response) {
-        const { id } = req.params;
-        try {
-            const [rows] = await connection.query("SELECT * FROM properties WHERE id = ?", [id]);
-            const properties = rows as any[];
+  async show(req: Request, res: Response) {
+    const { id } = req.params;
+    try {
+      const [rows] = await connection.query("SELECT * FROM properties WHERE id = ?", [id]);
+      const properties = rows as any[];
 
       if (properties.length === 0) {
         return res.status(404).json({ error: "Imóvel não encontrado." });
@@ -142,43 +142,20 @@ class PropertyController {
           .json({ error: "Apenas corretores aprovados podem criar imóveis." });
       }
 
-            const imageUrls: string[] = [];
-            if (req.files && req.files["images"]) {
-                for (const file of req.files["images"]) {
-                    const result = await uploadToCloudinary(file, "properties");
-                    imageUrls.push(result.url);
-                }
-            }
+      const imageUrls: string[] = [];
+      if (req.files && req.files["images"]) {
+        for (const file of req.files["images"]) {
+          const result = await uploadToCloudinary(file, "properties");
+          imageUrls.push(result.url);
+        }
+      }
 
-            let videoUrl: string | null = null;
-            if (req.files && req.files["video"] && req.files["video"][0]) {
-                const result = await uploadToCloudinary(req.files["video"][0], "videos");
-                videoUrl = result.url;
-            }
+      let videoUrl: string | null = null;
+      if (req.files && req.files["video"] && req.files["video"][0]) {
+        const result = await uploadToCloudinary(req.files["video"][0], "videos");
+        videoUrl = result.url;
+      }
 
-            const [result] = await connection.query(
-                `INSERT INTO properties
-                   (title, description, type, purpose, price, address, city, state, bedrooms, bathrooms, area,
-                    garage_spots, has_wifi, broker_id, video_url)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    title,
-                    description,
-                    type,
-                    purpose,
-                    price,
-                    address,
-                    city,
-                    state,
-                    bedrooms ?? null,
-                    bathrooms ?? null,
-                    area ?? null,
-                    garage_spots ?? null,
-                    has_wifi ? 1 : 0,
-                    brokerId,
-                    videoUrl
-                ]
-            );
       const [result] = await connection.query(
         `INSERT INTO properties
            (title, description, type, purpose, price, address, city, state, bedrooms, bathrooms, area,
@@ -203,27 +180,16 @@ class PropertyController {
         ]
       );
 
-            const propertyId = (result as any).insertId;
+      const propertyId = (result as any).insertId;
 
-            if (imageUrls.length > 0) {
-                const imageValues = imageUrls.map((url) => [propertyId, url]);
-                await connection.query(
-                    "INSERT INTO property_images (property_id, image_url) VALUES ?",
-                    [imageValues]
-                );
-            }
+      if (imageUrls.length > 0) {
+        const imageValues = imageUrls.map((url) => [propertyId, url]);
+        await connection.query(
+          "INSERT INTO property_images (property_id, image_url) VALUES ?",
+          [imageValues]
+        );
+      }
 
-            return res.status(201).json({
-                message: "Imóvel criado com sucesso!",
-                propertyId,
-                images: imageUrls.length,
-                video: Boolean(videoUrl)
-            });
-        } catch (error) {
-            console.error("Erro ao criar imóvel:", error);
-            return res.status(500).json({ error: "Erro interno do servidor." });
-        }
-    }
       return res.status(201).json({
         message: "Imóvel criado com sucesso!",
         propertyId,
@@ -339,10 +305,10 @@ class PropertyController {
 }
 
 
-    async updateStatus(req: AuthRequest, res: Response) {
-        const { id } = req.params;
-        const { status } = req.body as { status?: string };
-        const brokerIdFromToken = req.userId;
+  async updateStatus(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const { status } = req.body as { status?: string };
+    const brokerIdFromToken = req.userId;
 
     if (!status) {
       return res.status(400).json({ error: "O novo status é obrigatório." });
@@ -360,7 +326,7 @@ class PropertyController {
       venda: "Vendido",
     };
 
-        const nextStatus = statusDictionary[normalizedStatus];
+    const nextStatus = statusDictionary[normalizedStatus];
 
     if (!nextStatus) {
       return res.status(400).json({ error: "Status informado é inválido." });
@@ -395,24 +361,24 @@ class PropertyController {
           (salePrice * (commissionRate / 100)).toFixed(2)
         );
 
-                const [existingSaleRows] = await connection.query(
-                    "SELECT id FROM sales WHERE property_id = ?",
-                    [id]
-                );
-                const existingSales = existingSaleRows as any[];
+        const [existingSaleRows] = await connection.query(
+          "SELECT id FROM sales WHERE property_id = ?",
+          [id]
+        );
+        const existingSales = existingSaleRows as any[];
 
-                if (existingSales.length > 0) {
-                    await connection.query(
-                        "UPDATE sales SET sale_price = ?, commission_rate = ?, commission_amount = ?, sale_date = CURRENT_TIMESTAMP WHERE property_id = ?",
-                        [salePrice, commissionRate, commissionAmount, id]
-                    );
-                } else {
-                    await connection.query(
-                        "INSERT INTO sales (property_id, broker_id, sale_price, commission_rate, commission_amount) VALUES (?, ?, ?, ?, ?)",
-                        [id, brokerIdFromToken, salePrice, commissionRate, commissionAmount]
-                    );
-                }
-            }
+        if (existingSales.length > 0) {
+          await connection.query(
+            "UPDATE sales SET sale_price = ?, commission_rate = ?, commission_amount = ?, sale_date = CURRENT_TIMESTAMP WHERE property_id = ?",
+            [salePrice, commissionRate, commissionAmount, id]
+          );
+        } else {
+          await connection.query(
+            "INSERT INTO sales (property_id, broker_id, sale_price, commission_rate, commission_amount) VALUES (?, ?, ?, ?, ?)",
+            [id, brokerIdFromToken, salePrice, commissionRate, commissionAmount]
+          );
+        }
+      }
 
       return res
         .status(200)
@@ -428,9 +394,9 @@ class PropertyController {
     }
   }
 
-    async delete(req: AuthRequest, res: Response) {
-        const { id } = req.params;
-        const brokerIdFromToken = req.userId;
+  async delete(req: AuthRequest, res: Response) {
+    const { id } = req.params;
+    const brokerIdFromToken = req.userId;
 
     try {
       const [propertyRows] = await connection.query(
@@ -448,7 +414,7 @@ class PropertyController {
           .json({ error: "Você não tem permissão para deletar este imóvel." });
       }
 
-            await connection.query("DELETE FROM properties WHERE id = ?", [id]);
+      await connection.query("DELETE FROM properties WHERE id = ?", [id]);
 
       return res.status(200).json({ message: "Imóvel deletado com sucesso!" });
     } catch (error) {
@@ -459,17 +425,17 @@ class PropertyController {
     }
   }
 
-    async getAvailableCities(req: Request, res: Response) {
-        try {
-            const query = `
-                SELECT DISTINCT city
-                FROM properties
-                WHERE city IS NOT NULL AND city != ''
-                ORDER BY city ASC
-            `;
+  async getAvailableCities(req: Request, res: Response) {
+    try {
+      const query = `
+        SELECT DISTINCT city
+        FROM properties
+        WHERE city IS NOT NULL AND city != ''
+        ORDER BY city ASC
+      `;
 
-            const [rows] = await connection.query(query);
-            const cities = (rows as any[]).map((row) => row.city);
+      const [rows] = await connection.query(query);
+      const cities = (rows as any[]).map((row) => row.city);
 
       return res.status(200).json(cities);
     } catch (error) {
@@ -480,9 +446,9 @@ class PropertyController {
     }
   }
 
-    async addFavorite(req: AuthRequest, res: Response) {
-        const userId = req.userId;
-        const propertyId = Number.parseInt(req.params.id, 10);
+  async addFavorite(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    const propertyId = Number.parseInt(req.params.id, 10);
 
     if (!userId) {
       return res.status(401).json({ error: "Usuário não autenticado." });
@@ -501,19 +467,19 @@ class PropertyController {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }
 
-            const [favoriteRows] = await connection.query(
-                "SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?",
-                [userId, propertyId]
-            );
+      const [favoriteRows] = await connection.query(
+        "SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?",
+        [userId, propertyId]
+      );
 
       if ((favoriteRows as any[]).length > 0) {
         return res.status(409).json({ error: "Este imóvel já está nos seus favoritos." });
       }
 
-            await connection.query(
-                "INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)",
-                [userId, propertyId]
-            );
+      await connection.query(
+        "INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)",
+        [userId, propertyId]
+      );
 
       return res.status(201).json({ message: "Imóvel adicionado aos favoritos." });
     } catch (error) {
@@ -522,9 +488,9 @@ class PropertyController {
     }
   }
 
-    async removeFavorite(req: AuthRequest, res: Response) {
-        const userId = req.userId;
-        const propertyId = Number.parseInt(req.params.id, 10);
+  async removeFavorite(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    const propertyId = Number.parseInt(req.params.id, 10);
 
     if (!userId) {
       return res.status(401).json({ error: "Usuário não autenticado." });
@@ -534,11 +500,11 @@ class PropertyController {
       return res.status(400).json({ error: "Identificador de imóvel inválido." });
     }
 
-        try {
-            const [result] = await connection.query(
-                "DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?",
-                [userId, propertyId]
-            );
+    try {
+      const [result] = await connection.query(
+        "DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?",
+        [userId, propertyId]
+      );
 
       if ((result as any).affectedRows === 0) {
         return res.status(404).json({ error: "Favorito não encontrado." });
@@ -551,8 +517,8 @@ class PropertyController {
     }
   }
 
-    async listUserFavorites(req: AuthRequest, res: Response) {
-        const userId = req.userId;
+  async listUserFavorites(req: AuthRequest, res: Response) {
+    const userId = req.userId;
 
     if (!userId) {
       return res.status(401).json({ error: "Utilizador não autenticado." });

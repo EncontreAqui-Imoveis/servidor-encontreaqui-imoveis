@@ -282,30 +282,26 @@ class AdminController {
 
     async listPendingBrokers(req: Request, res: Response) {
         try {
-            const page = parseInt(req.query.page as string) || 1;
-            const limit = parseInt(req.query.limit as string) || 10;
-            const offset = (page - 1) * limit;
-
-            const countQuery = `SELECT COUNT(*) as total FROM brokers WHERE status = 'pending_verification'`;
-            const [totalResult] = await connection.query(countQuery);
-            const total = (totalResult as any[])[0].total;
-
-            const dataQuery = `
+            const [rows] = await connection.query(`
                 SELECT 
-                    b.id, u.name, u.email, b.creci, b.status, b.created_at,
-                    bd.creci_front_url, bd.creci_back_url, bd.selfie_url
+                    b.id,
+                    u.name,
+                    u.email,
+                    b.creci,
+                    b.status,
+                    bd.creci_front_url,
+                    bd.creci_back_url,
+                    bd.selfie_url,
+                    bd.status as verification_status
                 FROM brokers b
-                JOIN users u ON b.id = u.id
+                INNER JOIN users u ON b.id = u.id
                 LEFT JOIN broker_documents bd ON b.id = bd.broker_id
                 WHERE b.status = 'pending_verification'
-                LIMIT ? OFFSET ?
-            `;
-            const [data] = await connection.query(dataQuery, [limit, offset]);
-
-            return res.json({ data, total });
+            `);
+            return res.status(200).json(rows);
         } catch (error) {
-            console.error('Erro ao listar corretores pendentes:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+            console.error('Erro ao buscar corretores pendentes:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor' });
         }
     }
 

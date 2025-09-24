@@ -5,33 +5,54 @@ import connection from '../database/connection';
 
 class AdminController {
     async login(req: Request, res: Response) {
-        const { email, password } = req.body;
-        if (!email || !password) {
-            return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
-        }
-        try {
-            const [rows] = await connection.query('SELECT * FROM admins WHERE email = ?', [email]);
-            const admins = rows as any[];
-            if (admins.length === 0) {
-                return res.status(401).json({ error: 'Credenciais inválidas.' });
-            }
-            const admin = admins[0];
-            const isPasswordCorrect = await bcrypt.compare(password, admin.password_hash);
-            if (!isPasswordCorrect) {
-                return res.status(401).json({ error: 'Credenciais inválidas.' });
-            }
-            const token = jwt.sign(
-                { id: admin.id, role: 'admin' },
-                process.env.JWT_SECRET || 'default_secret',
-                { expiresIn: '1d' }
-            );
-            delete admin.password_hash;
-            return res.status(200).json({ admin, token });
-        } catch (error) {
-            console.error('Erro no login do admin:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-        }
+    const { email, password } = req.body;
+    console.log('Login attempt for email:', email);
+
+    if (!email || !password) {
+        console.log('Email or password missing');
+        return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
     }
+
+    try {
+        const [rows] = await connection.query('SELECT * FROM admins WHERE email = ?', [email]);
+        const admins = rows as any[];
+        console.log('Number of admins found:', admins.length);
+
+        if (admins.length === 0) {
+            console.log('No admin found with email:', email);
+            return res.status(401).json({ error: 'Credenciais inválidas.' });
+        }
+
+        const admin = admins[0];
+        console.log('Admin found:', admin.id, admin.email);
+
+        const isPasswordCorrect = await bcrypt.compare(password, admin.password_hash);
+        console.log('Password correct:', isPasswordCorrect);
+
+        if (!isPasswordCorrect) {
+            console.log('Password incorrect for admin:', admin.id);
+            return res.status(401).json({ error: 'Credenciais inválidas.' });
+        }
+
+        const jwtSecret = process.env.JWT_SECRET || 'default_secret';
+        console.log('JWT Secret length:', jwtSecret.length);
+
+        const token = jwt.sign(
+            { id: admin.id, role: 'admin' },
+            jwtSecret,
+            { expiresIn: '1d' }
+        );
+
+        console.log('Token generated successfully for admin:', admin.id);
+
+        delete admin.password_hash;
+        return res.status(200).json({ admin, token });
+
+    } catch (error) {
+        console.error('Erro no login do admin:', error);
+        return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+}
 
     async listPropertiesWithBrokers(req: Request, res: Response) {
         try {
@@ -48,7 +69,7 @@ class AdminController {
             const queryParams: (string | number)[] = [];
 
             const allowedSearchColumns = ['p.id', 'p.title', 'p.type', 'p.city', 'p.code'];
-            const allowedSortColumns = ['p.id', 'p.title', 'p.type', 'p.city', 'b.name', 'p.price', 'p.code'];
+            const allowedSortColumns = ['p.id', 'p.title', 'p.type', 'p.city', 'u.name', 'p.price', 'p.code'];
             
             const safeSearchColumn = allowedSearchColumns.includes(searchColumn) ? searchColumn : 'p.title';
             const safeSortBy = allowedSortColumns.includes(sortBy) ? sortBy : 'p.id';
@@ -74,11 +95,13 @@ class AdminController {
                 SELECT
                     p.id, p.code, p.title, p.type, p.status, p.price, p.city, p.broker_id,
                     p.sale_value, p.commission_rate, p.commission_value,
-                    b.name as broker_name
+                    u.name as broker_name
                 FROM
                     properties p
                 LEFT JOIN
                     brokers b ON p.broker_id = b.id
+                LEFT JOIN
+                    users u ON b.id = u.id
                 ${whereStatement}
                 ORDER BY ${safeSortBy} ${safeSortOrder}
                 LIMIT ? OFFSET ?
@@ -92,53 +115,51 @@ class AdminController {
         }
     }
 
-async updateProperty(req: Request, res: Response) {
-    const { id } = req.params;
-    const data = req.body;
+    async updateProperty(req: Request, res: Response) {
+        const { id } = req.params;
+        const data = req.body;
 
-    try {
-        if (data.status === 'Vendido') {
-            if (data.sale_value != null && data.commission_rate != null) {
-                const saleValue = parseFloat(data.sale_value);
-                const commissionRate = parseFloat(data.commission_rate);
-                data.commission_value = saleValue * (commissionRate / 100);
+        try {
+            if (data.status === 'Vendido') {
+                if (data.sale_value != null && data.commission_rate != null) {
+                    const saleValue = parseFloat(data.sale_value);
+                    const commissionRate = parseFloat(data.commission_rate);
+                    data.commission_value = saleValue * (commissionRate / 100);
+                }
+            } else {
+                data.sale_value = null;
+                data.commission_value = null;
+                data.commission_rate = null;
             }
-        } else {
-            data.sale_value = null;
-            data.commission_value = null;
-            data.commission_rate = null;
+
+            if (data.id) delete data.id;
+            if (data.broker_name) delete data.broker_name;
+
+            const fields = Object.keys(data);
+            const values = Object.values(data);
+
+            if (fields.length === 0) {
+                return res.status(400).json({ error: 'Nenhum dado fornecido para atualização.' });
+            }
+
+            const setClause = fields.map(field => `\`${field}\` = ?`).join(', ');
+
+            const updateQuery = `UPDATE properties SET ${setClause} WHERE id = ?`;
+            
+            await connection.query(updateQuery, [...values, id]);
+            
+            return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
+
+        } catch (error: any) { 
+            console.error('ERRO DETALHADO AO ATUALIZAR IMÓVEL:', error);
+
+            if (error.sqlMessage) {
+                return res.status(500).json({ error: 'Erro na base de dados.', details: error.sqlMessage });
+            }
+
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
-
-        if (data.id) delete data.id;
-        if (data.broker_name) delete data.broker_name; // Remove campo que não existe na tabela
-
-        const fields = Object.keys(data);
-        const values = Object.values(data);
-
-        if (fields.length === 0) {
-            return res.status(400).json({ error: 'Nenhum dado fornecido para atualização.' });
-        }
-
-        const setClause = fields.map(field => `\`${field}\` = ?`).join(', ');
-
-        const updateQuery = `UPDATE properties SET ${setClause} WHERE id = ?`;
-        
-        await connection.query(updateQuery, [...values, id]);
-        
-        return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
-
-    } catch (error: any) { 
-        
-        // --- Linha mais importante para o diagnóstico ---
-        console.error('ERRO DETALHADO AO ATUALIZAR IMÓVEL:', error); 
-
-        if (error.sqlMessage) {
-            return res.status(500).json({ error: 'Erro na base de dados.', details: error.sqlMessage });
-        }
-
-        return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
-}
 
     async getAllBrokers(req: Request, res: Response) {
         const page = parseInt(req.query.page as string) || 1;
@@ -147,7 +168,7 @@ async updateProperty(req: Request, res: Response) {
         const sortBy = req.query.sortBy as string || 'b.id';
         const sortOrder = req.query.sortOrder as string || 'desc';
     
-        const allowedSortColumns = ['b.id', 'b.name', 'b.email', 'b.creci', 'property_count'];
+        const allowedSortColumns = ['b.id', 'u.name', 'u.email', 'b.creci', 'property_count'];
         const safeSortBy = allowedSortColumns.includes(sortBy) ? sortBy : 'b.id';
         const safeSortOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     
@@ -158,14 +179,15 @@ async updateProperty(req: Request, res: Response) {
     
             const dataQuery = `
                 SELECT
-                    b.id, b.name, b.email, b.creci, b.created_at,
+                    b.id, u.name, u.email, b.creci, b.created_at,
                     COUNT(p.id) AS property_count
                 FROM
                     brokers b
+                JOIN users u ON b.id = u.id
                 LEFT JOIN
                     properties p ON b.id = p.broker_id
                 GROUP BY
-                    b.id
+                    b.id, u.name, u.email, b.creci, b.created_at
                 ORDER BY
                     ${safeSortBy} ${safeSortOrder}
                 LIMIT ? OFFSET ?
@@ -258,59 +280,59 @@ async updateProperty(req: Request, res: Response) {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
-    // AdminController.ts
-async listPendingBrokers(req: Request, res: Response) {
-  try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    const offset = (page - 1) * limit;
 
-    const countQuery = `SELECT COUNT(*) as total FROM brokers WHERE status = 'pending_verification'`;
-    const [totalResult] = await connection.query(countQuery);
-    const total = (totalResult as any[])[0].total;
+    async listPendingBrokers(req: Request, res: Response) {
+        try {
+            const page = parseInt(req.query.page as string) || 1;
+            const limit = parseInt(req.query.limit as string) || 10;
+            const offset = (page - 1) * limit;
 
-    const dataQuery = `
-      SELECT 
-        b.id, b.name, b.email, b.creci, b.status, b.created_at,
-        bd.creci_front_url, bd.creci_back_url, bd.selfie_url
-      FROM brokers b
-      LEFT JOIN broker_documents bd ON b.id = bd.broker_id
-      WHERE b.status = 'pending_verification'
-      LIMIT ? OFFSET ?
-    `;
-    const [data] = await connection.query(dataQuery, [limit, offset]);
+            const countQuery = `SELECT COUNT(*) as total FROM brokers WHERE status = 'pending_verification'`;
+            const [totalResult] = await connection.query(countQuery);
+            const total = (totalResult as any[])[0].total;
 
-    return res.json({ data, total });
-  } catch (error) {
-    console.error('Erro ao listar corretores pendentes:', error);
-    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-  }
-}
+            const dataQuery = `
+                SELECT 
+                    b.id, u.name, u.email, b.creci, b.status, b.created_at,
+                    bd.creci_front_url, bd.creci_back_url, bd.selfie_url
+                FROM brokers b
+                JOIN users u ON b.id = u.id
+                LEFT JOIN broker_documents bd ON b.id = bd.broker_id
+                WHERE b.status = 'pending_verification'
+                LIMIT ? OFFSET ?
+            `;
+            const [data] = await connection.query(dataQuery, [limit, offset]);
 
-async approveBroker(req: Request, res: Response) {
-  const { id } = req.params;
+            return res.json({ data, total });
+        } catch (error) {
+            console.error('Erro ao listar corretores pendentes:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
 
-  try {
-    await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['verified', id]);
-    return res.status(200).json({ message: 'Corretor aprovado com sucesso!' });
-  } catch (error) {
-    console.error('Erro ao aprovar corretor:', error);
-    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-  }
-}
+    async approveBroker(req: Request, res: Response) {
+        const { id } = req.params;
 
-async rejectBroker(req: Request, res: Response) {
-  const { id } = req.params;
+        try {
+            await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['approved', id]);
+            return res.status(200).json({ message: 'Corretor aprovado com sucesso!' });
+        } catch (error) {
+            console.error('Erro ao aprovar corretor:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
 
-  try {
-    await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['rejected', id]);
-    return res.status(200).json({ message: 'Corretor rejeitado com sucesso!' });
-  } catch (error) {
-    console.error('Erro ao rejeitar corretor:', error);
-    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-  }
-}
+    async rejectBroker(req: Request, res: Response) {
+        const { id } = req.params;
+
+        try {
+            await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['rejected', id]);
+            return res.status(200).json({ message: 'Corretor rejeitado com sucesso!' });
+        } catch (error) {
+            console.error('Erro ao rejeitar corretor:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
 }
 
 export const adminController = new AdminController();
-

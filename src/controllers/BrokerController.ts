@@ -7,7 +7,6 @@ import AuthRequest from "../middlewares/auth";
 class BrokerController {
     async register(req: Request, res: Response) {
         const { name, email, password, creci, phone, address, city, state } = req.body;
-
         try {
             const [existingUserRows] = await connection.query(
                 "SELECT id FROM users WHERE email = ?",

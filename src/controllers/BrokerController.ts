@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import connection from "../database/connection";
 import AuthRequest from "../middlewares/auth";
+import { uploadToCloudinary } from "../config/cloudinary";
 
 class BrokerController {
     async register(req: Request, res: Response) {
@@ -115,9 +116,13 @@ class BrokerController {
                 [userId, creci, "pending_verification"]
             );
 
-            const creciFrontUrl = `/uploads/docs/${creciFrontFile.filename}`;
-            const creciBackUrl = `/uploads/docs/${creciBackFile.filename}`;
-            const selfieUrl = `/uploads/docs/${selfieFile.filename}`;
+            const creciFrontResult = await uploadToCloudinary(creciFrontFile, "brokers/documents");
+            const creciBackResult = await uploadToCloudinary(creciBackFile, "brokers/documents");
+            const selfieResult = await uploadToCloudinary(selfieFile, "brokers/documents");
+
+            const creciFrontUrl = creciFrontResult.url;
+            const creciBackUrl = creciBackResult.url;
+            const selfieUrl = selfieResult.url;
 
             await db.query(
                 `INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
@@ -289,58 +294,53 @@ class BrokerController {
     }
 
     async getMyPerformanceReport(req: AuthRequest, res: Response) {
-    const brokerId = req.userId;
-    try {
-        // CORREÇÃO: A contagem de vendas agora vem diretamente da tabela de imóveis
-        const salesQuery = `
-            SELECT 
-                COUNT(CASE WHEN status = 'Vendido' THEN 1 END) as total_sales,
-                SUM(CASE WHEN status = 'Vendido' THEN commission_value ELSE 0 END) as total_commission
-            FROM properties
-            WHERE broker_id = ?
-        `;
-        const [salesResult] = await connection.query<any[]>(salesQuery, [brokerId]);
+        const brokerId = req.userId;
+        try {
+            const salesQuery = `
+                SELECT 
+                    COUNT(CASE WHEN status = 'Vendido' THEN 1 END) as total_sales,
+                    SUM(CASE WHEN status = 'Vendido' THEN commission_value ELSE 0 END) as total_commission
+                FROM properties
+                WHERE broker_id = ?
+            `;
+            const [salesResult] = await connection.query<any[]>(salesQuery, [brokerId]);
+            const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;
+            const [propertiesResult] = await connection.query<any[]>(propertiesQuery, [brokerId]);
+            
+            const statusQuery = `
+                SELECT 
+                    status,
+                    COUNT(*) as count
+                FROM properties 
+                WHERE broker_id = ? 
+                GROUP BY status
+            `;
+            const [statusRows] = await connection.query<any[]>(statusQuery, [brokerId]);
 
-        // A contagem de imóveis cadastrados continua a mesma
-        const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;
-        const [propertiesResult] = await connection.query<any[]>(propertiesQuery, [brokerId]);
-        
-        // CORREÇÃO ADICIONAL: Buscar breakdown por status para análise detalhada
-        const statusQuery = `
-            SELECT 
-                status,
-                COUNT(*) as count
-            FROM properties 
-            WHERE broker_id = ? 
-            GROUP BY status
-        `;
-        const [statusRows] = await connection.query<any[]>(statusQuery, [brokerId]);
+            const statusBreakdown: { [key: string]: number } = {};
+            for (const row of statusRows) {
+                statusBreakdown[row.status] = Number(row.count) || 0;
+            }
 
-        // Processar breakdown de status
-        const statusBreakdown: { [key: string]: number } = {};
-        for (const row of statusRows) {
-            statusBreakdown[row.status] = Number(row.count) || 0;
+            const report = {
+                totalSales: Number(salesResult[0]?.total_sales || 0),
+                totalCommission: Number(salesResult[0]?.total_commission || 0),
+                totalProperties: Number(propertiesResult[0]?.total_properties || 0),
+                statusBreakdown: statusBreakdown
+            };
+
+            return res.json({
+                success: true,
+                data: report
+            });
+        } catch (error) {
+            console.error('Erro ao gerar relatório de desempenho:', error);
+            return res.status(500).json({ 
+                success: false,
+                error: 'Ocorreu um erro inesperado no servidor.' 
+            });
         }
-
-        const report = {
-            totalSales: Number(salesResult[0]?.total_sales || 0),
-            totalCommission: Number(salesResult[0]?.total_commission || 0),
-            totalProperties: Number(propertiesResult[0]?.total_properties || 0),
-            statusBreakdown: statusBreakdown
-        };
-
-        return res.json({
-            success: true,
-            data: report
-        });
-    } catch (error) {
-        console.error('Erro ao gerar relatório de desempenho:', error);
-        return res.status(500).json({ 
-            success: false,
-            error: 'Ocorreu um erro inesperado no servidor.' 
-        });
     }
-}
 
     async uploadVerificationDocs(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
@@ -361,14 +361,18 @@ class BrokerController {
             });
         }
 
-        const creciFrontUrl = `/uploads/docs/${files.creciFront[0].filename}`;
-        const creciBackUrl = `/uploads/docs/${files.creciBack[0].filename}`;
-        const selfieUrl = `/uploads/docs/${files.selfie[0].filename}`;
+        const creciFrontResult = await uploadToCloudinary(files.creciFront[0], "brokers/documents");
+        const creciBackResult = await uploadToCloudinary(files.creciBack[0], "brokers/documents");
+        const selfieResult = await uploadToCloudinary(files.selfie[0], "brokers/documents");
+
+        const creciFrontUrl = creciFrontResult.url;
+        const creciBackUrl = creciBackResult.url;
+        const selfieUrl = selfieResult.url;
 
         try {
             const query = `
-                INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
+                VALUES (?, ?, ?, ?, 'pending')
                 ON DUPLICATE KEY UPDATE
                   creci_front_url = VALUES(creci_front_url),
                   creci_back_url = VALUES(creci_back_url),

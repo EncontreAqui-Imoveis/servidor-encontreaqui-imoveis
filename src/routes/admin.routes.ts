@@ -17,4 +17,7 @@ adminRoutes.get('/brokers/pending', authMiddlewareAdmin, isAdminAdmin, adminCont
 adminRoutes.patch('/brokers/:id/approve', authMiddlewareAdmin, isAdminAdmin, adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', authMiddlewareAdmin, isAdminAdmin, adminController.rejectBroker);
 adminRoutes.get('/brokers/pending', authMiddlewareAdmin, isAdminAdmin, adminController.listPendingBrokers);
+adminRoutes.get('/clients', authMiddlewareAdmin, isAdminAdmin, adminController.getAllClients);
+adminRoutes.put('/brokers/:id', authMiddlewareAdmin, isAdminAdmin, adminController.updateBroker);
+adminRoutes.put('/clients/:id', authMiddlewareAdmin, isAdminAdmin, adminController.updateClient);
 export default adminRoutes;

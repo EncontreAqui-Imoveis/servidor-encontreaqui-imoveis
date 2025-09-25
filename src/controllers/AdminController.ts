@@ -114,6 +114,45 @@ class AdminController {
         }
     }
 
+    async updateBroker(req: Request, res: Response) {
+        const { id } = req.params;
+        const { name, email, creci, status } = req.body;
+        
+        try {
+            await connection.query(
+                'UPDATE users SET name = ?, email = ? WHERE id = ?',
+                [name, email, id]
+            );
+            
+            await connection.query(
+                'UPDATE brokers SET creci = ?, status = ? WHERE id = ?',
+                [creci, status, id]
+            );
+            
+            return res.status(200).json({ message: 'Corretor atualizado com sucesso' });
+        } catch (error) {
+            console.error('Erro ao atualizar corretor:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+    }
+
+    async updateClient(req: Request, res: Response) {
+        const { id } = req.params;
+        const { name, email, phone } = req.body;
+        
+        try {
+            await connection.query(
+                'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
+                [name, email, phone, id]
+            );
+            
+            return res.status(200).json({ message: 'Cliente atualizado com sucesso' });
+        } catch (error) {
+            console.error('Erro ao atualizar cliente:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+    }
+
     async updateProperty(req: Request, res: Response) {
         const { id } = req.params;
         const data = req.body;
@@ -292,19 +331,38 @@ class AdminController {
                     bd.creci_front_url,
                     bd.creci_back_url,
                     bd.selfie_url,
-                    bd.status as verification_status
+                    bd.status as document_status,
+                    b.created_at
                 FROM brokers b
                 INNER JOIN users u ON b.id = u.id
                 LEFT JOIN broker_documents bd ON b.id = bd.broker_id
-                WHERE b.status = 'pending_verification'
+                WHERE b.status = 'pending_verification' 
+                OR bd.status = 'pending'
             `);
-            return res.status(200).json(rows);
+
+            const pendingBrokers = rows as any[];
+            console.log('Corretores pendentes encontrados:', pendingBrokers.length); 
+            return res.status(200).json({ data: pendingBrokers });
         } catch (error) {
             console.error('Erro ao buscar corretores pendentes:', error);
             return res.status(500).json({ error: 'Erro interno do servidor' });
         }
     }
-
+    async getAllClients(req: Request, res: Response) {
+        try {
+            const [rows] = await connection.query(`
+                SELECT u.* 
+                FROM users u
+                LEFT JOIN brokers b ON u.id = b.id
+                WHERE b.id IS NULL
+            `);
+            const pendingBrokers = rows as any[];
+            return res.status(200).json({ data: rows, total: pendingBrokers.length });
+        } catch (error) {
+            console.error('Erro ao buscar clientes:', error);
+            res.status(500).json({ error: 'Erro interno do servidor' });
+        }
+    }
     async approveBroker(req: Request, res: Response) {
         const { id } = req.params;
 

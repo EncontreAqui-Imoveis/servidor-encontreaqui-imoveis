@@ -11,7 +11,6 @@ class AdminController {
         console.log('Email or password missing');
         return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
     }
-
     try {
         const [rows] = await connection.query('SELECT * FROM admins WHERE email = ?', [email]);
         const admins = rows as any[];

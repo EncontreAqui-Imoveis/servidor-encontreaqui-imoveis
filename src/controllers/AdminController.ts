@@ -320,34 +320,33 @@ class AdminController {
     }
 
     async listPendingBrokers(req: Request, res: Response) {
-        try {
-            const [rows] = await connection.query(`
-                SELECT 
-                    b.id,
-                    u.name,
-                    u.email,
-                    b.creci,
-                    b.status,
-                    bd.creci_front_url,
-                    bd.creci_back_url,
-                    bd.selfie_url,
-                    bd.status as document_status,
-                    b.created_at
-                FROM brokers b
-                INNER JOIN users u ON b.id = u.id
-                LEFT JOIN broker_documents bd ON b.id = bd.broker_id
-                WHERE b.status = 'pending_verification' 
-                OR bd.status = 'pending'
-            `);
+    try {
+        const [rows] = await connection.query(`
+            SELECT 
+                b.id,
+                u.name,
+                u.email,
+                b.creci,
+                b.status,
+                bd.creci_front_url,
+                bd.creci_back_url,
+                bd.selfie_url,
+                bd.status as document_status,
+                b.created_at
+            FROM brokers b
+            INNER JOIN users u ON b.id = u.id
+            LEFT JOIN broker_documents bd ON b.id = bd.broker_id
+            WHERE b.status = 'pending_verification' 
+            AND (bd.status = 'pending' OR bd.status IS NULL)
+        `);
 
-            const pendingBrokers = rows as any[];
-            console.log('Corretores pendentes encontrados:', pendingBrokers.length); 
-            return res.status(200).json({ data: pendingBrokers });
-        } catch (error) {
-            console.error('Erro ao buscar corretores pendentes:', error);
-            return res.status(500).json({ error: 'Erro interno do servidor' });
-        }
+        const pendingBrokers = rows as any[];
+        return res.status(200).json({ data: pendingBrokers });
+    } catch (error) {
+        console.error('Erro ao buscar corretores pendentes:', error);
+        return res.status(500).json({ error: 'Erro interno do servidor' });
     }
+}
     async getAllClients(req: Request, res: Response) {
         try {
             const [rows] = await connection.query(`
@@ -364,29 +363,33 @@ class AdminController {
         }
     }
     async approveBroker(req: Request, res: Response) {
-        const { id } = req.params;
+    const { id } = req.params;
 
-        try {
-            await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['approved', id]);
-            return res.status(200).json({ message: 'Corretor aprovado com sucesso!' });
-        } catch (error) {
-            console.error('Erro ao aprovar corretor:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-        }
+    try {
+        await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['approved', id]);
+        await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
+        
+        return res.status(200).json({ message: 'Corretor aprovado com sucesso!' });
+    } catch (error) {
+        console.error('Erro ao aprovar corretor:', error);
+        return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
+}
 
-    async rejectBroker(req: Request, res: Response) {
-        const { id } = req.params;
+async rejectBroker(req: Request, res: Response) {
+    const { id } = req.params;
 
-        try {
-            await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['rejected', id]);
-            return res.status(200).json({ message: 'Corretor rejeitado com sucesso!' });
-        } catch (error) {
-            console.error('Erro ao rejeitar corretor:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-        }
+    try {
+        await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['rejected', id]);
+        await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['rejected', id]);
+        
+        return res.status(200).json({ message: 'Corretor rejeitado com sucesso!' });
+    } catch (error) {
+        console.error('Erro ao rejeitar corretor:', error);
+        return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
-
+}
+    
 }
 
 export const adminController = new AdminController();

@@ -1,37 +1,37 @@
 import { Router } from 'express';
 import { brokerController } from '../controllers/BrokerController';
-import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { authMiddleware, isBroker } from '../middlewares/auth';
+import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 
-const brokerRoutes = Router();
+const router = Router();
 
-brokerRoutes.post('/register', brokerController.register);
-brokerRoutes.post('/login', brokerController.login);
+router.post('/register', brokerController.register);
+router.post('/login', brokerController.login);
 
-brokerRoutes.post(
-    '/register-with-docs',
-    mediaUpload.fields([
-        { name: 'creciFront', maxCount: 1 },
-        { name: 'creciBack', maxCount: 1 },
-        { name: 'selfie', maxCount: 1 }
-    ]),
-    brokerController.registerWithDocs
+router.post(
+  '/register-with-docs',
+  brokerDocsUpload.fields([
+    { name: 'creciFront', maxCount: 1 },
+    { name: 'creciBack', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+  ]),
+  brokerController.registerWithDocs
 );
 
-brokerRoutes.get('/my-properties', authMiddleware, isBroker, brokerController.getMyProperties);
-brokerRoutes.get('/my-commissions', authMiddleware, isBroker, brokerController.getMyCommissions);
-brokerRoutes.get('/my-performance', authMiddleware, isBroker, brokerController.getMyPerformanceReport);
+router.use(authMiddleware);
 
-brokerRoutes.post(
-    '/verification-docs',
-    authMiddleware,
-    isBroker,
-    mediaUpload.fields([ 
-        { name: 'creciFront', maxCount: 1 },
-        { name: 'creciBack', maxCount: 1 },
-        { name: 'selfie', maxCount: 1 }
-    ]),
-    brokerController.uploadVerificationDocs
+router.post(
+  '/me/verify-documents',
+  brokerDocsUpload.fields([
+    { name: 'creciFront', maxCount: 1 },
+    { name: 'creciBack', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+  ]),
+  brokerController.uploadVerificationDocs
 );
 
-export default brokerRoutes;
+router.get('/me/properties', isBroker, brokerController.getMyProperties);
+router.get('/me/commissions', isBroker, brokerController.getMyCommissions);
+router.get('/me/performance-report', isBroker, brokerController.getMyPerformanceReport);
+
+export default router;

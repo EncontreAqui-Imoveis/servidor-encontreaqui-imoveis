@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { brokerController } from '../controllers/BrokerController';
 import { authMiddleware, isBroker } from '../middlewares/auth';
-import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
+import { brokerDocsUpload } from '../middlewares/uploadMiddleware'
 
 const router = Router();
 
 router.post('/register', brokerController.register);
 router.post('/login', brokerController.login);
+
 
 router.post(
   '/register-with-docs',
@@ -17,6 +18,7 @@ router.post(
   ]),
   brokerController.registerWithDocs
 );
+
 
 router.use(authMiddleware);
 

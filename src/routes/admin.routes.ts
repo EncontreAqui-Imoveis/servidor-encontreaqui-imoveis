@@ -1,23 +1,39 @@
-import { Router as RouterAdmin } from 'express';
+﻿import { Router } from 'express';
 import { adminController } from '../controllers/AdminController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
+import { mediaUpload } from '../middlewares/uploadMiddleware';
 
-const adminRoutes = RouterAdmin();
+const adminRoutes = Router();
+
 adminRoutes.post('/login', adminController.login);
-adminRoutes.get('/users', authMiddlewareAdmin, isAdminAdmin, adminController.getAllUsers);
-adminRoutes.delete('/users/:id', authMiddlewareAdmin, isAdminAdmin, adminController.deleteUser);
-adminRoutes.get('/brokers', authMiddlewareAdmin, isAdminAdmin, adminController.getAllBrokers);
-adminRoutes.delete('/brokers/:id', authMiddlewareAdmin, isAdminAdmin, adminController.deleteBroker);
-adminRoutes.delete('/properties/:id', authMiddlewareAdmin, isAdminAdmin, adminController.deleteProperty);
-adminRoutes.put('/properties/:id', authMiddlewareAdmin, isAdminAdmin, adminController.updateProperty);
-adminRoutes.get('/properties-with-brokers', authMiddlewareAdmin, isAdminAdmin, adminController.listPropertiesWithBrokers);
-adminRoutes.put('/properties/:id', authMiddlewareAdmin, isAdminAdmin, adminController.updateProperty);
-adminRoutes.delete('/properties/:id', authMiddlewareAdmin, isAdminAdmin, adminController.deleteProperty);
-adminRoutes.get('/brokers/pending', authMiddlewareAdmin, isAdminAdmin, adminController.listPendingBrokers);
-adminRoutes.patch('/brokers/:id/approve', authMiddlewareAdmin, isAdminAdmin, adminController.approveBroker);
-adminRoutes.patch('/brokers/:id/reject', authMiddlewareAdmin, isAdminAdmin, adminController.rejectBroker);
-adminRoutes.get('/brokers/pending', authMiddlewareAdmin, isAdminAdmin, adminController.listPendingBrokers);
-adminRoutes.get('/clients', authMiddlewareAdmin, isAdminAdmin, adminController.getAllClients);
-adminRoutes.put('/brokers/:id', authMiddlewareAdmin, isAdminAdmin, adminController.updateBroker);
-adminRoutes.put('/clients/:id', authMiddlewareAdmin, isAdminAdmin, adminController.updateClient);
+
+adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
+
+adminRoutes.get('/users', adminController.getAllUsers);
+adminRoutes.delete('/users/:id', adminController.deleteUser);
+
+adminRoutes.get('/clients', adminController.getAllClients);
+adminRoutes.put('/clients/:id', adminController.updateClient);
+
+adminRoutes.get('/brokers', adminController.getAllBrokers);
+adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
+adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
+adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
+adminRoutes.put('/brokers/:id', adminController.updateBroker);
+adminRoutes.delete('/brokers/:id', adminController.deleteBroker);
+
+adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
+adminRoutes.put('/properties/:id', adminController.updateProperty);
+adminRoutes.delete('/properties/:id', adminController.deleteProperty);
+adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
+adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
+adminRoutes.post(
+  '/properties/:id/images',
+  mediaUpload.array('images', 20),
+  adminController.addPropertyImage
+);
+adminRoutes.delete('/properties/images/:imageId', adminController.deletePropertyImage);
+
+adminRoutes.get('/dashboard/stats', adminController.getDashboardStats);
+
 export default adminRoutes;

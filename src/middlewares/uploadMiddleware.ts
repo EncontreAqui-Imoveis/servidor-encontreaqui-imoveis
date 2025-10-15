@@ -47,9 +47,6 @@ function isAllowedVideo(mime: string, originalname: string): boolean {
   return ['mp4', 'mov', 'avi', 'webm', '3gp'].includes(ext);
 }
 
-// IMPORTANT: Align size limits with the mobile client.
-// Front-end permite vídeo até 100MB. Aqui ajustamos o limite global para 110MB.
-// (Se quiser limites por campo, use middlewares separados por rota.)
 export const mediaUpload = multer({
   storage,
   limits: {
@@ -85,13 +82,32 @@ export const mediaUpload = multer({
   },
 });
 
-// Use este middleware na rota como fields() para aplicar os nomes corretos dos campos
-// Exemplo:
-// router.post(
-//   '/properties',
-//   mediaUpload.fields([
-//     { name: 'images', maxCount: 20 },
-//     { name: 'video',  maxCount: 1  },
-//   ]),
-//   controller.createProperty,
-// );
+// Middleware específico para documentos de verificação do corretor
+export const brokerDocsUpload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB para documentos
+    files: 3, // frente, verso e selfie
+  },
+  fileFilter: (req, file, cb: FileFilterCallback) => {
+    const field = file.fieldname;
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = file.originalname || '';
+
+    console.log(`[broker-docs] field=${field} mimetype=${mime} name=${name}`);
+
+    // Campos permitidos para documentos do corretor
+    const allowedFields = ['crecifront', 'creciback', 'selfie'];
+    
+    if (allowedFields.includes(field.toLowerCase())) {
+      if (isAllowedImage(mime, name)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Tipo de imagem não suportado para documentos'));
+      }
+      return;
+    }
+
+    cb(new Error(`Campo de upload inválido para documentos: ${field}`));
+  },
+});

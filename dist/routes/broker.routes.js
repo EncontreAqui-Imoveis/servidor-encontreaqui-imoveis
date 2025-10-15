@@ -3,21 +3,22 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const BrokerController_1 = require("../controllers/BrokerController");
 const auth_1 = require("../middlewares/auth");
-const multer_1 = require("../config/multer");
-const brokerRoutes = (0, express_1.Router)();
-brokerRoutes.post('/register', BrokerController_1.brokerController.register);
-brokerRoutes.post('/register-with-docs', multer_1.documentUpload.fields([
+const uploadMiddleware_1 = require("../middlewares/uploadMiddleware");
+const router = (0, express_1.Router)();
+router.post('/register', BrokerController_1.brokerController.register);
+router.post('/login', BrokerController_1.brokerController.login);
+router.post('/register-with-docs', uploadMiddleware_1.brokerDocsUpload.fields([
     { name: 'creciFront', maxCount: 1 },
     { name: 'creciBack', maxCount: 1 },
-    { name: 'selfie', maxCount: 1 }
+    { name: 'selfie', maxCount: 1 },
 ]), BrokerController_1.brokerController.registerWithDocs);
-brokerRoutes.post('/login', BrokerController_1.brokerController.login);
-brokerRoutes.get('/me/properties', auth_1.authMiddleware, auth_1.isBroker, BrokerController_1.brokerController.getMyProperties);
-brokerRoutes.get('/me/commissions', auth_1.authMiddleware, auth_1.isBroker, BrokerController_1.brokerController.getMyCommissions);
-brokerRoutes.get('/me/performance', auth_1.authMiddleware, auth_1.isBroker, BrokerController_1.brokerController.getMyPerformanceReport);
-brokerRoutes.post('/me/verify-documents', auth_1.authMiddleware, multer_1.documentUpload.fields([
+router.use(auth_1.authMiddleware);
+router.post('/me/verify-documents', uploadMiddleware_1.brokerDocsUpload.fields([
     { name: 'creciFront', maxCount: 1 },
     { name: 'creciBack', maxCount: 1 },
-    { name: 'selfie', maxCount: 1 }
+    { name: 'selfie', maxCount: 1 },
 ]), BrokerController_1.brokerController.uploadVerificationDocs);
-exports.default = brokerRoutes;
+router.get('/me/properties', auth_1.isBroker, BrokerController_1.brokerController.getMyProperties);
+router.get('/me/commissions', auth_1.isBroker, BrokerController_1.brokerController.getMyCommissions);
+router.get('/me/performance-report', auth_1.isBroker, BrokerController_1.brokerController.getMyPerformanceReport);
+exports.default = router;

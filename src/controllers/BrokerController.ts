@@ -7,7 +7,8 @@ import { uploadToCloudinary } from "../config/cloudinary";
 
 class BrokerController {
     async register(req: Request, res: Response) {
-        const { name, email, password, creci, phone, address, city, state } = req.body;
+        const { name, email, password, creci, phone, address, city, state, agencyId, agency_id } = req.body;
+        const resolvedAgencyId = agencyId ?? agency_id ?? null;
         try {
             const [existingUserRows] = await connection.query(
                 "SELECT id FROM users WHERE email = ?",
@@ -38,8 +39,8 @@ class BrokerController {
             const userId = (userResult as any).insertId;
 
             await connection.query(
-                "INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)",
-                [userId, creci, "pending_verification"]
+                "INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)",
+                [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
             );
 
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
@@ -61,8 +62,12 @@ class BrokerController {
             phone,
             address,
             city,
-            state
+            state,
+            agencyId,
+            agency_id
         } = req.body;
+
+        const resolvedAgencyId = agencyId ?? agency_id ?? null;
 
         const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
@@ -112,8 +117,8 @@ class BrokerController {
             const userId = (userResult as any).insertId;
 
             await db.query(
-                "INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)",
-                [userId, creci, "pending_verification"]
+                "INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)",
+                [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
             );
 
             const creciFrontResult = await uploadToCloudinary(creciFrontFile, "brokers/documents");
@@ -222,8 +227,8 @@ class BrokerController {
         const brokerId = req.userId;
 
         try {
-            const page = parseInt(req.query.page as string) || 1;
-            const limit = parseInt(req.query.limit as string) || 10;
+            const page = parseInt(req.query.page as string, 10) || 1;
+            const limit = parseInt(req.query.limit as string, 10) || 10;
             const offset = (page - 1) * limit;
 
             const countQuery = "SELECT COUNT(*) as total FROM properties WHERE broker_id = ?";
@@ -232,23 +237,72 @@ class BrokerController {
 
             const dataQuery = `
                 SELECT
-                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
-                    p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at,
-                    GROUP_CONCAT(pi.image_url) AS images
+                    p.id,
+                    p.title,
+                    p.description,
+                    p.type,
+                    p.status,
+                    p.purpose,
+                    p.price,
+                    p.code,
+                    p.address,
+                    p.quadra,
+                    p.lote,
+                    p.numero,
+                    p.bairro,
+                    p.complemento,
+                    p.tipo_lote,
+                    p.city,
+                    p.state,
+                    p.bedrooms,
+                    p.bathrooms,
+                    p.area_construida,
+                    p.area_terreno,
+                    p.garage_spots,
+                    p.has_wifi,
+                    p.tem_piscina,
+                    p.tem_energia_solar,
+                    p.tem_automacao,
+                    p.tem_ar_condicionado,
+                    p.eh_mobiliada,
+                    p.valor_condominio,
+                    p.valor_iptu,
+                    p.video_url,
+                    p.created_at,
+                    GROUP_CONCAT(pi.image_url ORDER BY pi.id) AS images
                 FROM properties p
                 LEFT JOIN property_images pi ON p.id = pi.property_id
                 WHERE p.broker_id = ?
-                GROUP BY 
-                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price,
-                    p.address, p.city, p.state, p.bedrooms, p.bathrooms, p.area,
-                    p.garage_spots, p.has_wifi, p.video_url, p.created_at
+                GROUP BY
+                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.code,
+                    p.address, p.quadra, p.lote, p.numero, p.bairro, p.complemento, p.tipo_lote,
+                    p.city, p.state, p.bedrooms, p.bathrooms, p.area_construida, p.area_terreno,
+                    p.garage_spots, p.has_wifi, p.tem_piscina, p.tem_energia_solar, p.tem_automacao,
+                    p.tem_ar_condicionado, p.eh_mobiliada, p.valor_condominio, p.valor_iptu,
+                    p.video_url, p.created_at
                 ORDER BY p.created_at DESC
                 LIMIT ? OFFSET ?
             `;
             const [dataRows] = await connection.query(dataQuery, [brokerId, limit, offset]);
+
+            const parseBool = (value: unknown) => value === 1 || value === "1" || value === true;
+
             const properties = (dataRows as any[]).map((row) => ({
                 ...row,
+                price: Number(row.price),
+                bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
+                bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
+                area_construida: row.area_construida != null ? Number(row.area_construida) : null,
+                area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
+                garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
+                has_wifi: parseBool(row.has_wifi),
+                tem_piscina: parseBool(row.tem_piscina),
+                tem_energia_solar: parseBool(row.tem_energia_solar),
+                tem_automacao: parseBool(row.tem_automacao),
+                tem_ar_condicionado: parseBool(row.tem_ar_condicionado),
+                eh_mobiliada: parseBool(row.eh_mobiliada),
+                valor_condominio: row.valor_condominio != null ? Number(row.valor_condominio) : null,
+                valor_iptu: row.valor_iptu != null ? Number(row.valor_iptu) : null,
                 images: row.images ? row.images.split(",") : []
             }));
 
@@ -260,7 +314,7 @@ class BrokerController {
                 totalPages: Math.ceil(total / limit)
             });
         } catch (error) {
-            console.error("Erro ao buscar imóveis do corretor:", error);
+            console.error("Erro ao buscar im�veis do corretor:", error);
             return res.status(500).json({
                 success: false,
                 error: "Ocorreu um erro inesperado no servidor."
@@ -298,8 +352,8 @@ class BrokerController {
         try {
             const salesQuery = `
                 SELECT 
-                    COUNT(CASE WHEN status = 'Vendido' THEN 1 END) as total_sales,
-                    SUM(CASE WHEN status = 'Vendido' THEN commission_value ELSE 0 END) as total_commission
+                    COUNT(CASE WHEN status = 'sold' THEN 1 END) as total_sales,
+                    SUM(CASE WHEN status = 'sold' THEN commission_value ELSE 0 END) as total_commission
                 FROM properties
                 WHERE broker_id = ?
             `;
@@ -397,3 +451,15 @@ class BrokerController {
 }
 
 export const brokerController = new BrokerController();
+
+
+
+
+
+
+
+
+
+
+
+

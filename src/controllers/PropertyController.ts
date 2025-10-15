@@ -1,7 +1,9 @@
 ﻿import { Request, Response } from "express";
+import { RowDataPacket, ResultSetHeader } from "mysql2";
 import connection from "../database/connection";
 import { uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
+import { notifyAdmins } from "../services/notificationService";
 
 interface MulterFiles {
   [fieldname: string]: Express.Multer.File[];
@@ -10,702 +12,902 @@ interface MulterFiles {
 export interface AuthRequestWithFiles extends AuthRequest {
   files?: MulterFiles;
 }
+type PropertyStatus = "pending_approval" | "approved" | "rejected" | "rented" | "sold";
 
-const normalizeStatus = (value: string) =>
-  value
-    .toString()
-    .trim()
-    .toLowerCase()
+type Nullable<T> = T | null;
+
+const STATUS_MAP: Record<string, PropertyStatus> = {
+  pendingapproval: "pending_approval",
+  pendente: "pending_approval",
+  pending: "pending_approval",
+  pendenteaprovacao: "pending_approval",
+  aprovado: "approved",
+  approved: "approved",
+  aprovada: "approved",
+  rejected: "rejected",
+  rejeitado: "rejected",
+  rejeitada: "rejected",
+  rented: "rented",
+  alugado: "rented",
+  alugada: "rented",
+  locado: "rented",
+  locada: "rented",
+  sold: "sold",
+  vendido: "sold",
+  vendida: "sold",
+};
+
+const ALLOWED_STATUSES = new Set<PropertyStatus>([
+  "pending_approval",
+  "approved",
+  "rejected",
+  "rented",
+  "sold",
+]);
+
+const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
+
+interface PropertyRow extends RowDataPacket {
+  id: number;
+  broker_id: number;
+  title: string;
+  description: string;
+  type: string;
+  purpose: string;
+  status: PropertyStatus;
+  price: number | string;
+  code?: string | null;
+  address: string;
+  quadra?: string | null;
+  lote?: string | null;
+  numero?: string | null;
+  bairro?: string | null;
+  complemento?: string | null;
+  tipo_lote?: string | null;
+  city: string;
+  state: string;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  area_construida?: number | string | null;
+  area_terreno?: number | string | null;
+  garage_spots?: number | null;
+  has_wifi?: number | boolean | null;
+  tem_piscina?: number | boolean | null;
+  tem_energia_solar?: number | boolean | null;
+  tem_automacao?: number | boolean | null;
+  tem_ar_condicionado?: number | boolean | null;
+  eh_mobiliada?: number | boolean | null;
+  valor_condominio?: number | string | null;
+  valor_iptu?: number | string | null;
+  video_url?: string | null;
+  created_at?: Date;
+  updated_at?: Date;
+  images?: string | null;
+  agency_id?: number | null;
+  agency_name?: string | null;
+  agency_logo_url?: string | null;
+  agency_address?: string | null;
+  agency_city?: string | null;
+  agency_state?: string | null;
+  agency_phone?: string | null;
+}
+
+interface PropertyAggregateRow extends PropertyRow {
+  images?: string | null;
+}
+
+function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value
     .normalize("NFD")
-    .replace(/[^a-z]/g, "");
+    .replace(/[^\p{L}0-9]/gu, "")
+    .toLowerCase();
+  const status = STATUS_MAP[normalized];
+  if (!status || !ALLOWED_STATUSES.has(status)) {
+    return null;
+  }
+  return status;
+}
+
+
+function parsePrice(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("Preço inválido.");
+  }
+  return parsed;
+}
+
+function parseDecimal(value: unknown): Nullable<number> {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Valor numérico inválido.");
+  }
+  return parsed;
+}
+
+function parseInteger(value: unknown): Nullable<number> {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Valor inteiro inválido.");
+  }
+  return Math.trunc(parsed);
+}
+
+function parseBoolean(value: unknown): 0 | 1 {
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  if (typeof value === "number") {
+    return value === 0 ? 0 : 1;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return ["1", "true", "yes", "sim", "on"].includes(normalized) ? 1 : 0;
+  }
+  return 0;
+}
+
+function stringOrNull(value: unknown): Nullable<string> {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const str = String(value).trim();
+  return str.length > 0 ? str : null;
+}
+
+function toBoolean(value: unknown): boolean {
+  return value === 1 || value === "1" || value === true;
+}
+
+function mapProperty(row: PropertyAggregateRow) {
+  const images = row.images ? row.images.split(",").filter(Boolean) : [];
+
+  const agency = row.agency_id
+    ? {
+        id: Number(row.agency_id),
+        name: row.agency_name,
+        logo_url: row.agency_logo_url,
+        address: row.agency_address,
+        city: row.agency_city,
+        state: row.agency_state,
+        phone: row.agency_phone,
+      }
+    : null;
+
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    type: row.type,
+    purpose: row.purpose,
+    status: row.status,
+    price: Number(row.price),
+    code: row.code ?? null,
+    address: row.address,
+    quadra: row.quadra ?? null,
+    lote: row.lote ?? null,
+    numero: row.numero ?? null,
+    bairro: row.bairro ?? null,
+    complemento: row.complemento ?? null,
+    tipo_lote: row.tipo_lote ?? null,
+    city: row.city,
+    state: row.state,
+    bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
+    bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
+    area_construida:
+      row.area_construida != null ? Number(row.area_construida) : null,
+    area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
+    garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
+    has_wifi: toBoolean(row.has_wifi),
+    tem_piscina: toBoolean(row.tem_piscina),
+    tem_energia_solar: toBoolean(row.tem_energia_solar),
+    tem_automacao: toBoolean(row.tem_automacao),
+    tem_ar_condicionado: toBoolean(row.tem_ar_condicionado),
+    eh_mobiliada: toBoolean(row.eh_mobiliada),
+    valor_condominio:
+      row.valor_condominio != null ? Number(row.valor_condominio) : null,
+    valor_iptu: row.valor_iptu != null ? Number(row.valor_iptu) : null,
+    video_url: row.video_url ?? null,
+    images,
+    agency,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
 
 class PropertyController {
-  async index(req: Request, res: Response) {
-    try {
-      const page = parseInt(req.query.page as string) || 1;
-      const limit = parseInt(req.query.limit as string) || 10;
-      const offset = (page - 1) * limit;
-
-      const { type, purpose, city, minPrice, maxPrice, searchTerm } = req.query;
-
-      const whereClauses: string[] = [];
-      const queryParams: (string | number)[] = [];
-
-      if (type) {
-        whereClauses.push("type = ?");
-        queryParams.push(type as string);
-      }
-      if (purpose) {
-        whereClauses.push("purpose = ?");
-        queryParams.push(purpose as string);
-      }
-      if (city) {
-        whereClauses.push("city LIKE ?");
-        queryParams.push(`%${city}%`);
-      }
-      if (minPrice) {
-        whereClauses.push("price >= ?");
-        queryParams.push(parseFloat(minPrice as string));
-      }
-      if (maxPrice) {
-        whereClauses.push("price <= ?");
-        queryParams.push(parseFloat(maxPrice as string));
-      }
-      if (searchTerm) {
-        whereClauses.push("title LIKE ?");
-        queryParams.push(`%${searchTerm}%`);
-      }
-
-      const whereStatement =
-        whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-
-      const countQuery = `SELECT COUNT(*) as total FROM properties ${whereStatement}`;
-      const [totalResult] = await connection.query(countQuery, queryParams);
-      const total = (totalResult as any[])[0].total;
-
-      const dataQuery = `SELECT id, title, type, status, price, address, city, bedrooms, bathrooms, area, garage_spots, has_wifi, broker_id, created_at FROM properties ${whereStatement} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-      const [data] = await connection.query(dataQuery, [
-        ...queryParams,
-        limit,
-        offset,
-      ]);
-
-      return res.json({ data, total });
-    } catch (error) {
-      console.error("Erro ao listar imóveis:", error);
-      return res
-        .status(500)
-        .json({ error: "Ocorreu um erro inesperado no servidor." });
-    }
-  }
-
   async show(req: Request, res: Response) {
-    const { id } = req.params;
-    try {
-      const [rows] = await connection.query("SELECT * FROM properties WHERE id = ?", [id]);
-      const properties = rows as any[];
+    const propertyId = Number(req.params.id);
 
-      if (properties.length === 0) {
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: "Identificador de imóvel inválido." });
+    }
+
+    try {
+      const [rows] = await connection.query<PropertyAggregateRow[]>(
+        `
+          SELECT
+            p.*,
+            ANY_VALUE(a.id) AS agency_id,
+            ANY_VALUE(a.name) AS agency_name,
+            ANY_VALUE(a.logo_url) AS agency_logo_url,
+            ANY_VALUE(a.address) AS agency_address,
+            ANY_VALUE(a.city) AS agency_city,
+            ANY_VALUE(a.state) AS agency_state,
+            ANY_VALUE(a.phone) AS agency_phone,
+            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+          FROM properties p
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          WHERE p.id = ?
+          GROUP BY p.id
+        `,
+        [propertyId]
+      );
+
+      if (!rows || rows.length === 0) {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }
 
-      return res.status(200).json(properties[0]);
+      return res.status(200).json(mapProperty(rows[0]));
     } catch (error) {
       console.error("Erro ao buscar imóvel:", error);
-      return res
-        .status(500)
-        .json({ error: "Ocorreu um erro inesperado no servidor." });
+      return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });
     }
   }
 
   async create(req: AuthRequestWithFiles, res: Response) {
+    const brokerId = req.userId;
+
+    if (!brokerId) {
+      return res.status(401).json({ error: "Corretor não autenticado." });
+    }
+
+    const {
+      title,
+      description,
+      type,
+      purpose,
+      price,
+      code,
+      address,
+      quadra,
+      lote,
+      numero,
+      bairro,
+      complemento,
+      tipo_lote,
+      city,
+      state,
+      bedrooms,
+      bathrooms,
+      area_construida,
+      area_terreno,
+      area,
+      garage_spots,
+      has_wifi,
+      tem_piscina,
+      tem_energia_solar,
+      tem_automacao,
+      tem_ar_condicionado,
+      eh_mobiliada,
+      valor_condominio,
+      valor_iptu,
+    } = req.body ?? {};
+
+    if (!title || !description || !type || !purpose || !address || !city || !state) {
+      return res.status(400).json({ error: "Campos obrigatórios não informados." });
+    }
+
+    let numericPrice: number;
     try {
-      const brokerId = req.userId;
-      const {
-        title,
-        description,
-        type,
-        purpose,
-        price,
-        address,
-        city,
-        state,
-        bedrooms,
-        bathrooms,
-        area,
-        garage_spots,
-        has_wifi,
-      } = req.body;
+      numericPrice = parsePrice(price);
+    } catch (parseError) {
+      return res.status(400).json({ error: (parseError as Error).message });
+    }
 
-      const [brokerRows] = (await connection.query(
-        "SELECT status FROM brokers WHERE id = ?",
+    try {
+      const [brokerRows] = await connection.query<RowDataPacket[]>(
+        'SELECT status FROM brokers WHERE id = ?',
         [brokerId]
-      )) as any[];
+      );
 
-      if ((brokerRows as any[]).length === 0) {
-        return res
-          .status(403)
-          .json({ error: "Conta de corretor não encontrada para este utilizador." });
+      if (!brokerRows || brokerRows.length === 0) {
+        return res.status(403).json({ error: "Conta de corretor não encontrada." });
       }
 
-      const brokerStatus = normalizeStatus((brokerRows as any[])[0]?.status ?? "");
-      const allowedStatuses = new Set([
-        "approved",
-        "aprovado",
-        "verified",
-        "verificado",
-      ]);
+      const brokerStatus = String(brokerRows[0].status ?? '')
+        .trim()
+        .toLowerCase();
 
-      if (!allowedStatuses.has(brokerStatus)) {
+      if (brokerStatus !== 'approved') {
         return res
           .status(403)
-          .json({ error: "Apenas corretores aprovados podem criar imóveis." });
+          .json({ error: 'Apenas corretores aprovados podem criar imóveis.' });
       }
+
+      const [duplicateRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT id FROM properties
+          WHERE address = ?
+            AND COALESCE(quadra, '') = COALESCE(?, '')
+            AND COALESCE(lote, '') = COALESCE(?, '')
+            AND COALESCE(numero, '') = COALESCE(?, '')
+            AND COALESCE(bairro, '') = COALESCE(?, '')
+          LIMIT 1
+        `,
+        [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]
+      );
+
+      if (duplicateRows.length > 0) {
+        return res
+          .status(409)
+          .json({ error: 'Imóvel já cadastrado no sistema.' });
+      }
+
+      const numericBedrooms = parseInteger(bedrooms);
+      const numericBathrooms = parseInteger(bathrooms);
+      const numericGarageSpots = parseInteger(garage_spots);
+      const numericAreaConstruida = parseDecimal(area_construida ?? area);
+      const numericAreaTerreno = parseDecimal(area_terreno);
+      const numericValorCondominio = parseDecimal(valor_condominio);
+      const numericValorIptu = parseDecimal(valor_iptu);
+
+      const hasWifiFlag = parseBoolean(has_wifi);
+      const temPiscinaFlag = parseBoolean(tem_piscina);
+      const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
+      const temAutomacaoFlag = parseBoolean(tem_automacao);
+      const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
+      const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
 
       const imageUrls: string[] = [];
-      if (req.files && req.files["images"]) {
-        for (const file of req.files["images"]) {
-          const result = await uploadToCloudinary(file, "properties");
-          imageUrls.push(result.url);
+      const files = req.files ?? {};
+
+      if (files.images) {
+        for (const file of files.images) {
+          const uploaded = await uploadToCloudinary(file, 'properties');
+          imageUrls.push(uploaded.url);
         }
       }
 
       let videoUrl: string | null = null;
-      if (req.files && req.files["video"] && req.files["video"][0]) {
-        const result = await uploadToCloudinary(req.files["video"][0], "videos");
-        videoUrl = result.url;
+      if (files.video && files.video[0]) {
+        const uploadedVideo = await uploadToCloudinary(files.video[0], 'videos');
+        videoUrl = uploadedVideo.url;
       }
 
-      const [result] = await connection.query(
-        `INSERT INTO properties
-           (title, description, type, purpose, price, address, city, state, bedrooms, bathrooms, area,
-            garage_spots, has_wifi, broker_id, video_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      const [result] = await connection.query<ResultSetHeader>(
+        `
+          INSERT INTO properties (
+            broker_id,
+            title,
+            description,
+            type,
+            purpose,
+            status,
+            price,
+            code,
+            address,
+            quadra,
+            lote,
+            numero,
+            bairro,
+            complemento,
+            tipo_lote,
+            city,
+            state,
+            bedrooms,
+            bathrooms,
+            area_construida,
+            area_terreno,
+            garage_spots,
+            has_wifi,
+            tem_piscina,
+            tem_energia_solar,
+            tem_automacao,
+            tem_ar_condicionado,
+            eh_mobiliada,
+            valor_condominio,
+            valor_iptu,
+            video_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
         [
+          brokerId,
           title,
           description,
           type,
           purpose,
-          price,
+          'pending_approval',
+          numericPrice,
+          stringOrNull(code),
           address,
+          stringOrNull(quadra),
+          stringOrNull(lote),
+          stringOrNull(numero),
+          stringOrNull(bairro),
+          stringOrNull(complemento),
+          stringOrNull(tipo_lote),
           city,
           state,
-          bedrooms ?? null,
-          bathrooms ?? null,
-          area ?? null,
-          garage_spots ?? null,
-          has_wifi ? 1 : 0,
-          brokerId,
+          numericBedrooms,
+          numericBathrooms,
+          numericAreaConstruida,
+          numericAreaTerreno,
+          numericGarageSpots,
+          hasWifiFlag,
+          temPiscinaFlag,
+          temEnergiaSolarFlag,
+          temAutomacaoFlag,
+          temArCondicionadoFlag,
+          ehMobiliadaFlag,
+          numericValorCondominio,
+          numericValorIptu,
           videoUrl,
         ]
       );
 
-      const propertyId = (result as any).insertId;
+      const propertyId = result.insertId;
 
       if (imageUrls.length > 0) {
-        const imageValues = imageUrls.map((url) => [propertyId, url]);
+        const values = imageUrls.map((url) => [propertyId, url]);
         await connection.query(
-          "INSERT INTO property_images (property_id, image_url) VALUES ?",
-          [imageValues]
+          'INSERT INTO property_images (property_id, image_url) VALUES ?',
+          [values]
         );
       }
 
+      try {
+        await notifyAdmins(
+          `Um novo imóvel '${title}' foi adicionado e aguarda aprovação.`,
+          'property',
+          propertyId
+        );
+      } catch (notifyError) {
+        console.error('Erro ao enviar notificação aos administradores:', notifyError);
+      }
+
       return res.status(201).json({
-        message: "Imóvel criado com sucesso!",
+        message: 'Imóvel criado com sucesso!',
         propertyId,
-        images: imageUrls.length,
-        video: Boolean(videoUrl),
+        status: 'pending_approval',
+        images: imageUrls,
+        video: videoUrl,
       });
     } catch (error) {
-      console.error("Erro ao criar imóvel:", error);
-      return res.status(500).json({ error: "Erro interno do servidor." });
+      console.error('Erro ao criar imóvel:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
 
   async update(req: AuthRequest, res: Response) {
-  const { id } = req.params;
-  const brokerId = req.userId;
+    const propertyId = Number(req.params.id);
+    const brokerId = req.userId;
 
-  try {
-    // 1) Segurança: valida dono
-    const [ownerRows] = await connection.query(
-      "SELECT broker_id FROM properties WHERE id = ?",
-      [id]
-    );
-    const owners = ownerRows as any[];
-    if (owners.length === 0) {
-      return res.status(404).json({ error: "Imóvel não encontrado." });
-    }
-    if (owners[0].broker_id !== brokerId) {
-      return res.status(403).json({ error: "Acesso não autorizado a este imóvel." });
+    if (!brokerId) {
+      return res.status(401).json({ error: 'Corretor não autenticado.' });
     }
 
-    // 2) Campos aceitos em `properties`
-    const body = req.body ?? {};
-    const allowed: Record<string, any> = {};
-
-    // Só liste aqui colunas que EXISTEM na tabela `properties`
-    const allowList = new Set([
-      "title",
-      "description",
-      "type",
-      "status",
-      "purpose",
-      "price",
-      "address",
-      "city",
-      "state",
-      "bedrooms",
-      "bathrooms",
-      "area",
-      "garage_spots",
-      "has_wifi",
-      "video_url",
-      // "broker_id" // normalmente você NÃO deve permitir trocar o dono.
-    ]);
-
-    for (const key of Object.keys(body)) {
-      if (allowList.has(key)) {
-        allowed[key] = body[key];
-      }
-    }
-
-    // Normalizações
-    if (allowed.has_wifi !== undefined) {
-      allowed.has_wifi = allowed.has_wifi ? 1 : 0; // TiDB/MySQL
-    }
-    if (allowed.price !== undefined) {
-      const n = Number(allowed.price);
-      if (!Number.isFinite(n)) {
-        return res.status(400).json({ error: "Preço inválido." });
-      }
-      allowed.price = n;
-    }
-    ["bedrooms", "bathrooms", "area", "garage_spots"].forEach((k) => {
-      if (allowed[k] !== undefined && allowed[k] !== null && allowed[k] !== "") {
-        const n = Number(allowed[k]);
-        allowed[k] = Number.isFinite(n) ? n : null;
-      }
-    });
-
-    // 3) Atualiza apenas se houver algo permitido
-    if (Object.keys(allowed).length > 0) {
-      const setParts: string[] = [];
-      const params: any[] = [];
-      for (const k of Object.keys(allowed)) {
-        setParts.push(`\`${k}\` = ?`);
-        params.push(allowed[k]);
-      }
-      params.push(id);
-
-      const sql = `UPDATE properties SET ${setParts.join(", ")} WHERE id = ?`;
-      await connection.query(sql, params);
-    }
-
-    // 4) Tratamento de imagens (opcional) — se vierem no corpo como array `images`
-    //    Vamos substituir todas as imagens do imóvel (simples e direto).
-    if (Array.isArray(body.images)) {
-      const images: string[] = body.images.filter((u: any) => typeof u === "string" && u.trim() !== "");
-      // apaga todas as atuais
-      await connection.query("DELETE FROM property_images WHERE property_id = ?", [id]);
-      if (images.length > 0) {
-        const values = images.map((url) => [id, url]);
-        await connection.query(
-          "INSERT INTO property_images (property_id, image_url) VALUES ?",
-          [values]
-        );
-      }
-    }
-
-    return res.status(200).json({ message: "Imóvel atualizado com sucesso!" });
-  } catch (error) {
-    console.error("Erro ao atualizar imóvel:", error);
-    return res.status(500).json({ error: "Erro interno do servidor." });
-  }
-}
-
-
-  async updateStatus(req: AuthRequest, res: Response) {
-    const { id } = req.params;
-    const { status } = req.body as { status?: string };
-    const brokerIdFromToken = req.userId;
-
-    if (!status) {
-      return res.status(400).json({ error: "O novo status é obrigatório." });
-    }
-
-    const normalizedStatus = normalizeStatus(status);
-    const statusDictionary: Record<string, string> = {
-      disponivel: "Disponível",
-      disponível: "Disponível",
-      negociando: "Negociando",
-      negociação: "Negociando",
-      alugado: "Alugado",
-      aluguel: "Alugado",
-      vendido: "Vendido",
-      venda: "Vendido",
-    };
-
-    const nextStatus = statusDictionary[normalizedStatus];
-
-    if (!nextStatus) {
-      return res.status(400).json({ error: "Status informado é inválido." });
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
     }
 
     try {
-      const [propertyRows] = await connection.query(
-        "SELECT broker_id, price FROM properties WHERE id = ?",
-        [id]
+      const [propertyRows] = await connection.query<PropertyRow[]>(
+        'SELECT * FROM properties WHERE id = ?',
+        [propertyId]
       );
-      const properties = propertyRows as any[];
-      if (properties.length === 0) {
-        return res.status(404).json({ error: "Imóvel não encontrado." });
-      }
-      const property = properties[0];
 
-      if (property.broker_id !== brokerIdFromToken) {
-        return res
-          .status(403)
-          .json({ error: "Você não tem permissão para alterar este imóvel." });
+      if (!propertyRows || propertyRows.length === 0) {
+        return res.status(404).json({ error: 'Imóvel não encontrado.' });
       }
 
-      await connection.query("UPDATE properties SET status = ? WHERE id = ?", [
-        nextStatus,
-        id,
-      ]);
+      const property = propertyRows[0];
 
-      if (nextStatus === "Vendido") {
-        const salePrice = Number(property.price);
-        const commissionRate = 5.0;
-        const commissionAmount = parseFloat(
-          (salePrice * (commissionRate / 100)).toFixed(2)
-        );
+      if (property.broker_id !== brokerId) {
+        return res.status(403).json({ error: 'Acesso não autorizado a este imóvel.' });
+      }
 
-        const [existingSaleRows] = await connection.query(
-          "SELECT id FROM sales WHERE property_id = ?",
-          [id]
-        );
-        const existingSales = existingSaleRows as any[];
+      const body = req.body ?? {};
+      const bodyKeys = Object.keys(body);
 
-        if (existingSales.length > 0) {
+      if (property.status === 'approved') {
+        const invalidKeys = bodyKeys.filter((key) => key !== 'status');
+        if (invalidKeys.length > 0) {
+          return res.status(403).json({
+            error:
+              'Imóveis aprovados não podem ter seus dados alterados, apenas o status.',
+          });
+        }
+      }
+
+      const updatableFields = property.status === 'approved'
+        ? new Set(['status'])
+        : new Set([
+            'title',
+            'description',
+            'type',
+            'purpose',
+            'status',
+            'price',
+            'code',
+            'address',
+            'quadra',
+            'lote',
+            'numero',
+            'bairro',
+            'complemento',
+            'tipo_lote',
+            'city',
+            'state',
+            'bedrooms',
+            'bathrooms',
+            'area_construida',
+            'area_terreno',
+            'garage_spots',
+            'has_wifi',
+            'tem_piscina',
+            'tem_energia_solar',
+            'tem_automacao',
+            'tem_ar_condicionado',
+            'eh_mobiliada',
+            'valor_condominio',
+            'valor_iptu',
+            'video_url',
+          ]);
+
+      const fields: string[] = [];
+      const values: any[] = [];
+      let nextStatus: Nullable<PropertyStatus> = null;
+
+      for (const key of bodyKeys) {
+        if (!updatableFields.has(key)) {
+          continue;
+        }
+
+        switch (key) {
+          case 'status': {
+            const normalized = normalizeStatus(body.status);
+            if (!normalized) {
+              return res.status(400).json({ error: 'Status informado é inválido.' });
+            }
+            nextStatus = normalized;
+            fields.push('status = ?');
+            values.push(normalized);
+            break;
+          }
+          case 'price': {
+            try {
+              fields.push('price = ?');
+              values.push(parsePrice(body.price));
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'bedrooms':
+          case 'bathrooms':
+          case 'garage_spots': {
+            try {
+              fields.push(`\`${key}\` = ?`);
+              values.push(parseInteger(body[key]));
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'area_construida':
+          case 'area_terreno':
+          case 'valor_condominio':
+          case 'valor_iptu': {
+            try {
+              fields.push(`\`${key}\` = ?`);
+              values.push(parseDecimal(body[key]));
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'has_wifi':
+          case 'tem_piscina':
+          case 'tem_energia_solar':
+          case 'tem_automacao':
+          case 'tem_ar_condicionado':
+          case 'eh_mobiliada': {
+            fields.push(`\`${key}\` = ?`);
+            values.push(parseBoolean(body[key]));
+            break;
+          }
+          default: {
+            fields.push(`\`${key}\` = ?`);
+            values.push(stringOrNull(body[key]));
+          }
+        }
+      }
+
+      if (fields.length === 0) {
+        return res.status(400).json({ error: 'Nenhum dado fornecido para atualização.' });
+      }
+
+      values.push(propertyId);
+
+      await connection.query(
+        `UPDATE properties SET ${fields.join(', ')} WHERE id = ?`,
+        values
+      );
+
+      if (Array.isArray(body.images) && property.status !== 'approved') {
+        const images: string[] = body.images
+          .filter((url: unknown) => typeof url === 'string' && url.trim().length > 0)
+          .map((url: string) => url.trim());
+
+        await connection.query('DELETE FROM property_images WHERE property_id = ?', [propertyId]);
+
+        if (images.length > 0) {
+          const imageValues = images.map((url) => [propertyId, url]);
           await connection.query(
-            "UPDATE sales SET sale_price = ?, commission_rate = ?, commission_amount = ?, sale_date = CURRENT_TIMESTAMP WHERE property_id = ?",
-            [salePrice, commissionRate, commissionAmount, id]
-          );
-        } else {
-          await connection.query(
-            "INSERT INTO sales (property_id, broker_id, sale_price, commission_rate, commission_amount) VALUES (?, ?, ?, ?, ?)",
-            [id, brokerIdFromToken, salePrice, commissionRate, commissionAmount]
+            'INSERT INTO property_images (property_id, image_url) VALUES ?',
+            [imageValues]
           );
         }
       }
 
-      return res
-        .status(200)
-        .json({
-          message: "Status do imóvel atualizado com sucesso!",
-          status: nextStatus,
-        });
+      if (nextStatus && NOTIFY_ON_STATUS.has(nextStatus)) {
+        try {
+          const action = nextStatus === 'sold' ? 'vendido' : 'alugado';
+          await notifyAdmins(
+            `O imóvel '${property.title}' foi marcado como ${action}.`,
+            'property',
+            propertyId
+          );
+        } catch (notifyError) {
+          console.error('Erro ao registrar notificação:', notifyError);
+        }
+
+        if (nextStatus === 'sold') {
+          const salePrice = Number(body.price ?? property.price);
+          const commissionRate = parseDecimal(body.commission_rate) ?? 5.0;
+          const commissionAmount = Number(
+            (salePrice * (commissionRate / 100)).toFixed(2)
+          );
+
+          const [existingSaleRows] = await connection.query<RowDataPacket[]>(
+            'SELECT id FROM sales WHERE property_id = ?',
+            [propertyId]
+          );
+
+          if (existingSaleRows.length > 0) {
+            await connection.query(
+              `UPDATE sales
+                 SET sale_price = ?, commission_rate = ?, commission_amount = ?, sale_date = CURRENT_TIMESTAMP
+               WHERE property_id = ?`,
+              [salePrice, commissionRate, commissionAmount, propertyId]
+            );
+          } else {
+            await connection.query(
+              `INSERT INTO sales (property_id, broker_id, sale_price, commission_rate, commission_amount)
+               VALUES (?, ?, ?, ?, ?)`,
+              [propertyId, brokerId, salePrice, commissionRate, commissionAmount]
+            );
+          }
+        }
+      }
+
+      return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
     } catch (error) {
-      console.error("Erro ao atualizar status do imóvel:", error);
-      return res
-        .status(500)
-        .json({ error: "Ocorreu um erro inesperado no servidor." });
+      console.error('Erro ao atualizar imóvel:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
 
+  async updateStatus(req: AuthRequest, res: Response) {
+    const { status } = req.body as { status?: string };
+    const normalized = normalizeStatus(status);
+
+    if (!normalized) {
+      return res.status(400).json({ error: 'Status informado é inválido.' });
+    }
+
+    req.body = { status: normalized } as any;
+    return this.update(req, res);
+  }
+
   async delete(req: AuthRequest, res: Response) {
-    const { id } = req.params;
-    const brokerIdFromToken = req.userId;
+    const propertyId = Number(req.params.id);
+    const brokerId = req.userId;
+
+    if (!brokerId) {
+      return res.status(401).json({ error: 'Corretor não autenticado.' });
+    }
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
+    }
 
     try {
-      const [propertyRows] = await connection.query(
-        "SELECT broker_id FROM properties WHERE id = ?",
-        [id]
+      const [propertyRows] = await connection.query<RowDataPacket[]>(
+        'SELECT broker_id FROM properties WHERE id = ?',
+        [propertyId]
       );
-      const properties = propertyRows as any[];
-      if (properties.length === 0) {
-        return res.status(404).json({ error: "Imóvel não encontrado." });
+
+      if (!propertyRows || propertyRows.length === 0) {
+        return res.status(404).json({ error: 'Imóvel não encontrado.' });
       }
 
-      if (properties[0].broker_id !== brokerIdFromToken) {
-        return res
-          .status(403)
-          .json({ error: "Você não tem permissão para deletar este imóvel." });
+      if (propertyRows[0].broker_id !== brokerId) {
+        return res.status(403).json({ error: 'Você não tem permissão para deletar este imóvel.' });
       }
 
-      await connection.query("DELETE FROM properties WHERE id = ?", [id]);
+      await connection.query('DELETE FROM properties WHERE id = ?', [propertyId]);
 
-      return res.status(200).json({ message: "Imóvel deletado com sucesso!" });
+      return res.status(200).json({ message: 'Imóvel deletado com sucesso!' });
     } catch (error) {
-      console.error("Erro ao deletar imóvel:", error);
-      return res
-        .status(500)
-        .json({ error: "Ocorreu um erro inesperado no servidor." });
+      console.error('Erro ao deletar imóvel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
 
   async getAvailableCities(req: Request, res: Response) {
     try {
-      const query = `
-        SELECT DISTINCT city
-        FROM properties
-        WHERE city IS NOT NULL AND city != ''
-        ORDER BY city ASC
-      `;
-
-      const [rows] = await connection.query(query);
-      const cities = (rows as any[]).map((row) => row.city);
-
-      return res.status(200).json(cities);
-    } catch (error) {
-      console.error("Erro ao buscar cidades disponíveis:", error);
-      return res
-        .status(500)
-        .json({ error: "Ocorreu um erro inesperado no servidor." });
-    }
-  }
-
-  async addFavorite(req: AuthRequest, res: Response) {
-    const userId = req.userId;
-    const propertyId = Number.parseInt(req.params.id, 10);
-
-    if (!userId) {
-      return res.status(401).json({ error: "Usuário não autenticado." });
-    }
-
-    if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: "Identificador de imóvel inválido." });
-    }
-
-    try {
-      const [propertyRows] = await connection.query(
-        "SELECT id FROM properties WHERE id = ?",
-        [propertyId]
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT DISTINCT city
+          FROM properties
+          WHERE city IS NOT NULL AND city <> ''
+          ORDER BY city ASC
+        `
       );
-      if ((propertyRows as any[]).length === 0) {
-        return res.status(404).json({ error: "Imóvel não encontrado." });
-      }
-
-      const [favoriteRows] = await connection.query(
-        "SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?",
-        [userId, propertyId]
-      );
-
-      if ((favoriteRows as any[]).length > 0) {
-        return res.status(409).json({ error: "Este imóvel já está nos seus favoritos." });
-      }
-
-      await connection.query(
-        "INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)",
-        [userId, propertyId]
-      );
-
-      return res.status(201).json({ message: "Imóvel adicionado aos favoritos." });
+      return res.status(200).json(rows.map((row) => row.city));
     } catch (error) {
-      console.error("Erro ao adicionar favorito:", error);
-      return res.status(500).json({ error: "Ocorreu um erro no servidor." });
-    }
-  }
-
-  async removeFavorite(req: AuthRequest, res: Response) {
-    const userId = req.userId;
-    const propertyId = Number.parseInt(req.params.id, 10);
-
-    if (!userId) {
-      return res.status(401).json({ error: "Usuário não autenticado." });
-    }
-
-    if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: "Identificador de imóvel inválido." });
-    }
-
-    try {
-      const [result] = await connection.query(
-        "DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?",
-        [userId, propertyId]
-      );
-
-      if ((result as any).affectedRows === 0) {
-        return res.status(404).json({ error: "Favorito não encontrado." });
-      }
-
-      return res.status(200).json({ message: "Imóvel removido dos favoritos." });
-    } catch (error) {
-      console.error("Erro ao remover favorito:", error);
-      return res.status(500).json({ error: "Ocorreu um erro no servidor." });
-    }
-  }
-
-  async listUserFavorites(req: AuthRequest, res: Response) {
-    const userId = req.userId;
-
-    if (!userId) {
-      return res.status(401).json({ error: "Utilizador não autenticado." });
-    }
-
-    try {
-      const query = `
-        SELECT
-          p.*,
-          ANY_VALUE(u.name)  AS broker_name,
-          ANY_VALUE(u.phone) AS broker_phone,
-          ANY_VALUE(u.email) AS broker_email,
-          GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
-          MAX(f.created_at) AS last_fav_at
-        FROM favoritos f
-        JOIN properties p           ON p.id = f.imovel_id
-        LEFT JOIN property_images pi ON pi.property_id = p.id
-        LEFT JOIN users u            ON u.id = p.broker_id
-        WHERE f.usuario_id = ?
-        GROUP BY p.id
-        ORDER BY last_fav_at DESC
-      `;
-
-      const [rows] = await connection.query(query, [userId]);
-
-      const properties = (rows as any[]).map((prop) => ({
-        ...prop,
-        images: prop.images ? String(prop.images).split(",") : [],
-        price: Number(prop.price),
-        has_wifi: Boolean(prop.has_wifi),
-        bedrooms: prop.bedrooms != null ? Number(prop.bedrooms) : null,
-        bathrooms: prop.bathrooms != null ? Number(prop.bathrooms) : null,
-        area: prop.area != null ? Number(prop.area) : null,
-        garage_spots: prop.garage_spots != null ? Number(prop.garage_spots) : null,
-      }));
-
-      return res.status(200).json(properties);
-    } catch (error) {
-      console.error("Erro ao listar favoritos:", error);
-      return res
-        .status(500)
-        .json({ error: "Ocorreu um erro inesperado no servidor." });
+      console.error('Erro ao buscar cidades disponíveis:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
 
   async listPublicProperties(req: Request, res: Response) {
+    const {
+      page = '1',
+      limit = '20',
+      type,
+      purpose,
+      city,
+      bairro,
+      minPrice,
+      maxPrice,
+      bedrooms,
+      sortBy,
+      order,
+      searchTerm,
+      status,
+    } = req.query;
+
+    const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    const numericPage = Math.max(Number(page) || 1, 1);
+    const offset = (numericPage - 1) * numericLimit;
+
+    const whereClauses: string[] = [];
+    const params: any[] = [];
+
+    const statusFilter = normalizeStatus(status);
+    const effectiveStatus = statusFilter ?? 'approved';
+    whereClauses.push('p.status = ?');
+    params.push(effectiveStatus);
+
+    if (type) {
+      whereClauses.push('p.type = ?');
+      params.push(type);
+    }
+
+    if (purpose) {
+      whereClauses.push('p.purpose = ?');
+      params.push(purpose);
+    }
+
+    if (city) {
+      whereClauses.push('p.city LIKE ?');
+      params.push(`%${city}%`);
+    }
+
+    if (bairro) {
+      whereClauses.push('p.bairro LIKE ?');
+      params.push(`%${bairro}%`);
+    }
+
+    if (minPrice) {
+      const value = Number(minPrice);
+      if (!Number.isNaN(value)) {
+        whereClauses.push('p.price >= ?');
+        params.push(value);
+      }
+    }
+
+    if (maxPrice) {
+      const value = Number(maxPrice);
+      if (!Number.isNaN(value)) {
+        whereClauses.push('p.price <= ?');
+        params.push(value);
+      }
+    }
+
+    if (bedrooms) {
+      const value = Number(bedrooms);
+      if (!Number.isNaN(value) && value > 0) {
+        whereClauses.push('p.bedrooms >= ?');
+        params.push(Math.trunc(value));
+      }
+    }
+
+    if (searchTerm) {
+      const term = `%${searchTerm}%`;
+      whereClauses.push('(p.title LIKE ? OR p.city LIKE ? OR p.address LIKE ? OR p.bairro LIKE ? )');
+      params.push(term, term, term, term);
+    }
+
+    const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const allowedSortColumns: Record<string, string> = {
+      price: 'p.price',
+      created_at: 'p.created_at',
+      area_construida: 'p.area_construida',
+    };
+
+    const sortColumn = allowedSortColumns[String(sortBy ?? '').toLowerCase()] ?? 'p.created_at';
+    const sortDirection = String(order ?? 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
     try {
-      const {
-        page = "1",
-        limit = "20",
-        type,
-        purpose,
-        city,
-        minPrice,
-        maxPrice,
-        bedrooms,
-        sortBy,
-        order,
-        searchTerm,
-        status,
-      } = req.query;
+      const [rows] = await connection.query<PropertyAggregateRow[]>(
+        `
+          SELECT
+            p.*,
+            ANY_VALUE(a.id) AS agency_id,
+            ANY_VALUE(a.name) AS agency_name,
+            ANY_VALUE(a.logo_url) AS agency_logo_url,
+            ANY_VALUE(a.address) AS agency_address,
+            ANY_VALUE(a.city) AS agency_city,
+            ANY_VALUE(a.state) AS agency_state,
+            ANY_VALUE(a.phone) AS agency_phone,
+            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+          FROM properties p
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          ${where}
+          GROUP BY p.id
+          ORDER BY ${sortColumn} ${sortDirection}
+          LIMIT ? OFFSET ?
+        `,
+        [...params, numericLimit, offset]
+      );
 
-      const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-      const numericPage = Math.max(Number(page) || 1, 1);
-      const offset = (numericPage - 1) * numericLimit;
+      const [totalRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(DISTINCT p.id) AS total FROM properties p ${where}`,
+        params
+      );
 
-      const whereClauses: string[] = [];
-      const queryParams: any[] = [];
-
-      const statusFilter = getParam(status);
-      if (statusFilter) {
-        whereClauses.push("p.status = ?");
-        queryParams.push(statusFilter);
-      }
-
-      const typeFilter = getParam(type);
-      if (typeFilter) {
-        whereClauses.push("p.type = ?");
-        queryParams.push(typeFilter);
-      }
-
-      const purposeFilter = getParam(purpose);
-      if (purposeFilter) {
-        whereClauses.push("p.purpose = ?");
-        queryParams.push(purposeFilter);
-      }
-
-      const cityFilter = getParam(city);
-      if (cityFilter) {
-        whereClauses.push("p.city LIKE ?");
-        queryParams.push(`%${cityFilter}%`);
-      }
-
-      const minPriceValue = Number(getParam(minPrice));
-      if (!Number.isNaN(minPriceValue) && minPriceValue > 0) {
-        whereClauses.push("p.price >= ?");
-        queryParams.push(minPriceValue);
-      }
-
-      const maxPriceValue = Number(getParam(maxPrice));
-      if (!Number.isNaN(maxPriceValue) && maxPriceValue > 0) {
-        whereClauses.push("p.price <= ?");
-        queryParams.push(maxPriceValue);
-      }
-
-      const bedroomsValue = Number(getParam(bedrooms));
-      if (!Number.isNaN(bedroomsValue) && bedroomsValue > 0) {
-        whereClauses.push("p.bedrooms >= ?");
-        queryParams.push(Math.floor(bedroomsValue));
-      }
-
-      const searchTermFilter = getParam(searchTerm);
-      if (searchTermFilter) {
-        whereClauses.push("(p.title LIKE ? OR p.city LIKE ? OR p.address LIKE ?)");
-        const term = `%${searchTermFilter}%`;
-        queryParams.push(term, term, term);
-      }
-
-      const whereStatement =
-        whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
-
-      const allowedSortColumns: Record<string, string> = {
-        price: "p.price",
-        created_at: "p.created_at",
-      };
-      const sortColumn =
-        allowedSortColumns[getParam(sortBy) ?? "created_at"] ?? "p.created_at";
-      const sortDirection =
-        (getParam(order) ?? "DESC").toUpperCase() === "ASC" ? "ASC" : "DESC";
-
-      const query = `
-        SELECT
-          p.*,
-          ANY_VALUE(u.name)  AS broker_name,
-          ANY_VALUE(u.phone) AS broker_phone,
-          ANY_VALUE(u.email) AS broker_email,
-          GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
-        FROM properties p
-        LEFT JOIN users u ON p.broker_id = u.id
-        LEFT JOIN property_images pi ON p.id = pi.property_id
-        ${whereStatement}
-        GROUP BY p.id
-        ORDER BY ${sortColumn} ${sortDirection}
-        LIMIT ? OFFSET ?
-      `;
-
-      const [properties] = (await connection.query(query, [
-        ...queryParams,
-        numericLimit,
-        offset,
-      ])) as any[];
-
-      const [totalResult] = (await connection.query(
-        `SELECT COUNT(DISTINCT p.id) as total FROM properties p ${whereStatement}`,
-        queryParams
-      )) as any[];
-
-      const processedProperties = (properties as any[]).map((prop: any) => ({
-        ...prop,
-        images: prop.images ? prop.images.split(",") : [],
-        price: Number(prop.price),
-        has_wifi: Boolean(prop.has_wifi),
-        bedrooms: prop.bedrooms ? Number(prop.bedrooms) : null,
-        bathrooms: prop.bathrooms ? Number(prop.bathrooms) : null,
-        area: prop.area ? Number(prop.area) : null,
-        garage_spots: prop.garage_spots ? Number(prop.garage_spots) : null,
-      }));
+      const total = totalRows[0]?.total ?? 0;
 
       return res.json({
-        properties: processedProperties,
-        total: totalResult[0]?.total ?? 0,
+        properties: rows.map(mapProperty),
+        total,
         page: numericPage,
-        totalPages: Math.ceil((totalResult[0]?.total ?? 0) / numericLimit),
+        totalPages: Math.ceil(total / numericLimit),
       });
     } catch (error) {
-      console.error("Erro ao listar imóveis:", error);
-      return res.status(500).json({ error: "Erro interno do servidor." });
+      console.error('Erro ao listar imóveis:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
 }
 
-// Função auxiliar para extrair o primeiro parâmetro, caso venha como um array
-function getParam(value: unknown): string | undefined {
-  if (Array.isArray(value) && value.length > 0) {
-    return String(value[0]);
-  }
-  return typeof value === "string" ? value : undefined;
-}
-
 export const propertyController = new PropertyController();
+

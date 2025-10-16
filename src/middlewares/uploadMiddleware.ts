@@ -82,7 +82,6 @@ export const mediaUpload = multer({
   },
 });
 
-// Middleware específico para documentos de verificação do corretor
 export const brokerDocsUpload = multer({
   storage,
   limits: {

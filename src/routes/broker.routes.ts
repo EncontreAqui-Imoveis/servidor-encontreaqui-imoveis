@@ -19,7 +19,6 @@ router.post(
   brokerController.registerWithDocs
 );
 
-
 router.use(authMiddleware);
 
 router.post(

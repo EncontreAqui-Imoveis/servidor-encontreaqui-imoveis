@@ -85,8 +85,8 @@ export const mediaUpload = multer({
 export const brokerDocsUpload = multer({
   storage,
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB para documentos
-    files: 3, // frente, verso e selfie
+    fileSize: 10 * 1024 * 1024, 
+    files: 3, 
   },
   fileFilter: (req, file, cb: FileFilterCallback) => {
     const field = file.fieldname;
@@ -95,7 +95,6 @@ export const brokerDocsUpload = multer({
 
     console.log(`[broker-docs] field=${field} mimetype=${mime} name=${name}`);
 
-    // Campos permitidos para documentos do corretor
     const allowedFields = ['crecifront', 'creciback', 'selfie'];
     
     if (allowedFields.includes(field.toLowerCase())) {

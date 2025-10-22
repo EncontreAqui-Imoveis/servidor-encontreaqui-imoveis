@@ -287,45 +287,59 @@ class AdminController {
         const { id } = req.params;
         const body = req.body ?? {};
         try {
-            const [propertyRows] = await connection_1.default.query('SELECT id FROM properties WHERE id = ?', [id]);
+            const [propertyRows] = await connection_1.default.query('SELECT id, status FROM properties WHERE id = ?', [id]);
             if (propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
-            const allowedFields = new Set([
-                'title',
-                'description',
-                'type',
-                'purpose',
-                'status',
-                'price',
-                'code',
-                'address',
-                'quadra',
-                'lote',
-                'numero',
-                'bairro',
-                'complemento',
-                'tipo_lote',
-                'city',
-                'state',
-                'bedrooms',
-                'bathrooms',
-                'area_construida',
-                'area_terreno',
-                'garage_spots',
-                'has_wifi',
-                'tem_piscina',
-                'tem_energia_solar',
-                'tem_automacao',
-                'tem_ar_condicionado',
-                'eh_mobiliada',
-                'valor_condominio',
-                'valor_iptu',
-                'video_url',
-                'sale_value',
-                'commission_rate',
-                'commission_value',
-            ]);
+            const property = propertyRows[0];
+            const currentStatus = String(property.status ?? '').trim().toLowerCase();
+            const isApproved = currentStatus === 'approved';
+            const bodyKeys = Object.keys(body);
+            if (isApproved) {
+                const invalidKeys = bodyKeys.filter((key) => key !== 'status');
+                if (invalidKeys.length > 0) {
+                    return res.status(403).json({
+                        error: 'Imoveis aprovados so permitem atualizar o status.',
+                    });
+                }
+            }
+            const allowedFields = isApproved
+                ? new Set(['status'])
+                : new Set([
+                    'title',
+                    'description',
+                    'type',
+                    'purpose',
+                    'status',
+                    'price',
+                    'code',
+                    'address',
+                    'quadra',
+                    'lote',
+                    'numero',
+                    'bairro',
+                    'complemento',
+                    'tipo_lote',
+                    'city',
+                    'state',
+                    'bedrooms',
+                    'bathrooms',
+                    'area_construida',
+                    'area_terreno',
+                    'garage_spots',
+                    'has_wifi',
+                    'tem_piscina',
+                    'tem_energia_solar',
+                    'tem_automacao',
+                    'tem_ar_condicionado',
+                    'eh_mobiliada',
+                    'valor_condominio',
+                    'valor_iptu',
+                    'video_url',
+                    'sale_value',
+                    'commission_rate',
+                    'commission_value',
+                ]);
             const setParts = [];
             const params = [];
             for (const [key, value] of Object.entries(body)) {
@@ -482,7 +496,7 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
-    async getAllBrokers(req, res) {
+    async listBrokers(req, res) {
         try {
             const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
             const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
@@ -500,12 +514,35 @@ class AdminController {
             b.created_at,
             a.id AS agency_id,
             a.name AS agency_name,
+            a.logo_url AS agency_logo_url,
+            a.address AS agency_address,
+            a.city AS agency_city,
+            a.state AS agency_state,
+            a.zip_code AS agency_zip_code,
+            a.phone AS agency_phone,
+            a.email AS agency_email,
             COUNT(p.id) AS property_count
           FROM brokers b
           INNER JOIN users u ON b.id = u.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN properties p ON p.broker_id = b.id
-          GROUP BY b.id, u.name, u.email, u.phone, b.creci, b.status, b.created_at, a.id, a.name
+          GROUP BY
+            b.id,
+            u.name,
+            u.email,
+            u.phone,
+            b.creci,
+            b.status,
+            b.created_at,
+            a.id,
+            a.name,
+            a.logo_url,
+            a.address,
+            a.city,
+            a.state,
+            a.zip_code,
+            a.phone,
+            a.email
           ORDER BY b.created_at DESC
           LIMIT ? OFFSET ?
         `, [limit, offset]);
@@ -581,19 +618,45 @@ class AdminController {
         }
     }
     async deletePropertyImage(req, res) {
+        const propertyId = Number(req.params.id);
         const imageId = Number(req.params.imageId);
-        if (Number.isNaN(imageId)) {
-            return res.status(400).json({ error: 'Identificador de imagem invalido.' });
+        if (Number.isNaN(propertyId) || Number.isNaN(imageId)) {
+            return res.status(400).json({ error: 'Identificadores invalidos.' });
         }
         try {
-            const [result] = await connection_1.default.query('DELETE FROM property_images WHERE id = ?', [imageId]);
+            const [result] = await connection_1.default.query('DELETE FROM property_images WHERE id = ? AND property_id = ?', [imageId, propertyId]);
             if (result.affectedRows === 0) {
-                return res.status(404).json({ error: 'Imagem nao encontrada.' });
+                return res.status(404).json({ error: 'Imagem nao encontrada para este imovel.' });
             }
             return res.status(200).json({ message: 'Imagem removida com sucesso.' });
         }
         catch (error) {
             console.error('Erro ao remover imagem:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async getNotifications(req, res) {
+        const adminId = Number(req.userId);
+        if (!adminId) {
+            return res.status(401).json({ error: 'Administrador nao autenticado.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            id,
+            message,
+            related_entity_type,
+            related_entity_id,
+            is_read,
+            created_at
+          FROM notifications
+          WHERE user_id = ? AND is_read = 0
+          ORDER BY created_at DESC
+        `, [adminId]);
+            return res.status(200).json({ data: rows });
+        }
+        catch (error) {
+            console.error('Erro ao buscar notificacoes:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }

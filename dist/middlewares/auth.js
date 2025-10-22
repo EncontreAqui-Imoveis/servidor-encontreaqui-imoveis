@@ -12,7 +12,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 async function authMiddleware(req, res, next) {
     const { authorization } = req.headers;
     if (!authorization) {
-        return res.status(401).json({ error: 'Token não fornecido.' });
+        return res.status(401).json({ error: 'Token n├úo fornecido.' });
     }
     const [scheme, token] = authorization.split(' ');
     if (!/Bearer$/i.test(scheme) || !token) {
@@ -24,7 +24,7 @@ async function authMiddleware(req, res, next) {
             const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
             req.userId = decoded.id;
             req.userRole = decoded.role;
-            // ✅ VERIFICAÇÃO EXTRA: Se for broker, verificar status
+            // Ô£à VERIFICA├ç├âO EXTRA: Se for broker, verificar status
             if (decoded.role === 'broker') {
                 const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [decoded.id]);
                 const brokers = brokerRows;
@@ -47,7 +47,7 @@ async function authMiddleware(req, res, next) {
          LEFT JOIN brokers b ON u.id = b.id
          WHERE u.firebase_uid = ?`, [firebase_uid]);
             if (userRows.length === 0) {
-                return res.status(404).json({ error: 'Usuário não encontrado.' });
+                return res.status(404).json({ error: 'Usu├írio n├úo encontrado.' });
             }
             const user = userRows[0];
             req.userId = user.id;
@@ -62,7 +62,7 @@ async function authMiddleware(req, res, next) {
             else {
                 req.userRole = user.role ?? 'user';
             }
-            // ✅ VERIFICAÇÃO EXTRA: Se for broker, verificar status
+            // Ô£à VERIFICA├ç├âO EXTRA: Se for broker, verificar status
             if (req.userRole === 'broker') {
                 const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [req.userId]);
                 const brokers = brokerRows;
@@ -77,8 +77,8 @@ async function authMiddleware(req, res, next) {
         }
     }
     catch (error) {
-        console.error('Erro de autenticação:', error);
-        return res.status(401).json({ error: 'Token inválido.' });
+        console.error('Erro de autentica├º├úo:', error);
+        return res.status(401).json({ error: 'Token inv├ílido.' });
     }
 }
 async function isBroker(req, res, next) {
@@ -86,11 +86,12 @@ async function isBroker(req, res, next) {
         return res.status(403).json({ error: 'Acesso negado. Rota exclusiva para corretores.' });
     }
     try {
+        // Ô£à Verificar se o corretor est├í aprovado
         const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [req.userId]);
         const brokers = brokerRows;
         if (brokers.length === 0 || brokers[0].status !== 'approved') {
             return res.status(403).json({
-                error: 'Acesso negado. Sua conta de corretor não foi aprovada ou foi rejeitada. Para se registrar como cliente, use um email diferente.'
+                error: 'Acesso negado. Sua conta de corretor n├úo foi aprovada ou foi rejeitada. Para se registrar como cliente, use um email diferente.'
             });
         }
         return next();

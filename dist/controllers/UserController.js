@@ -118,7 +118,7 @@ class UserController {
             return res.status(200).json({ user, token });
         }
         catch (error) {
-            console.error('Erro no login do usuario:', error);
+            console.error('Erro no login do usuário:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
@@ -130,7 +130,7 @@ class UserController {
         try {
             const [userRows] = await connection_1.default.query('SELECT id, name, email FROM users WHERE id = ?', [userId]);
             if (userRows.length === 0) {
-                return res.status(404).json({ error: 'Usuario nao encontrado.' });
+                return res.status(404).json({ error: 'Usuário nao encontrado.' });
             }
             const user = userRows[0];
             const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [userId]);
@@ -235,11 +235,11 @@ class UserController {
             if (propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
-            const [favoriteRows] = await connection_1.default.query('SELECT 1 FROM user_favorites WHERE user_id = ? AND property_id = ?', [userId, propertyId]);
+            const [favoriteRows] = await connection_1.default.query('SELECT 1 FROM favoritos WHERE user_id = ? AND property_id = ?', [userId, propertyId]);
             if (favoriteRows.length > 0) {
                 return res.status(409).json({ error: 'Este imovel ja esta nos seus favoritos.' });
             }
-            await connection_1.default.query('INSERT INTO user_favorites (user_id, property_id) VALUES (?, ?)', [userId, propertyId]);
+            await connection_1.default.query('INSERT INTO favoritos (user_id, property_id) VALUES (?, ?)', [userId, propertyId]);
             return res.status(201).json({ message: 'Imovel adicionado aos favoritos.' });
         }
         catch (error) {
@@ -257,7 +257,7 @@ class UserController {
             return res.status(400).json({ error: 'Identificador de imovel invalido.' });
         }
         try {
-            const [result] = await connection_1.default.query('DELETE FROM user_favorites WHERE user_id = ? AND property_id = ?', [userId, propertyId]);
+            const [result] = await connection_1.default.query('DELETE FROM favoritos WHERE user_id = ? AND property_id = ?', [userId, propertyId]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Favorito nao encontrado.' });
             }
@@ -286,7 +286,7 @@ class UserController {
             ANY_VALUE(a.phone) AS agency_phone,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
             MAX(f.created_at) AS favorited_at
-          FROM user_favorites f
+          FROM favoritos f
           JOIN properties p ON p.id = f.property_id
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id

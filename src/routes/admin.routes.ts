@@ -15,7 +15,7 @@ adminRoutes.delete('/users/:id', adminController.deleteUser);
 adminRoutes.get('/clients', adminController.getAllClients);
 adminRoutes.put('/clients/:id', adminController.updateClient);
 
-adminRoutes.get('/brokers', adminController.getAllBrokers);
+adminRoutes.get('/brokers', adminController.listBrokers);
 adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
 adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
@@ -32,7 +32,9 @@ adminRoutes.post(
   mediaUpload.array('images', 20),
   adminController.addPropertyImage
 );
-adminRoutes.delete('/properties/images/:imageId', adminController.deletePropertyImage);
+adminRoutes.delete('/properties/:id/images/:imageId', adminController.deletePropertyImage);
+
+adminRoutes.get('/notifications', adminController.getNotifications);
 
 adminRoutes.get('/dashboard/stats', adminController.getDashboardStats);
 

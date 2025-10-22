@@ -11,7 +11,7 @@ adminRoutes.get('/users', AdminController_1.adminController.getAllUsers);
 adminRoutes.delete('/users/:id', AdminController_1.adminController.deleteUser);
 adminRoutes.get('/clients', AdminController_1.adminController.getAllClients);
 adminRoutes.put('/clients/:id', AdminController_1.adminController.updateClient);
-adminRoutes.get('/brokers', AdminController_1.adminController.getAllBrokers);
+adminRoutes.get('/brokers', AdminController_1.adminController.listBrokers);
 adminRoutes.get('/brokers/pending', AdminController_1.adminController.listPendingBrokers);
 adminRoutes.patch('/brokers/:id/approve', AdminController_1.adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', AdminController_1.adminController.rejectBroker);
@@ -23,6 +23,7 @@ adminRoutes.delete('/properties/:id', AdminController_1.adminController.deletePr
 adminRoutes.patch('/properties/:id/approve', AdminController_1.adminController.approveProperty);
 adminRoutes.patch('/properties/:id/reject', AdminController_1.adminController.rejectProperty);
 adminRoutes.post('/properties/:id/images', uploadMiddleware_1.mediaUpload.array('images', 20), AdminController_1.adminController.addPropertyImage);
-adminRoutes.delete('/properties/images/:imageId', AdminController_1.adminController.deletePropertyImage);
+adminRoutes.delete('/properties/:id/images/:imageId', AdminController_1.adminController.deletePropertyImage);
+adminRoutes.get('/notifications', AdminController_1.adminController.getNotifications);
 adminRoutes.get('/dashboard/stats', AdminController_1.adminController.getDashboardStats);
 exports.default = adminRoutes;

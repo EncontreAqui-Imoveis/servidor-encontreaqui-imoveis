@@ -518,7 +518,6 @@ class AdminController {
             a.address AS agency_address,
             a.city AS agency_city,
             a.state AS agency_state,
-            a.zip_code AS agency_zip_code,
             a.phone AS agency_phone,
             a.email AS agency_email,
             COUNT(p.id) AS property_count
@@ -540,7 +539,6 @@ class AdminController {
             a.address,
             a.city,
             a.state,
-            a.zip_code,
             a.phone,
             a.email
           ORDER BY b.created_at DESC
@@ -559,7 +557,10 @@ class AdminController {
             return res.status(400).json({ error: 'Identificador de imovel invalido.' });
         }
         try {
-            const [result] = await connection_1.default.query('UPDATE properties SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['approved', propertyId]);
+            const [result] = await connection_1.default.query('UPDATE properties SET status = ? WHERE id = ?', [
+                'approved',
+                propertyId,
+            ]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
@@ -576,7 +577,10 @@ class AdminController {
             return res.status(400).json({ error: 'Identificador de imovel invalido.' });
         }
         try {
-            const [result] = await connection_1.default.query('UPDATE properties SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', ['rejected', propertyId]);
+            const [result] = await connection_1.default.query('UPDATE properties SET status = ? WHERE id = ?', [
+                'rejected',
+                propertyId,
+            ]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }

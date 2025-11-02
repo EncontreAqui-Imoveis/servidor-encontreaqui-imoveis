@@ -21,6 +21,7 @@ adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
 adminRoutes.put('/brokers/:id', adminController.updateBroker);
 adminRoutes.delete('/brokers/:id', adminController.deleteBroker);
+adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
 
 adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
 adminRoutes.put('/properties/:id', adminController.updateProperty);

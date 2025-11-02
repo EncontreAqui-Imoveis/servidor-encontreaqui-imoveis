@@ -415,13 +415,30 @@ class AdminController {
     }
     async getDashboardStats(req, res) {
         try {
-            const [propertiesResult] = await connection_1.default.query('SELECT COUNT(*) AS total FROM properties');
-            const [brokersResult] = await connection_1.default.query('SELECT COUNT(*) AS total FROM brokers');
-            const [usersResult] = await connection_1.default.query('SELECT COUNT(*) AS total FROM users');
+            const [[propertyTotals]] = await connection_1.default.query(`
+          SELECT
+            COUNT(*) AS total_properties,
+            SUM(CASE WHEN status = 'pending_approval' THEN 1 ELSE 0 END) AS pending_properties,
+            SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) AS sold_properties
+          FROM properties
+        `);
+            const [[brokerTotals]] = await connection_1.default.query(`
+          SELECT
+            COUNT(*) AS total_brokers,
+            SUM(CASE WHEN status = 'pending_verification' THEN 1 ELSE 0 END) AS pending_brokers
+          FROM brokers
+        `);
+            const [[userTotals]] = await connection_1.default.query(`
+          SELECT COUNT(*) AS total_users
+          FROM users
+        `);
             return res.json({
-                totalProperties: propertiesResult[0]?.total ?? 0,
-                totalBrokers: brokersResult[0]?.total ?? 0,
-                totalUsers: usersResult[0]?.total ?? 0,
+                totalProperties: Number(propertyTotals?.total_properties ?? 0),
+                totalBrokers: Number(brokerTotals?.total_brokers ?? 0),
+                totalUsers: Number(userTotals?.total_users ?? 0),
+                totalImoveisPendentes: Number(propertyTotals?.pending_properties ?? 0),
+                totalCorretoresPendentes: Number(brokerTotals?.pending_brokers ?? 0),
+                totalImoveisVendidos: Number(propertyTotals?.sold_properties ?? 0),
             });
         }
         catch (error) {
@@ -639,6 +656,35 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
+    async getBrokerProperties(req, res) {
+        const brokerId = Number(req.params.id);
+        if (Number.isNaN(brokerId)) {
+            return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+        }
+        try {
+            const [properties] = await connection_1.default.query(`
+          SELECT
+            p.id,
+            p.title,
+            p.status,
+            p.type,
+            p.purpose,
+            p.price,
+            p.address,
+            p.city,
+            p.state,
+            p.created_at
+          FROM properties p
+          WHERE p.broker_id = ?
+          ORDER BY p.created_at DESC
+        `, [brokerId]);
+            return res.status(200).json({ data: properties });
+        }
+        catch (error) {
+            console.error('Erro ao buscar imoveis do corretor:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
     async getNotifications(req, res) {
         const adminId = Number(req.userId);
         if (!adminId) {
@@ -654,9 +700,9 @@ class AdminController {
             is_read,
             created_at
           FROM notifications
-          WHERE user_id = ? AND is_read = 0
+          WHERE is_read = 0
           ORDER BY created_at DESC
-        `, [adminId]);
+        `);
             return res.status(200).json({ data: rows });
         }
         catch (error) {

@@ -38,6 +38,8 @@ propertyRoutes.delete(
 );
 
 propertyRoutes.get('/', (req, res) => propertyController.listPublicProperties(req, res));
+propertyRoutes.get('/public', (req, res) => propertyController.listPublicProperties(req, res));
+propertyRoutes.get('/public/list', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/cities', (req, res) => propertyController.getAvailableCities(req, res));
 propertyRoutes.get('/:id', (req, res) => propertyController.show(req, res));
 

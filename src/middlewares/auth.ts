@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import admin from '../config/firebaseAdmin';
 import connection from '../database/connection';
 import { RowDataPacket } from 'mysql2';
 import jwt from 'jsonwebtoken';
@@ -33,90 +32,29 @@ export async function authMiddleware(
   }
 
   try {
-    // 1) Tenta verificar como JWT próprio
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-        id: number;
-        role: string;
-      };
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      id: number;
+      role: string;
+    };
 
-      req.userId = decoded.id;
-      req.userRole = decoded.role;
+    req.userId = decoded.id;
+    req.userRole = decoded.role;
 
-      // Verificação extra: se for broker, checar status
-      if (decoded.role === 'broker') {
-        const [brokerRows] = await connection.query(
-          'SELECT status FROM brokers WHERE id = ?',
-          [decoded.id]
-        );
-        const brokers = brokerRows as any[];
-        if (brokers.length > 0 && brokers[0].status === 'rejected') {
-          return res.status(403).json({
-            error:
-              'Sua conta de corretor foi rejeitada. Para se registrar como cliente, use um email diferente.',
-          });
-        }
-      }
-
-      return next();
-    } catch (_jwtError) {
-      // 2) Fallback: verificar token do Firebase
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      const firebase_uid = decodedToken.uid;
-
-      const [userRows] = await connection.query<UserFromDB[]>(
-        `SELECT u.id,
-                u.role,
-                b.status AS broker_status
-           FROM users u
-           LEFT JOIN brokers b ON u.id = b.id
-          WHERE u.firebase_uid = ?`,
-        [firebase_uid]
+    if (decoded.role === 'broker') {
+      const [brokerRows] = await connection.query(
+        'SELECT status FROM brokers WHERE id = ?',
+        [decoded.id]
       );
-
-      if ((userRows as UserFromDB[]).length === 0) {
-        return res.status(404).json({ error: 'Usuário não encontrado.' });
+      const brokers = brokerRows as any[];
+      if (brokers.length > 0 && brokers[0].status === 'rejected') {
+        return res.status(403).json({
+          error:
+            'Sua conta de corretor foi rejeitada. Para se registrar como cliente, use um email diferente.',
+        });
       }
-
-      const user = (userRows as UserFromDB[])[0];
-      req.userId = user.id;
-
-      // Define a role considerando o status do corretor
-      const brokerStatus = (user.broker_status ?? '')
-        .toString()
-        .toLowerCase();
-      const normalizedBrokerStatus = brokerStatus
-        .normalize('NFD')
-        .replace(/[^a-z]/g, '');
-
-      if (
-        ['approved', 'verificado', 'verified', 'aprovado'].includes(
-          normalizedBrokerStatus
-        )
-      ) {
-        req.userRole = 'broker';
-      } else {
-        req.userRole = user.role ?? 'user';
-      }
-
-      // Verificação extra: se for broker, confirmar que não está rejeitado
-      if (req.userRole === 'broker') {
-        const [brokerRows] = await connection.query(
-          'SELECT status FROM brokers WHERE id = ?',
-          [req.userId]
-        );
-        const brokers = brokerRows as any[];
-        if (brokers.length > 0 && brokers[0].status === 'rejected') {
-          return res.status(403).json({
-            error:
-              'Sua conta de corretor foi rejeitada. Para se registrar como cliente, use um email diferente.',
-          });
-        }
-      }
-
-      req.firebase_uid = firebase_uid;
-      return next();
     }
+
+    return next();
   } catch (error) {
     console.error('Erro de autenticação:', error);
     return res.status(401).json({ error: 'Token inválido.' });
@@ -135,7 +73,6 @@ export async function isBroker(
   }
 
   try {
-    // Verificar se o corretor está aprovado
     const [brokerRows] = await connection.query(
       'SELECT status FROM brokers WHERE id = ?',
       [req.userId]

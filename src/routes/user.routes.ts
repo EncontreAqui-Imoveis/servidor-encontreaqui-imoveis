@@ -14,4 +14,6 @@ userRoutes.get('/favorites', authMiddleware, (req, res) => userController.listFa
 userRoutes.post('/favorites/:propertyId', authMiddleware, (req, res) => userController.addFavorite(req as any, res));
 userRoutes.delete('/favorites/:propertyId', authMiddleware, (req, res) => userController.removeFavorite(req as any, res));
 
+userRoutes.get('/notifications', authMiddleware, (req, res) => userController.listNotifications(req as any, res));
+
 export default userRoutes;

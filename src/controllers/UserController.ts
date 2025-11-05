@@ -442,6 +442,31 @@ class UserController {
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
+
+  async listNotifications(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    try {
+      const sql = `
+        SELECT id, message, related_entity_type, related_entity_id, created_at
+        FROM notifications
+        WHERE recipient_id = ?
+          OR (recipient_id IS NULL AND related_entity_type = 'other')
+        ORDER BY created_at DESC
+      `;
+
+      const [rows] = await connection.query<RowDataPacket[]>(sql, [userId]);
+      return res.status(200).json(rows);
+    } catch (error) {
+      console.error('Erro ao buscar notificacoes:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+    }
+  }
+
 }
 
 export const userController = new UserController();

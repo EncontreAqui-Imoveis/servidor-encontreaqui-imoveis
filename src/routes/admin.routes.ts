@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express';
-import { adminController } from '../controllers/AdminController';
+import { adminController, sendNotification } from '../controllers/AdminController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 
@@ -8,6 +8,8 @@ const adminRoutes = Router();
 adminRoutes.post('/login', adminController.login);
 
 adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
+
+adminRoutes.post('/notifications/send', sendNotification);
 
 adminRoutes.get('/users', adminController.getAllUsers);
 adminRoutes.delete('/users/:id', adminController.deleteUser);

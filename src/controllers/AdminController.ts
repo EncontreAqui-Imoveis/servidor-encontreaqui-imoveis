@@ -853,4 +853,29 @@ class AdminController {
   }
 }
 
+
+export async function sendNotification(req: Request, res: Response) {
+  try {
+    const { message, recipientId } = req.body;
+
+    if (!message || typeof message !== 'string' || message.trim() === '') {
+      return res.status(400).json({ error: 'A mensagem é obrigatória.' });
+    }
+
+    await connection.query(
+      `
+        INSERT INTO notifications (message, related_entity_type, recipient_id)
+        VALUES (?, 'other', ?)
+      `,
+      [message.trim(), recipientId || null]
+    );
+
+    return res.status(201).json({ message: 'Notificação enviada com sucesso.' });
+  } catch (error) {
+    console.error('Erro ao enviar notificação:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+}
+
+
 export const adminController = new AdminController();

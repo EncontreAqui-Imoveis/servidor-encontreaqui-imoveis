@@ -238,7 +238,7 @@ class AdminController {
             const [totalRows] = await connection_1.default.query('SELECT COUNT(*) AS total FROM users');
             const total = totalRows[0]?.total ?? 0;
             const [rows] = await connection_1.default.query(`
-          SELECT id, name, email, phone, role, created_at
+          SELECT id, name, email, phone, created_at
           FROM users
           ORDER BY created_at DESC
           LIMIT ? OFFSET ?

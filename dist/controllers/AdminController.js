@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adminController = void 0;
+exports.adminController = exports.getDashboardStats = void 0;
+exports.sendNotification = sendNotification;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
@@ -86,6 +87,55 @@ function stringOrNull(value) {
     const textual = String(value).trim();
     return textual.length > 0 ? textual : null;
 }
+function toNullableNumber(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+function mapAdminProperty(row) {
+    const images = row.images
+        ? String(row.images)
+            .split(',')
+            .map((url) => url.trim())
+            .filter(Boolean)
+            .map((url, index) => ({ id: index, url }))
+        : [];
+    return {
+        id: row.id,
+        broker_id: row.broker_id ?? null,
+        code: row.code ?? null,
+        title: row.title,
+        description: row.description ?? null,
+        type: row.type ?? '',
+        purpose: row.purpose ?? null,
+        status: row.status,
+        price: toNullableNumber(row.price) ?? 0,
+        address: row.address ?? null,
+        quadra: row.quadra ?? null,
+        lote: row.lote ?? null,
+        numero: row.numero ?? null,
+        bairro: row.bairro ?? null,
+        complemento: row.complemento ?? null,
+        tipo_lote: row.tipo_lote ?? null,
+        city: row.city ?? null,
+        state: row.state ?? null,
+        bedrooms: toNullableNumber(row.bedrooms),
+        bathrooms: toNullableNumber(row.bathrooms),
+        area_construida: toNullableNumber(row.area_construida),
+        area_terreno: toNullableNumber(row.area_terreno),
+        garage_spots: toNullableNumber(row.garage_spots),
+        valor_condominio: toNullableNumber(row.valor_condominio),
+        valor_iptu: toNullableNumber(row.valor_iptu),
+        video_url: row.video_url ?? null,
+        images,
+        broker_name: row.broker_name ?? null,
+        broker_phone: row.broker_phone ?? null,
+        created_at: row.created_at ? String(row.created_at) : null,
+        updated_at: row.updated_at ? String(row.updated_at) : null,
+    };
+}
 class AdminController {
     async login(req, res) {
         const { email, password } = req.body;
@@ -119,6 +169,7 @@ class AdminController {
             const searchTerm = String(req.query.search ?? '').trim();
             const searchColumn = String(req.query.searchColumn ?? 'p.title');
             const status = normalizeStatus(req.query.status);
+            const city = String(req.query.city ?? '').trim();
             const sortBy = String(req.query.sortBy ?? 'p.created_at');
             const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
             const allowedSearchColumns = new Set(['p.id', 'p.title', 'p.type', 'p.city', 'p.code', 'u.name']);
@@ -131,6 +182,7 @@ class AdminController {
                 'p.price',
                 'p.created_at',
                 'p.code',
+                'p.status',
             ]);
             const safeSearchColumn = allowedSearchColumns.has(searchColumn) ? searchColumn : 'p.title';
             const safeSortBy = allowedSortColumns.has(sortBy) ? sortBy : 'p.created_at';
@@ -143,6 +195,10 @@ class AdminController {
             if (status) {
                 whereClauses.push('p.status = ?');
                 params.push(status);
+            }
+            if (city) {
+                whereClauses.push('p.city = ?');
+                params.push(city);
             }
             const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
             const [totalRows] = await connection_1.default.query(`SELECT COUNT(*) AS total FROM properties p ${where}`, params);
@@ -413,39 +469,6 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
-    async getDashboardStats(req, res) {
-        try {
-            const [[propertyTotals]] = await connection_1.default.query(`
-          SELECT
-            COUNT(*) AS total_properties,
-            SUM(CASE WHEN status = 'pending_approval' THEN 1 ELSE 0 END) AS pending_properties,
-            SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) AS sold_properties
-          FROM properties
-        `);
-            const [[brokerTotals]] = await connection_1.default.query(`
-          SELECT
-            COUNT(*) AS total_brokers,
-            SUM(CASE WHEN status = 'pending_verification' THEN 1 ELSE 0 END) AS pending_brokers
-          FROM brokers
-        `);
-            const [[userTotals]] = await connection_1.default.query(`
-          SELECT COUNT(*) AS total_users
-          FROM users
-        `);
-            return res.json({
-                totalProperties: Number(propertyTotals?.total_properties ?? 0),
-                totalBrokers: Number(brokerTotals?.total_brokers ?? 0),
-                totalUsers: Number(userTotals?.total_users ?? 0),
-                totalImoveisPendentes: Number(propertyTotals?.pending_properties ?? 0),
-                totalCorretoresPendentes: Number(brokerTotals?.pending_brokers ?? 0),
-                totalImoveisVendidos: Number(propertyTotals?.sold_properties ?? 0),
-            });
-        }
-        catch (error) {
-            console.error('Erro ao buscar estatisticas do dashboard:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-        }
-    }
     async listPendingBrokers(req, res) {
         try {
             const [rows] = await connection_1.default.query(`
@@ -513,12 +536,56 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
+    async updateBrokerStatus(req, res) {
+        const brokerId = Number(req.params.id);
+        const { status } = req.body ?? {};
+        if (Number.isNaN(brokerId)) {
+            return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+        }
+        if (typeof status !== 'string') {
+            return res.status(400).json({ error: 'Status invalido.' });
+        }
+        const normalizedStatus = status.trim();
+        const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+        if (!allowedStatuses.has(normalizedStatus)) {
+            return res.status(400).json({ error: 'Status de corretor nao suportado.' });
+        }
+        try {
+            const [result] = await connection_1.default.query('UPDATE brokers SET status = ? WHERE id = ?', [normalizedStatus, brokerId]);
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Corretor nao encontrado.' });
+            }
+            if (normalizedStatus === 'approved' || normalizedStatus === 'rejected') {
+                await connection_1.default.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
+                    normalizedStatus,
+                    brokerId,
+                ]);
+            }
+            return res.status(200).json({
+                message: 'Status do corretor atualizado com sucesso.',
+                status: normalizedStatus,
+            });
+        }
+        catch (error) {
+            console.error('Erro ao atualizar status do corretor:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
     async listBrokers(req, res) {
         try {
             const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
             const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
             const offset = (page - 1) * limit;
-            const [totalRows] = await connection_1.default.query('SELECT COUNT(*) AS total FROM brokers');
+            const requestedStatus = String(req.query.status ?? '').trim();
+            const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+            const whereClauses = [];
+            const params = [];
+            if (requestedStatus && allowedStatuses.has(requestedStatus)) {
+                whereClauses.push('b.status = ?');
+                params.push(requestedStatus);
+            }
+            const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+            const [totalRows] = await connection_1.default.query(`SELECT COUNT(*) AS total FROM brokers b ${where}`, params);
             const total = totalRows[0]?.total ?? 0;
             const [rows] = await connection_1.default.query(`
           SELECT
@@ -542,6 +609,7 @@ class AdminController {
           INNER JOIN users u ON b.id = u.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN properties p ON p.broker_id = b.id
+          ${where}
           GROUP BY
             b.id,
             u.name,
@@ -560,11 +628,40 @@ class AdminController {
             a.email
           ORDER BY b.created_at DESC
           LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        `, [...params, limit, offset]);
             return res.json({ data: rows, total });
         }
         catch (error) {
             console.error('Erro ao buscar corretores:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async getPropertyDetails(req, res) {
+        const propertyId = Number(req.params.id);
+        if (Number.isNaN(propertyId)) {
+            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            p.*,
+            u.name AS broker_name,
+            u.phone AS broker_phone,
+            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+          FROM properties p
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          WHERE p.id = ?
+          GROUP BY p.id
+        `, [propertyId]);
+            if (!rows || rows.length === 0) {
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+            }
+            return res.status(200).json(mapAdminProperty(rows[0]));
+        }
+        catch (error) {
+            console.error('Erro ao buscar detalhes do imovel:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
@@ -605,6 +702,35 @@ class AdminController {
         }
         catch (error) {
             console.error('Erro ao rejeitar imovel:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async updatePropertyStatus(req, res) {
+        const propertyId = Number(req.params.id);
+        const { status } = req.body ?? {};
+        if (Number.isNaN(propertyId)) {
+            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+        }
+        if (typeof status !== 'string') {
+            return res.status(400).json({ error: 'Status invalido.' });
+        }
+        const normalizedStatus = status.trim();
+        const allowedStatuses = new Set(['pending_approval', 'approved', 'rejected', 'rented', 'sold']);
+        if (!allowedStatuses.has(normalizedStatus)) {
+            return res.status(400).json({ error: 'Status de imovel nao suportado.' });
+        }
+        try {
+            const [result] = await connection_1.default.query('UPDATE properties SET status = ? WHERE id = ?', [normalizedStatus, propertyId]);
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+            }
+            return res.status(200).json({
+                message: 'Status do imovel atualizado com sucesso.',
+                status: normalizedStatus,
+            });
+        }
+        catch (error) {
+            console.error('Erro ao atualizar status do imovel:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
@@ -709,6 +835,61 @@ class AdminController {
             console.error('Erro ao buscar notificacoes:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
+    }
+}
+/**
+ * Busca estatisticas agregadas para o dashboard do admin.
+ */
+const getDashboardStats = async (req, res) => {
+    try {
+        const propertiesByStatusQuery = `
+      SELECT
+        status,
+        COUNT(*) AS count
+      FROM properties
+      GROUP BY status
+    `;
+        const newPropertiesQuery = `
+      SELECT
+        DATE(created_at) AS date,
+        COUNT(*) AS count
+      FROM properties
+      WHERE created_at >= CURDATE() - INTERVAL 30 DAY
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `;
+        const [propertiesByStatusResult, newPropertiesResult] = await Promise.all([
+            connection_1.default.query(propertiesByStatusQuery),
+            connection_1.default.query(newPropertiesQuery),
+        ]);
+        const [propertiesByStatusRows] = propertiesByStatusResult;
+        const [newPropertiesRows] = newPropertiesResult;
+        return res.status(200).json({
+            propertiesByStatus: propertiesByStatusRows ?? [],
+            newPropertiesOverTime: newPropertiesRows ?? [],
+        });
+    }
+    catch (error) {
+        console.error('Erro ao buscar estatisticas do dashboard:', error);
+        return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+};
+exports.getDashboardStats = getDashboardStats;
+async function sendNotification(req, res) {
+    try {
+        const { message, recipientId } = req.body;
+        if (!message || typeof message !== 'string' || message.trim() === '') {
+            return res.status(400).json({ error: 'A mensagem é obrigatória.' });
+        }
+        await connection_1.default.query(`
+        INSERT INTO notifications (message, related_entity_type, recipient_id)
+        VALUES (?, 'other', ?)
+      `, [message.trim(), recipientId || null]);
+        return res.status(201).json({ message: 'Notificação enviada com sucesso.' });
+    }
+    catch (error) {
+        console.error('Erro ao enviar notificação:', error);
+        return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
 }
 exports.adminController = new AdminController();

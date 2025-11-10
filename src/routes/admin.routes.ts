@@ -21,15 +21,18 @@ adminRoutes.get('/brokers', adminController.listBrokers);
 adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
 adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
+adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);
 adminRoutes.put('/brokers/:id', adminController.updateBroker);
 adminRoutes.delete('/brokers/:id', adminController.deleteBroker);
 adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
 
 adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
+adminRoutes.get('/properties/:id', adminController.getPropertyDetails);
 adminRoutes.put('/properties/:id', adminController.updateProperty);
 adminRoutes.delete('/properties/:id', adminController.deleteProperty);
 adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
 adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
+adminRoutes.patch('/properties/:id/status', adminController.updatePropertyStatus);
 adminRoutes.post(
   '/properties/:id/images',
   mediaUpload.array('images', 20),

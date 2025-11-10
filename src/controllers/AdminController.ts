@@ -95,6 +95,92 @@ function stringOrNull(value: unknown): string | null {
   return textual.length > 0 ? textual : null;
 }
 
+interface PropertyDetailRow extends RowDataPacket {
+  id: number;
+  broker_id?: number | null;
+  code?: string | null;
+  title: string;
+  description?: string | null;
+  type?: string | null;
+  purpose?: string | null;
+  status: string;
+  price?: number | string | null;
+  address?: string | null;
+  quadra?: string | null;
+  lote?: string | null;
+  numero?: string | null;
+  bairro?: string | null;
+  complemento?: string | null;
+  tipo_lote?: string | null;
+  city?: string | null;
+  state?: string | null;
+  bedrooms?: number | string | null;
+  bathrooms?: number | string | null;
+  area_construida?: number | string | null;
+  area_terreno?: number | string | null;
+  garage_spots?: number | string | null;
+  valor_condominio?: number | string | null;
+  valor_iptu?: number | string | null;
+  video_url?: string | null;
+  created_at?: Date | string | null;
+  updated_at?: Date | string | null;
+  images?: string | null;
+  broker_name?: string | null;
+  broker_phone?: string | null;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mapAdminProperty(row: PropertyDetailRow) {
+  const images = row.images
+    ? String(row.images)
+        .split(',')
+        .map((url) => url.trim())
+        .filter(Boolean)
+        .map((url, index) => ({ id: index, url }))
+    : [];
+
+  return {
+    id: row.id,
+    broker_id: row.broker_id ?? null,
+    code: row.code ?? null,
+    title: row.title,
+    description: row.description ?? null,
+    type: row.type ?? '',
+    purpose: row.purpose ?? null,
+    status: row.status as string,
+    price: toNullableNumber(row.price) ?? 0,
+    address: row.address ?? null,
+    quadra: row.quadra ?? null,
+    lote: row.lote ?? null,
+    numero: row.numero ?? null,
+    bairro: row.bairro ?? null,
+    complemento: row.complemento ?? null,
+    tipo_lote: row.tipo_lote ?? null,
+    city: row.city ?? null,
+    state: row.state ?? null,
+    bedrooms: toNullableNumber(row.bedrooms),
+    bathrooms: toNullableNumber(row.bathrooms),
+    area_construida: toNullableNumber(row.area_construida),
+    area_terreno: toNullableNumber(row.area_terreno),
+    garage_spots: toNullableNumber(row.garage_spots),
+    valor_condominio: toNullableNumber(row.valor_condominio),
+    valor_iptu: toNullableNumber(row.valor_iptu),
+    video_url: row.video_url ?? null,
+    images,
+    broker_name: row.broker_name ?? null,
+    broker_phone: row.broker_phone ?? null,
+    created_at: row.created_at ? String(row.created_at) : null,
+    updated_at: row.updated_at ? String(row.updated_at) : null,
+  };
+}
+
 class AdminController {
   async login(req: Request, res: Response) {
     const { email, password } = req.body;
@@ -576,14 +662,73 @@ class AdminController {
     }
   }
 
+  async updateBrokerStatus(req: Request, res: Response) {
+    const brokerId = Number(req.params.id);
+    const { status } = req.body ?? {};
+
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    if (typeof status !== 'string') {
+      return res.status(400).json({ error: 'Status invalido.' });
+    }
+
+    const normalizedStatus = status.trim();
+    const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+
+    if (!allowedStatuses.has(normalizedStatus)) {
+      return res.status(400).json({ error: 'Status de corretor nao suportado.' });
+    }
+
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        'UPDATE brokers SET status = ? WHERE id = ?',
+        [normalizedStatus, brokerId],
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
+      }
+
+      if (normalizedStatus === 'approved' || normalizedStatus === 'rejected') {
+        await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
+          normalizedStatus,
+          brokerId,
+        ]);
+      }
+
+      return res.status(200).json({
+        message: 'Status do corretor atualizado com sucesso.',
+        status: normalizedStatus,
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar status do corretor:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
   async listBrokers(req: Request, res: Response) {
     try {
       const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
       const offset = (page - 1) * limit;
 
+      const requestedStatus = String(req.query.status ?? '').trim();
+      const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+      const whereClauses: string[] = [];
+      const params: Array<string | number> = [];
+
+      if (requestedStatus && allowedStatuses.has(requestedStatus)) {
+        whereClauses.push('b.status = ?');
+        params.push(requestedStatus);
+      }
+
+      const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
       const [totalRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) AS total FROM brokers'
+        `SELECT COUNT(*) AS total FROM brokers b ${where}`,
+        params,
       );
       const total = totalRows[0]?.total ?? 0;
 
@@ -610,6 +755,7 @@ class AdminController {
           INNER JOIN users u ON b.id = u.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN properties p ON p.broker_id = b.id
+          ${where}
           GROUP BY
             b.id,
             u.name,
@@ -629,12 +775,48 @@ class AdminController {
           ORDER BY b.created_at DESC
           LIMIT ? OFFSET ?
         `,
-        [limit, offset]
+        [...params, limit, offset]
       );
 
       return res.json({ data: rows, total });
     } catch (error) {
       console.error('Erro ao buscar corretores:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async getPropertyDetails(req: Request, res: Response) {
+    const propertyId = Number(req.params.id);
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+    }
+
+    try {
+      const [rows] = await connection.query<PropertyDetailRow[]>(
+        `
+          SELECT
+            p.*,
+            u.name AS broker_name,
+            u.phone AS broker_phone,
+            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+          FROM properties p
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          WHERE p.id = ?
+          GROUP BY p.id
+        `,
+        [propertyId],
+      );
+
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      return res.status(200).json(mapAdminProperty(rows[0]));
+    } catch (error) {
+      console.error('Erro ao buscar detalhes do imovel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -683,6 +865,45 @@ class AdminController {
       return res.status(200).json({ message: 'Imovel rejeitado com sucesso.' });
     } catch (error) {
       console.error('Erro ao rejeitar imovel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async updatePropertyStatus(req: Request, res: Response) {
+    const propertyId = Number(req.params.id);
+    const { status } = req.body ?? {};
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+    }
+
+    if (typeof status !== 'string') {
+      return res.status(400).json({ error: 'Status invalido.' });
+    }
+
+    const normalizedStatus = status.trim();
+    const allowedStatuses = new Set(['pending_approval', 'approved', 'rejected', 'rented', 'sold']);
+
+    if (!allowedStatuses.has(normalizedStatus)) {
+      return res.status(400).json({ error: 'Status de imovel nao suportado.' });
+    }
+
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        'UPDATE properties SET status = ? WHERE id = ?',
+        [normalizedStatus, propertyId],
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      return res.status(200).json({
+        message: 'Status do imovel atualizado com sucesso.',
+        status: normalizedStatus,
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar status do imovel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

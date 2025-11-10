@@ -235,11 +235,11 @@ class UserController {
             if (propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
-            const [favoriteRows] = await connection_1.default.query('SELECT 1 FROM favoritos WHERE user_id = ? AND property_id = ?', [userId, propertyId]);
+            const [favoriteRows] = await connection_1.default.query('SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?', [userId, propertyId]);
             if (favoriteRows.length > 0) {
                 return res.status(409).json({ error: 'Este imovel ja esta nos seus favoritos.' });
             }
-            await connection_1.default.query('INSERT INTO favoritos (user_id, property_id) VALUES (?, ?)', [userId, propertyId]);
+            await connection_1.default.query('INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)', [userId, propertyId]);
             return res.status(201).json({ message: 'Imovel adicionado aos favoritos.' });
         }
         catch (error) {
@@ -257,7 +257,7 @@ class UserController {
             return res.status(400).json({ error: 'Identificador de imovel invalido.' });
         }
         try {
-            const [result] = await connection_1.default.query('DELETE FROM favoritos WHERE user_id = ? AND property_id = ?', [userId, propertyId]);
+            const [result] = await connection_1.default.query('DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?', [userId, propertyId]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Favorito nao encontrado.' });
             }
@@ -287,11 +287,11 @@ class UserController {
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
             MAX(f.created_at) AS favorited_at
           FROM favoritos f
-          JOIN properties p ON p.id = f.property_id
+          JOIN properties p ON p.id = f.imovel_id
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
-          WHERE f.user_id = ?
+          WHERE f.usuario_id = ?
           GROUP BY p.id
           ORDER BY favorited_at DESC
         `, [userId]);
@@ -300,6 +300,27 @@ class UserController {
         catch (error) {
             console.error('Erro ao listar favoritos:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async listNotifications(req, res) {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        try {
+            const sql = `
+        SELECT id, message, related_entity_type, related_entity_id, created_at
+        FROM notifications
+        WHERE recipient_id = ?
+          OR (recipient_id IS NULL AND related_entity_type = 'other')
+        ORDER BY created_at DESC
+      `;
+            const [rows] = await connection_1.default.query(sql, [userId]);
+            return res.status(200).json(rows);
+        }
+        catch (error) {
+            console.error('Erro ao buscar notificacoes:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
         }
     }
 }

@@ -1,5 +1,5 @@
 ﻿import { Router } from 'express';
-import { adminController, sendNotification } from '../controllers/AdminController';
+import { adminController, sendNotification, getDashboardStats } from '../controllers/AdminController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 
@@ -39,6 +39,7 @@ adminRoutes.delete('/properties/:id/images/:imageId', adminController.deleteProp
 
 adminRoutes.get('/notifications', adminController.getNotifications);
 
-adminRoutes.get('/dashboard/stats', adminController.getDashboardStats);
+adminRoutes.get('/dashboard/stats', getDashboardStats);
+adminRoutes.get('/stats/dashboard', getDashboardStats);
 
 export default adminRoutes;

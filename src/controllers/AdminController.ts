@@ -142,6 +142,7 @@ class AdminController {
       const searchTerm = String(req.query.search ?? '').trim();
       const searchColumn = String(req.query.searchColumn ?? 'p.title');
       const status = normalizeStatus(req.query.status);
+      const city = String(req.query.city ?? '').trim();
       const sortBy = String(req.query.sortBy ?? 'p.created_at');
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -155,6 +156,7 @@ class AdminController {
         'p.price',
         'p.created_at',
         'p.code',
+        'p.status',
       ]);
 
       const safeSearchColumn = allowedSearchColumns.has(searchColumn) ? searchColumn : 'p.title';
@@ -171,6 +173,11 @@ class AdminController {
       if (status) {
         whereClauses.push('p.status = ?');
         params.push(status);
+      }
+
+      if (city) {
+        whereClauses.push('p.city = ?');
+        params.push(city);
       }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -493,47 +500,6 @@ class AdminController {
     }
   }
 
-  async getDashboardStats(req: Request, res: Response) {
-    try {
-      const [[propertyTotals]] = await connection.query<RowDataPacket[]>(
-        `
-          SELECT
-            COUNT(*) AS total_properties,
-            SUM(CASE WHEN status = 'pending_approval' THEN 1 ELSE 0 END) AS pending_properties,
-            SUM(CASE WHEN status = 'sold' THEN 1 ELSE 0 END) AS sold_properties
-          FROM properties
-        `
-      );
-
-      const [[brokerTotals]] = await connection.query<RowDataPacket[]>(
-        `
-          SELECT
-            COUNT(*) AS total_brokers,
-            SUM(CASE WHEN status = 'pending_verification' THEN 1 ELSE 0 END) AS pending_brokers
-          FROM brokers
-        `
-      );
-
-      const [[userTotals]] = await connection.query<RowDataPacket[]>(
-        `
-          SELECT COUNT(*) AS total_users
-          FROM users
-        `
-      );
-
-      return res.json({
-        totalProperties: Number(propertyTotals?.total_properties ?? 0),
-        totalBrokers: Number(brokerTotals?.total_brokers ?? 0),
-        totalUsers: Number(userTotals?.total_users ?? 0),
-        totalImoveisPendentes: Number(propertyTotals?.pending_properties ?? 0),
-        totalCorretoresPendentes: Number(brokerTotals?.pending_brokers ?? 0),
-        totalImoveisVendidos: Number(propertyTotals?.sold_properties ?? 0),
-      });
-    } catch (error) {
-      console.error('Erro ao buscar estatisticas do dashboard:', error);
-      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-    }
-  }
 
   async listPendingBrokers(req: Request, res: Response) {
     try {
@@ -853,6 +819,47 @@ class AdminController {
   }
 }
 
+
+/**
+ * Busca estatisticas agregadas para o dashboard do admin.
+ */
+export const getDashboardStats = async (req: Request, res: Response) => {
+  try {
+    const propertiesByStatusQuery = `
+      SELECT
+        status,
+        COUNT(*) AS count
+      FROM properties
+      GROUP BY status
+    `;
+
+    const newPropertiesQuery = `
+      SELECT
+        DATE(created_at) AS date,
+        COUNT(*) AS count
+      FROM properties
+      WHERE created_at >= CURDATE() - INTERVAL 30 DAY
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `;
+
+    const [propertiesByStatusResult, newPropertiesResult] = await Promise.all([
+      connection.query<RowDataPacket[]>(propertiesByStatusQuery),
+      connection.query<RowDataPacket[]>(newPropertiesQuery),
+    ]);
+
+    const [propertiesByStatusRows] = propertiesByStatusResult;
+    const [newPropertiesRows] = newPropertiesResult;
+
+    return res.status(200).json({
+      propertiesByStatus: propertiesByStatusRows ?? [],
+      newPropertiesOverTime: newPropertiesRows ?? [],
+    });
+  } catch (error) {
+    console.error('Erro ao buscar estatisticas do dashboard:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+};
 
 export async function sendNotification(req: Request, res: Response) {
   try {

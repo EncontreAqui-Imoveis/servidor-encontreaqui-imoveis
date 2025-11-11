@@ -752,7 +752,12 @@ class AdminController {
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
       const [totalRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS total FROM brokers b ${where}`,
+        `
+          SELECT COUNT(DISTINCT b.id) AS total
+          FROM brokers b
+          INNER JOIN users u ON b.id = u.id
+          ${where}
+        `,
         params,
       );
       const total = totalRows[0]?.total ?? 0;

@@ -297,14 +297,23 @@ class AdminController {
             const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
             const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
             const offset = (page - 1) * limit;
-            const [totalRows] = await connection_1.default.query('SELECT COUNT(*) AS total FROM users');
+            const searchTerm = String(req.query.search ?? '').trim();
+            const whereClauses = [];
+            const params = [];
+            if (searchTerm) {
+                whereClauses.push('(name LIKE ? OR email LIKE ?)');
+                params.push(`%${searchTerm}%`, `%${searchTerm}%`);
+            }
+            const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+            const [totalRows] = await connection_1.default.query(`SELECT COUNT(*) AS total FROM users ${whereSql}`, params);
             const total = totalRows[0]?.total ?? 0;
             const [rows] = await connection_1.default.query(`
           SELECT id, name, email, phone, created_at
           FROM users
+          ${whereSql}
           ORDER BY created_at DESC
           LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        `, [...params, limit, offset]);
             return res.json({ data: rows, total });
         }
         catch (error) {
@@ -583,12 +592,17 @@ class AdminController {
             const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
             const offset = (page - 1) * limit;
             const requestedStatus = String(req.query.status ?? '').trim();
+            const searchTerm = String(req.query.search ?? '').trim();
             const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
             const whereClauses = [];
             const params = [];
             if (requestedStatus && allowedStatuses.has(requestedStatus)) {
                 whereClauses.push('b.status = ?');
                 params.push(requestedStatus);
+            }
+            if (searchTerm) {
+                whereClauses.push('(u.name LIKE ? OR u.email LIKE ? OR b.creci LIKE ?)');
+                params.push(`%${searchTerm}%`, `%${searchTerm}%`, `%${searchTerm}%`);
             }
             const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
             const [totalRows] = await connection_1.default.query(`SELECT COUNT(*) AS total FROM brokers b ${where}`, params);

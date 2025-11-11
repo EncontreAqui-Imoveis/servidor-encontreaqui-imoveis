@@ -392,6 +392,8 @@ class AdminController {
       const whereClauses: string[] = [];
       const params: Array<string | number> = [];
 
+      whereClauses.push('id NOT IN (SELECT id FROM brokers)');
+
       if (searchTerm) {
         whereClauses.push('(name LIKE ? OR email LIKE ?)');
         params.push(`%${searchTerm}%`, `%${searchTerm}%`);

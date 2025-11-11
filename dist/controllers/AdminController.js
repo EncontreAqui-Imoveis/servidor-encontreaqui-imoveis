@@ -95,13 +95,15 @@ function toNullableNumber(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 function mapAdminProperty(row) {
-    const images = row.images
-        ? String(row.images)
-            .split(',')
-            .map((url) => url.trim())
-            .filter(Boolean)
-            .map((url, index) => ({ id: index, url }))
-        : [];
+    const imageList = Array.isArray(row.images)
+        ? row.images
+        : row.images
+            ? String(row.images)
+                .split(',')
+                .map((url) => url.trim())
+                .filter(Boolean)
+            : [];
+    const images = imageList.map((url, index) => ({ id: index, url }));
     return {
         id: row.id,
         broker_id: row.broker_id ?? null,
@@ -195,6 +197,10 @@ class AdminController {
             if (status) {
                 whereClauses.push('p.status = ?');
                 params.push(status);
+            }
+            else {
+                whereClauses.push('p.status = ?');
+                params.push('approved');
             }
             if (city) {
                 whereClauses.push('p.city = ?');
@@ -645,8 +651,8 @@ class AdminController {
             const [rows] = await connection_1.default.query(`
           SELECT
             p.*,
-            u.name AS broker_name,
-            u.phone AS broker_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
@@ -656,12 +662,19 @@ class AdminController {
           GROUP BY p.id
         `, [propertyId]);
             if (!rows || rows.length === 0) {
-                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+                return res.status(404).json({ error: 'Imóvel nao encontrado.' });
             }
-            return res.status(200).json(mapAdminProperty(rows[0]));
+            const property = rows[0];
+            if (property.images === null) {
+                property.images = [];
+            }
+            else if (typeof property.images === 'string') {
+                property.images = property.images.split(',').filter(Boolean);
+            }
+            return res.status(200).json(mapAdminProperty(property));
         }
         catch (error) {
-            console.error('Erro ao buscar detalhes do imovel:', error);
+            console.error('Erro ao buscar detalhes do imóvel:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }

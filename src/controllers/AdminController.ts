@@ -124,7 +124,7 @@ interface PropertyDetailRow extends RowDataPacket {
   video_url?: string | null;
   created_at?: Date | string | null;
   updated_at?: Date | string | null;
-  images?: string | null;
+  images?: string | string[] | null;
   broker_name?: string | null;
   broker_phone?: string | null;
 }
@@ -138,13 +138,16 @@ function toNullableNumber(value: unknown): number | null {
 }
 
 function mapAdminProperty(row: PropertyDetailRow) {
-  const images = row.images
+  const imageList = Array.isArray(row.images)
+    ? row.images
+    : row.images
     ? String(row.images)
         .split(',')
         .map((url) => url.trim())
         .filter(Boolean)
-        .map((url, index) => ({ id: index, url }))
     : [];
+
+  const images = imageList.map((url, index) => ({ id: index, url }));
 
   return {
     id: row.id,
@@ -259,6 +262,9 @@ class AdminController {
       if (status) {
         whereClauses.push('p.status = ?');
         params.push(status);
+      } else {
+        whereClauses.push('p.status = ?');
+        params.push('approved');
       }
 
       if (city) {
@@ -797,8 +803,8 @@ class AdminController {
         `
           SELECT
             p.*,
-            u.name AS broker_name,
-            u.phone AS broker_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
@@ -811,12 +817,20 @@ class AdminController {
       );
 
       if (!rows || rows.length === 0) {
-        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+        return res.status(404).json({ error: 'Imóvel nao encontrado.' });
       }
 
-      return res.status(200).json(mapAdminProperty(rows[0]));
+      const property = rows[0];
+
+      if (property.images === null) {
+        property.images = [];
+      } else if (typeof property.images === 'string') {
+        property.images = property.images.split(',').filter(Boolean);
+      }
+
+      return res.status(200).json(mapAdminProperty(property));
     } catch (error) {
-      console.error('Erro ao buscar detalhes do imovel:', error);
+      console.error('Erro ao buscar detalhes do imóvel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

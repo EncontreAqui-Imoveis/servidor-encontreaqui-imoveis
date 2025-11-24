@@ -34,6 +34,7 @@ adminRoutes.patch('/properties/:id/approve', AdminController_1.adminController.a
 adminRoutes.patch('/properties/:id/reject', AdminController_1.adminController.rejectProperty);
 adminRoutes.patch('/properties/:id/status', AdminController_1.adminController.updatePropertyStatus);
 adminRoutes.post('/properties/:id/images', uploadMiddleware_1.mediaUpload.array('images', 20), AdminController_1.adminController.addPropertyImage);
+adminRoutes.post('/properties/:id/video', uploadMiddleware_1.mediaUpload.single('video'), AdminController_1.adminController.addPropertyVideo);
 adminRoutes.delete('/properties/:id/video', AdminController_1.adminController.deletePropertyVideo);
 adminRoutes.delete('/properties/:id/images/:imageId', AdminController_1.adminController.deletePropertyImage);
 adminRoutes.get('/notifications', AdminController_1.adminController.getNotifications);

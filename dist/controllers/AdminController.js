@@ -1072,6 +1072,29 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
+    async addPropertyVideo(req, res) {
+        const propertyId = Number(req.params.id);
+        const file = req.file;
+        if (Number.isNaN(propertyId)) {
+            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+        }
+        if (!file) {
+            return res.status(400).json({ error: 'Nenhum video enviado.' });
+        }
+        try {
+            const [propertyRows] = await connection_1.default.query('SELECT id FROM properties WHERE id = ?', [propertyId]);
+            if (propertyRows.length === 0) {
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+            }
+            const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'videos');
+            await connection_1.default.query('UPDATE properties SET video_url = ? WHERE id = ?', [uploaded.url, propertyId]);
+            return res.status(201).json({ message: 'Video adicionado com sucesso.', video: uploaded.url });
+        }
+        catch (error) {
+            console.error('Erro ao adicionar video:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
     async deletePropertyVideo(req, res) {
         const propertyId = Number(req.params.id);
         if (Number.isNaN(propertyId)) {

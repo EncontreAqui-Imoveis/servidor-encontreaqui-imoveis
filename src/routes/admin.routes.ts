@@ -48,6 +48,11 @@ adminRoutes.post(
   mediaUpload.array('images', 20),
   adminController.addPropertyImage
 );
+adminRoutes.post(
+  '/properties/:id/video',
+  mediaUpload.single('video'),
+  adminController.addPropertyVideo
+);
 adminRoutes.delete('/properties/:id/video', adminController.deletePropertyVideo);
 adminRoutes.delete('/properties/:id/images/:imageId', adminController.deletePropertyImage);
 

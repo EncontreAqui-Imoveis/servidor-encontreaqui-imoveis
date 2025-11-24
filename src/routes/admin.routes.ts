@@ -48,6 +48,7 @@ adminRoutes.post(
   mediaUpload.array('images', 20),
   adminController.addPropertyImage
 );
+adminRoutes.delete('/properties/:id/video', adminController.deletePropertyVideo);
 adminRoutes.delete('/properties/:id/images/:imageId', adminController.deletePropertyImage);
 
 adminRoutes.get('/notifications', adminController.getNotifications);

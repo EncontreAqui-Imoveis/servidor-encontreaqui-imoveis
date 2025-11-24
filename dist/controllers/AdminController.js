@@ -96,15 +96,20 @@ function toNullableNumber(value) {
     return Number.isFinite(parsed) ? parsed : null;
 }
 function mapAdminProperty(row) {
-    const imageList = Array.isArray(row.images)
+    const images = Array.isArray(row.images)
         ? row.images
         : row.images
             ? String(row.images)
-                .split(',')
-                .map((url) => url.trim())
+                .split(';')
+                .map((item) => item.trim())
                 .filter(Boolean)
+                .map((pair) => {
+                const [id, url] = pair.split('|');
+                const numId = Number(id);
+                return { id: Number.isFinite(numId) ? numId : null, url };
+            })
+                .filter((item) => item.id !== null && item.url)
             : [];
-    const images = imageList.map((url, index) => ({ id: index, url }));
     return {
         id: row.id,
         broker_id: row.broker_id ?? null,
@@ -295,6 +300,13 @@ class AdminController {
             const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
             const offset = (page - 1) * limit;
             const searchTerm = String(req.query.search ?? '').trim();
+            const sortByParam = String(req.query.sortBy ?? '').toLowerCase();
+            const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+            const sortMap = {
+                name: 'name',
+                created_at: 'created_at',
+            };
+            const sortBy = sortMap[sortByParam] ?? 'created_at';
             const whereClauses = [];
             const params = [];
             whereClauses.push('id NOT IN (SELECT id FROM brokers)');
@@ -309,7 +321,7 @@ class AdminController {
           SELECT id, name, email, phone, created_at
           FROM users
           ${whereSql}
-          ORDER BY created_at DESC
+          ORDER BY ${sortBy} ${sortOrder}
           LIMIT ? OFFSET ?
         `, [...params, limit, offset]);
             return res.json({ data: rows, total });
@@ -900,7 +912,7 @@ class AdminController {
             p.*,
             ANY_VALUE(u.name) AS broker_name,
             ANY_VALUE(u.phone) AS broker_phone,
-            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+            GROUP_CONCAT(DISTINCT CONCAT(pi.id, '|', pi.image_url) ORDER BY pi.id SEPARATOR ';') AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
@@ -1057,6 +1069,23 @@ class AdminController {
         }
         catch (error) {
             console.error('Erro ao remover imagem:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async deletePropertyVideo(req, res) {
+        const propertyId = Number(req.params.id);
+        if (Number.isNaN(propertyId)) {
+            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+        }
+        try {
+            const [result] = await connection_1.default.query('UPDATE properties SET video_url = NULL WHERE id = ?', [propertyId]);
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+            }
+            return res.status(200).json({ message: 'Video removido com sucesso.' });
+        }
+        catch (error) {
+            console.error('Erro ao remover video:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }

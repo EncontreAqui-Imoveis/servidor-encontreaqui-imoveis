@@ -8,10 +8,16 @@ const adminRoutes = (0, express_1.Router)();
 adminRoutes.post('/login', AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
 adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
+adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
+    { name: 'images', maxCount: 20 },
+    { name: 'video', maxCount: 1 },
+]), AdminController_1.adminController.createProperty);
 adminRoutes.get('/users', AdminController_1.adminController.getAllUsers);
+adminRoutes.post('/users', AdminController_1.adminController.createUser);
 adminRoutes.delete('/users/:id', AdminController_1.adminController.deleteUser);
 adminRoutes.get('/clients', AdminController_1.adminController.getAllClients);
 adminRoutes.put('/clients/:id', AdminController_1.adminController.updateClient);
+adminRoutes.post('/brokers', AdminController_1.adminController.createBroker);
 adminRoutes.get('/brokers', AdminController_1.adminController.listBrokers);
 adminRoutes.get('/brokers/pending', AdminController_1.adminController.listPendingBrokers);
 adminRoutes.patch('/brokers/:id/approve', AdminController_1.adminController.approveBroker);

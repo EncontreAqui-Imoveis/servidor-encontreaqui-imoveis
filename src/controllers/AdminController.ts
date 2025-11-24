@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import { uploadToCloudinary } from '../config/cloudinary';
+import { notifyAdmins } from '../services/notificationService';
 import type AuthRequest from '../middlewares/auth';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
@@ -262,9 +263,6 @@ class AdminController {
       if (status) {
         whereClauses.push('p.status = ?');
         params.push(status);
-      } else {
-        whereClauses.push('p.status = ?');
-        params.push('approved');
       }
 
       if (city) {
@@ -607,6 +605,287 @@ class AdminController {
     }
   }
 
+  async createProperty(req: Request, res: Response) {
+    const files = (req as any).files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    const body = req.body ?? {};
+
+    try {
+      const required = ['title', 'type', 'purpose', 'price', 'address', 'city', 'state'];
+      for (const field of required) {
+        if (!body[field]) {
+          return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
+        }
+      }
+
+      const {
+        title,
+        description,
+        type,
+        purpose,
+        status,
+        price,
+        code,
+        address,
+        quadra,
+        lote,
+        numero,
+        bairro,
+        complemento,
+        tipo_lote,
+        city,
+        state,
+        bedrooms,
+        bathrooms,
+        area_construida,
+        area_terreno,
+        garage_spots,
+        has_wifi,
+        tem_piscina,
+        tem_energia_solar,
+        tem_automacao,
+        tem_ar_condicionado,
+        eh_mobiliada,
+        valor_condominio,
+        valor_iptu,
+        video_url,
+        broker_id,
+      } = body;
+
+      const normalizedStatus = normalizeStatus(status) ?? 'pending_approval';
+      const numericPrice = parseDecimal(price);
+      if (numericPrice === null) {
+        return res.status(400).json({ error: 'Preco invalido.' });
+      }
+      const numericBedrooms = parseInteger(bedrooms);
+      const numericBathrooms = parseInteger(bathrooms);
+      const numericGarageSpots = parseInteger(garage_spots);
+      const numericAreaConstruida = parseDecimal(area_construida);
+      const numericAreaTerreno = parseDecimal(area_terreno);
+      const numericValorCondominio = parseDecimal(valor_condominio);
+      const numericValorIptu = parseDecimal(valor_iptu);
+      const brokerIdValue = broker_id ? Number(broker_id) : null;
+
+      const hasWifiFlag = parseBoolean(has_wifi);
+      const temPiscinaFlag = parseBoolean(tem_piscina);
+      const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
+      const temAutomacaoFlag = parseBoolean(tem_automacao);
+      const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
+      const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+
+      const [duplicateRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT id FROM properties
+          WHERE address = ?
+            AND COALESCE(quadra, '') = COALESCE(?, '')
+            AND COALESCE(lote, '') = COALESCE(?, '')
+            AND COALESCE(numero, '') = COALESCE(?, '')
+            AND COALESCE(bairro, '') = COALESCE(?, '')
+          LIMIT 1
+        `,
+        [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]
+      );
+
+      if (duplicateRows.length > 0) {
+        return res.status(409).json({ error: 'Imovel ja cadastrado no sistema.' });
+      }
+
+      const imageUrls: string[] = [];
+      const uploadImages = files?.images ?? [];
+      for (const file of uploadImages) {
+        const uploaded = await uploadToCloudinary(file, 'properties/admin');
+        imageUrls.push(uploaded.url);
+      }
+
+      let finalVideoUrl: string | null = null;
+      const uploadVideos = files?.video ?? [];
+      if (uploadVideos[0]) {
+        const uploadedVideo = await uploadToCloudinary(uploadVideos[0], 'videos');
+        finalVideoUrl = uploadedVideo.url;
+      } else if (video_url) {
+        finalVideoUrl = String(video_url);
+      }
+
+      const [result] = await connection.query<ResultSetHeader>(
+        `
+          INSERT INTO properties (
+            broker_id,
+            title,
+            description,
+            type,
+            purpose,
+            status,
+            price,
+            code,
+            address,
+            quadra,
+            lote,
+            numero,
+            bairro,
+            complemento,
+            tipo_lote,
+            city,
+            state,
+            bedrooms,
+            bathrooms,
+            area_construida,
+            area_terreno,
+            garage_spots,
+            has_wifi,
+            tem_piscina,
+            tem_energia_solar,
+            tem_automacao,
+            tem_ar_condicionado,
+            eh_mobiliada,
+            valor_condominio,
+            valor_iptu,
+            video_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          brokerIdValue,
+          title,
+          description,
+          type,
+          purpose,
+          normalizedStatus,
+          numericPrice,
+          stringOrNull(code),
+          address,
+          stringOrNull(quadra),
+          stringOrNull(lote),
+          stringOrNull(numero),
+          stringOrNull(bairro),
+          stringOrNull(complemento),
+          stringOrNull(tipo_lote),
+          city,
+          state,
+          numericBedrooms,
+          numericBathrooms,
+          numericAreaConstruida,
+          numericAreaTerreno,
+          numericGarageSpots,
+          hasWifiFlag,
+          temPiscinaFlag,
+          temEnergiaSolarFlag,
+          temAutomacaoFlag,
+          temArCondicionadoFlag,
+          ehMobiliadaFlag,
+          numericValorCondominio,
+          numericValorIptu,
+          finalVideoUrl,
+        ]
+      );
+
+      const propertyId = result.insertId;
+
+      if (imageUrls.length > 0) {
+        const values = imageUrls.map((url) => [propertyId, url]);
+        await connection.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
+      }
+
+      try {
+        await notifyAdmins(
+          `Um novo imovel '${title}' foi criado pelo admin.`,
+          'property',
+          propertyId
+        );
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre novo imovel:', notifyError);
+      }
+
+      return res.status(201).json({
+        message: 'Imovel criado com sucesso!',
+        propertyId,
+        images: imageUrls,
+        video: finalVideoUrl,
+        status: normalizedStatus,
+      });
+    } catch (error) {
+      console.error('Erro ao criar imovel pelo admin:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async createBroker(req: Request, res: Response) {
+    const { name, email, phone, creci, agency_id, password } = req.body ?? {};
+
+    if (!name || !email || !creci) {
+      return res.status(400).json({ error: 'Nome, email e CRECI s�o obrigatorios.' });
+    }
+
+    try {
+      const [existing] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM users WHERE email = ? LIMIT 1',
+        [email]
+      );
+      if (existing.length > 0) {
+        return res.status(409).json({ error: 'Email ja cadastrado.' });
+      }
+
+      let passwordHash: string | null = null;
+      if (password) {
+        const salt = await bcrypt.genSalt(10);
+        passwordHash = await bcrypt.hash(String(password), salt);
+      }
+
+      const [userResult] = await connection.query<ResultSetHeader>(
+        'INSERT INTO users (name, email, phone, password_hash) VALUES (?, ?, ?, ?)',
+        [name, email, stringOrNull(phone), passwordHash]
+      );
+      const userId = userResult.insertId;
+
+      await connection.query(
+        'INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)',
+        [userId, creci, 'pending_verification', agency_id ? Number(agency_id) : null]
+      );
+
+      try {
+        await notifyAdmins(`Novo corretor '${name}' cadastrado e pendente de verificacao.`, 'broker', userId);
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre novo corretor:', notifyError);
+      }
+
+      return res.status(201).json({ message: 'Corretor criado com sucesso.', broker_id: userId });
+    } catch (error) {
+      console.error('Erro ao criar corretor:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async createUser(req: Request, res: Response) {
+    const { name, email, phone, password, address, city, state } = req.body ?? {};
+
+    if (!name || !email) {
+      return res.status(400).json({ error: 'Nome e email s�o obrigatorios.' });
+    }
+
+    try {
+      const [existing] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM users WHERE email = ? LIMIT 1',
+        [email]
+      );
+      if (existing.length > 0) {
+        return res.status(409).json({ error: 'Email ja cadastrado.' });
+      }
+
+      let passwordHash: string | null = null;
+      if (password) {
+        const salt = await bcrypt.genSalt(10);
+        passwordHash = await bcrypt.hash(String(password), salt);
+      }
+
+      const [userResult] = await connection.query<ResultSetHeader>(
+        'INSERT INTO users (name, email, phone, password_hash, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [name, email, stringOrNull(phone), passwordHash, stringOrNull(address), stringOrNull(city), stringOrNull(state)]
+      );
+
+      return res.status(201).json({ message: 'Usuario criado com sucesso.', user_id: userResult.insertId });
+    } catch (error) {
+      console.error('Erro ao criar usuario:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
 
   async listPendingBrokers(req: Request, res: Response) {
     try {
@@ -663,6 +942,12 @@ class AdminController {
     try {
       await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['approved', id]);
       await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
+
+      try {
+        await notifyAdmins(`Corretor #${id} aprovado pelo admin.`, 'broker', Number(id));
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre aprovacao de corretor:', notifyError);
+      }
       return res.status(200).json({ message: 'Corretor aprovado com sucesso.' });
     } catch (error) {
       console.error('Erro ao aprovar corretor:', error);
@@ -676,6 +961,12 @@ class AdminController {
     try {
       await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['rejected', id]);
       await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['rejected', id]);
+
+      try {
+        await notifyAdmins(`Corretor #${id} rejeitado pelo admin.`, 'broker', Number(id));
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre rejeicao de corretor:', notifyError);
+      }
       return res.status(200).json({ message: 'Corretor rejeitado com sucesso.' });
     } catch (error) {
       console.error('Erro ao rejeitar corretor:', error);
@@ -719,6 +1010,12 @@ class AdminController {
         ]);
       }
 
+      try {
+        await notifyAdmins(`Status do corretor #${brokerId} atualizado para ${normalizedStatus}.`, 'broker', brokerId);
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre status do corretor:', notifyError);
+      }
+
       return res.status(200).json({
         message: 'Status do corretor atualizado com sucesso.',
         status: normalizedStatus,
@@ -752,6 +1049,17 @@ class AdminController {
       }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+      const sortMap: Record<string, string> = {
+        name: 'u.name',
+        property_count: 'property_count',
+        created_at: 'b.created_at',
+        status: 'b.status',
+        creci: 'b.creci',
+      };
+      const sortByParam = String(req.query.sortBy ?? '').toLowerCase();
+      const sortBy = sortMap[sortByParam] ?? 'b.created_at';
+      const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
       const [totalRows] = await connection.query<RowDataPacket[]>(
         `
@@ -804,7 +1112,7 @@ class AdminController {
             a.state,
             a.phone,
             a.email
-          ORDER BY b.created_at DESC
+          ORDER BY ${sortBy} ${sortOrder}
           LIMIT ? OFFSET ?
         `,
         [...params, limit, offset]
@@ -878,6 +1186,12 @@ class AdminController {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
+      try {
+        await notifyAdmins(`Imovel #${propertyId} aprovado pelo admin.`, 'property', propertyId);
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre aprovacao de imovel:', notifyError);
+      }
+
       return res.status(200).json({ message: 'Imovel aprovado com sucesso.' });
     } catch (error) {
       console.error('Erro ao aprovar imovel:', error);
@@ -900,6 +1214,12 @@ class AdminController {
 
       if (result.affectedRows === 0) {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      try {
+        await notifyAdmins(`Imovel #${propertyId} rejeitado pelo admin.`, 'property', propertyId);
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre rejeicao de imovel:', notifyError);
       }
 
       return res.status(200).json({ message: 'Imovel rejeitado com sucesso.' });
@@ -936,6 +1256,12 @@ class AdminController {
 
       if (result.affectedRows === 0) {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      try {
+        await notifyAdmins(`Status do imovel #${propertyId} atualizado para ${normalizedStatus}.`, 'property', propertyId);
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre status de imovel:', notifyError);
       }
 
       return res.status(200).json({
@@ -1122,28 +1448,39 @@ export const getDashboardStats = async (req: Request, res: Response) => {
   }
 };
 
+
 export async function sendNotification(req: Request, res: Response) {
   try {
-    const { message, recipientId } = req.body;
+    const { message, recipientId, related_entity_type, related_entity_id } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim() === '') {
-      return res.status(400).json({ error: 'A mensagem é obrigatória.' });
+      return res.status(400).json({ error: 'A mensagem ? obrigat?ria.' });
     }
+
+    const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'other']);
+    const entityType = allowedTypes.has(String(related_entity_type)) ? String(related_entity_type) : 'other';
+    const entityId = related_entity_id != null ? Number(related_entity_id) : null;
 
     await connection.query(
       `
-        INSERT INTO notifications (message, related_entity_type, recipient_id)
-        VALUES (?, 'other', ?)
+        INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
+        VALUES (?, ?, ?, ?)
       `,
-      [message.trim(), recipientId || null]
+      [message.trim(), entityType, entityId, recipientId || null]
     );
 
-    return res.status(201).json({ message: 'Notificação enviada com sucesso.' });
+    return res.status(201).json({ message: 'Notifica??o enviada com sucesso.' });
   } catch (error) {
-    console.error('Erro ao enviar notificação:', error);
+    console.error('Erro ao enviar notifica??o:', error);
     return res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 }
+
+
+
+
+
+
 
 
 export const adminController = new AdminController();

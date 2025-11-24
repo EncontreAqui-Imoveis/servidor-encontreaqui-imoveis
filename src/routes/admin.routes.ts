@@ -11,12 +11,22 @@ adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
 
 adminRoutes.post('/notifications/send', sendNotification);
 
+adminRoutes.post(
+  '/properties',
+  mediaUpload.fields([
+    { name: 'images', maxCount: 20 },
+    { name: 'video', maxCount: 1 },
+  ]),
+  adminController.createProperty
+);
 adminRoutes.get('/users', adminController.getAllUsers);
+adminRoutes.post('/users', adminController.createUser);
 adminRoutes.delete('/users/:id', adminController.deleteUser);
 
 adminRoutes.get('/clients', adminController.getAllClients);
 adminRoutes.put('/clients/:id', adminController.updateClient);
 
+adminRoutes.post('/brokers', adminController.createBroker);
 adminRoutes.get('/brokers', adminController.listBrokers);
 adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
 adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);

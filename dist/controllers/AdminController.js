@@ -83,10 +83,10 @@ function parseBoolean(value) {
 }
 function stringOrNull(value) {
     if (value === undefined || value === null) {
-        return null;
+        return '';
     }
     const textual = String(value).trim();
-    return textual.length > 0 ? textual : null;
+    return textual.length > 0 ? textual : '';
 }
 function toNullableNumber(value) {
     if (value === undefined || value === null || value === '') {

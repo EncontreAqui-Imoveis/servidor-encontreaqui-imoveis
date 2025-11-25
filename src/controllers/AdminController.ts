@@ -90,10 +90,10 @@ function parseBoolean(value: unknown): 0 | 1 {
 
 function stringOrNull(value: unknown): string | null {
   if (value === undefined || value === null) {
-    return null;
+    return '';
   }
   const textual = String(value).trim();
-  return textual.length > 0 ? textual : null;
+  return textual.length > 0 ? textual : '';
 }
 
 interface PropertyDetailRow extends RowDataPacket {

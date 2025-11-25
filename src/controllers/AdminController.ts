@@ -1102,10 +1102,14 @@ class AdminController {
             a.state AS agency_state,
             a.phone AS agency_phone,
             a.email AS agency_email,
+            bd.creci_front_url,
+            bd.creci_back_url,
+            bd.selfie_url,
             COUNT(p.id) AS property_count
           FROM brokers b
           INNER JOIN users u ON b.id = u.id
           LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN broker_documents bd ON bd.broker_id = b.id
           LEFT JOIN properties p ON p.broker_id = b.id
           ${where}
           GROUP BY
@@ -1123,7 +1127,10 @@ class AdminController {
             a.city,
             a.state,
             a.phone,
-            a.email
+            a.email,
+            bd.creci_front_url,
+            bd.creci_back_url,
+            bd.selfie_url
           ORDER BY ${sortBy} ${sortOrder}
           LIMIT ? OFFSET ?
         `,

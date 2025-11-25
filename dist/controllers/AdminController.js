@@ -1197,17 +1197,41 @@ const getDashboardStats = async (req, res) => {
 exports.getDashboardStats = getDashboardStats;
 async function sendNotification(req, res) {
     try {
-        const { message, recipientId, related_entity_type, related_entity_id } = req.body;
+        const { message, recipientId, recipientIds, related_entity_type, related_entity_id } = req.body;
         if (!message || typeof message !== 'string' || message.trim() === '') {
             return res.status(400).json({ error: 'A mensagem ? obrigat?ria.' });
         }
         const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'other']);
         const entityType = allowedTypes.has(String(related_entity_type)) ? String(related_entity_type) : 'other';
         const entityId = related_entity_id != null ? Number(related_entity_id) : null;
+        const normalizedRecipients = [];
+        if (Array.isArray(recipientIds)) {
+            for (const rid of recipientIds) {
+                const parsed = rid === null || rid === 'all' ? null : Number(rid);
+                if (parsed === null || Number.isFinite(parsed)) {
+                    normalizedRecipients.push(parsed === null ? null : Number(parsed));
+                }
+            }
+        }
+        else if (recipientId !== undefined) {
+            const parsed = recipientId === null || recipientId === 'all' ? null : Number(recipientId);
+            if (parsed === null || Number.isFinite(parsed)) {
+                normalizedRecipients.push(parsed === null ? null : Number(parsed));
+            }
+        }
+        if (normalizedRecipients.length === 0) {
+            normalizedRecipients.push(null);
+        }
+        const values = normalizedRecipients.map((rid) => [
+            message.trim(),
+            entityType,
+            entityId,
+            rid,
+        ]);
         await connection_1.default.query(`
         INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
-        VALUES (?, ?, ?, ?)
-      `, [message.trim(), entityType, entityId, recipientId || null]);
+        VALUES ?
+      `, [values]);
         return res.status(201).json({ message: 'Notifica??o enviada com sucesso.' });
     }
     catch (error) {

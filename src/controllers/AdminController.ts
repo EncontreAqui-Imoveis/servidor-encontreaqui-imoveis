@@ -1137,7 +1137,16 @@ class AdminController {
         [...params, limit, offset]
       );
 
-      return res.json({ data: rows, total });
+      const mappedRows = (rows as any[]).map((row) => ({
+        ...row,
+        documents: {
+          creci_front_url: row.creci_front_url ?? null,
+          creci_back_url: row.creci_back_url ?? null,
+          selfie_url: row.selfie_url ?? null,
+        },
+      }));
+
+      return res.json({ data: mappedRows, total });
     } catch (error) {
       console.error('Erro ao buscar corretores:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });

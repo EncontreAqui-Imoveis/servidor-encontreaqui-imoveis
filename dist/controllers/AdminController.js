@@ -372,55 +372,41 @@ class AdminController {
             if (propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
-            const property = propertyRows[0];
-            const currentStatus = String(property.status ?? '').trim().toLowerCase();
-            const isApproved = currentStatus === 'approved';
-            const bodyKeys = Object.keys(body);
-            if (isApproved) {
-                const invalidKeys = bodyKeys.filter((key) => key !== 'status');
-                if (invalidKeys.length > 0) {
-                    return res.status(403).json({
-                        error: 'Imoveis aprovados so permitem atualizar o status.',
-                    });
-                }
-            }
-            const allowedFields = isApproved
-                ? new Set(['status'])
-                : new Set([
-                    'title',
-                    'description',
-                    'type',
-                    'purpose',
-                    'status',
-                    'price',
-                    'code',
-                    'address',
-                    'quadra',
-                    'lote',
-                    'numero',
-                    'bairro',
-                    'complemento',
-                    'tipo_lote',
-                    'city',
-                    'state',
-                    'bedrooms',
-                    'bathrooms',
-                    'area_construida',
-                    'area_terreno',
-                    'garage_spots',
-                    'has_wifi',
-                    'tem_piscina',
-                    'tem_energia_solar',
-                    'tem_automacao',
-                    'tem_ar_condicionado',
-                    'eh_mobiliada',
-                    'valor_condominio',
-                    'valor_iptu',
-                    'video_url',
-                    'sale_value',
-                    'commission_rate',
-                    'commission_value',
-                ]);
+            const allowedFields = new Set([
+                'title',
+                'description',
+                'type',
+                'purpose',
+                'status',
+                'price',
+                'code',
+                'address',
+                'quadra',
+                'lote',
+                'numero',
+                'bairro',
+                'complemento',
+                'tipo_lote',
+                'city',
+                'state',
+                'bedrooms',
+                'bathrooms',
+                'area_construida',
+                'area_terreno',
+                'garage_spots',
+                'has_wifi',
+                'tem_piscina',
+                'tem_energia_solar',
+                'tem_automacao',
+                'tem_ar_condicionado',
+                'eh_mobiliada',
+                'valor_condominio',
+                'valor_iptu',
+                'video_url',
+                'sale_value',
+                'commission_rate',
+                'commission_value',
+            ]);
             const setParts = [];
             const params = [];
             for (const [key, value] of Object.entries(body)) {

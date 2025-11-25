@@ -77,7 +77,8 @@ function parseInteger(value: unknown): Nullable<number> {
 function parseBoolean(value: unknown): 0 | 1 {
   if (typeof value === 'boolean') {
     return value ? 1 : 0;
-  }
+  } 
+  
   if (typeof value === 'number') {
     return value === 0 ? 0 : 1;
   }

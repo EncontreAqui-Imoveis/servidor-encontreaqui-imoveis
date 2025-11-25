@@ -54,7 +54,7 @@ function parseDecimal(value) {
     }
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
-        throw new Error('Valor numerico invalido.');
+        return null;
     }
     return parsed;
 }
@@ -64,7 +64,7 @@ function parseInteger(value) {
     }
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) {
-        throw new Error('Valor inteiro invalido.');
+        return null;
     }
     return Math.trunc(parsed);
 }

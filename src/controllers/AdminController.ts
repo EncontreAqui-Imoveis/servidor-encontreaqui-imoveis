@@ -123,6 +123,12 @@ interface PropertyDetailRow extends RowDataPacket {
   valor_condominio?: number | string | null;
   valor_iptu?: number | string | null;
   video_url?: string | null;
+  has_wifi?: number | boolean | null;
+  tem_piscina?: number | boolean | null;
+  tem_energia_solar?: number | boolean | null;
+  tem_automacao?: number | boolean | null;
+  tem_ar_condicionado?: number | boolean | null;
+  eh_mobiliada?: number | boolean | null;
   created_at?: Date | string | null;
   updated_at?: Date | string | null;
   images?: string | string[] | null;
@@ -181,6 +187,12 @@ function mapAdminProperty(row: PropertyDetailRow) {
     valor_condominio: toNullableNumber(row.valor_condominio),
     valor_iptu: toNullableNumber(row.valor_iptu),
     video_url: row.video_url ?? null,
+    has_wifi: parseBoolean(row.has_wifi),
+    tem_piscina: parseBoolean(row.tem_piscina),
+    tem_energia_solar: parseBoolean(row.tem_energia_solar),
+    tem_automacao: parseBoolean(row.tem_automacao),
+    tem_ar_condicionado: parseBoolean(row.tem_ar_condicionado),
+    eh_mobiliada: parseBoolean(row.eh_mobiliada),
     images,
     broker_name: row.broker_name ?? null,
     broker_phone: row.broker_phone ?? null,

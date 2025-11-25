@@ -590,7 +590,6 @@ class AdminController {
           }
           default: {
             if (value === undefined) {
-              // Ignora campos undefined para evitar sobrescrever com NULL acidentalmente
               continue;
             }
             setParts.push(`${key} = ?`);

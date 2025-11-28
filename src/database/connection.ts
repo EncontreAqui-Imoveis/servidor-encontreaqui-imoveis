@@ -25,12 +25,6 @@ const database =
   process.env.DATABASE_NAME ||
   'db_imobiliaria';
 
-const port = Number(
-  process.env.DB_PORT ||
-  process.env.DATABASE_PORT ||
-  3306
-);
-
 const useSsl =
   String(process.env.DB_SSL || process.env.DATABASE_SSL || '')
     .toLowerCase() === 'true';
@@ -39,6 +33,12 @@ const resolvedHost =
   host === 'db' && process.env.NODE_ENV !== 'production'
     ? '127.0.0.1'
     : host;
+
+const port = Number(
+  process.env.DB_PORT ||
+  process.env.DATABASE_PORT ||
+  (resolvedHost === '127.0.0.1' ? 3307 : 3306)
+);
 
 const connectionOptions: mysql.PoolOptions = {
   host: resolvedHost,
@@ -56,4 +56,3 @@ const connectionOptions: mysql.PoolOptions = {
 const connection = mysql.createPool(connectionOptions).promise();
 
 export default connection;
-

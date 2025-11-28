@@ -34,5 +34,6 @@ router.post(
 router.get('/me/properties', isBroker, brokerController.getMyProperties);
 router.get('/me/commissions', isBroker, brokerController.getMyCommissions);
 router.get('/me/performance-report', isBroker, brokerController.getMyPerformanceReport);
+router.get('/me/performance', isBroker, brokerController.getMyPerformanceReport);
 
 export default router;

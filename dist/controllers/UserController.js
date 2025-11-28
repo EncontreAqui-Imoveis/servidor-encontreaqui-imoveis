@@ -88,8 +88,8 @@ class UserController {
             }
             const passwordHash = await bcryptjs_1.default.hash(password, 8);
             await connection_1.default.query(`
-          INSERT INTO users (name, email, password_hash, phone, address, city, state, role)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'client')
+          INSERT INTO users (name, email, password_hash, phone, address, city, state)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `, [name, email, passwordHash, stringOrNull(phone), stringOrNull(address), stringOrNull(city), stringOrNull(state)]);
             return res.status(201).json({ message: 'Usuario criado com sucesso!' });
         }
@@ -165,7 +165,7 @@ class UserController {
             if (existingUserRows.length > 0) {
                 return res.status(409).json({ error: 'Usuario ja existe.' });
             }
-            await connection_1.default.query('INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)', [uid, email, `User-${uid.substring(0, 8)}`, 'client']);
+            await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, `User-${uid.substring(0, 8)}`]);
             return res.status(201).json({ message: 'Usuario sincronizado com sucesso!' });
         }
         catch (error) {
@@ -197,7 +197,7 @@ class UserController {
                 }
             }
             else {
-                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)', [uid, email, name || `User-${uid.substring(0, 8)}`, 'client']);
+                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, name || `User-${uid.substring(0, 8)}`]);
                 user = {
                     id: result.insertId,
                     name: name || `User-${uid.substring(0, 8)}`,

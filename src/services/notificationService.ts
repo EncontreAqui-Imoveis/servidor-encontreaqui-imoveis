@@ -1,7 +1,7 @@
 ﻿import { RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
 
-type RelatedEntityType = 'property' | 'broker';
+type RelatedEntityType = 'property' | 'broker' | 'agency' | 'user' | 'other';
 
 interface AdminRow {
   id: number;
@@ -10,6 +10,9 @@ interface AdminRow {
 const RELATED_ENTITY_TYPES: Set<RelatedEntityType> = new Set([
   'property',
   'broker',
+  'agency',
+  'user',
+  'other',
 ]);
 
 function isValidRelatedEntityType(
@@ -37,19 +40,19 @@ export async function notifyAdmins(
   }
 
   const values = adminIds.map((adminId) => [
-    adminId,
     message,
     relatedEntityType,
     relatedEntityId,
+    adminId,
   ]);
 
   await connection.query(
     `
       INSERT INTO notifications (
-        user_id,
         message,
         related_entity_type,
-        related_entity_id
+        related_entity_id,
+        recipient_id
       )
       VALUES ?
     `,

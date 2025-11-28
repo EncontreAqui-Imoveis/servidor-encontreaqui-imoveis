@@ -21,4 +21,5 @@ router.post('/me/verify-documents', uploadMiddleware_1.brokerDocsUpload.fields([
 router.get('/me/properties', auth_1.isBroker, BrokerController_1.brokerController.getMyProperties);
 router.get('/me/commissions', auth_1.isBroker, BrokerController_1.brokerController.getMyCommissions);
 router.get('/me/performance-report', auth_1.isBroker, BrokerController_1.brokerController.getMyPerformanceReport);
+router.get('/me/performance', auth_1.isBroker, BrokerController_1.brokerController.getMyPerformanceReport);
 exports.default = router;

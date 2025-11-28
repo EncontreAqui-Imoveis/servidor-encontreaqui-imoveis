@@ -8,6 +8,9 @@ const connection_1 = __importDefault(require("../database/connection"));
 const RELATED_ENTITY_TYPES = new Set([
     'property',
     'broker',
+    'agency',
+    'user',
+    'other',
 ]);
 function isValidRelatedEntityType(value) {
     return RELATED_ENTITY_TYPES.has(value);
@@ -22,17 +25,17 @@ async function notifyAdmins(message, relatedEntityType, relatedEntityId) {
         return;
     }
     const values = adminIds.map((adminId) => [
-        adminId,
         message,
         relatedEntityType,
         relatedEntityId,
+        adminId,
     ]);
     await connection_1.default.query(`
       INSERT INTO notifications (
-        user_id,
         message,
         related_entity_type,
-        related_entity_id
+        related_entity_id,
+        recipient_id
       )
       VALUES ?
     `, [values]);

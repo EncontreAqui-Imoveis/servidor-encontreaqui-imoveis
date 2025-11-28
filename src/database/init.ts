@@ -173,16 +173,16 @@ const DDL_STATEMENTS: DDLStatement[] = [
     name: 'notifications',
     sql: `
       CREATE TABLE IF NOT EXISTS notifications (
-        id INT PRIMARY KEY AUTO_INCREMENT,
-        user_id INT NOT NULL,
+        id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
         message TEXT NOT NULL,
-        related_entity_type ENUM('property', 'broker') NOT NULL,
-        related_entity_id INT NULL,
+        related_entity_type ENUM('property','broker','agency','user','other') NOT NULL,
+        related_entity_id BIGINT UNSIGNED NULL,
+        recipient_id BIGINT UNSIGNED NULL,
         is_read TINYINT(1) NOT NULL DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES admins(id) ON DELETE CASCADE,
-        INDEX idx_notifications_user (user_id),
-        INDEX idx_notifications_entity (related_entity_type, related_entity_id)
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_notifications_is_read (is_read),
+        INDEX idx_notifications_entity (related_entity_type, related_entity_id),
+        INDEX idx_recipient (recipient_id)
       );
     `,
   },
@@ -240,4 +240,3 @@ async function createTables(): Promise<void> {
 }
 
 void createTables();
-

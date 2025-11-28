@@ -143,8 +143,8 @@ class UserController {
 
       await connection.query(
         `
-          INSERT INTO users (name, email, password_hash, phone, address, city, state, role)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'client')
+          INSERT INTO users (name, email, password_hash, phone, address, city, state)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `,
         [name, email, passwordHash, stringOrNull(phone), stringOrNull(address), stringOrNull(city), stringOrNull(state)]
       );
@@ -259,8 +259,8 @@ class UserController {
       }
 
       await connection.query(
-        'INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)',
-        [uid, email, `User-${uid.substring(0, 8)}`, 'client']
+        'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
+        [uid, email, `User-${uid.substring(0, 8)}`]
       );
 
       return res.status(201).json({ message: 'Usuario sincronizado com sucesso!' });
@@ -302,8 +302,8 @@ class UserController {
         }
       } else {
         const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)',
-          [uid, email, name || `User-${uid.substring(0, 8)}`, 'client']
+          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
+          [uid, email, name || `User-${uid.substring(0, 8)}`]
         );
         user = {
           id: result.insertId,

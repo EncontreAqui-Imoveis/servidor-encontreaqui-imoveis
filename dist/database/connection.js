@@ -25,8 +25,11 @@ const port = Number(process.env.DB_PORT ||
     3306);
 const useSsl = String(process.env.DB_SSL || process.env.DATABASE_SSL || '')
     .toLowerCase() === 'true';
+const resolvedHost = host === 'db' && process.env.NODE_ENV !== 'production'
+    ? '127.0.0.1'
+    : host;
 const connectionOptions = {
-    host,
+    host: resolvedHost,
     user,
     password,
     database,

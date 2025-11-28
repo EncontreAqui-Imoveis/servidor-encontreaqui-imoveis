@@ -35,8 +35,13 @@ const useSsl =
   String(process.env.DB_SSL || process.env.DATABASE_SSL || '')
     .toLowerCase() === 'true';
 
+const resolvedHost =
+  host === 'db' && process.env.NODE_ENV !== 'production'
+    ? '127.0.0.1'
+    : host;
+
 const connectionOptions: mysql.PoolOptions = {
-  host,
+  host: resolvedHost,
   user,
   password,
   database,

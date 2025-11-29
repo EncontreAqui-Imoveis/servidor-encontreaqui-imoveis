@@ -1515,15 +1515,28 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       ORDER BY date ASC
     `;
 
-    const [propertiesByStatusResult, newPropertiesResult] = await Promise.all([
+    const totalsQuery = `
+      SELECT
+        (SELECT COUNT(*) FROM properties) AS totalProperties,
+        (SELECT COUNT(*) FROM brokers) AS totalBrokers,
+        (SELECT COUNT(*) FROM users) AS totalUsers
+    `;
+
+    const [propertiesByStatusResult, newPropertiesResult, totalsResult] = await Promise.all([
       connection.query<RowDataPacket[]>(propertiesByStatusQuery),
       connection.query<RowDataPacket[]>(newPropertiesQuery),
+      connection.query<RowDataPacket[]>(totalsQuery),
     ]);
 
     const [propertiesByStatusRows] = propertiesByStatusResult;
     const [newPropertiesRows] = newPropertiesResult;
+    const [totalsRow] = totalsResult;
+    const totals = Array.isArray(totalsRow) && totalsRow[0] ? totalsRow[0] : null;
 
     return res.status(200).json({
+      totalProperties: Number(totals?.totalProperties ?? 0),
+      totalBrokers: Number(totals?.totalBrokers ?? 0),
+      totalUsers: Number(totals?.totalUsers ?? 0),
       propertiesByStatus: propertiesByStatusRows ?? [],
       newPropertiesOverTime: newPropertiesRows ?? [],
     });

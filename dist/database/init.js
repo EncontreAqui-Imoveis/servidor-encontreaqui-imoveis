@@ -186,15 +186,16 @@ const DDL_STATEMENTS = [
     `,
     },
     {
-        name: 'user_favorites',
+        name: 'favoritos',
         sql: `
-      CREATE TABLE IF NOT EXISTS user_favorites (
-        user_id INT NOT NULL,
-        property_id INT NOT NULL,
+      CREATE TABLE IF NOT EXISTS favoritos (
+        usuario_id INT NOT NULL,
+        imovel_id INT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (user_id, property_id),
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+        PRIMARY KEY (usuario_id, imovel_id),
+        FOREIGN KEY (usuario_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (imovel_id) REFERENCES properties(id) ON DELETE CASCADE,
+        INDEX fk_favoritos_imovel (imovel_id)
       );
     `,
     },

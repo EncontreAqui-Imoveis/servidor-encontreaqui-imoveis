@@ -664,6 +664,12 @@ class PropertyController {
         }
         catch (error) {
             console.error('Erro ao listar imóveis:', error);
+            const code = error?.code;
+            if (code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'PROTOCOL_CONNECTION_LOST') {
+                return res
+                    .status(503)
+                    .json({ error: 'Banco de dados indisponível. Tente novamente em instantes.' });
+            }
             return res.status(500).json({ error: 'Erro interno do servidor.' });
         }
     }

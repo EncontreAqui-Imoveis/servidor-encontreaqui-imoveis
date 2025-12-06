@@ -221,6 +221,81 @@ class UserController {
             return res.status(401).json({ error: 'Token do Google invalido.' });
         }
     }
+    async firebaseLogin(req, res) {
+        const { idToken, role, name: nameOverride, phone: phoneOverride, address, city, state } = req.body;
+        if (!idToken) {
+            return res.status(400).json({ error: 'Token do Firebase é obrigatório.' });
+        }
+        try {
+            const decodedToken = await firebaseAdmin_1.default.auth().verifyIdToken(idToken);
+            const { uid, email, name, phone_number: phone } = decodedToken;
+            const fallbackEmail = email ?? `${uid}@noemail.firebase`;
+            const displayName = name || `User-${uid.substring(0, 8)}`;
+            const [userRows] = await connection_1.default.query(`
+          SELECT u.id, u.name, u.email, u.firebase_uid,
+                 u.phone,
+                 CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
+                 b.status AS broker_status
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.firebase_uid = ? OR u.email = ?
+        `, [uid, fallbackEmail]);
+            let user;
+            if (userRows.length > 0) {
+                user = userRows[0];
+                const updates = [];
+                if (!user.firebase_uid)
+                    updates.push(['firebase_uid', uid]);
+                if ((phone || phoneOverride) && user.phone !== (phoneOverride ?? phone)) {
+                    updates.push(['phone', phoneOverride ?? phone]);
+                }
+                if (email && user.email !== email)
+                    updates.push(['email', email]);
+                if (nameOverride && user.name !== nameOverride)
+                    updates.push(['name', nameOverride]);
+                if (address !== undefined)
+                    updates.push(['address', address]);
+                if (city !== undefined)
+                    updates.push(['city', city]);
+                if (state !== undefined)
+                    updates.push(['state', state]);
+                if (updates.length > 0) {
+                    const set = updates.map(([field]) => `${field} = ?`).join(', ');
+                    const values = updates.map(([, value]) => value);
+                    await connection_1.default.query(`UPDATE users SET ${set} WHERE id = ?`, [...values, user.id]);
+                }
+            }
+            else {
+                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name, phone, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)', [uid, fallbackEmail, nameOverride ?? displayName, phoneOverride ?? phone ?? null, address ?? null, city ?? null, state ?? null]);
+                user = {
+                    id: result.insertId,
+                    name: nameOverride ?? displayName,
+                    email: fallbackEmail,
+                    role: 'client',
+                };
+            }
+            const effectiveRole = role ?? user.role ?? 'client';
+            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
+            return res.json({
+                user: {
+                    id: user.id,
+                    name: user.name ?? nameOverride ?? displayName,
+                    email: user.email ?? fallbackEmail,
+                    role: effectiveRole,
+                    phone: user.phone ?? phoneOverride ?? phone ?? null,
+                    address: user.address ?? address ?? null,
+                    city: user.city ?? city ?? null,
+                    state: user.state ?? state ?? null,
+                    broker_status: user.broker_status,
+                },
+                token,
+            });
+        }
+        catch (error) {
+            console.error('Erro no login com Firebase:', error);
+            return res.status(401).json({ error: 'Token do Firebase invalido.' });
+        }
+    }
     async addFavorite(req, res) {
         const userId = req.userId;
         const propertyId = Number(req.params.propertyId);

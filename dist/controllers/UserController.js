@@ -128,7 +128,7 @@ class UserController {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
         try {
-            const [userRows] = await connection_1.default.query('SELECT id, name, email FROM users WHERE id = ?', [userId]);
+            const [userRows] = await connection_1.default.query('SELECT id, name, email, phone, address, city, state FROM users WHERE id = ?', [userId]);
             if (userRows.length === 0) {
                 return res.status(404).json({ error: 'Usuário nao encontrado.' });
             }
@@ -138,16 +138,64 @@ class UserController {
                 return res.json({
                     role: 'broker',
                     status: brokerRows[0].status,
-                    user: { id: user.id, name: user.name, email: user.email },
+                    user: {
+                        id: user.id,
+                        name: user.name,
+                        email: user.email,
+                        phone: user.phone,
+                        address: user.address,
+                        city: user.city,
+                        state: user.state,
+                    },
                 });
             }
             return res.json({
                 role: 'client',
-                user: { id: user.id, name: user.name, email: user.email },
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    address: user.address,
+                    city: user.city,
+                    state: user.state,
+                },
             });
         }
         catch (error) {
             console.error('Erro ao buscar perfil:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async updateProfile(req, res) {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        const { phone, address, city, state } = req.body ?? {};
+        try {
+            await connection_1.default.query('UPDATE users SET phone = ?, address = ?, city = ?, state = ? WHERE id = ?', [stringOrNull(phone), stringOrNull(address), stringOrNull(city), stringOrNull(state), userId]);
+            const [userRows] = await connection_1.default.query('SELECT id, name, email, phone, address, city, state FROM users WHERE id = ?', [userId]);
+            const user = userRows[0];
+            const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [userId]);
+            const role = brokerRows.length > 0 ? 'broker' : 'client';
+            const status = brokerRows.length > 0 ? brokerRows[0].status : undefined;
+            return res.json({
+                role,
+                status,
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone,
+                    address: user.address,
+                    city: user.city,
+                    state: user.state,
+                },
+            });
+        }
+        catch (error) {
+            console.error('Erro ao atualizar perfil:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }

@@ -10,6 +10,7 @@ userRoutes.post('/sync', UserController_1.userController.syncUser);
 userRoutes.post('/auth/google', UserController_1.userController.googleLogin);
 userRoutes.post('/auth/firebase', UserController_1.userController.firebaseLogin);
 userRoutes.get('/me', auth_1.authMiddleware, (req, res) => UserController_1.userController.getProfile(req, res));
+userRoutes.put('/me', auth_1.authMiddleware, (req, res) => UserController_1.userController.updateProfile(req, res));
 userRoutes.get('/favorites', auth_1.authMiddleware, (req, res) => UserController_1.userController.listFavorites(req, res));
 userRoutes.post('/favorites/:propertyId', auth_1.authMiddleware, (req, res) => UserController_1.userController.addFavorite(req, res));
 userRoutes.delete('/favorites/:propertyId', auth_1.authMiddleware, (req, res) => UserController_1.userController.removeFavorite(req, res));

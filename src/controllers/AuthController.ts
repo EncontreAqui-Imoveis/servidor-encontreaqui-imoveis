@@ -1,0 +1,221 @@
+import { Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import admin from '../config/firebaseAdmin';
+import connection from '../database/connection';
+
+type ProfileType = 'client' | 'broker';
+
+function buildUserPayload(row: any, profileType: ProfileType) {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone ?? null,
+    address: row.address ?? null,
+    city: row.city ?? null,
+    state: row.state ?? null,
+    role: profileType,
+  };
+}
+
+function hasCompleteProfile(row: any) {
+  return !!(row.phone && row.city && row.state && row.address);
+}
+
+function signToken(id: number, role: ProfileType) {
+  return jwt.sign(
+    { id, role },
+    process.env.JWT_SECRET || 'default_secret',
+    { expiresIn: '7d' },
+  );
+}
+
+class AuthController {
+  async register(req: Request, res: Response) {
+    const {
+      name,
+      email,
+      password,
+      phone,
+      address,
+      city,
+      state,
+      profileType,
+    } = req.body as Record<string, string>;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
+    }
+
+    const normalizedProfile: ProfileType =
+      profileType === 'broker' ? 'broker' : 'client';
+
+    try {
+      const [existingUserRows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM users WHERE email = ?',
+        [email],
+      );
+      if (existingUserRows.length > 0) {
+        return res.status(409).json({ error: 'Este email já está em uso.' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 8);
+      const [userResult] = await connection.query<ResultSetHeader>(
+        `
+          INSERT INTO users (name, email, password_hash, phone, address, city, state)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+        [name, email, passwordHash, phone ?? null, address ?? null, city ?? null, state ?? null],
+      );
+
+      const userId = userResult.insertId;
+
+      if (normalizedProfile === 'broker') {
+        await connection.query(
+          'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+          [userId, req.body.creci ?? '', 'pending_verification'],
+        );
+      }
+
+      const token = signToken(userId, normalizedProfile);
+
+      return res.status(201).json({
+        user: buildUserPayload(
+          { id: userId, name, email, phone, address, city, state },
+          normalizedProfile,
+        ),
+        token,
+        needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+      });
+    } catch (error) {
+      console.error('Erro no registro:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async login(req: Request, res: Response) {
+    const { email, password } = req.body as { email?: string; password?: string };
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.address, u.city, u.state,
+                 CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
+                 b.status AS broker_status
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.email = ?
+        `,
+        [email],
+      );
+
+      if (rows.length === 0) {
+        return res.status(401).json({ error: 'Credenciais inválidas.' });
+      }
+
+      const user = rows[0];
+      const isPasswordCorrect = await bcrypt.compare(password, String(user.password_hash));
+
+      if (!isPasswordCorrect) {
+        return res.status(401).json({ error: 'Credenciais inválidas.' });
+      }
+
+      const profile: ProfileType = user.role === 'broker' ? 'broker' : 'client';
+      const token = signToken(user.id, profile);
+
+      return res.json({
+        user: buildUserPayload(user, profile),
+        token,
+        needsCompletion: !hasCompleteProfile(user),
+      });
+    } catch (error) {
+      console.error('Erro no login:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async google(req: Request, res: Response) {
+    const { idToken, profileType } = req.body as { idToken?: string; profileType?: string };
+
+    if (!idToken) {
+      return res.status(400).json({ error: 'idToken do Google é obrigatório.' });
+    }
+
+    const normalizedProfile: ProfileType =
+      profileType === 'broker' ? 'broker' : 'client';
+
+    try {
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      const uid = decoded.uid;
+      const email = decoded.email;
+      const displayName = decoded.name || decoded.email?.split('@')[0] || `User-${uid}`;
+
+      if (!email) {
+        return res.status(400).json({ error: 'Email não disponível no token do Google.' });
+      }
+
+      const [existingRows] = await connection.query<RowDataPacket[]>(
+        'SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id FROM users u LEFT JOIN brokers b ON u.id = b.id WHERE u.firebase_uid = ? OR u.email = ? LIMIT 1',
+        [uid, email],
+      );
+
+      let userId: number;
+      let userName = displayName;
+      let phone: string | null = null;
+      let address: string | null = null;
+      let city: string | null = null;
+      let state: string | null = null;
+      let hasBrokerRow = false;
+
+      if (existingRows.length > 0) {
+        const row = existingRows[0];
+        userId = row.id;
+        userName = row.name || displayName;
+        phone = row.phone ?? null;
+        address = row.address ?? null;
+        city = row.city ?? null;
+        state = row.state ?? null;
+        hasBrokerRow = !!row.broker_id;
+
+        if (!row.firebase_uid) {
+          await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
+        }
+      } else {
+        const [result] = await connection.query<ResultSetHeader>(
+          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
+          [uid, email, displayName],
+        );
+        userId = result.insertId;
+      }
+
+      if (normalizedProfile === 'broker' && !hasBrokerRow) {
+        await connection.query(
+          'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+          [userId, '', 'pending_verification'],
+        );
+      }
+
+      const token = signToken(userId, normalizedProfile);
+
+      return res.json({
+        user: buildUserPayload(
+          { id: userId, name: userName, email, phone, address, city, state },
+          normalizedProfile,
+        ),
+        token,
+        needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+      });
+    } catch (error) {
+      console.error('Erro no login com Google:', error);
+      return res.status(401).json({ error: 'Token do Google inválido.' });
+    }
+  }
+}
+
+export const authController = new AuthController();

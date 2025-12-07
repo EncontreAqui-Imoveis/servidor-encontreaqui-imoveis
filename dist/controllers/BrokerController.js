@@ -322,6 +322,13 @@ class BrokerController {
             });
         }
         const files = req.files;
+        const creci = req.body?.creci?.toString().trim() || '';
+        if (!creci) {
+            return res.status(400).json({
+                success: false,
+                error: "Informe o CRECI."
+            });
+        }
         if (!files.creciFront || !files.creciBack || !files.selfie) {
             return res.status(400).json({
                 success: false,
@@ -335,6 +342,14 @@ class BrokerController {
         const creciBackUrl = creciBackResult.url;
         const selfieUrl = selfieResult.url;
         try {
+            // Garante que a linha em brokers existe; se não existir, cria com status pending_verification.
+            const [brokerRows] = await connection_1.default.query('SELECT id FROM brokers WHERE id = ?', [brokerId]);
+            if (brokerRows.length === 0) {
+                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [brokerId, creci, 'pending_verification']);
+            }
+            else {
+                await connection_1.default.query('UPDATE brokers SET creci = ? WHERE id = ?', [creci, brokerId]);
+            }
             const query = `
                 INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
                 VALUES (?, ?, ?, ?, 'pending')

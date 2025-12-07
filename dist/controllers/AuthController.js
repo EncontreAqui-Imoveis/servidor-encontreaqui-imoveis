@@ -108,7 +108,11 @@ class AuthController {
             if (!email) {
                 return res.status(400).json({ error: 'Email não disponível no token do Google.' });
             }
-            const [existingRows] = await connection_1.default.query('SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id FROM users u LEFT JOIN brokers b ON u.id = b.id WHERE u.firebase_uid = ? OR u.email = ? LIMIT 1', [uid, email]);
+            const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id
+           FROM users u
+           LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.firebase_uid = ? OR u.email = ?
+          LIMIT 1`, [uid, email]);
             let userId;
             let userName = displayName;
             let phone = null;
@@ -116,6 +120,10 @@ class AuthController {
             let city = null;
             let state = null;
             let hasBrokerRow = false;
+            let createdNow = false;
+            let blockedBrokerRequest = false;
+            let effectiveProfile = normalizedProfile;
+            let requiresDocuments = false;
             if (existingRows.length > 0) {
                 const row = existingRows[0];
                 userId = row.id;
@@ -125,6 +133,13 @@ class AuthController {
                 city = row.city ?? null;
                 state = row.state ?? null;
                 hasBrokerRow = !!row.broker_id;
+                effectiveProfile = hasBrokerRow ? 'broker' : 'client';
+                // NUNCA promove automaticamente um cliente existente para corretor via login Google.
+                if (normalizedProfile === 'broker' && !hasBrokerRow) {
+                    blockedBrokerRequest = true;
+                    requiresDocuments = true;
+                    effectiveProfile = 'client';
+                }
                 if (!row.firebase_uid) {
                     await connection_1.default.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
                 }
@@ -132,15 +147,26 @@ class AuthController {
             else {
                 const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, displayName]);
                 userId = result.insertId;
+                createdNow = true;
+                effectiveProfile = 'client';
+                if (normalizedProfile === 'broker') {
+                    requiresDocuments = true;
+                }
             }
-            if (normalizedProfile === 'broker' && !hasBrokerRow) {
-                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, '', 'pending_verification']);
+            // Não cria broker automaticamente; exige envio de documentos.
+            if (normalizedProfile === 'broker') {
+                requiresDocuments = true;
+                if (!hasBrokerRow) {
+                    effectiveProfile = 'client';
+                }
             }
-            const token = signToken(userId, normalizedProfile);
+            const token = signToken(userId, effectiveProfile);
             return res.json({
-                user: buildUserPayload({ id: userId, name: userName, email, phone, address, city, state }, normalizedProfile),
+                user: buildUserPayload({ id: userId, name: userName, email, phone, address, city, state }, effectiveProfile),
                 token,
                 needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+                requiresDocuments,
+                blockedBrokerRequest,
             });
         }
         catch (error) {

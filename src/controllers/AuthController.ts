@@ -161,7 +161,11 @@ class AuthController {
       }
 
       const [existingRows] = await connection.query<RowDataPacket[]>(
-        'SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id FROM users u LEFT JOIN brokers b ON u.id = b.id WHERE u.firebase_uid = ? OR u.email = ? LIMIT 1',
+        `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id
+           FROM users u
+           LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.firebase_uid = ? OR u.email = ?
+          LIMIT 1`,
         [uid, email],
       );
 
@@ -172,6 +176,10 @@ class AuthController {
       let city: string | null = null;
       let state: string | null = null;
       let hasBrokerRow = false;
+      let createdNow = false;
+      let blockedBrokerRequest = false;
+      let effectiveProfile: ProfileType = normalizedProfile;
+      let requiresDocuments = false;
 
       if (existingRows.length > 0) {
         const row = existingRows[0];
@@ -182,6 +190,14 @@ class AuthController {
         city = row.city ?? null;
         state = row.state ?? null;
         hasBrokerRow = !!row.broker_id;
+        effectiveProfile = hasBrokerRow ? 'broker' : 'client';
+
+        // NUNCA promove automaticamente um cliente existente para corretor via login Google.
+        if (normalizedProfile === 'broker' && !hasBrokerRow) {
+          blockedBrokerRequest = true;
+          requiresDocuments = true;
+          effectiveProfile = 'client';
+        }
 
         if (!row.firebase_uid) {
           await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
@@ -192,24 +208,32 @@ class AuthController {
           [uid, email, displayName],
         );
         userId = result.insertId;
+        createdNow = true;
+        effectiveProfile = 'client';
+        if (normalizedProfile === 'broker') {
+          requiresDocuments = true;
+        }
       }
 
-      if (normalizedProfile === 'broker' && !hasBrokerRow) {
-        await connection.query(
-          'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-          [userId, '', 'pending_verification'],
-        );
+      // Não cria broker automaticamente; exige envio de documentos.
+      if (normalizedProfile === 'broker') {
+        requiresDocuments = true;
+        if (!hasBrokerRow) {
+          effectiveProfile = 'client';
+        }
       }
 
-      const token = signToken(userId, normalizedProfile);
+      const token = signToken(userId, effectiveProfile);
 
       return res.json({
         user: buildUserPayload(
           { id: userId, name: userName, email, phone, address, city, state },
-          normalizedProfile,
+          effectiveProfile,
         ),
         token,
         needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+        requiresDocuments,
+        blockedBrokerRequest,
       });
     } catch (error) {
       console.error('Erro no login com Google:', error);

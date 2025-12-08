@@ -344,8 +344,9 @@ class UserController {
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       const { uid, email, name } = decodedToken as any;
-      const requestedRole = profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'client';
-      const autoMode = profileType === 'auto';
+      const requestedRole =
+        profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
+      const autoMode = requestedRole === 'auto';
 
       const [userRows] = await connection.query<RowDataPacket[]>(
         `
@@ -374,41 +375,38 @@ class UserController {
             requiresProfileChoice: true,
             isNewUser: true,
             roleLocked: false,
-            pending: {
-              email,
-              name,
-            },
+            pending: { email, name },
           });
         }
 
+        const chosenRole = requestedRole === 'broker' ? 'broker' : 'client';
         const [result] = await connection.query<ResultSetHeader>(
           'INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)',
-          [uid, email, name || `User-${uid.substring(0, 8)}`, requestedRole]
+          [uid, email, name || `User-${uid.substring(0, 8)}`, chosenRole]
         );
         user = {
           id: result.insertId,
           name: name || `User-${uid.substring(0, 8)}`,
           email,
-          role: requestedRole,
+          role: chosenRole,
         };
         isNewUser = true;
         user.broker_status = null;
+
+        if (chosenRole === 'broker') {
+          await connection.query(
+            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+            [user.id, null, 'pending_verification']
+          );
+          user.broker_status = 'pending_verification';
+        }
       }
 
-      // Ajusta papel conforme escolha explícita (permite promover cliente -> corretor)
-      let effectiveRole = user.role ?? requestedRole ?? 'client';
-      let roleLocked = false;
+      // Nunca muda papel de usuário existente
+      const effectiveRole = user.role ?? 'client';
+      const roleLocked = true;
 
-      if (!isNewUser && requestedRole === 'broker' && effectiveRole !== 'broker') {
-        // Promove cliente existente para corretor quando o usuário escolhe broker na escolha explícita
-        effectiveRole = 'broker';
-        roleLocked = false;
-      } else if (!isNewUser && requestedRole === 'client' && effectiveRole === 'broker') {
-        // Não fazemos downgrade automático
-        roleLocked = true;
-      }
-
-      // Se papel final é corretor, garanta linha em brokers
+      // Se papel final é corretor, garanta status carregado
       if (effectiveRole === 'broker') {
         const [brokerRows] = await connection.query<RowDataPacket[]>(
           'SELECT status FROM brokers WHERE id = ?',
@@ -417,10 +415,6 @@ class UserController {
         if (brokerRows.length > 0) {
           user.broker_status = brokerRows[0].status;
         } else {
-          await connection.query(
-            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-            [user.id, null, 'pending_verification']
-          );
           user.broker_status = 'pending_verification';
         }
       }

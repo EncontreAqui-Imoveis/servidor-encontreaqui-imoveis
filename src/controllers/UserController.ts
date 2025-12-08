@@ -335,7 +335,7 @@ class UserController {
   }
 
   async googleLogin(req: Request, res: Response) {
-    const { idToken } = req.body;
+    const { idToken, profileType } = req.body as { idToken?: string; profileType?: string };
 
     if (!idToken) {
       return res.status(400).json({ error: 'Token do Google e obrigatorio.' });
@@ -343,11 +343,14 @@ class UserController {
 
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
-      const { uid, email, name } = decodedToken;
+      const { uid, email, name } = decodedToken as any;
+      const requestedRole = profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'client';
+      const autoMode = profileType === 'auto';
 
       const [userRows] = await connection.query<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
+                 u.phone, u.address, u.city, u.state,
                  CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
                  b.status AS broker_status
           FROM users u
@@ -358,6 +361,7 @@ class UserController {
       );
 
       let user: any;
+      let isNewUser = false;
 
       if (userRows.length > 0) {
         user = userRows[0];
@@ -365,22 +369,72 @@ class UserController {
           await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
         }
       } else {
+        if (autoMode) {
+          return res.json({
+            requiresProfileChoice: true,
+            isNewUser: true,
+            roleLocked: false,
+            pending: {
+              email,
+              name,
+            },
+          });
+        }
+
         const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
-          [uid, email, name || `User-${uid.substring(0, 8)}`]
+          'INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)',
+          [uid, email, name || `User-${uid.substring(0, 8)}`, requestedRole]
         );
         user = {
           id: result.insertId,
           name: name || `User-${uid.substring(0, 8)}`,
           email,
-          role: 'client',
+          role: requestedRole,
         };
+        isNewUser = true;
+        user.broker_status = null;
       }
 
+      // Ajusta papel conforme escolha explícita (permite promover cliente -> corretor)
+      let effectiveRole = user.role ?? requestedRole ?? 'client';
+      let roleLocked = false;
+
+      if (!isNewUser && requestedRole === 'broker' && effectiveRole !== 'broker') {
+        // Promove cliente existente para corretor quando o usuário escolhe broker na escolha explícita
+        effectiveRole = 'broker';
+        roleLocked = false;
+      } else if (!isNewUser && requestedRole === 'client' && effectiveRole === 'broker') {
+        // Não fazemos downgrade automático
+        roleLocked = true;
+      }
+
+      // Se papel final é corretor, garanta linha em brokers
+      if (effectiveRole === 'broker') {
+        const [brokerRows] = await connection.query<RowDataPacket[]>(
+          'SELECT status FROM brokers WHERE id = ?',
+          [user.id]
+        );
+        if (brokerRows.length > 0) {
+          user.broker_status = brokerRows[0].status;
+        } else {
+          await connection.query(
+            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+            [user.id, null, 'pending_verification']
+          );
+          user.broker_status = 'pending_verification';
+        }
+      }
+
+      const needsCompletion =
+        !user.phone || !user.city || !user.state || !user.address;
+      const requiresDocuments =
+        effectiveRole === 'broker' &&
+        (!user.broker_status || user.broker_status !== 'approved');
+
       const token = jwt.sign(
-        { id: user.id, role: user.role },
+        { id: user.id, role: effectiveRole },
         process.env.JWT_SECRET || 'default_secret',
-        { expiresIn: '1d' }
+        { expiresIn: '7d' }
       );
 
       return res.json({
@@ -388,9 +442,18 @@ class UserController {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role,
+          role: effectiveRole,
+          phone: user.phone ?? null,
+          address: user.address ?? null,
+          city: user.city ?? null,
+          state: user.state ?? null,
+          broker_status: user.broker_status,
         },
         token,
+        needsCompletion,
+        requiresDocuments,
+        isNewUser,
+        roleLocked,
       });
     } catch (error) {
       console.error('Erro no login com Google:', error);

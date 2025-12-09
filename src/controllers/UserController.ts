@@ -370,8 +370,9 @@ class UserController {
           await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
         }
 
+        const empty = (v: any) => v === null || v === undefined || String(v).trim() === '';
         const missingProfile =
-          (user.phone == null || user.city == null || user.state == null || user.address == null) &&
+          (empty(user.phone) || empty(user.city) || empty(user.state) || empty(user.address)) &&
           user.broker_status == null;
         const missingRole = !user.role;
 

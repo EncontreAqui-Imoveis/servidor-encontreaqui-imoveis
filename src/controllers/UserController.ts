@@ -369,6 +369,20 @@ class UserController {
         if (!user.firebase_uid) {
           await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
         }
+
+        const missingProfile =
+          (user.phone == null || user.city == null || user.state == null || user.address == null) &&
+          user.broker_status == null;
+        const missingRole = !user.role;
+
+        if (autoMode && (missingProfile || missingRole)) {
+          return res.json({
+            requiresProfileChoice: true,
+            isNewUser: false,
+            roleLocked: false,
+            pending: { email, name },
+          });
+        }
       } else {
         if (autoMode) {
           return res.json({
@@ -402,9 +416,30 @@ class UserController {
         }
       }
 
-      // Nunca muda papel de usuário existente
-      const effectiveRole = user.role ?? 'client';
-      const roleLocked = true;
+      // Define papel efetivo:
+      // - Se já existe role, mantemos (não promove/downgrade)
+      // - Se não existe role (caso legado), usamos a escolha explícita
+      let effectiveRole: string = user.role ?? 'client';
+      let roleLocked = true;
+
+      if (!user.role && !autoMode) {
+        effectiveRole = requestedRole === 'broker' ? 'broker' : 'client';
+        roleLocked = false;
+        await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
+        if (effectiveRole === 'broker') {
+          const [brokerRows] = await connection.query<RowDataPacket[]>(
+            'SELECT status FROM brokers WHERE id = ?',
+            [user.id]
+          );
+          if (brokerRows.length === 0) {
+            await connection.query(
+              'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+              [user.id, null, 'pending_verification']
+            );
+            user.broker_status = 'pending_verification';
+          }
+        }
+      }
 
       // Se papel final é corretor, garanta status carregado
       if (effectiveRole === 'broker') {

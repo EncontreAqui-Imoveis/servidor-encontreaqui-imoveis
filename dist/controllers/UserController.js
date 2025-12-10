@@ -222,15 +222,18 @@ class UserController {
         }
     }
     async googleLogin(req, res) {
-        const { idToken } = req.body;
+        const { idToken, profileType } = req.body;
         if (!idToken) {
             return res.status(400).json({ error: 'Token do Google e obrigatorio.' });
         }
         try {
             const decodedToken = await firebaseAdmin_1.default.auth().verifyIdToken(idToken);
             const { uid, email, name } = decodedToken;
+            const requestedRole = profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
+            const autoMode = requestedRole === 'auto';
             const [userRows] = await connection_1.default.query(`
           SELECT u.id, u.name, u.email, u.firebase_uid,
+                 u.phone, u.address, u.city, u.state,
                  CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
                  b.status AS broker_status
           FROM users u
@@ -238,30 +241,108 @@ class UserController {
           WHERE u.firebase_uid = ? OR u.email = ?
         `, [uid, email]);
             let user;
+            let isNewUser = false;
             if (userRows.length > 0) {
                 user = userRows[0];
                 if (!user.firebase_uid) {
                     await connection_1.default.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
                 }
+                const empty = (v) => v === null || v === undefined || String(v).trim() === '';
+                const missingProfile = (empty(user.phone) || empty(user.city) || empty(user.state) || empty(user.address)) &&
+                    user.broker_status == null;
+                const missingRole = !user.role;
+                if (autoMode && (missingProfile || missingRole)) {
+                    return res.json({
+                        requiresProfileChoice: true,
+                        isNewUser: false,
+                        roleLocked: false,
+                        pending: { email, name },
+                    });
+                }
             }
             else {
-                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, name || `User-${uid.substring(0, 8)}`]);
+                if (autoMode) {
+                    return res.json({
+                        requiresProfileChoice: true,
+                        isNewUser: true,
+                        roleLocked: false,
+                        pending: { email, name },
+                    });
+                }
+                const chosenRole = requestedRole === 'broker' ? 'broker' : 'client';
+                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)', [uid, email, name || `User-${uid.substring(0, 8)}`, chosenRole]);
                 user = {
                     id: result.insertId,
                     name: name || `User-${uid.substring(0, 8)}`,
                     email,
-                    role: 'client',
+                    role: chosenRole,
                 };
+                isNewUser = true;
+                user.broker_status = null;
+                if (chosenRole === 'broker') {
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
+                    user.broker_status = 'pending_verification';
+                }
             }
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: user.role }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '1d' });
+            // Define papel efetivo:
+            // - Se já existe role, mantemos (não promove/downgrade)
+            // - Se não existe role (caso legado), usamos a escolha explícita
+            let effectiveRole = user.role ?? 'client';
+            let roleLocked = true;
+            if (!user.role && !autoMode) {
+                effectiveRole = requestedRole === 'broker' ? 'broker' : 'client';
+                roleLocked = false;
+                await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
+                if (effectiveRole === 'broker') {
+                    const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [user.id]);
+                    if (brokerRows.length === 0) {
+                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
+                        user.broker_status = 'pending_verification';
+                    }
+                }
+            }
+            // Se papel final é corretor, garanta status carregado
+            if (effectiveRole === 'broker') {
+                const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [user.id]);
+                if (brokerRows.length > 0) {
+                    user.broker_status = brokerRows[0].status;
+                }
+                else {
+                    user.broker_status = 'pending_verification';
+                }
+            }
+            const needsCompletion = !user.phone || !user.city || !user.state || !user.address;
+            const requiresDocuments = effectiveRole === 'broker' &&
+                (!user.broker_status || user.broker_status !== 'approved');
+            // No modo auto, se a conta for nova ou estiver incompleta/pedindo docs, devolve escolha antes de emitir token
+            if (autoMode && (isNewUser || needsCompletion || requiresDocuments)) {
+                return res.json({
+                    requiresProfileChoice: true,
+                    isNewUser,
+                    roleLocked,
+                    needsCompletion,
+                    requiresDocuments,
+                    pending: { email, name },
+                });
+            }
+            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
             return res.json({
                 user: {
                     id: user.id,
                     name: user.name,
                     email: user.email,
-                    role: user.role,
+                    role: effectiveRole,
+                    phone: user.phone ?? null,
+                    address: user.address ?? null,
+                    city: user.city ?? null,
+                    state: user.state ?? null,
+                    broker_status: user.broker_status,
                 },
                 token,
+                needsCompletion,
+                requiresDocuments,
+                isNewUser,
+                roleLocked,
             });
         }
         catch (error) {

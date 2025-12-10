@@ -461,6 +461,18 @@ class UserController {
         effectiveRole === 'broker' &&
         (!user.broker_status || user.broker_status !== 'approved');
 
+      // No modo auto, se a conta for nova ou estiver incompleta/pedindo docs, devolve escolha antes de emitir token
+      if (autoMode && (isNewUser || needsCompletion || requiresDocuments)) {
+        return res.json({
+          requiresProfileChoice: true,
+          isNewUser,
+          roleLocked,
+          needsCompletion,
+          requiresDocuments,
+          pending: { email, name },
+        });
+      }
+
       const token = jwt.sign(
         { id: user.id, role: effectiveRole },
         process.env.JWT_SECRET || 'default_secret',

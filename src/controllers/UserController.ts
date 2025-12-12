@@ -417,29 +417,34 @@ class UserController {
         }
       }
 
-      // Define papel efetivo:
-      // - Se já existe role, mantemos (não promove/downgrade)
-      // - Se não existe role (caso legado), usamos a escolha explícita
+      // Papel efetivo:
+      // - Se solicitou broker explicitamente, promove/atualiza para broker.
+      // - Se solicitou client explicitamente e não tinha role, fixa como client.
+      // - Modo auto mantém papel existente.
       let effectiveRole: string = user.role ?? 'client';
       let roleLocked = true;
 
-      if (!user.role && !autoMode) {
-        effectiveRole = requestedRole === 'broker' ? 'broker' : 'client';
+      if (!autoMode && requestedRole === 'broker') {
+        effectiveRole = 'broker';
         roleLocked = false;
         await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
-        if (effectiveRole === 'broker') {
-          const [brokerRows] = await connection.query<RowDataPacket[]>(
-            'SELECT status FROM brokers WHERE id = ?',
-            [user.id]
+        const [brokerRows] = await connection.query<RowDataPacket[]>(
+          'SELECT status FROM brokers WHERE id = ?',
+          [user.id]
+        );
+        if (brokerRows.length === 0) {
+          await connection.query(
+            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+            [user.id, null, 'pending_verification']
           );
-          if (brokerRows.length === 0) {
-            await connection.query(
-              'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-              [user.id, null, 'pending_verification']
-            );
-            user.broker_status = 'pending_verification';
-          }
+          user.broker_status = 'pending_verification';
+        } else {
+          user.broker_status = brokerRows[0].status;
         }
+      } else if (!autoMode && requestedRole === 'client' && !user.role) {
+        effectiveRole = 'client';
+        roleLocked = false;
+        await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
       }
 
       // Se papel final é corretor, garanta status carregado

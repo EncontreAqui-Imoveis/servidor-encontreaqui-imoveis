@@ -164,7 +164,7 @@ class AuthController {
 
       let requiresProfileChoice = false;
       const [existingRows] = await connection.query<RowDataPacket[]>(
-        `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, u.role,
+        `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid,
                 b.id AS broker_id, b.status AS broker_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id
@@ -182,7 +182,7 @@ class AuthController {
       let hasBrokerRow = false;
       let createdNow = false;
       let blockedBrokerRequest = false;
-      let effectiveProfile: ProfileType = requestedProfile === 'broker' ? 'broker' : 'client';
+      let effectiveProfile: ProfileType = 'client';
       let requiresDocuments = false;
       let roleLocked = false;
       let brokerStatus: string | null = null;
@@ -197,7 +197,7 @@ class AuthController {
         state = row.state ?? null;
         hasBrokerRow = !!row.broker_id;
         brokerStatus = row.broker_status ?? null;
-        effectiveProfile = hasBrokerRow ? 'broker' : row.role === 'broker' ? 'broker' : 'client';
+        effectiveProfile = hasBrokerRow ? 'broker' : 'client';
         blockedBrokerRequest = brokerStatus === 'rejected';
 
         if (!row.firebase_uid) {
@@ -230,10 +230,11 @@ class AuthController {
         if (blockedBrokerRequest) {
           effectiveProfile = 'client';
           roleLocked = true;
+          requiresDocuments = true;
         } else {
           effectiveProfile = 'broker';
           roleLocked = false;
-          await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveProfile, userId]);
+          await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveProfile, userId]).catch(() => {});
           if (!hasBrokerRow) {
             await connection.query(
               'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
@@ -248,9 +249,8 @@ class AuthController {
       } else if (!autoMode && requestedProfile === 'client') {
         effectiveProfile = 'client';
         roleLocked = false;
-        await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveProfile, userId]);
       } else if (autoMode) {
-        roleLocked = true;
+        roleLocked = blockedBrokerRequest;
         requiresDocuments =
           effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved';
       }

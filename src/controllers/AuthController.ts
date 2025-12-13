@@ -294,9 +294,18 @@ class AuthController {
         roleLocked,
         isNewUser: createdNow,
       });
-    } catch (error) {
-      console.error('Erro no login com Google:', error);
-      return res.status(401).json({ error: 'Token do Google inválido.' });
+    } catch (error: any) {
+      console.error('Erro no login com Google:', {
+        name: error?.name,
+        message: error?.message,
+        code: error?.code,
+        stack: error?.stack,
+      });
+
+      return res.status(401).json({
+        error: 'Token do Google inválido.',
+        details: error?.message ?? String(error),
+      });
     }
   }
 }

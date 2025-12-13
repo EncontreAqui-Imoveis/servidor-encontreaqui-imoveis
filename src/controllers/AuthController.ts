@@ -17,6 +17,7 @@ function buildUserPayload(row: any, profileType: ProfileType) {
     city: row.city ?? null,
     state: row.state ?? null,
     role: profileType,
+    broker_status: row.broker_status ?? null,
   };
 }
 
@@ -147,8 +148,9 @@ class AuthController {
       return res.status(400).json({ error: 'idToken do Google é obrigatório.' });
     }
 
-    const normalizedProfile: ProfileType =
-      profileType === 'broker' ? 'broker' : 'client';
+    const requestedProfile: ProfileType | 'auto' =
+      profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
+    const autoMode = requestedProfile === 'auto';
 
     try {
       const decoded = await admin.auth().verifyIdToken(idToken);
@@ -160,8 +162,10 @@ class AuthController {
         return res.status(400).json({ error: 'Email não disponível no token do Google.' });
       }
 
+      let requiresProfileChoice = false;
       const [existingRows] = await connection.query<RowDataPacket[]>(
-        `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id
+        `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, u.role,
+                b.id AS broker_id, b.status AS broker_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id
           WHERE u.firebase_uid = ? OR u.email = ?
@@ -178,8 +182,10 @@ class AuthController {
       let hasBrokerRow = false;
       let createdNow = false;
       let blockedBrokerRequest = false;
-      let effectiveProfile: ProfileType = normalizedProfile;
+      let effectiveProfile: ProfileType = requestedProfile === 'broker' ? 'broker' : 'client';
       let requiresDocuments = false;
+      let roleLocked = false;
+      let brokerStatus: string | null = null;
 
       if (existingRows.length > 0) {
         const row = existingRows[0];
@@ -190,50 +196,103 @@ class AuthController {
         city = row.city ?? null;
         state = row.state ?? null;
         hasBrokerRow = !!row.broker_id;
-        effectiveProfile = hasBrokerRow ? 'broker' : 'client';
-
-        // NUNCA promove automaticamente um cliente existente para corretor via login Google.
-        if (normalizedProfile === 'broker' && !hasBrokerRow) {
-          blockedBrokerRequest = true;
-          requiresDocuments = true;
-          effectiveProfile = 'client';
-        }
+        brokerStatus = row.broker_status ?? null;
+        effectiveProfile = hasBrokerRow ? 'broker' : row.role === 'broker' ? 'broker' : 'client';
+        blockedBrokerRequest = brokerStatus === 'rejected';
 
         if (!row.firebase_uid) {
           await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
         }
       } else {
+        if (autoMode) {
+          requiresProfileChoice = true;
+        }
+        const initialRole: ProfileType = requestedProfile === 'broker' ? 'broker' : 'client';
         const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
-          [uid, email, displayName],
+          'INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)',
+          [uid, email, displayName, initialRole],
         );
         userId = result.insertId;
         createdNow = true;
-        effectiveProfile = 'client';
-        if (normalizedProfile === 'broker') {
+        effectiveProfile = initialRole;
+        if (initialRole === 'broker') {
+          await connection.query(
+            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+            [userId, null, 'pending_verification'],
+          );
+          brokerStatus = 'pending_verification';
+          hasBrokerRow = true;
           requiresDocuments = true;
         }
       }
 
-      // Não cria broker automaticamente; exige envio de documentos.
-      if (normalizedProfile === 'broker') {
-        requiresDocuments = true;
-        if (!hasBrokerRow) {
+      if (!autoMode && requestedProfile === 'broker') {
+        if (blockedBrokerRequest) {
           effectiveProfile = 'client';
+          roleLocked = true;
+        } else {
+          effectiveProfile = 'broker';
+          roleLocked = false;
+          await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveProfile, userId]);
+          if (!hasBrokerRow) {
+            await connection.query(
+              'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+              [userId, null, 'pending_verification'],
+            );
+            brokerStatus = 'pending_verification';
+          } else {
+            brokerStatus = brokerStatus ?? 'pending_verification';
+          }
+          requiresDocuments = (brokerStatus ?? '') !== 'approved';
         }
+      } else if (!autoMode && requestedProfile === 'client') {
+        effectiveProfile = 'client';
+        roleLocked = false;
+        await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveProfile, userId]);
+      } else if (autoMode) {
+        roleLocked = true;
+        requiresDocuments =
+          effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved';
+      }
+
+      const needsCompletion = !hasCompleteProfile({ phone, city, state, address });
+      requiresDocuments =
+        requiresDocuments ||
+        (effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved');
+
+      if (autoMode && requiresProfileChoice) {
+        return res.json({
+          requiresProfileChoice: true,
+          isNewUser: true,
+          roleLocked,
+          needsCompletion: true,
+          requiresDocuments,
+          pending: { email, name: displayName },
+        });
       }
 
       const token = signToken(userId, effectiveProfile);
 
       return res.json({
         user: buildUserPayload(
-          { id: userId, name: userName, email, phone, address, city, state },
+          {
+            id: userId,
+            name: userName,
+            email,
+            phone,
+            address,
+            city,
+            state,
+            broker_status: brokerStatus,
+          },
           effectiveProfile,
         ),
         token,
-        needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+        needsCompletion,
         requiresDocuments,
         blockedBrokerRequest,
+        roleLocked,
+        isNewUser: createdNow,
       });
     } catch (error) {
       console.error('Erro no login com Google:', error);

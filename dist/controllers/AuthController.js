@@ -18,6 +18,7 @@ function buildUserPayload(row, profileType) {
         city: row.city ?? null,
         state: row.state ?? null,
         role: profileType,
+        broker_status: row.broker_status ?? null,
     };
 }
 function hasCompleteProfile(row) {
@@ -99,7 +100,8 @@ class AuthController {
         if (!idToken) {
             return res.status(400).json({ error: 'idToken do Google é obrigatório.' });
         }
-        const normalizedProfile = profileType === 'broker' ? 'broker' : 'client';
+        const requestedProfile = profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
+        const autoMode = requestedProfile === 'auto';
         try {
             const decoded = await firebaseAdmin_1.default.auth().verifyIdToken(idToken);
             const uid = decoded.uid;
@@ -108,7 +110,9 @@ class AuthController {
             if (!email) {
                 return res.status(400).json({ error: 'Email não disponível no token do Google.' });
             }
-            const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid, b.id AS broker_id
+            let requiresProfileChoice = false;
+            const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid,
+                b.id AS broker_id, b.status AS broker_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id
           WHERE u.firebase_uid = ? OR u.email = ?
@@ -122,8 +126,10 @@ class AuthController {
             let hasBrokerRow = false;
             let createdNow = false;
             let blockedBrokerRequest = false;
-            let effectiveProfile = normalizedProfile;
+            let effectiveProfile = 'client';
             let requiresDocuments = false;
+            let roleLocked = false;
+            let brokerStatus = null;
             if (existingRows.length > 0) {
                 const row = existingRows[0];
                 userId = row.id;
@@ -133,45 +139,108 @@ class AuthController {
                 city = row.city ?? null;
                 state = row.state ?? null;
                 hasBrokerRow = !!row.broker_id;
-                effectiveProfile = hasBrokerRow ? 'broker' : 'client';
-                // NUNCA promove automaticamente um cliente existente para corretor via login Google.
-                if (normalizedProfile === 'broker' && !hasBrokerRow) {
-                    blockedBrokerRequest = true;
-                    requiresDocuments = true;
+                brokerStatus = row.broker_status ?? null;
+                blockedBrokerRequest = brokerStatus === 'rejected';
+                if (hasBrokerRow && !blockedBrokerRequest) {
+                    effectiveProfile = 'broker';
+                }
+                else {
                     effectiveProfile = 'client';
+                    requiresDocuments = hasBrokerRow;
                 }
                 if (!row.firebase_uid) {
                     await connection_1.default.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
                 }
             }
             else {
+                if (autoMode) {
+                    requiresProfileChoice = true;
+                }
                 const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, displayName]);
                 userId = result.insertId;
                 createdNow = true;
-                effectiveProfile = 'client';
-                if (normalizedProfile === 'broker') {
+                effectiveProfile = requestedProfile === 'broker' ? 'broker' : 'client';
+                if (requestedProfile === 'broker') {
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_verification']);
+                    brokerStatus = 'pending_verification';
+                    hasBrokerRow = true;
                     requiresDocuments = true;
                 }
             }
-            // Não cria broker automaticamente; exige envio de documentos.
-            if (normalizedProfile === 'broker') {
-                requiresDocuments = true;
-                if (!hasBrokerRow) {
+            if (!autoMode && requestedProfile === 'broker') {
+                if (blockedBrokerRequest) {
+                    effectiveProfile = 'client';
+                    roleLocked = true;
+                    requiresDocuments = true;
+                }
+                else {
+                    effectiveProfile = 'broker';
+                    roleLocked = false;
+                    if (!hasBrokerRow) {
+                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_verification']);
+                        brokerStatus = 'pending_verification';
+                        hasBrokerRow = true;
+                    }
+                    requiresDocuments = (brokerStatus ?? '') !== 'approved';
+                }
+            }
+            else if (!autoMode && requestedProfile === 'client') {
+                effectiveProfile = blockedBrokerRequest ? 'client' : effectiveProfile;
+                roleLocked = blockedBrokerRequest;
+            }
+            else if (autoMode) {
+                roleLocked = blockedBrokerRequest || effectiveProfile === 'broker';
+                requiresDocuments =
+                    effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved';
+                if (effectiveProfile === 'broker' && blockedBrokerRequest) {
                     effectiveProfile = 'client';
                 }
             }
+            const needsCompletion = !hasCompleteProfile({ phone, city, state, address });
+            requiresDocuments =
+                requiresDocuments ||
+                    (effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved');
+            if (autoMode && requiresProfileChoice) {
+                return res.json({
+                    requiresProfileChoice: true,
+                    isNewUser: true,
+                    roleLocked,
+                    needsCompletion: true,
+                    requiresDocuments,
+                    pending: { email, name: displayName },
+                });
+            }
             const token = signToken(userId, effectiveProfile);
             return res.json({
-                user: buildUserPayload({ id: userId, name: userName, email, phone, address, city, state }, effectiveProfile),
+                user: buildUserPayload({
+                    id: userId,
+                    name: userName,
+                    email,
+                    phone,
+                    address,
+                    city,
+                    state,
+                    broker_status: brokerStatus,
+                }, effectiveProfile),
                 token,
-                needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+                needsCompletion,
                 requiresDocuments,
                 blockedBrokerRequest,
+                roleLocked,
+                isNewUser: createdNow,
             });
         }
         catch (error) {
-            console.error('Erro no login com Google:', error);
-            return res.status(401).json({ error: 'Token do Google inválido.' });
+            console.error('Erro no login com Google:', {
+                name: error?.name,
+                message: error?.message,
+                code: error?.code,
+                stack: error?.stack,
+            });
+            return res.status(401).json({
+                error: 'Token do Google inválido.',
+                details: error?.message ?? String(error),
+            });
         }
     }
 }

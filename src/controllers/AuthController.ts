@@ -197,8 +197,13 @@ class AuthController {
         state = row.state ?? null;
         hasBrokerRow = !!row.broker_id;
         brokerStatus = row.broker_status ?? null;
-        effectiveProfile = hasBrokerRow ? 'broker' : 'client';
         blockedBrokerRequest = brokerStatus === 'rejected';
+        if (hasBrokerRow && !blockedBrokerRequest) {
+          effectiveProfile = 'broker';
+        } else {
+          effectiveProfile = 'client';
+          requiresDocuments = hasBrokerRow;
+        }
 
         if (!row.firebase_uid) {
           await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
@@ -207,15 +212,14 @@ class AuthController {
         if (autoMode) {
           requiresProfileChoice = true;
         }
-        const initialRole: ProfileType = requestedProfile === 'broker' ? 'broker' : 'client';
         const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)',
-          [uid, email, displayName, initialRole],
+          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
+          [uid, email, displayName],
         );
         userId = result.insertId;
         createdNow = true;
-        effectiveProfile = initialRole;
-        if (initialRole === 'broker') {
+        effectiveProfile = requestedProfile === 'broker' ? 'broker' : 'client';
+        if (requestedProfile === 'broker') {
           await connection.query(
             'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
             [userId, null, 'pending_verification'],
@@ -234,25 +238,26 @@ class AuthController {
         } else {
           effectiveProfile = 'broker';
           roleLocked = false;
-          await connection.query('UPDATE users SET role = ? WHERE id = ?', [effectiveProfile, userId]).catch(() => {});
           if (!hasBrokerRow) {
             await connection.query(
               'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
               [userId, null, 'pending_verification'],
             );
             brokerStatus = 'pending_verification';
-          } else {
-            brokerStatus = brokerStatus ?? 'pending_verification';
+            hasBrokerRow = true;
           }
           requiresDocuments = (brokerStatus ?? '') !== 'approved';
         }
       } else if (!autoMode && requestedProfile === 'client') {
-        effectiveProfile = 'client';
-        roleLocked = false;
-      } else if (autoMode) {
+        effectiveProfile = blockedBrokerRequest ? 'client' : effectiveProfile;
         roleLocked = blockedBrokerRequest;
+      } else if (autoMode) {
+        roleLocked = blockedBrokerRequest || effectiveProfile === 'broker';
         requiresDocuments =
           effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved';
+        if (effectiveProfile === 'broker' && blockedBrokerRequest) {
+          effectiveProfile = 'client';
+        }
       }
 
       const needsCompletion = !hasCompleteProfile({ phone, city, state, address });

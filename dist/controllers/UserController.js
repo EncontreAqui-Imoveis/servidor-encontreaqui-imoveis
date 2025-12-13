@@ -284,22 +284,29 @@ class UserController {
                     user.broker_status = 'pending_verification';
                 }
             }
-            // Define papel efetivo:
-            // - Se já existe role, mantemos (não promove/downgrade)
-            // - Se não existe role (caso legado), usamos a escolha explícita
+            // Papel efetivo:
+            // - Se solicitou broker explicitamente, promove/atualiza para broker.
+            // - Se solicitou client explicitamente e não tinha role, fixa como client.
+            // - Modo auto mantém papel existente.
             let effectiveRole = user.role ?? 'client';
             let roleLocked = true;
-            if (!user.role && !autoMode) {
-                effectiveRole = requestedRole === 'broker' ? 'broker' : 'client';
+            if (!autoMode && requestedRole === 'broker') {
+                effectiveRole = 'broker';
                 roleLocked = false;
                 await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
-                if (effectiveRole === 'broker') {
-                    const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [user.id]);
-                    if (brokerRows.length === 0) {
-                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
-                        user.broker_status = 'pending_verification';
-                    }
+                const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [user.id]);
+                if (brokerRows.length === 0) {
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
+                    user.broker_status = 'pending_verification';
                 }
+                else {
+                    user.broker_status = brokerRows[0].status;
+                }
+            }
+            else if (!autoMode && requestedRole === 'client' && !user.role) {
+                effectiveRole = 'client';
+                roleLocked = false;
+                await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
             }
             // Se papel final é corretor, garanta status carregado
             if (effectiveRole === 'broker') {

@@ -300,24 +300,11 @@ class AuthController {
         isNewUser: createdNow,
       });
     } catch (error: any) {
-      console.error('Erro no login com Google:', {
-        name: error?.name,
-        message: error?.message,
-        code: error?.code,
-        stack: error?.stack,
-      });
-
-      const code = typeof error?.code === 'string' ? error.code : '';
-      if (code.startsWith('auth/')) {
-        return res.status(401).json({
-          error: 'Token do Google inválido.',
-          details: error?.message ?? String(error),
-        });
-      }
-
-      return res.status(500).json({
-        error: 'Erro interno ao processar login com Google.',
-        details: error?.message ?? String(error),
+      console.error('Google auth error:', error);
+      const details = error?.sqlMessage || error?.message || String(error);
+      return res.status(500).json({ 
+        error: 'Erro ao autenticar com Google.', 
+        details 
       });
     }
   }

@@ -237,8 +237,15 @@ class AuthController {
                 code: error?.code,
                 stack: error?.stack,
             });
-            return res.status(401).json({
-                error: 'Token do Google inválido.',
+            const code = typeof error?.code === 'string' ? error.code : '';
+            if (code.startsWith('auth/')) {
+                return res.status(401).json({
+                    error: 'Token do Google inválido.',
+                    details: error?.message ?? String(error),
+                });
+            }
+            return res.status(500).json({
+                error: 'Erro interno ao processar login com Google.',
                 details: error?.message ?? String(error),
             });
         }

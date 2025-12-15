@@ -162,6 +162,22 @@ class AuthController {
         return res.status(400).json({ error: 'Email não disponível no token do Google.' });
       }
 
+      if (autoMode) {
+        const [existing] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM users WHERE firebase_uid = ? OR email = ? LIMIT 1',
+          [uid, email],
+        );
+        const isNewUser = existing.length === 0;
+        return res.json({
+          requiresProfileChoice: true,
+          pending: { email, name: displayName },
+          isNewUser,
+          roleLocked: false,
+          needsCompletion: true,
+          requiresDocuments: false,
+        });
+      }
+
       let requiresProfileChoice = false;
       const [existingRows] = await connection.query<RowDataPacket[]>(
         `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid,

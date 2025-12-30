@@ -262,7 +262,21 @@ async function sendPushNotifications(payload: PushNotificationPayload) {
         title: 'Mais Imoveis',
         body: payload.message,
       },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'default_channel',
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: 'default',
+          },
+        },
+      },
       data: {
+        message: payload.message,
         related_entity_type: payload.relatedEntityType,
         related_entity_id: payload.relatedEntityId != null ? String(payload.relatedEntityId) : '',
       },

@@ -50,6 +50,9 @@ const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
 interface PropertyRow extends RowDataPacket {
   id: number;
   broker_id: number;
+  broker_name?: string | null;
+  broker_phone?: string | null;
+  broker_email?: string | null;
   title: string;
   description: string;
   type: string;
@@ -219,6 +222,9 @@ function mapProperty(row: PropertyAggregateRow) {
     video_url: row.video_url ?? null,
     images,
     agency,
+    broker_name: row.broker_name ?? null,
+    broker_phone: row.broker_phone ?? null,
+    broker_email: row.broker_email ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -244,9 +250,13 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
+            ANY_VALUE(u.email) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
@@ -876,9 +886,13 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
+            ANY_VALUE(u.email) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           ${where}

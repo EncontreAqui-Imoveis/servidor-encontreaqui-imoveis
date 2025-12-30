@@ -238,6 +238,7 @@ class BrokerController {
 
             const dataQuery = `
                 SELECT
+                    p.broker_id,
                     p.id,
                     p.title,
                     p.description,
@@ -270,17 +271,21 @@ class BrokerController {
                     p.valor_iptu,
                     p.video_url,
                     p.created_at,
+                    u.name AS broker_name,
+                    u.phone AS broker_phone,
+                    u.email AS broker_email,
                     GROUP_CONCAT(pi.image_url ORDER BY pi.id) AS images
                 FROM properties p
+                LEFT JOIN users u ON u.id = p.broker_id
                 LEFT JOIN property_images pi ON p.id = pi.property_id
                 WHERE p.broker_id = ?
                 GROUP BY
-                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.code,
+                    p.id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.code,
                     p.address, p.quadra, p.lote, p.numero, p.bairro, p.complemento, p.tipo_lote,
                     p.city, p.state, p.bedrooms, p.bathrooms, p.area_construida, p.area_terreno,
                     p.garage_spots, p.has_wifi, p.tem_piscina, p.tem_energia_solar, p.tem_automacao,
                     p.tem_ar_condicionado, p.eh_mobiliada, p.valor_condominio, p.valor_iptu,
-                    p.video_url, p.created_at
+                    p.video_url, p.created_at, u.name, u.phone, u.email
                 ORDER BY p.created_at DESC
                 LIMIT ? OFFSET ?
             `;

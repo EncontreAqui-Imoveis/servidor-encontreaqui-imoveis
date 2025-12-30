@@ -5,6 +5,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import { uploadToCloudinary } from '../config/cloudinary';
 import { notifyAdmins } from '../services/notificationService';
+import admin from '../config/firebaseAdmin';
 import type AuthRequest from '../middlewares/auth';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
@@ -138,6 +139,19 @@ interface PropertyDetailRow extends RowDataPacket {
   broker_phone?: string | null;
 }
 
+interface DeviceTokenRow extends RowDataPacket {
+  fcm_token: string;
+}
+
+type PushNotificationPayload = {
+  message: string;
+  recipientIds: number[] | null;
+  relatedEntityType: string;
+  relatedEntityId: number | null;
+};
+
+const PUSH_BATCH_LIMIT = 500;
+
 function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') {
     return null;
@@ -201,6 +215,77 @@ function mapAdminProperty(row: PropertyDetailRow) {
     created_at: row.created_at ? String(row.created_at) : null,
     updated_at: row.updated_at ? String(row.updated_at) : null,
   };
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function fetchDeviceTokens(recipientIds: number[] | null): Promise<string[]> {
+  const params: Array<number> = [];
+  let sql = 'SELECT DISTINCT fcm_token FROM user_device_tokens';
+
+  if (recipientIds && recipientIds.length > 0) {
+    const placeholders = recipientIds.map(() => '?').join(', ');
+    sql += ` WHERE user_id IN (${placeholders})`;
+    params.push(...recipientIds);
+  }
+
+  const [rows] = await connection.query<DeviceTokenRow[]>(sql, params);
+  return (rows ?? [])
+    .map((row) => (row.fcm_token ?? '').trim())
+    .filter((token) => token.length > 0);
+}
+
+async function removeInvalidTokens(tokens: string[]) {
+  if (tokens.length === 0) {
+    return;
+  }
+  await connection.query('DELETE FROM user_device_tokens WHERE fcm_token IN (?)', [tokens]);
+}
+
+async function sendPushNotifications(payload: PushNotificationPayload) {
+  const tokens = await fetchDeviceTokens(payload.recipientIds);
+  if (tokens.length === 0) {
+    return;
+  }
+
+  const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
+  for (const batch of batches) {
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens: batch,
+      notification: {
+        title: 'Mais Imoveis',
+        body: payload.message,
+      },
+      data: {
+        related_entity_type: payload.relatedEntityType,
+        related_entity_id: payload.relatedEntityId != null ? String(payload.relatedEntityId) : '',
+      },
+    });
+
+    const invalidTokens: string[] = [];
+    response.responses.forEach((item, index) => {
+      if (item.success) {
+        return;
+      }
+      const code = item.error?.code ?? '';
+      if (
+        code === 'messaging/invalid-registration-token' ||
+        code === 'messaging/registration-token-not-registered'
+      ) {
+        invalidTokens.push(batch[index]);
+      }
+    });
+
+    if (invalidTokens.length > 0) {
+      await removeInvalidTokens(invalidTokens);
+    }
+  }
 }
 
 class AdminController {
@@ -405,36 +490,47 @@ class AdminController {
       const offset = (page - 1) * limit;
 
       const searchTerm = String(req.query.search ?? '').trim();
+      const includeBrokers = String(req.query.includeBrokers ?? '').toLowerCase() === 'true';
       const sortByParam = String(req.query.sortBy ?? '').toLowerCase();
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
       const sortMap: Record<string, string> = {
-        name: 'name',
-        created_at: 'created_at',
+        name: 'u.name',
+        email: 'u.email',
+        created_at: 'u.created_at',
       };
-      const sortBy = sortMap[sortByParam] ?? 'created_at';
+      const sortBy = sortMap[sortByParam] ?? 'u.created_at';
 
       const whereClauses: string[] = [];
       const params: Array<string | number> = [];
 
-      whereClauses.push('id NOT IN (SELECT id FROM brokers)');
+      if (!includeBrokers) {
+        whereClauses.push('b.id IS NULL');
+      }
 
       if (searchTerm) {
-        whereClauses.push('(name LIKE ? OR email LIKE ?)');
+        whereClauses.push('(u.name LIKE ? OR u.email LIKE ?)');
         params.push(`%${searchTerm}%`, `%${searchTerm}%`);
       }
 
       const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
       const [totalRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS total FROM users ${whereSql}`,
+        `SELECT COUNT(*) AS total FROM users u LEFT JOIN brokers b ON u.id = b.id ${whereSql}`,
         params,
       );
       const total = totalRows[0]?.total ?? 0;
 
       const [rows] = await connection.query<RowDataPacket[]>(
         `
-          SELECT id, name, email, phone, created_at
-          FROM users
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.created_at,
+            CASE WHEN b.id IS NULL THEN 'client' ELSE 'broker' END AS role
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
           ${whereSql}
           ORDER BY ${sortBy} ${sortOrder}
           LIMIT ? OFFSET ?
@@ -1555,6 +1651,7 @@ export async function sendNotification(req: Request, res: Response) {
       return res.status(400).json({ error: 'A mensagem ? obrigat?ria.' });
     }
 
+    const trimmedMessage = message.trim();
     const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'other']);
     const entityType = allowedTypes.has(String(related_entity_type)) ? String(related_entity_type) : 'other';
     const entityId = related_entity_id != null ? Number(related_entity_id) : null;
@@ -1579,7 +1676,7 @@ export async function sendNotification(req: Request, res: Response) {
     }
 
     const values = normalizedRecipients.map((rid) => [
-      message.trim(),
+      trimmedMessage,
       entityType,
       entityId,
       rid,
@@ -1592,6 +1689,22 @@ export async function sendNotification(req: Request, res: Response) {
       `,
       [values]
     );
+
+    const sendToAll = normalizedRecipients.some((rid) => rid === null);
+    const pushRecipients = sendToAll
+      ? null
+      : normalizedRecipients.filter((rid): rid is number => typeof rid === 'number');
+
+    try {
+      await sendPushNotifications({
+        message: trimmedMessage,
+        recipientIds: pushRecipients,
+        relatedEntityType: entityType,
+        relatedEntityId: entityId,
+      });
+    } catch (pushError) {
+      console.error('Erro ao enviar push de notificacao:', pushError);
+    }
 
     return res.status(201).json({ message: 'Notifica??o enviada com sucesso.' });
   } catch (error) {

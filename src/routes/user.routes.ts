@@ -17,5 +17,7 @@ userRoutes.post('/favorites/:propertyId', authMiddleware, (req, res) => userCont
 userRoutes.delete('/favorites/:propertyId', authMiddleware, (req, res) => userController.removeFavorite(req as any, res));
 
 userRoutes.get('/notifications', authMiddleware, (req, res) => userController.listNotifications(req as any, res));
+userRoutes.post('/device-token', authMiddleware, (req, res) => userController.registerDeviceToken(req as any, res));
+userRoutes.delete('/device-token', authMiddleware, (req, res) => userController.unregisterDeviceToken(req as any, res));
 
 export default userRoutes;

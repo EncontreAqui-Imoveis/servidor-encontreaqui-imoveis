@@ -187,6 +187,21 @@ const DDL_STATEMENTS: DDLStatement[] = [
     `,
   },
   {
+    name: 'user_device_tokens',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_device_tokens (
+        id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        fcm_token VARCHAR(255) NOT NULL UNIQUE,
+        platform VARCHAR(50) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_device_tokens_user (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+    `,
+  },
+  {
     name: 'favoritos',
     sql: `
       CREATE TABLE IF NOT EXISTS favoritos (

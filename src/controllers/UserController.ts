@@ -736,6 +736,66 @@ class UserController {
     }
   }
 
+  async registerDeviceToken(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    const { token, platform } = req.body ?? {};
+    const trimmedToken = typeof token === 'string' ? token.trim() : '';
+    const trimmedPlatform = typeof platform === 'string' ? platform.trim() : null;
+
+    if (!trimmedToken) {
+      return res.status(400).json({ error: 'Token do dispositivo e obrigatorio.' });
+    }
+
+    try {
+      await connection.query(
+        `
+          INSERT INTO user_device_tokens (user_id, fcm_token, platform)
+          VALUES (?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            platform = VALUES(platform),
+            updated_at = CURRENT_TIMESTAMP
+        `,
+        [userId, trimmedToken, trimmedPlatform],
+      );
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao registrar token do dispositivo:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async unregisterDeviceToken(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    const tokenFromQuery = typeof req.query.token === 'string' ? req.query.token : null;
+    const tokenFromBody = typeof req.body?.token === 'string' ? req.body.token : null;
+    const trimmedToken = (tokenFromBody ?? tokenFromQuery ?? '').trim();
+
+    if (!trimmedToken) {
+      return res.status(400).json({ error: 'Token do dispositivo e obrigatorio.' });
+    }
+
+    try {
+      await connection.query(
+        'DELETE FROM user_device_tokens WHERE user_id = ? AND fcm_token = ?',
+        [userId, trimmedToken],
+      );
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao remover token do dispositivo:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
 }
 
 export const userController = new UserController();

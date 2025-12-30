@@ -164,9 +164,11 @@ class AuthController {
 
       const [existingRows] = await connection.query<RowDataPacket[]>(
         `SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid,
-                b.id AS broker_id, b.status AS broker_status
+                b.id AS broker_id, b.status AS broker_status,
+                bd.status AS broker_documents_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id
+           LEFT JOIN broker_documents bd ON u.id = bd.broker_id
           WHERE u.firebase_uid = ? OR u.email = ?
           LIMIT 1`,
         [uid, email],
@@ -185,6 +187,8 @@ class AuthController {
       let requiresDocuments = false;
       let roleLocked = false;
       let brokerStatus: string | null = null;
+      let brokerDocumentsStatus: string | null = null;
+      let hasBrokerDocuments = false;
 
       if (existingRows.length > 0) {
         const row = existingRows[0];
@@ -196,6 +200,8 @@ class AuthController {
         state = row.state ?? null;
         hasBrokerRow = !!row.broker_id;
         brokerStatus = row.broker_status ?? null;
+        brokerDocumentsStatus = row.broker_documents_status ?? null;
+        hasBrokerDocuments = brokerDocumentsStatus != null;
         blockedBrokerRequest = brokerStatus === 'rejected';
         if (hasBrokerRow && !blockedBrokerRequest) {
           effectiveProfile = 'broker';
@@ -267,9 +273,10 @@ class AuthController {
       }
 
       const needsCompletion = !hasCompleteProfile({ phone, city, state, address });
-      requiresDocuments =
-        requiresDocuments ||
-        (effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved');
+      const brokerDocsRequired =
+        effectiveProfile === 'broker' &&
+        (!hasBrokerDocuments || brokerDocumentsStatus === 'rejected');
+      requiresDocuments = brokerDocsRequired;
 
       const token = signToken(userId, effectiveProfile);
 

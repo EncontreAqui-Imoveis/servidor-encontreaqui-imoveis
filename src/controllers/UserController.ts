@@ -724,7 +724,7 @@ class UserController {
         SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
         FROM notifications
         WHERE recipient_id = ?
-          OR recipient_id IS NULL
+          AND related_entity_type = 'other'
         ORDER BY created_at DESC
       `;
 
@@ -751,10 +751,10 @@ class UserController {
     try {
       const [result] = await connection.query<ResultSetHeader>(
         `
-          UPDATE notifications
-          SET is_read = 1
+          DELETE FROM notifications
           WHERE id = ?
-            AND (recipient_id = ? OR recipient_id IS NULL)
+            AND recipient_id = ?
+            AND related_entity_type = 'other'
         `,
         [notificationId, userId],
       );
@@ -765,7 +765,7 @@ class UserController {
 
       return res.status(204).send();
     } catch (error) {
-      console.error('Erro ao marcar notificacao como lida:', error);
+      console.error('Erro ao remover notificacao:', error);
       return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
     }
   }
@@ -780,17 +780,16 @@ class UserController {
     try {
       await connection.query(
         `
-          UPDATE notifications
-          SET is_read = 1
+          DELETE FROM notifications
           WHERE recipient_id = ?
-            OR recipient_id IS NULL
+            AND related_entity_type = 'other'
         `,
         [userId],
       );
 
       return res.status(204).send();
     } catch (error) {
-      console.error('Erro ao marcar todas as notificacoes como lidas:', error);
+      console.error('Erro ao limpar notificacoes:', error);
       return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
     }
   }

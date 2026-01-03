@@ -150,6 +150,13 @@ type PushNotificationPayload = {
   relatedEntityId: number | null;
 };
 
+type PushNotificationResult = {
+  requested: number;
+  success: number;
+  failure: number;
+  errorCodes: string[];
+};
+
 const PUSH_BATCH_LIMIT = 500;
 
 function toNullableNumber(value: unknown): number | null {
@@ -248,10 +255,19 @@ async function removeInvalidTokens(tokens: string[]) {
   await connection.query('DELETE FROM user_device_tokens WHERE fcm_token IN (?)', [tokens]);
 }
 
-async function sendPushNotifications(payload: PushNotificationPayload) {
+async function sendPushNotifications(
+  payload: PushNotificationPayload,
+): Promise<PushNotificationResult> {
   const tokens = await fetchDeviceTokens(payload.recipientIds);
+  const errorCodes = new Set<string>();
+  const summary: PushNotificationResult = {
+    requested: tokens.length,
+    success: 0,
+    failure: 0,
+    errorCodes: [],
+  };
   if (tokens.length === 0) {
-    return;
+    return summary;
   }
 
   const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
@@ -288,6 +304,9 @@ async function sendPushNotifications(payload: PushNotificationPayload) {
         return;
       }
       const code = item.error?.code ?? '';
+      if (code) {
+        errorCodes.add(code);
+      }
       if (
         code === 'messaging/invalid-registration-token' ||
         code === 'messaging/registration-token-not-registered'
@@ -309,7 +328,13 @@ async function sendPushNotifications(payload: PushNotificationPayload) {
     if (invalidTokens.length > 0) {
       await removeInvalidTokens(invalidTokens);
     }
+
+    summary.success += response.successCount;
+    summary.failure += response.failureCount;
   }
+
+  summary.errorCodes = Array.from(errorCodes);
+  return summary;
 }
 
 class AdminController {
@@ -1739,8 +1764,9 @@ export async function sendNotification(req: Request, res: Response) {
 
     const pushRecipients = sendToAll ? null : notificationRecipients;
 
+    let pushSummary: PushNotificationResult | null = null;
     try {
-      await sendPushNotifications({
+      pushSummary = await sendPushNotifications({
         message: trimmedMessage,
         recipientIds: pushRecipients,
         relatedEntityType: entityType,
@@ -1750,7 +1776,9 @@ export async function sendNotification(req: Request, res: Response) {
       console.error('Erro ao enviar push de notificacao:', pushError);
     }
 
-    return res.status(201).json({ message: 'Notifica??o enviada com sucesso.' });
+    return res
+      .status(201)
+      .json({ message: 'Notifica??o enviada com sucesso.', push: pushSummary });
   } catch (error) {
     console.error('Erro ao enviar notifica??o:', error);
     return res.status(500).json({ error: 'Erro interno do servidor.' });

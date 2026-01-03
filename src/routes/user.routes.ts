@@ -17,6 +17,8 @@ userRoutes.post('/favorites/:propertyId', authMiddleware, (req, res) => userCont
 userRoutes.delete('/favorites/:propertyId', authMiddleware, (req, res) => userController.removeFavorite(req as any, res));
 
 userRoutes.get('/notifications', authMiddleware, (req, res) => userController.listNotifications(req as any, res));
+userRoutes.patch('/notifications/:id/read', authMiddleware, (req, res) => userController.markNotificationRead(req as any, res));
+userRoutes.post('/notifications/read-all', authMiddleware, (req, res) => userController.markAllNotificationsRead(req as any, res));
 userRoutes.post('/device-token', authMiddleware, (req, res) => userController.registerDeviceToken(req as any, res));
 userRoutes.delete('/device-token', authMiddleware, (req, res) => userController.unregisterDeviceToken(req as any, res));
 

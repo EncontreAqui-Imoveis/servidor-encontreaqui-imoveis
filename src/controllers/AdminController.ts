@@ -296,6 +296,16 @@ async function sendPushNotifications(payload: PushNotificationPayload) {
       }
     });
 
+    if (response.failureCount > 0) {
+      const errorCodes = response.responses
+        .map((item) => item.error?.code)
+        .filter((code): code is string => Boolean(code));
+      console.warn('Falhas ao enviar push:', {
+        failures: response.failureCount,
+        codes: errorCodes,
+      });
+    }
+
     if (invalidTokens.length > 0) {
       await removeInvalidTokens(invalidTokens);
     }
@@ -1689,25 +1699,45 @@ export async function sendNotification(req: Request, res: Response) {
       normalizedRecipients.push(null);
     }
 
-    const values = normalizedRecipients.map((rid) => [
+    const sendToAll = normalizedRecipients.some((rid) => rid === null);
+    let notificationRecipients: number[] = [];
+    if (sendToAll) {
+      const [userRows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM users'
+      );
+      notificationRecipients = (userRows ?? [])
+        .map((row) => Number(row.id))
+        .filter((id) => Number.isFinite(id));
+    } else {
+      notificationRecipients = normalizedRecipients.filter(
+        (rid): rid is number => typeof rid === 'number'
+      );
+    }
+
+    if (notificationRecipients.length === 0) {
+      return res.status(404).json({ error: 'Nenhum destinatario encontrado.' });
+    }
+
+    const values = notificationRecipients.map((rid) => [
       trimmedMessage,
       entityType,
       entityId,
       rid,
     ]);
 
-    await connection.query(
-      `
-        INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
-        VALUES ?
-      `,
-      [values]
-    );
+    const batchSize = 500;
+    for (let i = 0; i < values.length; i += batchSize) {
+      const chunk = values.slice(i, i + batchSize);
+      await connection.query(
+        `
+          INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
+          VALUES ?
+        `,
+        [chunk]
+      );
+    }
 
-    const sendToAll = normalizedRecipients.some((rid) => rid === null);
-    const pushRecipients = sendToAll
-      ? null
-      : normalizedRecipients.filter((rid): rid is number => typeof rid === 'number');
+    const pushRecipients = sendToAll ? null : notificationRecipients;
 
     try {
       await sendPushNotifications({

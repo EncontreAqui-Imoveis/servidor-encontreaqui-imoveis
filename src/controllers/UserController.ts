@@ -721,10 +721,10 @@ class UserController {
 
     try {
       const sql = `
-        SELECT id, message, related_entity_type, related_entity_id, created_at
+        SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
         FROM notifications
         WHERE recipient_id = ?
-          OR (recipient_id IS NULL AND related_entity_type = 'other')
+          OR recipient_id IS NULL
         ORDER BY created_at DESC
       `;
 
@@ -732,6 +732,65 @@ class UserController {
       return res.status(200).json(rows);
     } catch (error) {
       console.error('Erro ao buscar notificacoes:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+    }
+  }
+
+  async markNotificationRead(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    const notificationId = Number(req.params.id);
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    if (Number.isNaN(notificationId)) {
+      return res.status(400).json({ error: 'Identificador de notificacao invalido.' });
+    }
+
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        `
+          UPDATE notifications
+          SET is_read = 1
+          WHERE id = ?
+            AND (recipient_id = ? OR recipient_id IS NULL)
+        `,
+        [notificationId, userId],
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Notificacao nao encontrada.' });
+      }
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao marcar notificacao como lida:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+    }
+  }
+
+  async markAllNotificationsRead(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    try {
+      await connection.query(
+        `
+          UPDATE notifications
+          SET is_read = 1
+          WHERE recipient_id = ?
+            OR recipient_id IS NULL
+        `,
+        [userId],
+      );
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao marcar todas as notificacoes como lidas:', error);
       return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
     }
   }

@@ -33,6 +33,23 @@ function signToken(id: number, role: ProfileType) {
   );
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout while waiting for ${label}`));
+    }, ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 class AuthController {
   async register(req: Request, res: Response) {
     const {
@@ -153,7 +170,11 @@ class AuthController {
     const autoMode = requestedProfile === 'auto';
 
     try {
-      const decoded = await admin.auth().verifyIdToken(idToken);
+      const decoded = await withTimeout(
+        admin.auth().verifyIdToken(idToken),
+        8000,
+        'firebase token verification',
+      );
       const uid = decoded.uid;
       const email = decoded.email;
       const displayName = decoded.name || decoded.email?.split('@')[0] || `User-${uid}`;
@@ -304,9 +325,11 @@ class AuthController {
     } catch (error: any) {
       console.error('Google auth error:', error);
       const details = error?.sqlMessage || error?.message || String(error);
-      return res.status(500).json({ 
-        error: 'Erro ao autenticar com Google.', 
-        details 
+      const message = String(details).toLowerCase();
+      const status = message.includes('timeout') ? 504 : 500;
+      return res.status(status).json({
+        error: 'Erro ao autenticar com Google.',
+        details,
       });
     }
   }

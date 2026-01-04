@@ -332,7 +332,17 @@ class BrokerController {
         const brokerId = req.userId;
         try {
             const query = `
-                SELECT s.id, p.title, s.sale_price, s.commission_rate, s.commission_amount, s.sale_date 
+                SELECT
+                    s.id,
+                    p.title,
+                    s.deal_type,
+                    s.sale_price,
+                    s.commission_rate,
+                    s.commission_amount,
+                    s.iptu_value,
+                    s.condominio_value,
+                    s.is_recurring,
+                    s.sale_date
                 FROM sales s
                 JOIN properties p ON s.property_id = p.id
                 WHERE s.broker_id = ?
@@ -357,10 +367,13 @@ class BrokerController {
         const brokerId = req.userId;
         try {
             const salesQuery = `
-                SELECT 
-                    COUNT(CASE WHEN status = 'sold' THEN 1 END) as total_sales,
-                    SUM(CASE WHEN status = 'sold' THEN commission_value ELSE 0 END) as total_commission
-                FROM properties
+                SELECT
+                    COUNT(*) as total_deals,
+                    SUM(CASE WHEN deal_type = 'sale' THEN 1 ELSE 0 END) as total_sales,
+                    SUM(CASE WHEN deal_type = 'rent' THEN 1 ELSE 0 END) as total_rents,
+                    SUM(commission_amount) as total_commission,
+                    SUM(iptu_value) as total_iptu
+                FROM sales
                 WHERE broker_id = ?
             `;
             const [salesResult] = await connection.query<any[]>(salesQuery, [brokerId]);
@@ -383,8 +396,11 @@ class BrokerController {
             }
 
             const report = {
+                totalDeals: Number(salesResult[0]?.total_deals || 0),
                 totalSales: Number(salesResult[0]?.total_sales || 0),
+                totalRents: Number(salesResult[0]?.total_rents || 0),
                 totalCommission: Number(salesResult[0]?.total_commission || 0),
+                totalIptu: Number(salesResult[0]?.total_iptu || 0),
                 totalProperties: Number(propertiesResult[0]?.total_properties || 0),
                 statusBreakdown: statusBreakdown
             };

@@ -30,6 +30,13 @@ propertyRoutes.patch(
   (req, res) => propertyController.updateStatus(req as any, res)
 );
 
+propertyRoutes.post(
+  '/:id/close',
+  authMiddleware,
+  isBroker,
+  (req, res) => propertyController.closeDeal(req as any, res)
+);
+
 propertyRoutes.delete(
   '/:id',
   authMiddleware,

@@ -13,6 +13,7 @@ export interface AuthRequestWithFiles extends AuthRequest {
   files?: MulterFiles;
 }
 type PropertyStatus = "pending_approval" | "approved" | "rejected" | "rented" | "sold";
+type DealType = "sale" | "rent";
 
 type Nullable<T> = T | null;
 
@@ -46,6 +47,27 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
 ]);
 
 const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
+
+const DEAL_TYPE_MAP: Record<string, DealType> = {
+  sale: "sale",
+  sold: "sale",
+  venda: "sale",
+  vendido: "sale",
+  vendida: "sale",
+  rent: "rent",
+  rented: "rent",
+  aluguel: "rent",
+  alugado: "rent",
+  alugada: "rent",
+  locacao: "rent",
+  locado: "rent",
+  locada: "rent",
+};
+
+const STATUS_TO_DEAL: Partial<Record<PropertyStatus, DealType>> = {
+  sold: "sale",
+  rented: "rent",
+};
 
 interface PropertyRow extends RowDataPacket {
   id: number;
@@ -82,6 +104,9 @@ interface PropertyRow extends RowDataPacket {
   eh_mobiliada?: number | boolean | null;
   valor_condominio?: number | string | null;
   valor_iptu?: number | string | null;
+  sale_value?: number | string | null;
+  commission_rate?: number | string | null;
+  commission_value?: number | string | null;
   video_url?: string | null;
   created_at?: Date;
   updated_at?: Date;
@@ -121,6 +146,33 @@ function parsePrice(value: unknown): number {
     throw new Error("Preço inválido.");
   }
   return parsed;
+}
+
+function normalizeDealType(value: unknown): Nullable<DealType> {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[^\p{L}0-9]/gu, "")
+    .toLowerCase();
+  return DEAL_TYPE_MAP[normalized] ?? null;
+}
+
+function resolveDealTypeFromStatus(status: Nullable<PropertyStatus>): Nullable<DealType> {
+  if (!status) return null;
+  return STATUS_TO_DEAL[status] ?? null;
+}
+
+function resolveDealAmount(value: unknown, fallback: number): number {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  return parsePrice(value);
+}
+
+function calculateCommissionAmount(amount: number, rate: number): number {
+  return Number((amount * (rate / 100)).toFixed(2));
 }
 
 function parseDecimal(value: unknown): Nullable<number> {
@@ -228,6 +280,83 @@ function mapProperty(row: PropertyAggregateRow) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+type QueryExecutor = Pick<typeof connection, "query">;
+
+async function upsertSaleRecord(
+  db: QueryExecutor,
+  payload: {
+    propertyId: number;
+    brokerId: number;
+    dealType: DealType;
+    salePrice: number;
+    commissionRate: number;
+    commissionAmount: number;
+    iptuValue: number | null;
+    condominioValue: number | null;
+    isRecurring: number;
+  }
+) {
+  const {
+    propertyId,
+    brokerId,
+    dealType,
+    salePrice,
+    commissionRate,
+    commissionAmount,
+    iptuValue,
+    condominioValue,
+    isRecurring,
+  } = payload;
+
+  const [existingSaleRows] = await db.query<RowDataPacket[]>(
+    "SELECT id FROM sales WHERE property_id = ? ORDER BY sale_date DESC LIMIT 1",
+    [propertyId]
+  );
+
+  if (existingSaleRows.length > 0) {
+    await db.query(
+      `UPDATE sales
+         SET deal_type = ?,
+             sale_price = ?,
+             commission_rate = ?,
+             commission_amount = ?,
+             iptu_value = ?,
+             condominio_value = ?,
+             is_recurring = ?,
+             sale_date = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        dealType,
+        salePrice,
+        commissionRate,
+        commissionAmount,
+        iptuValue,
+        condominioValue,
+        isRecurring,
+        existingSaleRows[0].id,
+      ]
+    );
+    return;
+  }
+
+  await db.query(
+    `INSERT INTO sales
+       (property_id, broker_id, deal_type, sale_price, commission_rate, commission_amount, iptu_value, condominio_value, is_recurring)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      propertyId,
+      brokerId,
+      dealType,
+      salePrice,
+      commissionRate,
+      commissionAmount,
+      iptuValue,
+      condominioValue,
+      isRecurring,
+    ]
+  );
 }
 
 class PropertyController {
@@ -684,32 +813,49 @@ class PropertyController {
           console.error('Erro ao registrar notificação:', notifyError);
         }
 
-        if (nextStatus === 'sold') {
-          const salePrice = Number(body.price ?? property.price);
-          const commissionRate = parseDecimal(body.commission_rate) ?? 5.0;
-          const commissionAmount = Number(
-            (salePrice * (commissionRate / 100)).toFixed(2)
-          );
-
-          const [existingSaleRows] = await connection.query<RowDataPacket[]>(
-            'SELECT id FROM sales WHERE property_id = ?',
-            [propertyId]
-          );
-
-          if (existingSaleRows.length > 0) {
-            await connection.query(
-              `UPDATE sales
-                 SET sale_price = ?, commission_rate = ?, commission_amount = ?, sale_date = CURRENT_TIMESTAMP
-               WHERE property_id = ?`,
-              [salePrice, commissionRate, commissionAmount, propertyId]
+        const dealType = resolveDealTypeFromStatus(nextStatus);
+        if (dealType) {
+          let dealAmount: number;
+          try {
+            dealAmount = resolveDealAmount(
+              body.amount ?? body.sale_price ?? body.price,
+              Number(property.price)
             );
-          } else {
-            await connection.query(
-              `INSERT INTO sales (property_id, broker_id, sale_price, commission_rate, commission_amount)
-               VALUES (?, ?, ?, ?, ?)`,
-              [propertyId, brokerId, salePrice, commissionRate, commissionAmount]
-            );
+          } catch (parseError) {
+            return res.status(400).json({ error: (parseError as Error).message });
           }
+
+          let commissionRate: number;
+          try {
+            commissionRate =
+              parseDecimal(body.commission_rate) ??
+              (property.commission_rate != null ? Number(property.commission_rate) : 5.0);
+          } catch (parseError) {
+            return res.status(400).json({ error: (parseError as Error).message });
+          }
+
+          const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
+          const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
+          const condominioValue =
+            property.valor_condominio != null ? Number(property.valor_condominio) : null;
+          const isRecurring = dealType === "rent" ? 1 : 0;
+
+          await upsertSaleRecord(connection, {
+            propertyId,
+            brokerId,
+            dealType,
+            salePrice: dealAmount,
+            commissionRate,
+            commissionAmount,
+            iptuValue,
+            condominioValue,
+            isRecurring,
+          });
+
+          await connection.query(
+            "UPDATE properties SET sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?",
+            [dealAmount, commissionRate, commissionAmount, propertyId]
+          );
         }
       }
 
@@ -730,6 +876,119 @@ class PropertyController {
 
     req.body = { status: normalized } as any;
     return this.update(req, res);
+  }
+
+  async closeDeal(req: AuthRequest, res: Response) {
+    const propertyId = Number(req.params.id);
+    const brokerId = req.userId;
+
+    if (!brokerId) {
+      return res.status(401).json({ error: 'Corretor nÆo autenticado.' });
+    }
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de im¢vel inv lido.' });
+    }
+
+    const { type, amount, commission_rate } = req.body as {
+      type?: string;
+      amount?: number | string;
+      commission_rate?: number | string;
+    };
+
+    const dealType = normalizeDealType(type);
+    if (!dealType) {
+      return res.status(400).json({ error: 'Tipo de negocio invalido.' });
+    }
+
+    try {
+      const [propertyRows] = await connection.query<PropertyRow[]>(
+        'SELECT * FROM properties WHERE id = ?',
+        [propertyId]
+      );
+
+      if (!propertyRows || propertyRows.length === 0) {
+        return res.status(404).json({ error: 'Im¢vel nÆo encontrado.' });
+      }
+
+      const property = propertyRows[0];
+      if (property.broker_id !== brokerId) {
+        return res.status(403).json({ error: 'Acesso nÆo autorizado a este im¢vel.' });
+      }
+
+      if (property.status === 'pending_approval' || property.status === 'rejected') {
+        return res.status(403).json({ error: 'Im¢vel ainda nÆo pode ser fechado.' });
+      }
+
+      let dealAmount: number;
+      try {
+        dealAmount = resolveDealAmount(amount, Number(property.price));
+      } catch (parseError) {
+        return res.status(400).json({ error: (parseError as Error).message });
+      }
+
+      let commissionRate: number;
+      try {
+        commissionRate =
+          parseDecimal(commission_rate) ??
+          (property.commission_rate != null ? Number(property.commission_rate) : 5.0);
+      } catch (parseError) {
+        return res.status(400).json({ error: (parseError as Error).message });
+      }
+
+      const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
+      const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
+      const condominioValue =
+        property.valor_condominio != null ? Number(property.valor_condominio) : null;
+      const newStatus: PropertyStatus = dealType === 'sale' ? 'sold' : 'rented';
+      const isRecurring = dealType === 'rent' ? 1 : 0;
+
+      const db = await connection.getConnection();
+      try {
+        await db.beginTransaction();
+        await db.query(
+          'UPDATE properties SET status = ?, sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?',
+          [newStatus, dealAmount, commissionRate, commissionAmount, propertyId]
+        );
+
+        await upsertSaleRecord(db, {
+          propertyId,
+          brokerId,
+          dealType,
+          salePrice: dealAmount,
+          commissionRate,
+          commissionAmount,
+          iptuValue,
+          condominioValue,
+          isRecurring,
+        });
+
+        await db.commit();
+      } catch (error) {
+        await db.rollback();
+        throw error;
+      } finally {
+        db.release();
+      }
+
+      return res.status(200).json({
+        message: 'Negocio fechado com sucesso.',
+        status: newStatus,
+        sale: {
+          property_id: propertyId,
+          deal_type: dealType,
+          sale_price: dealAmount,
+          commission_rate: commissionRate,
+          commission_amount: commissionAmount,
+          iptu_value: iptuValue,
+          condominio_value: condominioValue,
+          is_recurring: isRecurring,
+        },
+      });
+    } catch (error) {
+      console.error('Erro ao fechar negocio:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
   }
 
   async delete(req: AuthRequest, res: Response) {

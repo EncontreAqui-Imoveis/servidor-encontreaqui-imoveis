@@ -38,6 +38,17 @@ const ALLOWED_STATUS = new Set<PropertyStatus>([
   'sold',
 ]);
 
+const PURPOSE_MAP: Record<string, string> = {
+  venda: 'Venda',
+  comprar: 'Venda',
+  aluguel: 'Aluguel',
+  alugar: 'Aluguel',
+  vendaealuguel: 'Venda e Aluguel',
+  vendaaluguel: 'Venda e Aluguel',
+};
+
+const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
+
 function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
   if (typeof value !== 'string') {
     return null;
@@ -51,6 +62,21 @@ function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
     return null;
   }
   return status;
+}
+
+function normalizePurpose(value: unknown): Nullable<string> {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[^\p{L}0-9]/gu, '')
+    .toLowerCase();
+  const mapped = PURPOSE_MAP[normalized];
+  if (!mapped || !ALLOWED_PURPOSES.has(mapped)) {
+    return null;
+  }
+  return mapped;
 }
 
 function parseDecimal(value: unknown): Nullable<number> {
@@ -109,6 +135,8 @@ interface PropertyDetailRow extends RowDataPacket {
   purpose?: string | null;
   status: string;
   price?: number | string | null;
+  price_sale?: number | string | null;
+  price_rent?: number | string | null;
   address?: string | null;
   quadra?: string | null;
   lote?: string | null;
@@ -193,6 +221,8 @@ function mapAdminProperty(row: PropertyDetailRow) {
     purpose: row.purpose ?? null,
     status: row.status as string,
     price: toNullableNumber(row.price) ?? 0,
+    price_sale: toNullableNumber(row.price_sale),
+    price_rent: toNullableNumber(row.price_rent),
     address: row.address ?? null,
     quadra: row.quadra ?? null,
     lote: row.lote ?? null,
@@ -439,6 +469,8 @@ class AdminController {
             p.type,
             p.status,
             p.price,
+            p.price_sale,
+            p.price_rent,
             p.city,
             p.bairro,
             p.purpose,
@@ -651,6 +683,8 @@ class AdminController {
         'purpose',
         'status',
         'price',
+        'price_sale',
+        'price_rent',
         'code',
         'address',
         'quadra',
@@ -698,7 +732,18 @@ class AdminController {
             params.push(normalized);
             break;
           }
+          case 'purpose': {
+            const normalized = normalizePurpose(value);
+            if (!normalized) {
+              return res.status(400).json({ error: 'Finalidade invalida.' });
+            }
+            setParts.push('purpose = ?');
+            params.push(normalized);
+            break;
+          }
           case 'price':
+          case 'price_sale':
+          case 'price_rent':
           case 'sale_value':
           case 'commission_rate':
           case 'commission_value':
@@ -768,7 +813,7 @@ class AdminController {
     const body = req.body ?? {};
 
     try {
-      const required = ['title', 'type', 'purpose', 'price', 'address', 'city', 'state'];
+      const required = ['title', 'type', 'purpose', 'address', 'city', 'state'];
       for (const field of required) {
         if (!body[field]) {
           return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
@@ -782,6 +827,8 @@ class AdminController {
         purpose,
         status,
         price,
+        price_sale,
+        price_rent,
         code,
         address,
         quadra,
@@ -810,9 +857,40 @@ class AdminController {
       } = body;
 
       const normalizedStatus = normalizeStatus(status) ?? 'pending_approval';
+
+      const normalizedPurpose = normalizePurpose(purpose);
+      if (!normalizedPurpose) {
+        return res.status(400).json({ error: 'Finalidade invalida.' });
+      }
+
       const numericPrice = parseDecimal(price);
-      if (numericPrice === null) {
+      const numericPriceSale = parseDecimal(price_sale);
+      const numericPriceRent = parseDecimal(price_rent);
+
+      let resolvedPrice: number | null = null;
+      let resolvedPriceSale: number | null = null;
+      let resolvedPriceRent: number | null = null;
+
+      if (normalizedPurpose === 'Venda') {
+        resolvedPriceSale = numericPriceSale ?? numericPrice;
+        resolvedPrice = resolvedPriceSale;
+      } else if (normalizedPurpose === 'Aluguel') {
+        resolvedPriceRent = numericPriceRent ?? numericPrice;
+        resolvedPrice = resolvedPriceRent;
+      } else {
+        resolvedPriceSale = numericPriceSale;
+        resolvedPriceRent = numericPriceRent;
+        resolvedPrice = resolvedPriceSale;
+      }
+
+      if (!resolvedPrice || resolvedPrice <= 0) {
         return res.status(400).json({ error: 'Preco invalido.' });
+      }
+
+      if (normalizedPurpose === 'Venda e Aluguel') {
+        if (!resolvedPriceSale || resolvedPriceSale <= 0 || !resolvedPriceRent || resolvedPriceRent <= 0) {
+          return res.status(400).json({ error: 'Informe os precos de venda e aluguel.' });
+        }
       }
       const numericBedrooms = parseInteger(bedrooms);
       const numericBathrooms = parseInteger(bathrooms);
@@ -873,6 +951,8 @@ class AdminController {
             purpose,
             status,
             price,
+            price_sale,
+            price_rent,
             code,
             address,
             quadra,
@@ -897,16 +977,18 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerIdValue,
           title,
           description,
           type,
-          purpose,
+          normalizedPurpose,
           normalizedStatus,
-          numericPrice,
+          resolvedPrice,
+          resolvedPriceSale,
+          resolvedPriceRent,
           stringOrNull(code),
           address,
           stringOrNull(quadra),
@@ -1587,6 +1669,8 @@ class AdminController {
             p.type,
             p.purpose,
             p.price,
+            p.price_sale,
+            p.price_rent,
             p.address,
             p.city,
             p.state,

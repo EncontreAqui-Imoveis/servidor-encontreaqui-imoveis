@@ -302,6 +302,8 @@ class BrokerController {
                     p.status,
                     p.purpose,
                     p.price,
+                    p.price_sale,
+                    p.price_rent,
                     p.code,
                     p.address,
                     p.quadra,
@@ -336,7 +338,7 @@ class BrokerController {
                 LEFT JOIN property_images pi ON p.id = pi.property_id
                 WHERE p.broker_id = ?
                 GROUP BY
-                    p.id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.code,
+                    p.id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.price_sale, p.price_rent, p.code,
                     p.address, p.quadra, p.lote, p.numero, p.bairro, p.complemento, p.tipo_lote,
                     p.city, p.state, p.bedrooms, p.bathrooms, p.area_construida, p.area_terreno,
                     p.garage_spots, p.has_wifi, p.tem_piscina, p.tem_energia_solar, p.tem_automacao,
@@ -352,6 +354,8 @@ class BrokerController {
             const properties = (dataRows as any[]).map((row) => ({
                 ...row,
                 price: Number(row.price),
+                price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+                price_rent: row.price_rent != null ? Number(row.price_rent) : null,
                 bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
                 bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
                 area_construida: row.area_construida != null ? Number(row.area_construida) : null,

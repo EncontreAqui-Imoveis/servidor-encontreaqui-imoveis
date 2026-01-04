@@ -14,6 +14,8 @@ interface FavoriteRow extends RowDataPacket {
   purpose: string;
   status: string;
   price: number | string;
+  price_sale?: number | string | null;
+  price_rent?: number | string | null;
   code?: string | null;
   address: string;
   quadra?: string | null;
@@ -91,6 +93,8 @@ function mapFavorite(row: FavoriteRow) {
     purpose: row.purpose,
     status: row.status,
     price: Number(row.price),
+    price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+    price_rent: row.price_rent != null ? Number(row.price_rent) : null,
     code: row.code ?? null,
     address: row.address,
     quadra: row.quadra ?? null,

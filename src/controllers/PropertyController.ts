@@ -70,6 +70,17 @@ const STATUS_TO_DEAL: Partial<Record<PropertyStatus, DealType>> = {
   rented: "rent",
 };
 
+const PURPOSE_MAP: Record<string, string> = {
+  venda: "Venda",
+  comprar: "Venda",
+  aluguel: "Aluguel",
+  alugar: "Aluguel",
+  vendaealuguel: "Venda e Aluguel",
+  vendaaluguel: "Venda e Aluguel",
+};
+
+const ALLOWED_PURPOSES = new Set(["Venda", "Aluguel", "Venda e Aluguel"]);
+
 const RECURRENCE_INTERVALS = new Set<RecurrenceInterval>([
   "none",
   "weekly",
@@ -89,6 +100,8 @@ interface PropertyRow extends RowDataPacket {
   purpose: string;
   status: PropertyStatus;
   price: number | string;
+  price_sale?: number | string | null;
+  price_rent?: number | string | null;
   code?: string | null;
   address: string;
   quadra?: string | null;
@@ -147,6 +160,37 @@ function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
   return status;
 }
 
+
+function normalizePurpose(value: unknown): Nullable<string> {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[^\p{L}0-9]/gu, "")
+    .toLowerCase();
+  const mapped = PURPOSE_MAP[normalized];
+  if (!mapped || !ALLOWED_PURPOSES.has(mapped)) {
+    return null;
+  }
+  return mapped;
+}
+
+function purposeAllowsDeal(purpose: string, dealType: DealType): boolean {
+  const normalized = normalizePurpose(purpose) ?? purpose;
+  const lower = normalized.toLowerCase();
+  if (dealType === "sale") {
+    return lower.includes("vend");
+  }
+  return lower.includes("alug");
+}
+
+function parseOptionalPrice(value: unknown): Nullable<number> {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  return parsePrice(value);
+}
 
 function parsePrice(value: unknown): number {
   const parsed = Number(value);
@@ -267,6 +311,8 @@ function mapProperty(row: PropertyAggregateRow) {
     purpose: row.purpose,
     status: row.status,
     price: Number(row.price),
+    price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+    price_rent: row.price_rent != null ? Number(row.price_rent) : null,
     code: row.code ?? null,
     address: row.address,
     quadra: row.quadra ?? null,
@@ -449,6 +495,8 @@ class PropertyController {
       type,
       purpose,
       price,
+      price_sale,
+      price_rent,
       code,
       address,
       quadra,
@@ -476,12 +524,34 @@ class PropertyController {
     } = req.body ?? {};
 
     if (!title || !description || !type || !purpose || !address || !city || !state) {
-      return res.status(400).json({ error: "Campos obrigatórios não informados." });
+      return res.status(400).json({ error: "Campos obrigatorios nao informados." });
+    }
+
+    const normalizedPurpose = normalizePurpose(purpose);
+    if (!normalizedPurpose) {
+      return res.status(400).json({ error: "Finalidade do imovel invalida." });
     }
 
     let numericPrice: number;
+    let numericPriceSale: number | null = null;
+    let numericPriceRent: number | null = null;
     try {
-      numericPrice = parsePrice(price);
+      if (normalizedPurpose === "Venda") {
+        numericPriceSale = parseOptionalPrice(price_sale) ?? parsePrice(price);
+        numericPrice = numericPriceSale;
+      } else if (normalizedPurpose === "Aluguel") {
+        numericPriceRent = parseOptionalPrice(price_rent) ?? parsePrice(price);
+        numericPrice = numericPriceRent;
+      } else {
+        numericPriceSale = parseOptionalPrice(price_sale);
+        numericPriceRent = parseOptionalPrice(price_rent);
+        if (numericPriceSale == null || numericPriceRent == null) {
+          return res.status(400).json({
+            error: "Informe os precos de venda e aluguel para esta finalidade.",
+          });
+        }
+        numericPrice = numericPriceSale;
+      }
     } catch (parseError) {
       return res.status(400).json({ error: (parseError as Error).message });
     }
@@ -566,6 +636,8 @@ class PropertyController {
             purpose,
             status,
             price,
+            price_sale,
+            price_rent,
             code,
             address,
             quadra,
@@ -590,16 +662,18 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
           title,
           description,
           type,
-          purpose,
+          normalizedPurpose,
           'pending_approval',
           numericPrice,
+          numericPriceSale,
+          numericPriceRent,
           stringOrNull(code),
           address,
           stringOrNull(quadra),
@@ -665,11 +739,11 @@ class PropertyController {
     const brokerId = req.userId;
 
     if (!brokerId) {
-      return res.status(401).json({ error: 'Corretor não autenticado.' });
+      return res.status(401).json({ error: 'Corretor nao autenticado.' });
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
+      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
     }
 
     try {
@@ -679,13 +753,13 @@ class PropertyController {
       );
 
       if (!propertyRows || propertyRows.length === 0) {
-        return res.status(404).json({ error: 'Imóvel não encontrado.' });
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
       const property = propertyRows[0];
 
       if (property.broker_id !== brokerId) {
-        return res.status(403).json({ error: 'Acesso não autorizado a este imóvel.' });
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
       }
 
       const body = req.body ?? {};
@@ -695,8 +769,7 @@ class PropertyController {
         const invalidKeys = bodyKeys.filter((key) => key !== 'status');
         if (invalidKeys.length > 0) {
           return res.status(403).json({
-            error:
-              'Imóveis aprovados não podem ter seus dados alterados, apenas o status.',
+            error: 'Imoveis aprovados nao podem ter seus dados alterados, apenas o status.',
           });
         }
       }
@@ -710,6 +783,8 @@ class PropertyController {
             'purpose',
             'status',
             'price',
+            'price_sale',
+            'price_rent',
             'code',
             'address',
             'quadra',
@@ -749,10 +824,19 @@ class PropertyController {
           case 'status': {
             const normalized = normalizeStatus(body.status);
             if (!normalized) {
-              return res.status(400).json({ error: 'Status informado é inválido.' });
+              return res.status(400).json({ error: 'Status informado invalido.' });
             }
             nextStatus = normalized;
             fields.push('status = ?');
+            values.push(normalized);
+            break;
+          }
+          case 'purpose': {
+            const normalized = normalizePurpose(body.purpose);
+            if (!normalized) {
+              return res.status(400).json({ error: 'Finalidade informada e invalida.' });
+            }
+            fields.push('purpose = ?');
             values.push(normalized);
             break;
           }
@@ -760,6 +844,16 @@ class PropertyController {
             try {
               fields.push('price = ?');
               values.push(parsePrice(body.price));
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'price_sale':
+          case 'price_rent': {
+            try {
+              fields.push(`\`${key}\` = ?`);
+              values.push(parsePrice(body[key]));
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
@@ -806,7 +900,7 @@ class PropertyController {
       }
 
       if (fields.length === 0) {
-        return res.status(400).json({ error: 'Nenhum dado fornecido para atualização.' });
+        return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });
       }
 
       values.push(propertyId);
@@ -836,21 +930,25 @@ class PropertyController {
         try {
           const action = nextStatus === 'sold' ? 'vendido' : 'alugado';
           await notifyAdmins(
-            `O imóvel '${property.title}' foi marcado como ${action}.`,
+            `O imovel '${property.title}' foi marcado como ${action}.`,
             'property',
             propertyId
           );
         } catch (notifyError) {
-          console.error('Erro ao registrar notificação:', notifyError);
+          console.error('Erro ao registrar notificacao:', notifyError);
         }
 
         const dealType = resolveDealTypeFromStatus(nextStatus);
         if (dealType) {
           let dealAmount: number;
           try {
+            const fallbackPrice =
+              dealType === 'sale'
+                ? Number(property.price_sale ?? property.price)
+                : Number(property.price_rent ?? property.price);
             dealAmount = resolveDealAmount(
               body.amount ?? body.sale_price ?? body.price,
-              Number(property.price)
+              fallbackPrice
             );
           } catch (parseError) {
             return res.status(400).json({ error: (parseError as Error).message });
@@ -870,7 +968,7 @@ class PropertyController {
             const parsedCycles = parseInteger(body.commission_cycles);
             if (parsedCycles != null) {
               if (parsedCycles < 0) {
-                return res.status(400).json({ error: "Comissoes ja realizadas invalidas." });
+                return res.status(400).json({ error: 'Comissoes ja realizadas invalidas.' });
               }
               commissionCycles = parsedCycles;
             }
@@ -884,15 +982,15 @@ class PropertyController {
             body.recurrence_interval !== null &&
             normalizedInterval == null
           ) {
-            return res.status(400).json({ error: "Intervalo de recorrencia invalido." });
+            return res.status(400).json({ error: 'Intervalo de recorrencia invalido.' });
           }
-          const recurrenceInterval = normalizedInterval ?? "none";
+          const recurrenceInterval = normalizedInterval ?? 'none';
 
           const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
           const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
           const condominioValue =
             property.valor_condominio != null ? Number(property.valor_condominio) : null;
-          const isRecurring = recurrenceInterval !== "none" ? 1 : 0;
+          const isRecurring = recurrenceInterval !== 'none' ? 1 : 0;
 
           await upsertSaleRecord(connection, {
             propertyId,
@@ -909,15 +1007,15 @@ class PropertyController {
           });
 
           await connection.query(
-            "UPDATE properties SET sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?",
+            'UPDATE properties SET sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?',
             [dealAmount, commissionRate, commissionAmount, propertyId]
           );
         }
       }
 
-      return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
+      return res.status(200).json({ message: 'Imovel atualizado com sucesso!' });
     } catch (error) {
-      console.error('Erro ao atualizar imóvel:', error);
+      console.error('Erro ao atualizar imovel:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
@@ -975,12 +1073,22 @@ class PropertyController {
       }
 
       if (property.status === 'pending_approval' || property.status === 'rejected') {
-        return res.status(403).json({ error: 'Im¢vel ainda nÆo pode ser fechado.' });
+        return res.status(403).json({ error: 'Imovel ainda nao pode ser fechado.' });
       }
 
+      
+
+      if (!purposeAllowsDeal(property.purpose, dealType)) {
+        return res.status(400).json({ error: 'Tipo de negocio nao permitido para esta finalidade.' });
+      }
+
+      const fallbackPrice =
+        dealType === 'sale'
+          ? Number(property.price_sale ?? property.price)
+          : Number(property.price_rent ?? property.price);
       let dealAmount: number;
       try {
-        dealAmount = resolveDealAmount(amount, Number(property.price));
+        dealAmount = resolveDealAmount(amount, fallbackPrice);
       } catch (parseError) {
         return res.status(400).json({ error: (parseError as Error).message });
       }
@@ -1219,9 +1327,22 @@ class PropertyController {
       params.push(type);
     }
 
-    if (purpose) {
-      whereClauses.push('p.purpose = ?');
-      params.push(purpose);
+    const normalizedPurpose = normalizePurpose(purpose);
+    let priceColumn = 'p.price';
+    if (normalizedPurpose) {
+      if (normalizedPurpose === 'Venda') {
+        whereClauses.push('(p.purpose = ? OR p.purpose = ?)');
+        params.push('Venda', 'Venda e Aluguel');
+        priceColumn = 'COALESCE(p.price_sale, p.price)';
+      } else if (normalizedPurpose === 'Aluguel') {
+        whereClauses.push('(p.purpose = ? OR p.purpose = ?)');
+        params.push('Aluguel', 'Venda e Aluguel');
+        priceColumn = 'COALESCE(p.price_rent, p.price)';
+      } else {
+        whereClauses.push('p.purpose = ?');
+        params.push('Venda e Aluguel');
+        priceColumn = 'COALESCE(p.price_sale, p.price)';
+      }
     }
 
     if (city) {
@@ -1237,7 +1358,7 @@ class PropertyController {
     if (minPrice) {
       const value = Number(minPrice);
       if (!Number.isNaN(value)) {
-        whereClauses.push('p.price >= ?');
+        whereClauses.push(`${priceColumn} >= ?`);
         params.push(value);
       }
     }
@@ -1245,7 +1366,7 @@ class PropertyController {
     if (maxPrice) {
       const value = Number(maxPrice);
       if (!Number.isNaN(value)) {
-        whereClauses.push('p.price <= ?');
+        whereClauses.push(`${priceColumn} <= ?`);
         params.push(value);
       }
     }
@@ -1267,7 +1388,7 @@ class PropertyController {
     const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     const allowedSortColumns: Record<string, string> = {
-      price: 'p.price',
+      price: priceColumn,
       created_at: 'p.created_at',
       area_construida: 'p.area_construida',
     };

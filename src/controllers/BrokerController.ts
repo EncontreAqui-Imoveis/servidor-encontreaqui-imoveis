@@ -6,6 +6,62 @@ import { RowDataPacket } from "mysql2";
 import AuthRequest from "../middlewares/auth";
 import { uploadToCloudinary } from "../config/cloudinary";
 
+type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
+
+function toDate(value: unknown): Date | null {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value as any);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function diffInWeeks(start: Date, end: Date): number {
+    const diffMs = end.getTime() - start.getTime();
+    return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+}
+
+function diffInMonths(start: Date, end: Date): number {
+    let months = (end.getFullYear() - start.getFullYear()) * 12;
+    months += end.getMonth() - start.getMonth();
+    if (end.getDate() < start.getDate()) {
+        months -= 1;
+    }
+    return Math.max(months, 0);
+}
+
+function diffInYears(start: Date, end: Date): number {
+    let years = end.getFullYear() - start.getFullYear();
+    if (
+        end.getMonth() < start.getMonth() ||
+        (end.getMonth() === start.getMonth() && end.getDate() < start.getDate())
+    ) {
+        years -= 1;
+    }
+    return Math.max(years, 0);
+}
+
+function calculateAutoCycles(intervalValue: unknown, saleDateValue: unknown): number {
+    const interval = typeof intervalValue === "string"
+        ? intervalValue.trim().toLowerCase()
+        : "none";
+    if (interval !== "weekly" && interval !== "monthly" && interval !== "yearly") {
+        return 0;
+    }
+    const saleDate = toDate(saleDateValue);
+    if (!saleDate) return 0;
+    const now = new Date();
+    if (now <= saleDate) return 0;
+    switch (interval as RecurrenceInterval) {
+        case "weekly":
+            return diffInWeeks(saleDate, now);
+        case "monthly":
+            return diffInMonths(saleDate, now);
+        case "yearly":
+            return diffInYears(saleDate, now);
+        default:
+            return 0;
+    }
+}
+
 class BrokerController {
     async register(req: Request, res: Response) {
         const { name, email, password, creci, phone, address, city, state, agencyId, agency_id } = req.body;
@@ -342,6 +398,8 @@ class BrokerController {
                     s.iptu_value,
                     s.condominio_value,
                     s.is_recurring,
+                    s.commission_cycles,
+                    s.recurrence_interval,
                     s.sale_date
                 FROM sales s
                 JOIN properties p ON s.property_id = p.id
@@ -352,7 +410,20 @@ class BrokerController {
 
             return res.json({
                 success: true,
-                data: commissions
+                data: (commissions as any[]).map((row) => {
+                    const baseCycles = Math.max(Number(row.commission_cycles) || 0, 0);
+                    const autoCycles = calculateAutoCycles(
+                        row.recurrence_interval,
+                        row.sale_date
+                    );
+                    const totalCycles = baseCycles + autoCycles;
+                    const commissionAmount = Number(row.commission_amount) || 0;
+                    return {
+                        ...row,
+                        commission_cycles_total: totalCycles,
+                        commission_amount_total: Number((commissionAmount * totalCycles).toFixed(2)),
+                    };
+                })
             });
         } catch (error) {
             console.error("Erro ao buscar comissões:", error);
@@ -366,17 +437,49 @@ class BrokerController {
     async getMyPerformanceReport(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
         try {
-            const salesQuery = `
+            const [salesRows] = await connection.query<any[]>(
+                `
                 SELECT
-                    COUNT(*) as total_deals,
-                    SUM(CASE WHEN deal_type = 'sale' THEN 1 ELSE 0 END) as total_sales,
-                    SUM(CASE WHEN deal_type = 'rent' THEN 1 ELSE 0 END) as total_rents,
-                    SUM(commission_amount) as total_commission,
-                    SUM(iptu_value) as total_iptu
+                    deal_type,
+                    commission_amount,
+                    commission_cycles,
+                    recurrence_interval,
+                    sale_date,
+                    iptu_value
                 FROM sales
                 WHERE broker_id = ?
-            `;
-            const [salesResult] = await connection.query<any[]>(salesQuery, [brokerId]);
+                `,
+                [brokerId]
+            );
+
+            let totalDeals = 0;
+            let totalSales = 0;
+            let totalRents = 0;
+            let totalCommission = 0;
+            let totalIptu = 0;
+
+            for (const row of salesRows) {
+                totalDeals += 1;
+                const dealType = String(row.deal_type ?? "").toLowerCase();
+                if (dealType === "sale") {
+                    totalSales += 1;
+                } else if (dealType === "rent") {
+                    totalRents += 1;
+                }
+
+                const baseCycles = Math.max(Number(row.commission_cycles) || 0, 0);
+                const autoCycles = calculateAutoCycles(
+                    row.recurrence_interval,
+                    row.sale_date
+                );
+                const totalCycles = baseCycles + autoCycles;
+                const commissionAmount = Number(row.commission_amount) || 0;
+                totalCommission += commissionAmount * totalCycles;
+
+                const iptuValue = Number(row.iptu_value) || 0;
+                totalIptu += iptuValue;
+            }
+
             const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;
             const [propertiesResult] = await connection.query<any[]>(propertiesQuery, [brokerId]);
             
@@ -396,11 +499,11 @@ class BrokerController {
             }
 
             const report = {
-                totalDeals: Number(salesResult[0]?.total_deals || 0),
-                totalSales: Number(salesResult[0]?.total_sales || 0),
-                totalRents: Number(salesResult[0]?.total_rents || 0),
-                totalCommission: Number(salesResult[0]?.total_commission || 0),
-                totalIptu: Number(salesResult[0]?.total_iptu || 0),
+                totalDeals: Number(totalDeals || 0),
+                totalSales: Number(totalSales || 0),
+                totalRents: Number(totalRents || 0),
+                totalCommission: Number(totalCommission.toFixed(2)),
+                totalIptu: Number(totalIptu.toFixed(2)),
                 totalProperties: Number(propertiesResult[0]?.total_properties || 0),
                 statusBreakdown: statusBreakdown
             };

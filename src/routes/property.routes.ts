@@ -37,6 +37,13 @@ propertyRoutes.post(
   (req, res) => propertyController.closeDeal(req as any, res)
 );
 
+propertyRoutes.post(
+  '/:id/cancel-deal',
+  authMiddleware,
+  isBroker,
+  (req, res) => propertyController.cancelDeal(req as any, res)
+);
+
 propertyRoutes.delete(
   '/:id',
   authMiddleware,

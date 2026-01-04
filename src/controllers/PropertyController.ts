@@ -14,6 +14,7 @@ export interface AuthRequestWithFiles extends AuthRequest {
 }
 type PropertyStatus = "pending_approval" | "approved" | "rejected" | "rented" | "sold";
 type DealType = "sale" | "rent";
+type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
 
 type Nullable<T> = T | null;
 
@@ -68,6 +69,13 @@ const STATUS_TO_DEAL: Partial<Record<PropertyStatus, DealType>> = {
   sold: "sale",
   rented: "rent",
 };
+
+const RECURRENCE_INTERVALS = new Set<RecurrenceInterval>([
+  "none",
+  "weekly",
+  "monthly",
+  "yearly",
+]);
 
 interface PropertyRow extends RowDataPacket {
   id: number;
@@ -162,6 +170,19 @@ function normalizeDealType(value: unknown): Nullable<DealType> {
 function resolveDealTypeFromStatus(status: Nullable<PropertyStatus>): Nullable<DealType> {
   if (!status) return null;
   return STATUS_TO_DEAL[status] ?? null;
+}
+
+function normalizeRecurrenceInterval(
+  value: unknown
+): Nullable<RecurrenceInterval> {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase() as RecurrenceInterval;
+  return RECURRENCE_INTERVALS.has(normalized) ? normalized : null;
 }
 
 function resolveDealAmount(value: unknown, fallback: number): number {
@@ -296,6 +317,8 @@ async function upsertSaleRecord(
     iptuValue: number | null;
     condominioValue: number | null;
     isRecurring: number;
+    commissionCycles: number;
+    recurrenceInterval: RecurrenceInterval;
   }
 ) {
   const {
@@ -308,6 +331,8 @@ async function upsertSaleRecord(
     iptuValue,
     condominioValue,
     isRecurring,
+    commissionCycles,
+    recurrenceInterval,
   } = payload;
 
   const [existingSaleRows] = await db.query<RowDataPacket[]>(
@@ -325,6 +350,8 @@ async function upsertSaleRecord(
              iptu_value = ?,
              condominio_value = ?,
              is_recurring = ?,
+             commission_cycles = ?,
+             recurrence_interval = ?,
              sale_date = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
@@ -335,6 +362,8 @@ async function upsertSaleRecord(
         iptuValue,
         condominioValue,
         isRecurring,
+        commissionCycles,
+        recurrenceInterval,
         existingSaleRows[0].id,
       ]
     );
@@ -343,8 +372,8 @@ async function upsertSaleRecord(
 
   await db.query(
     `INSERT INTO sales
-       (property_id, broker_id, deal_type, sale_price, commission_rate, commission_amount, iptu_value, condominio_value, is_recurring)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (property_id, broker_id, deal_type, sale_price, commission_rate, commission_amount, iptu_value, condominio_value, is_recurring, commission_cycles, recurrence_interval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       propertyId,
       brokerId,
@@ -355,6 +384,8 @@ async function upsertSaleRecord(
       iptuValue,
       condominioValue,
       isRecurring,
+      commissionCycles,
+      recurrenceInterval,
     ]
   );
 }
@@ -834,11 +865,34 @@ class PropertyController {
             return res.status(400).json({ error: (parseError as Error).message });
           }
 
+          let commissionCycles = 0;
+          try {
+            const parsedCycles = parseInteger(body.commission_cycles);
+            if (parsedCycles != null) {
+              if (parsedCycles < 0) {
+                return res.status(400).json({ error: "Comissoes ja realizadas invalidas." });
+              }
+              commissionCycles = parsedCycles;
+            }
+          } catch (parseError) {
+            return res.status(400).json({ error: (parseError as Error).message });
+          }
+
+          const normalizedInterval = normalizeRecurrenceInterval(body.recurrence_interval);
+          if (
+            body.recurrence_interval !== undefined &&
+            body.recurrence_interval !== null &&
+            normalizedInterval == null
+          ) {
+            return res.status(400).json({ error: "Intervalo de recorrencia invalido." });
+          }
+          const recurrenceInterval = normalizedInterval ?? "none";
+
           const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
           const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
           const condominioValue =
             property.valor_condominio != null ? Number(property.valor_condominio) : null;
-          const isRecurring = dealType === "rent" ? 1 : 0;
+          const isRecurring = recurrenceInterval !== "none" ? 1 : 0;
 
           await upsertSaleRecord(connection, {
             propertyId,
@@ -850,6 +904,8 @@ class PropertyController {
             iptuValue,
             condominioValue,
             isRecurring,
+            commissionCycles,
+            recurrenceInterval,
           });
 
           await connection.query(
@@ -890,10 +946,12 @@ class PropertyController {
       return res.status(400).json({ error: 'Identificador de im¢vel inv lido.' });
     }
 
-    const { type, amount, commission_rate } = req.body as {
+    const { type, amount, commission_rate, commission_cycles, recurrence_interval } = req.body as {
       type?: string;
       amount?: number | string;
       commission_rate?: number | string;
+      commission_cycles?: number | string;
+      recurrence_interval?: string;
     };
 
     const dealType = normalizeDealType(type);
@@ -936,12 +994,35 @@ class PropertyController {
         return res.status(400).json({ error: (parseError as Error).message });
       }
 
+      let commissionCycles = 0;
+      try {
+        const parsedCycles = parseInteger(commission_cycles);
+        if (parsedCycles != null) {
+          if (parsedCycles < 0) {
+            return res.status(400).json({ error: "Comissoes ja realizadas invalidas." });
+          }
+          commissionCycles = parsedCycles;
+        }
+      } catch (parseError) {
+        return res.status(400).json({ error: (parseError as Error).message });
+      }
+
+      const normalizedInterval = normalizeRecurrenceInterval(recurrence_interval);
+      if (
+        recurrence_interval !== undefined &&
+        recurrence_interval !== null &&
+        normalizedInterval == null
+      ) {
+        return res.status(400).json({ error: "Intervalo de recorrencia invalido." });
+      }
+      const recurrenceInterval = normalizedInterval ?? "none";
+
       const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
       const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
       const condominioValue =
         property.valor_condominio != null ? Number(property.valor_condominio) : null;
       const newStatus: PropertyStatus = dealType === 'sale' ? 'sold' : 'rented';
-      const isRecurring = dealType === 'rent' ? 1 : 0;
+      const isRecurring = recurrenceInterval !== "none" ? 1 : 0;
 
       const db = await connection.getConnection();
       try {
@@ -961,6 +1042,8 @@ class PropertyController {
           iptuValue,
           condominioValue,
           isRecurring,
+          commissionCycles,
+          recurrenceInterval,
         });
 
         await db.commit();
@@ -983,10 +1066,69 @@ class PropertyController {
           iptu_value: iptuValue,
           condominio_value: condominioValue,
           is_recurring: isRecurring,
+          commission_cycles: commissionCycles,
+          recurrence_interval: recurrenceInterval,
         },
       });
     } catch (error) {
       console.error('Erro ao fechar negocio:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async cancelDeal(req: AuthRequest, res: Response) {
+    const propertyId = Number(req.params.id);
+    const brokerId = req.userId;
+
+    if (!brokerId) {
+      return res.status(401).json({ error: 'Corretor nao autenticado.' });
+    }
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+    }
+
+    try {
+      const [propertyRows] = await connection.query<PropertyRow[]>(
+        'SELECT id, broker_id, status FROM properties WHERE id = ?',
+        [propertyId]
+      );
+
+      if (!propertyRows || propertyRows.length === 0) {
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      const property = propertyRows[0];
+      if (property.broker_id !== brokerId) {
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+      }
+
+      if (property.status !== 'sold' && property.status !== 'rented') {
+        return res.status(400).json({ error: 'Este imovel nao possui negocio fechado.' });
+      }
+
+      const db = await connection.getConnection();
+      try {
+        await db.beginTransaction();
+        await db.query(
+          'UPDATE properties SET status = ?, sale_value = NULL, commission_rate = NULL, commission_value = NULL WHERE id = ?',
+          ['approved', propertyId]
+        );
+        await db.query('DELETE FROM sales WHERE property_id = ?', [propertyId]);
+        await db.commit();
+      } catch (error) {
+        await db.rollback();
+        throw error;
+      } finally {
+        db.release();
+      }
+
+      return res.status(200).json({
+        message: 'Negocio cancelado com sucesso.',
+        status: 'approved',
+      });
+    } catch (error) {
+      console.error('Erro ao cancelar negocio:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }

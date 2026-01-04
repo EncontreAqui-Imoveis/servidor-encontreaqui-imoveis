@@ -150,6 +150,8 @@ const DDL_STATEMENTS: DDLStatement[] = [
         iptu_value DECIMAL(12, 2) NULL,
         condominio_value DECIMAL(12, 2) NULL,
         is_recurring TINYINT(1) NOT NULL DEFAULT 0,
+        commission_cycles INT NOT NULL DEFAULT 0,
+        recurrence_interval ENUM('none','weekly','monthly','yearly') NOT NULL DEFAULT 'none',
         sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (broker_id) REFERENCES brokers(id) ON DELETE CASCADE,

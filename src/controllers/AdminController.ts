@@ -5,7 +5,9 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import { uploadToCloudinary } from '../config/cloudinary';
 import { notifyAdmins } from '../services/notificationService';
-import admin from '../config/firebaseAdmin';
+import { sendPushNotifications, type PushNotificationResult } from '../services/pushNotificationService';
+import { notifyPriceDropIfNeeded } from '../services/priceDropNotificationService';
+import { notifyUsers } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
@@ -167,26 +169,6 @@ interface PropertyDetailRow extends RowDataPacket {
   broker_phone?: string | null;
 }
 
-interface DeviceTokenRow extends RowDataPacket {
-  fcm_token: string;
-}
-
-type PushNotificationPayload = {
-  message: string;
-  recipientIds: number[] | null;
-  relatedEntityType: string;
-  relatedEntityId: number | null;
-};
-
-type PushNotificationResult = {
-  requested: number;
-  success: number;
-  failure: number;
-  errorCodes: string[];
-};
-
-const PUSH_BATCH_LIMIT = 500;
-
 function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') {
     return null;
@@ -254,117 +236,18 @@ function mapAdminProperty(row: PropertyDetailRow) {
   };
 }
 
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
+async function fetchPropertyOwner(propertyId: number): Promise<{ brokerId: number | null; title: string }> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    'SELECT broker_id, title FROM properties WHERE id = ?',
+    [propertyId],
+  );
+  if (!rows || rows.length === 0) {
+    return { brokerId: null, title: '' };
   }
-  return chunks;
-}
-
-async function fetchDeviceTokens(recipientIds: number[] | null): Promise<string[]> {
-  const params: Array<number> = [];
-  let sql = 'SELECT DISTINCT fcm_token FROM user_device_tokens';
-
-  if (recipientIds && recipientIds.length > 0) {
-    const placeholders = recipientIds.map(() => '?').join(', ');
-    sql += ` WHERE user_id IN (${placeholders})`;
-    params.push(...recipientIds);
-  }
-
-  const [rows] = await connection.query<DeviceTokenRow[]>(sql, params);
-  return (rows ?? [])
-    .map((row) => (row.fcm_token ?? '').trim())
-    .filter((token) => token.length > 0);
-}
-
-async function removeInvalidTokens(tokens: string[]) {
-  if (tokens.length === 0) {
-    return;
-  }
-  await connection.query('DELETE FROM user_device_tokens WHERE fcm_token IN (?)', [tokens]);
-}
-
-async function sendPushNotifications(
-  payload: PushNotificationPayload,
-): Promise<PushNotificationResult> {
-  const tokens = await fetchDeviceTokens(payload.recipientIds);
-  const errorCodes = new Set<string>();
-  const summary: PushNotificationResult = {
-    requested: tokens.length,
-    success: 0,
-    failure: 0,
-    errorCodes: [],
-  };
-  if (tokens.length === 0) {
-    return summary;
-  }
-
-  const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
-  for (const batch of batches) {
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: batch,
-      notification: {
-        title: 'Mais Imoveis',
-        body: payload.message,
-      },
-      android: {
-        priority: 'high',
-        notification: {
-          channelId: 'default_channel',
-        },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
-          },
-        },
-      },
-      data: {
-        message: payload.message,
-        related_entity_type: payload.relatedEntityType,
-        related_entity_id: payload.relatedEntityId != null ? String(payload.relatedEntityId) : '',
-      },
-    });
-
-    const invalidTokens: string[] = [];
-    response.responses.forEach((item, index) => {
-      if (item.success) {
-        return;
-      }
-      const code = item.error?.code ?? '';
-      if (code) {
-        errorCodes.add(code);
-      }
-      if (
-        code === 'messaging/invalid-registration-token' ||
-        code === 'messaging/registration-token-not-registered'
-      ) {
-        invalidTokens.push(batch[index]);
-      }
-    });
-
-    if (response.failureCount > 0) {
-      const errorCodes = response.responses
-        .map((item) => item.error?.code)
-        .filter((code): code is string => Boolean(code));
-      console.warn('Falhas ao enviar push:', {
-        failures: response.failureCount,
-        codes: errorCodes,
-      });
-    }
-
-    if (invalidTokens.length > 0) {
-      await removeInvalidTokens(invalidTokens);
-    }
-
-    summary.success += response.successCount;
-    summary.failure += response.failureCount;
-  }
-
-  summary.errorCodes = Array.from(errorCodes);
-  return summary;
+  const row = rows[0];
+  const brokerId = row.broker_id != null ? Number(row.broker_id) : null;
+  const title = typeof row.title === 'string' ? row.title : '';
+  return { brokerId: Number.isFinite(brokerId ?? NaN) ? brokerId : null, title };
 }
 
 class AdminController {
@@ -668,13 +551,54 @@ class AdminController {
 
     try {
       const [propertyRows] = await connection.query<RowDataPacket[]>(
-        'SELECT id, status FROM properties WHERE id = ?',
+        'SELECT id, status, price, price_sale, price_rent, purpose, title FROM properties WHERE id = ?',
         [id]
       );
 
       if (propertyRows.length === 0) {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
+
+      const property = propertyRows[0];
+      const nextPurpose = normalizePurpose(body.purpose) ?? String(property.purpose ?? '');
+      const purposeLower = nextPurpose.toLowerCase();
+      const supportsSale = purposeLower.includes('vend');
+      const supportsRent = purposeLower.includes('alug');
+      const previousSalePrice =
+        toNullableNumber(property.price_sale) ?? toNullableNumber(property.price);
+      const previousRentPrice =
+        toNullableNumber(property.price_rent) ??
+        (supportsRent && !supportsSale ? toNullableNumber(property.price) : null);
+      let nextSalePrice = previousSalePrice;
+      let nextRentPrice = previousRentPrice;
+      let saleTouched = false;
+      let rentTouched = false;
+
+      if (Object.prototype.hasOwnProperty.call(body, 'price_sale')) {
+        nextSalePrice = parseDecimal(body.price_sale);
+        saleTouched = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'price_rent')) {
+        nextRentPrice = parseDecimal(body.price_rent);
+        rentTouched = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(body, 'price')) {
+        const parsed = parseDecimal(body.price);
+        if (supportsSale && !supportsRent) {
+          nextSalePrice = parsed;
+          saleTouched = true;
+        } else if (supportsRent && !supportsSale) {
+          nextRentPrice = parsed;
+          rentTouched = true;
+        } else if (supportsSale && supportsRent) {
+          nextSalePrice = parsed;
+          saleTouched = true;
+        }
+      }
+
+      const nextStatus = normalizeStatus(body.status) ?? (property.status as string);
+      const shouldNotifyPriceDrop =
+        (nextStatus ?? '').toLowerCase() === 'approved' && (saleTouched || rentTouched);
 
       const allowedFields = new Set([
         'title',
@@ -800,6 +724,25 @@ class AdminController {
         `UPDATE properties SET ${setParts.join(', ')} WHERE id = ?`,
         params
       );
+
+      if (shouldNotifyPriceDrop) {
+        try {
+          const title =
+            typeof body.title === 'string' && body.title.trim()
+              ? body.title.trim()
+              : String(property.title ?? '');
+          await notifyPriceDropIfNeeded({
+            propertyId: Number(id),
+            propertyTitle: title,
+            previousSalePrice,
+            newSalePrice: saleTouched ? nextSalePrice : undefined,
+            previousRentPrice,
+            newRentPrice: rentTouched ? nextRentPrice : undefined,
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar queda de preco:', notifyError);
+        }
+      }
 
       return res.status(200).json({ message: 'Imovel atualizado com sucesso.' });
     } catch (error) {
@@ -1188,6 +1131,19 @@ class AdminController {
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre aprovacao de corretor:', notifyError);
       }
+      try {
+        const brokerId = Number(id);
+        if (Number.isFinite(brokerId)) {
+          await notifyUsers({
+            message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
+            recipientIds: [brokerId],
+            relatedEntityType: 'broker',
+            relatedEntityId: brokerId,
+          });
+        }
+      } catch (notifyError) {
+        console.error('Erro ao notificar corretor aprovado:', notifyError);
+      }
       return res.status(200).json({ message: 'Corretor aprovado com sucesso.' });
     } catch (error) {
       console.error('Erro ao aprovar corretor:', error);
@@ -1254,6 +1210,18 @@ class AdminController {
         await notifyAdmins(`Status do corretor #${brokerId} atualizado para ${normalizedStatus}.`, 'broker', brokerId);
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre status do corretor:', notifyError);
+      }
+      if (normalizedStatus === 'approved') {
+        try {
+          await notifyUsers({
+            message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
+            recipientIds: [brokerId],
+            relatedEntityType: 'broker',
+            relatedEntityId: brokerId,
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar corretor aprovado:', notifyError);
+        }
       }
 
       return res.status(200).json({
@@ -1447,6 +1415,19 @@ class AdminController {
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre aprovacao de imovel:', notifyError);
       }
+      try {
+        const { brokerId, title } = await fetchPropertyOwner(propertyId);
+        if (brokerId) {
+          await notifyUsers({
+            message: `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`,
+            recipientIds: [brokerId],
+            relatedEntityType: 'property',
+            relatedEntityId: propertyId,
+          });
+        }
+      } catch (notifyError) {
+        console.error('Erro ao notificar corretor sobre aprovacao do imovel:', notifyError);
+      }
 
       return res.status(200).json({ message: 'Imovel aprovado com sucesso.' });
     } catch (error) {
@@ -1476,6 +1457,19 @@ class AdminController {
         await notifyAdmins(`Imovel #${propertyId} rejeitado pelo admin.`, 'property', propertyId);
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre rejeicao de imovel:', notifyError);
+      }
+      try {
+        const { brokerId, title } = await fetchPropertyOwner(propertyId);
+        if (brokerId) {
+          await notifyUsers({
+            message: `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`,
+            recipientIds: [brokerId],
+            relatedEntityType: 'property',
+            relatedEntityId: propertyId,
+          });
+        }
+      } catch (notifyError) {
+        console.error('Erro ao notificar corretor sobre rejeicao do imovel:', notifyError);
       }
 
       return res.status(200).json({ message: 'Imovel rejeitado com sucesso.' });
@@ -1518,6 +1512,25 @@ class AdminController {
         await notifyAdmins(`Status do imovel #${propertyId} atualizado para ${normalizedStatus}.`, 'property', propertyId);
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre status de imovel:', notifyError);
+      }
+      if (normalizedStatus === 'approved' || normalizedStatus === 'rejected') {
+        try {
+          const { brokerId, title } = await fetchPropertyOwner(propertyId);
+          if (brokerId) {
+            const message =
+              normalizedStatus === 'approved'
+                ? `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`
+                : `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`;
+            await notifyUsers({
+              message,
+              recipientIds: [brokerId],
+              relatedEntityType: 'property',
+              relatedEntityId: propertyId,
+            });
+          }
+        } catch (notifyError) {
+          console.error('Erro ao notificar corretor sobre status do imovel:', notifyError);
+        }
       }
 
       return res.status(200).json({
@@ -1697,6 +1710,9 @@ class AdminController {
     }
 
     try {
+      const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '20'), 10) || 20, 1), 100);
+      const offset = (page - 1) * limit;
       const [rows] = await connection.query<RowDataPacket[]>(
         `
           SELECT
@@ -1707,14 +1723,67 @@ class AdminController {
             is_read,
             created_at
           FROM notifications
-          WHERE is_read = 0
+          WHERE recipient_id = ?
           ORDER BY created_at DESC
+          LIMIT ? OFFSET ?
         `
+        ,
+        [adminId, limit, offset]
       );
+      const [countRows] = await connection.query<RowDataPacket[]>(
+        'SELECT COUNT(*) as total FROM notifications WHERE recipient_id = ?',
+        [adminId],
+      );
+      const total = countRows.length > 0 ? Number(countRows[0].total) : 0;
 
-      return res.status(200).json({ data: rows });
+      return res.status(200).json({ data: rows, total, page, limit });
     } catch (error) {
       console.error('Erro ao buscar notificacoes:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async deleteNotification(req: AuthRequest, res: Response) {
+    const adminId = Number(req.userId);
+    const notificationId = Number(req.params.id);
+
+    if (!adminId) {
+      return res.status(401).json({ error: 'Administrador nao autenticado.' });
+    }
+
+    if (Number.isNaN(notificationId)) {
+      return res.status(400).json({ error: 'Identificador de notificacao invalido.' });
+    }
+
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        'DELETE FROM notifications WHERE id = ? AND recipient_id = ?',
+        [notificationId, adminId],
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Notificacao nao encontrada.' });
+      }
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao deletar notificacao:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async clearNotifications(req: AuthRequest, res: Response) {
+    const adminId = Number(req.userId);
+
+    if (!adminId) {
+      return res.status(401).json({ error: 'Administrador nao autenticado.' });
+    }
+
+    try {
+      await connection.query('DELETE FROM notifications WHERE recipient_id = ?', [adminId]);
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao limpar notificacoes:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

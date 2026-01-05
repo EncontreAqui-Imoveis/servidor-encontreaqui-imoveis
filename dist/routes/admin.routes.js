@@ -8,6 +8,8 @@ const adminRoutes = (0, express_1.Router)();
 adminRoutes.post('/login', AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
 adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
+adminRoutes.delete('/notifications/:id', AdminController_1.adminController.deleteNotification);
+adminRoutes.delete('/notifications', AdminController_1.adminController.clearNotifications);
 adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },

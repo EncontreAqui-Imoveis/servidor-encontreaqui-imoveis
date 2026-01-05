@@ -4,6 +4,7 @@ import connection from "../database/connection";
 import { uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
 import { notifyAdmins } from "../services/notificationService";
+import { notifyPriceDropIfNeeded } from "../services/priceDropNotificationService";
 
 interface MulterFiles {
   [fieldname: string]: Express.Multer.File[];
@@ -762,8 +763,22 @@ class PropertyController {
         return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
       }
 
+      const previousSalePrice =
+        property.price_sale != null ? Number(property.price_sale) : Number(property.price);
+      const previousRentPrice =
+        property.price_rent != null ? Number(property.price_rent) : Number(property.price);
+
       const body = req.body ?? {};
       const bodyKeys = Object.keys(body);
+
+      const nextPurpose = normalizePurpose(body.purpose) ?? property.purpose;
+      const purposeLower = String(nextPurpose ?? '').toLowerCase();
+      const supportsSale = purposeLower.includes('vend');
+      const supportsRent = purposeLower.includes('alug');
+      let nextSalePrice = previousSalePrice;
+      let nextRentPrice = previousRentPrice;
+      let saleTouched = false;
+      let rentTouched = false;
 
       if (property.status === 'approved') {
         const invalidKeys = bodyKeys.filter((key) => key !== 'status');
@@ -842,8 +857,19 @@ class PropertyController {
           }
           case 'price': {
             try {
+              const parsed = parsePrice(body.price);
               fields.push('price = ?');
-              values.push(parsePrice(body.price));
+              values.push(parsed);
+              if (supportsSale && !supportsRent) {
+                nextSalePrice = parsed;
+                saleTouched = true;
+              } else if (supportsRent && !supportsSale) {
+                nextRentPrice = parsed;
+                rentTouched = true;
+              } else if (supportsSale && supportsRent) {
+                nextSalePrice = parsed;
+                saleTouched = true;
+              }
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
@@ -852,8 +878,16 @@ class PropertyController {
           case 'price_sale':
           case 'price_rent': {
             try {
+              const parsed = parsePrice(body[key]);
               fields.push(`\`${key}\` = ?`);
-              values.push(parsePrice(body[key]));
+              values.push(parsed);
+              if (key === 'price_sale') {
+                nextSalePrice = parsed;
+                saleTouched = true;
+              } else {
+                nextRentPrice = parsed;
+                rentTouched = true;
+              }
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
@@ -923,6 +957,22 @@ class PropertyController {
             'INSERT INTO property_images (property_id, image_url) VALUES ?',
             [imageValues]
           );
+        }
+      }
+
+      const effectiveStatus = nextStatus ?? property.status;
+      if (effectiveStatus === 'approved' && (saleTouched || rentTouched)) {
+        try {
+          await notifyPriceDropIfNeeded({
+            propertyId,
+            propertyTitle: property.title,
+            previousSalePrice,
+            newSalePrice: saleTouched ? nextSalePrice : undefined,
+            previousRentPrice,
+            newRentPrice: rentTouched ? nextRentPrice : undefined,
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar queda de preco:', notifyError);
         }
       }
 

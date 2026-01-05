@@ -7,6 +7,7 @@ exports.propertyController = void 0;
 const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
 const notificationService_1 = require("../services/notificationService");
+const priceDropNotificationService_1 = require("../services/priceDropNotificationService");
 const STATUS_MAP = {
     pendingapproval: "pending_approval",
     pendente: "pending_approval",
@@ -540,8 +541,18 @@ class PropertyController {
             if (property.broker_id !== brokerId) {
                 return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
             }
+            const previousSalePrice = property.price_sale != null ? Number(property.price_sale) : Number(property.price);
+            const previousRentPrice = property.price_rent != null ? Number(property.price_rent) : Number(property.price);
             const body = req.body ?? {};
             const bodyKeys = Object.keys(body);
+            const nextPurpose = normalizePurpose(body.purpose) ?? property.purpose;
+            const purposeLower = String(nextPurpose ?? '').toLowerCase();
+            const supportsSale = purposeLower.includes('vend');
+            const supportsRent = purposeLower.includes('alug');
+            let nextSalePrice = previousSalePrice;
+            let nextRentPrice = previousRentPrice;
+            let saleTouched = false;
+            let rentTouched = false;
             if (property.status === 'approved') {
                 const invalidKeys = bodyKeys.filter((key) => key !== 'status');
                 if (invalidKeys.length > 0) {
@@ -615,8 +626,21 @@ class PropertyController {
                     }
                     case 'price': {
                         try {
+                            const parsed = parsePrice(body.price);
                             fields.push('price = ?');
-                            values.push(parsePrice(body.price));
+                            values.push(parsed);
+                            if (supportsSale && !supportsRent) {
+                                nextSalePrice = parsed;
+                                saleTouched = true;
+                            }
+                            else if (supportsRent && !supportsSale) {
+                                nextRentPrice = parsed;
+                                rentTouched = true;
+                            }
+                            else if (supportsSale && supportsRent) {
+                                nextSalePrice = parsed;
+                                saleTouched = true;
+                            }
                         }
                         catch (parseError) {
                             return res.status(400).json({ error: parseError.message });
@@ -626,8 +650,17 @@ class PropertyController {
                     case 'price_sale':
                     case 'price_rent': {
                         try {
+                            const parsed = parsePrice(body[key]);
                             fields.push(`\`${key}\` = ?`);
-                            values.push(parsePrice(body[key]));
+                            values.push(parsed);
+                            if (key === 'price_sale') {
+                                nextSalePrice = parsed;
+                                saleTouched = true;
+                            }
+                            else {
+                                nextRentPrice = parsed;
+                                rentTouched = true;
+                            }
                         }
                         catch (parseError) {
                             return res.status(400).json({ error: parseError.message });
@@ -688,6 +721,22 @@ class PropertyController {
                 if (images.length > 0) {
                     const imageValues = images.map((url) => [propertyId, url]);
                     await connection_1.default.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [imageValues]);
+                }
+            }
+            const effectiveStatus = nextStatus ?? property.status;
+            if (effectiveStatus === 'approved' && (saleTouched || rentTouched)) {
+                try {
+                    await (0, priceDropNotificationService_1.notifyPriceDropIfNeeded)({
+                        propertyId,
+                        propertyTitle: property.title,
+                        previousSalePrice,
+                        newSalePrice: saleTouched ? nextSalePrice : undefined,
+                        previousRentPrice,
+                        newRentPrice: rentTouched ? nextRentPrice : undefined,
+                    });
+                }
+                catch (notifyError) {
+                    console.error('Erro ao notificar queda de preco:', notifyError);
                 }
             }
             if (nextStatus && NOTIFY_ON_STATUS.has(nextStatus)) {

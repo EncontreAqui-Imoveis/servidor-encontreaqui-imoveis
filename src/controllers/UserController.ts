@@ -728,7 +728,6 @@ class UserController {
         SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
         FROM notifications
         WHERE recipient_id = ?
-          AND related_entity_type = 'other'
         ORDER BY created_at DESC
       `;
 

@@ -29,13 +29,17 @@ async function notifyAdmins(message, relatedEntityType, relatedEntityId) {
         relatedEntityType,
         relatedEntityId,
         adminId,
+        'admin',
+        'admin',
     ]);
     await connection_1.default.query(`
       INSERT INTO notifications (
         message,
         related_entity_type,
         related_entity_id,
-        recipient_id
+        recipient_id,
+        recipient_type,
+        recipient_role
       )
       VALUES ?
     `, [values]);

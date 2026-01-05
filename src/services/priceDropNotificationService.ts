@@ -1,6 +1,11 @@
 import { RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
-import { notifyUsers, filterRecipientsByCooldown } from './userNotificationService';
+import {
+  notifyUsers,
+  filterRecipientsByCooldown,
+  splitRecipientsByRole,
+  type RecipientRole,
+} from './userNotificationService';
 
 const PRICE_DROP_THRESHOLD = 0.1;
 const PRICE_DROP_COOLDOWN_MS = 6 * 60 * 60 * 1000;
@@ -70,17 +75,7 @@ export async function notifyPriceDropIfNeeded({
   }
 
   const cutoff = new Date(Date.now() - PRICE_DROP_COOLDOWN_MS);
-  const allowedRecipients = await filterRecipientsByCooldown(
-    recipients,
-    'property',
-    propertyId,
-    PRICE_DROP_PREFIX,
-    cutoff
-  );
-
-  if (allowedRecipients.length === 0) {
-    return;
-  }
+  const { clientIds, brokerIds } = await splitRecipientsByRole(recipients);
 
   const title = propertyTitle?.trim() ? propertyTitle.trim() : `#${propertyId}`;
   let message = `${PRICE_DROP_PREFIX}: o imovel "${title}" ficou mais barato.`;
@@ -94,10 +89,35 @@ export async function notifyPriceDropIfNeeded({
     message += ` Aluguel: de ${formatCurrency(previousRentPrice!)} para ${formatCurrency(newRentPrice!)}.`;
   }
 
-  await notifyUsers({
-    message,
-    recipientIds: allowedRecipients,
-    relatedEntityType: 'property',
-    relatedEntityId: propertyId,
-  });
+  const recipientGroups: Array<{ role: RecipientRole; ids: number[] }> = [
+    { role: 'client', ids: clientIds },
+    { role: 'broker', ids: brokerIds },
+  ];
+
+  for (const group of recipientGroups) {
+    if (group.ids.length === 0) {
+      continue;
+    }
+
+    const allowedRecipients = await filterRecipientsByCooldown(
+      group.ids,
+      'property',
+      propertyId,
+      PRICE_DROP_PREFIX,
+      cutoff,
+      group.role
+    );
+
+    if (allowedRecipients.length === 0) {
+      continue;
+    }
+
+    await notifyUsers({
+      message,
+      recipientIds: allowedRecipients,
+      recipientRole: group.role,
+      relatedEntityType: 'property',
+      relatedEntityId: propertyId,
+    });
+  }
 }

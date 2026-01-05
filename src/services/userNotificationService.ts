@@ -6,10 +6,14 @@ import {
 } from './pushNotificationService';
 
 type RelatedEntityType = 'property' | 'broker' | 'agency' | 'user' | 'other';
+export type RecipientRole = 'client' | 'broker';
+
+const ACTIVE_BROKER_STATUSES = new Set(['pending_verification', 'approved']);
 
 interface NotifyUsersInput {
   message: string;
   recipientIds: number[];
+  recipientRole: RecipientRole;
   relatedEntityType: RelatedEntityType;
   relatedEntityId?: number | null;
   sendPush?: boolean;
@@ -18,6 +22,7 @@ interface NotifyUsersInput {
 export async function notifyUsers({
   message,
   recipientIds,
+  recipientRole,
   relatedEntityType,
   relatedEntityId = null,
   sendPush = true,
@@ -44,6 +49,8 @@ export async function notifyUsers({
     relatedEntityType,
     relatedEntityId,
     rid,
+    'user',
+    recipientRole,
   ]);
 
   const batchSize = 500;
@@ -51,7 +58,7 @@ export async function notifyUsers({
     const chunk = values.slice(i, i + batchSize);
     await connection.query(
       `
-        INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
+        INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id, recipient_type, recipient_role)
         VALUES ?
       `,
       [chunk]
@@ -76,6 +83,7 @@ export async function filterRecipientsByCooldown(
   relatedEntityId: number | null,
   messagePrefix: string,
   cutoff: Date,
+  recipientRole: RecipientRole,
 ): Promise<number[]> {
   const uniqueRecipients = Array.from(new Set(recipientIds));
   if (uniqueRecipients.length === 0) {
@@ -88,12 +96,14 @@ export async function filterRecipientsByCooldown(
       SELECT DISTINCT recipient_id
       FROM notifications
       WHERE recipient_id IN (${placeholders})
+        AND recipient_type = 'user'
+        AND recipient_role = ?
         AND related_entity_type = ?
         AND related_entity_id = ?
         AND message LIKE ?
         AND created_at >= ?
     `,
-    [...uniqueRecipients, relatedEntityType, relatedEntityId, `${messagePrefix}%`, cutoff]
+    [...uniqueRecipients, recipientRole, relatedEntityType, relatedEntityId, `${messagePrefix}%`, cutoff]
   );
 
   const blocked = new Set(
@@ -101,4 +111,55 @@ export async function filterRecipientsByCooldown(
   );
 
   return uniqueRecipients.filter((id) => !blocked.has(id));
+}
+
+export async function splitRecipientsByRole(
+  recipientIds: number[],
+): Promise<{ clientIds: number[]; brokerIds: number[] }> {
+  const uniqueIds = Array.from(
+    new Set(recipientIds.map((id) => Number(id)).filter((id) => Number.isFinite(id)))
+  );
+
+  if (uniqueIds.length === 0) {
+    return { clientIds: [], brokerIds: [] };
+  }
+
+  const placeholders = uniqueIds.map(() => '?').join(', ');
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `SELECT id, status FROM brokers WHERE id IN (${placeholders})`,
+    uniqueIds
+  );
+
+  const brokerIds = new Set<number>();
+  for (const row of rows ?? []) {
+    const brokerId = Number(row.id);
+    if (!Number.isFinite(brokerId)) {
+      continue;
+    }
+    const status = String(row.status ?? '').trim();
+    if (ACTIVE_BROKER_STATUSES.has(status)) {
+      brokerIds.add(brokerId);
+    }
+  }
+
+  const clientIds = uniqueIds.filter((id) => !brokerIds.has(id));
+  return { clientIds, brokerIds: Array.from(brokerIds) };
+}
+
+export async function resolveUserNotificationRole(userId: number): Promise<RecipientRole> {
+  if (!Number.isFinite(userId)) {
+    return 'client';
+  }
+
+  const [rows] = await connection.query<RowDataPacket[]>(
+    'SELECT status FROM brokers WHERE id = ? LIMIT 1',
+    [userId]
+  );
+
+  if (!rows || rows.length === 0) {
+    return 'client';
+  }
+
+  const status = String(rows[0].status ?? '').trim();
+  return ACTIVE_BROKER_STATUSES.has(status) ? 'broker' : 'client';
 }

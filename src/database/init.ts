@@ -186,10 +186,14 @@ const DDL_STATEMENTS: DDLStatement[] = [
         related_entity_type ENUM('property','broker','agency','user','other') NOT NULL,
         related_entity_id BIGINT UNSIGNED NULL,
         recipient_id BIGINT UNSIGNED NULL,
+        recipient_type ENUM('admin','user') NOT NULL DEFAULT 'user',
+        recipient_role ENUM('client','broker','admin') NOT NULL DEFAULT 'client',
         is_read TINYINT(1) NOT NULL DEFAULT 0,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_notifications_is_read (is_read),
         INDEX idx_notifications_entity (related_entity_type, related_entity_id),
+        INDEX idx_notifications_recipient_type (recipient_type, recipient_id),
+        INDEX idx_notifications_role (recipient_role),
         INDEX idx_recipient (recipient_id)
       );
     `,

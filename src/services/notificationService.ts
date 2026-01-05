@@ -44,6 +44,8 @@ export async function notifyAdmins(
     relatedEntityType,
     relatedEntityId,
     adminId,
+    'admin',
+    'admin',
   ]);
 
   await connection.query(
@@ -52,7 +54,9 @@ export async function notifyAdmins(
         message,
         related_entity_type,
         related_entity_id,
-        recipient_id
+        recipient_id,
+        recipient_type,
+        recipient_role
       )
       VALUES ?
     `,

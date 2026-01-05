@@ -46,10 +46,7 @@ async function notifyPriceDropIfNeeded({ propertyId, propertyTitle, previousSale
         return;
     }
     const cutoff = new Date(Date.now() - PRICE_DROP_COOLDOWN_MS);
-    const allowedRecipients = await (0, userNotificationService_1.filterRecipientsByCooldown)(recipients, 'property', propertyId, PRICE_DROP_PREFIX, cutoff);
-    if (allowedRecipients.length === 0) {
-        return;
-    }
+    const { clientIds, brokerIds } = await (0, userNotificationService_1.splitRecipientsByRole)(recipients);
     const title = propertyTitle?.trim() ? propertyTitle.trim() : `#${propertyId}`;
     let message = `${PRICE_DROP_PREFIX}: o imovel "${title}" ficou mais barato.`;
     if (saleDrop >= PRICE_DROP_THRESHOLD && rentDrop >= PRICE_DROP_THRESHOLD) {
@@ -62,10 +59,24 @@ async function notifyPriceDropIfNeeded({ propertyId, propertyTitle, previousSale
     else if (rentDrop >= PRICE_DROP_THRESHOLD) {
         message += ` Aluguel: de ${formatCurrency(previousRentPrice)} para ${formatCurrency(newRentPrice)}.`;
     }
-    await (0, userNotificationService_1.notifyUsers)({
-        message,
-        recipientIds: allowedRecipients,
-        relatedEntityType: 'property',
-        relatedEntityId: propertyId,
-    });
+    const recipientGroups = [
+        { role: 'client', ids: clientIds },
+        { role: 'broker', ids: brokerIds },
+    ];
+    for (const group of recipientGroups) {
+        if (group.ids.length === 0) {
+            continue;
+        }
+        const allowedRecipients = await (0, userNotificationService_1.filterRecipientsByCooldown)(group.ids, 'property', propertyId, PRICE_DROP_PREFIX, cutoff, group.role);
+        if (allowedRecipients.length === 0) {
+            continue;
+        }
+        await (0, userNotificationService_1.notifyUsers)({
+            message,
+            recipientIds: allowedRecipients,
+            recipientRole: group.role,
+            relatedEntityType: 'property',
+            relatedEntityId: propertyId,
+        });
+    }
 }

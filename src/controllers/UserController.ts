@@ -5,6 +5,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import AuthRequest from '../middlewares/auth';
 import admin from '../config/firebaseAdmin';
+import { resolveUserNotificationRole } from '../services/userNotificationService';
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -724,14 +725,17 @@ class UserController {
     }
 
     try {
+      const role = await resolveUserNotificationRole(Number(userId));
       const sql = `
         SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
         FROM notifications
         WHERE recipient_id = ?
+          AND recipient_type = 'user'
+          AND recipient_role = ?
         ORDER BY created_at DESC
       `;
 
-      const [rows] = await connection.query<RowDataPacket[]>(sql, [userId]);
+      const [rows] = await connection.query<RowDataPacket[]>(sql, [userId, role]);
       return res.status(200).json(rows);
     } catch (error) {
       console.error('Erro ao buscar notificacoes:', error);
@@ -752,14 +756,16 @@ class UserController {
     }
 
     try {
+      const role = await resolveUserNotificationRole(Number(userId));
       const [result] = await connection.query<ResultSetHeader>(
         `
           DELETE FROM notifications
           WHERE id = ?
             AND recipient_id = ?
-            AND related_entity_type = 'other'
+            AND recipient_type = 'user'
+            AND recipient_role = ?
         `,
-        [notificationId, userId],
+        [notificationId, userId, role],
       );
 
       if (result.affectedRows === 0) {
@@ -781,13 +787,15 @@ class UserController {
     }
 
     try {
+      const role = await resolveUserNotificationRole(Number(userId));
       await connection.query(
         `
           DELETE FROM notifications
           WHERE recipient_id = ?
-            AND related_entity_type = 'other'
+            AND recipient_type = 'user'
+            AND recipient_role = ?
         `,
-        [userId],
+        [userId, role],
       );
 
       return res.status(204).send();

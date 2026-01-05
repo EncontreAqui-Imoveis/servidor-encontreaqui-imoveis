@@ -8,6 +8,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
+const userNotificationService_1 = require("../services/userNotificationService");
 function toBoolean(value) {
     return value === 1 || value === '1' || value === true;
 }
@@ -521,13 +522,16 @@ class UserController {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
         try {
+            const role = await (0, userNotificationService_1.resolveUserNotificationRole)(Number(userId));
             const sql = `
         SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
         FROM notifications
         WHERE recipient_id = ?
+          AND recipient_type = 'user'
+          AND recipient_role = ?
         ORDER BY created_at DESC
       `;
-            const [rows] = await connection_1.default.query(sql, [userId]);
+            const [rows] = await connection_1.default.query(sql, [userId, role]);
             return res.status(200).json(rows);
         }
         catch (error) {
@@ -545,12 +549,14 @@ class UserController {
             return res.status(400).json({ error: 'Identificador de notificacao invalido.' });
         }
         try {
+            const role = await (0, userNotificationService_1.resolveUserNotificationRole)(Number(userId));
             const [result] = await connection_1.default.query(`
           DELETE FROM notifications
           WHERE id = ?
             AND recipient_id = ?
-            AND related_entity_type = 'other'
-        `, [notificationId, userId]);
+            AND recipient_type = 'user'
+            AND recipient_role = ?
+        `, [notificationId, userId, role]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Notificacao nao encontrada.' });
             }
@@ -567,11 +573,13 @@ class UserController {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
         try {
+            const role = await (0, userNotificationService_1.resolveUserNotificationRole)(Number(userId));
             await connection_1.default.query(`
           DELETE FROM notifications
           WHERE recipient_id = ?
-            AND related_entity_type = 'other'
-        `, [userId]);
+            AND recipient_type = 'user'
+            AND recipient_role = ?
+        `, [userId, role]);
             return res.status(204).send();
         }
         catch (error) {

@@ -5,9 +5,9 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import { uploadToCloudinary } from '../config/cloudinary';
 import { notifyAdmins } from '../services/notificationService';
-import { sendPushNotifications, type PushNotificationResult } from '../services/pushNotificationService';
+import { type PushNotificationResult } from '../services/pushNotificationService';
 import { notifyPriceDropIfNeeded } from '../services/priceDropNotificationService';
-import { notifyUsers } from '../services/userNotificationService';
+import { notifyUsers, splitRecipientsByRole } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
@@ -468,7 +468,7 @@ class AdminController {
       const params: Array<string | number> = [];
 
       if (!includeBrokers) {
-        whereClauses.push('b.id IS NULL');
+        whereClauses.push("(b.id IS NULL OR b.status IN ('rejected','suspended'))");
       }
 
       if (searchTerm) {
@@ -492,7 +492,10 @@ class AdminController {
             u.email,
             u.phone,
             u.created_at,
-            CASE WHEN b.id IS NULL THEN 'client' ELSE 'broker' END AS role
+            CASE
+              WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification') THEN 'broker'
+              ELSE 'client'
+            END AS role
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
           ${whereSql}
@@ -1137,6 +1140,7 @@ class AdminController {
           await notifyUsers({
             message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
             recipientIds: [brokerId],
+            recipientRole: 'broker',
             relatedEntityType: 'broker',
             relatedEntityId: brokerId,
           });
@@ -1216,6 +1220,7 @@ class AdminController {
           await notifyUsers({
             message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
             recipientIds: [brokerId],
+            recipientRole: 'broker',
             relatedEntityType: 'broker',
             relatedEntityId: brokerId,
           });
@@ -1421,6 +1426,7 @@ class AdminController {
           await notifyUsers({
             message: `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`,
             recipientIds: [brokerId],
+            recipientRole: 'broker',
             relatedEntityType: 'property',
             relatedEntityId: propertyId,
           });
@@ -1464,6 +1470,7 @@ class AdminController {
           await notifyUsers({
             message: `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`,
             recipientIds: [brokerId],
+            recipientRole: 'broker',
             relatedEntityType: 'property',
             relatedEntityId: propertyId,
           });
@@ -1524,6 +1531,7 @@ class AdminController {
             await notifyUsers({
               message,
               recipientIds: [brokerId],
+              recipientRole: 'broker',
               relatedEntityType: 'property',
               relatedEntityId: propertyId,
             });
@@ -1724,6 +1732,7 @@ class AdminController {
             created_at
           FROM notifications
           WHERE recipient_id = ?
+            AND recipient_type = 'admin'
           ORDER BY created_at DESC
           LIMIT ? OFFSET ?
         `
@@ -1731,7 +1740,7 @@ class AdminController {
         [adminId, limit, offset]
       );
       const [countRows] = await connection.query<RowDataPacket[]>(
-        'SELECT COUNT(*) as total FROM notifications WHERE recipient_id = ?',
+        "SELECT COUNT(*) as total FROM notifications WHERE recipient_id = ? AND recipient_type = 'admin'",
         [adminId],
       );
       const total = countRows.length > 0 ? Number(countRows[0].total) : 0;
@@ -1757,7 +1766,7 @@ class AdminController {
 
     try {
       const [result] = await connection.query<ResultSetHeader>(
-        'DELETE FROM notifications WHERE id = ? AND recipient_id = ?',
+        "DELETE FROM notifications WHERE id = ? AND recipient_id = ? AND recipient_type = 'admin'",
         [notificationId, adminId],
       );
 
@@ -1780,7 +1789,7 @@ class AdminController {
     }
 
     try {
-      await connection.query('DELETE FROM notifications WHERE recipient_id = ?', [adminId]);
+      await connection.query("DELETE FROM notifications WHERE recipient_id = ? AND recipient_type = 'admin'", [adminId]);
       return res.status(204).send();
     } catch (error) {
       console.error('Erro ao limpar notificacoes:', error);
@@ -1847,16 +1856,33 @@ export const getDashboardStats = async (req: Request, res: Response) => {
 
 export async function sendNotification(req: Request, res: Response) {
   try {
-    const { message, recipientId, recipientIds, related_entity_type, related_entity_id } = req.body;
+    const {
+      message,
+      recipientId,
+      recipientIds,
+      related_entity_type,
+      related_entity_id,
+      audience,
+    } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim() === '') {
-      return res.status(400).json({ error: 'A mensagem ? obrigat?ria.' });
+      return res.status(400).json({ error: 'A mensagem e obrigatoria.' });
     }
 
     const trimmedMessage = message.trim();
     const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'other']);
-    const entityType = allowedTypes.has(String(related_entity_type)) ? String(related_entity_type) : 'other';
+    const rawEntityType = String(related_entity_type);
+    const entityType = (allowedTypes.has(rawEntityType) ? rawEntityType : 'other') as
+      | 'property'
+      | 'broker'
+      | 'agency'
+      | 'user'
+      | 'other';
     const entityId = related_entity_id != null ? Number(related_entity_id) : null;
+
+    const audienceValue = typeof audience === 'string' ? audience.trim().toLowerCase() : 'all';
+    const normalizedAudience =
+      audienceValue === 'client' || audienceValue === 'broker' ? audienceValue : 'all';
 
     const normalizedRecipients: Array<number | null> = [];
     if (Array.isArray(recipientIds)) {
@@ -1879,13 +1905,35 @@ export async function sendNotification(req: Request, res: Response) {
 
     const sendToAll = normalizedRecipients.some((rid) => rid === null);
     let notificationRecipients: number[] = [];
+
     if (sendToAll) {
-      const [userRows] = await connection.query<RowDataPacket[]>(
-        'SELECT id FROM users'
-      );
-      notificationRecipients = (userRows ?? [])
-        .map((row) => Number(row.id))
-        .filter((id) => Number.isFinite(id));
+      if (normalizedAudience === 'broker') {
+        const [userRows] = await connection.query<RowDataPacket[]>(
+          "SELECT id FROM brokers WHERE status IN ('pending_verification','approved')",
+        );
+        notificationRecipients = (userRows ?? [])
+          .map((row) => Number(row.id))
+          .filter((id) => Number.isFinite(id));
+      } else if (normalizedAudience === 'client') {
+        const [userRows] = await connection.query<RowDataPacket[]>(
+          `
+            SELECT u.id
+            FROM users u
+            LEFT JOIN brokers b ON u.id = b.id
+            WHERE b.id IS NULL OR b.status IN ('rejected','suspended')
+          `
+        );
+        notificationRecipients = (userRows ?? [])
+          .map((row) => Number(row.id))
+          .filter((id) => Number.isFinite(id));
+      } else {
+        const [userRows] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM users'
+        );
+        notificationRecipients = (userRows ?? [])
+          .map((row) => Number(row.id))
+          .filter((id) => Number.isFinite(id));
+      }
     } else {
       notificationRecipients = normalizedRecipients.filter(
         (rid): rid is number => typeof rid === 'number'
@@ -1896,44 +1944,66 @@ export async function sendNotification(req: Request, res: Response) {
       return res.status(404).json({ error: 'Nenhum destinatario encontrado.' });
     }
 
-    const values = notificationRecipients.map((rid) => [
-      trimmedMessage,
-      entityType,
-      entityId,
-      rid,
-    ]);
+    const { clientIds, brokerIds } = await splitRecipientsByRole(notificationRecipients);
+    const targetClientIds = normalizedAudience === 'broker' ? [] : clientIds;
+    const targetBrokerIds = normalizedAudience === 'client' ? [] : brokerIds;
 
-    const batchSize = 500;
-    for (let i = 0; i < values.length; i += batchSize) {
-      const chunk = values.slice(i, i + batchSize);
-      await connection.query(
-        `
-          INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
-          VALUES ?
-        `,
-        [chunk]
-      );
-    }
+    const summaries: PushNotificationResult[] = [];
 
-    const pushRecipients = sendToAll ? null : notificationRecipients;
-
-    let pushSummary: PushNotificationResult | null = null;
-    try {
-      pushSummary = await sendPushNotifications({
+    if (targetClientIds.length > 0) {
+      const summary = await notifyUsers({
         message: trimmedMessage,
-        recipientIds: pushRecipients,
+        recipientIds: targetClientIds,
+        recipientRole: 'client',
         relatedEntityType: entityType,
         relatedEntityId: entityId,
       });
-    } catch (pushError) {
-      console.error('Erro ao enviar push de notificacao:', pushError);
+      if (summary) {
+        summaries.push(summary);
+      }
     }
+
+    if (targetBrokerIds.length > 0) {
+      const summary = await notifyUsers({
+        message: trimmedMessage,
+        recipientIds: targetBrokerIds,
+        recipientRole: 'broker',
+        relatedEntityType: entityType,
+        relatedEntityId: entityId,
+      });
+      if (summary) {
+        summaries.push(summary);
+      }
+    }
+
+    if (summaries.length === 0) {
+      return res.status(404).json({ error: 'Nenhum destinatario encontrado.' });
+    }
+
+    const errorCodes = new Set<string>();
+    const combined: PushNotificationResult = {
+      requested: 0,
+      success: 0,
+      failure: 0,
+      errorCodes: [],
+    };
+
+    for (const summary of summaries) {
+      combined.requested += summary.requested;
+      combined.success += summary.success;
+      combined.failure += summary.failure;
+      for (const code of summary.errorCodes) {
+        errorCodes.add(code);
+      }
+    }
+
+    combined.errorCodes = Array.from(errorCodes);
 
     return res
       .status(201)
-      .json({ message: 'Notifica??o enviada com sucesso.', push: pushSummary });
+      .json({ message: 'Notificacao enviada com sucesso.', push: combined });
   } catch (error) {
-    console.error('Erro ao enviar notifica??o:', error);
+    console.error('Erro ao enviar notificacao:', error);
     return res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 }

@@ -46,6 +46,8 @@ function mapFavorite(row) {
         purpose: row.purpose,
         status: row.status,
         price: Number(row.price),
+        price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+        price_rent: row.price_rent != null ? Number(row.price_rent) : null,
         code: row.code ?? null,
         address: row.address,
         quadra: row.quadra ?? null,
@@ -520,10 +522,10 @@ class UserController {
         }
         try {
             const sql = `
-        SELECT id, message, related_entity_type, related_entity_id, created_at
+        SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
         FROM notifications
         WHERE recipient_id = ?
-          OR (recipient_id IS NULL AND related_entity_type = 'other')
+          AND related_entity_type = 'other'
         ORDER BY created_at DESC
       `;
             const [rows] = await connection_1.default.query(sql, [userId]);
@@ -532,6 +534,97 @@ class UserController {
         catch (error) {
             console.error('Erro ao buscar notificacoes:', error);
             return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+        }
+    }
+    async markNotificationRead(req, res) {
+        const userId = req.userId;
+        const notificationId = Number(req.params.id);
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        if (Number.isNaN(notificationId)) {
+            return res.status(400).json({ error: 'Identificador de notificacao invalido.' });
+        }
+        try {
+            const [result] = await connection_1.default.query(`
+          DELETE FROM notifications
+          WHERE id = ?
+            AND recipient_id = ?
+            AND related_entity_type = 'other'
+        `, [notificationId, userId]);
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Notificacao nao encontrada.' });
+            }
+            return res.status(204).send();
+        }
+        catch (error) {
+            console.error('Erro ao remover notificacao:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+        }
+    }
+    async markAllNotificationsRead(req, res) {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        try {
+            await connection_1.default.query(`
+          DELETE FROM notifications
+          WHERE recipient_id = ?
+            AND related_entity_type = 'other'
+        `, [userId]);
+            return res.status(204).send();
+        }
+        catch (error) {
+            console.error('Erro ao limpar notificacoes:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
+        }
+    }
+    async registerDeviceToken(req, res) {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        const { token, platform } = req.body ?? {};
+        const trimmedToken = typeof token === 'string' ? token.trim() : '';
+        const trimmedPlatform = typeof platform === 'string' ? platform.trim() : null;
+        if (!trimmedToken) {
+            return res.status(400).json({ error: 'Token do dispositivo e obrigatorio.' });
+        }
+        try {
+            await connection_1.default.query(`
+          INSERT INTO user_device_tokens (user_id, fcm_token, platform)
+          VALUES (?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            platform = VALUES(platform),
+            updated_at = CURRENT_TIMESTAMP
+        `, [userId, trimmedToken, trimmedPlatform]);
+            return res.status(204).send();
+        }
+        catch (error) {
+            console.error('Erro ao registrar token do dispositivo:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async unregisterDeviceToken(req, res) {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        const tokenFromQuery = typeof req.query.token === 'string' ? req.query.token : null;
+        const tokenFromBody = typeof req.body?.token === 'string' ? req.body.token : null;
+        const trimmedToken = (tokenFromBody ?? tokenFromQuery ?? '').trim();
+        if (!trimmedToken) {
+            return res.status(400).json({ error: 'Token do dispositivo e obrigatorio.' });
+        }
+        try {
+            await connection_1.default.query('DELETE FROM user_device_tokens WHERE user_id = ? AND fcm_token = ?', [userId, trimmedToken]);
+            return res.status(204).send();
+        }
+        catch (error) {
+            console.error('Erro ao remover token do dispositivo:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
 }

@@ -35,6 +35,40 @@ const ALLOWED_STATUSES = new Set([
     "sold",
 ]);
 const NOTIFY_ON_STATUS = new Set(["sold", "rented"]);
+const DEAL_TYPE_MAP = {
+    sale: "sale",
+    sold: "sale",
+    venda: "sale",
+    vendido: "sale",
+    vendida: "sale",
+    rent: "rent",
+    rented: "rent",
+    aluguel: "rent",
+    alugado: "rent",
+    alugada: "rent",
+    locacao: "rent",
+    locado: "rent",
+    locada: "rent",
+};
+const STATUS_TO_DEAL = {
+    sold: "sale",
+    rented: "rent",
+};
+const PURPOSE_MAP = {
+    venda: "Venda",
+    comprar: "Venda",
+    aluguel: "Aluguel",
+    alugar: "Aluguel",
+    vendaealuguel: "Venda e Aluguel",
+    vendaaluguel: "Venda e Aluguel",
+};
+const ALLOWED_PURPOSES = new Set(["Venda", "Aluguel", "Venda e Aluguel"]);
+const RECURRENCE_INTERVALS = new Set([
+    "none",
+    "weekly",
+    "monthly",
+    "yearly",
+]);
 function normalizeStatus(value) {
     if (typeof value !== "string") {
         return null;
@@ -49,12 +83,74 @@ function normalizeStatus(value) {
     }
     return status;
 }
+function normalizePurpose(value) {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value
+        .normalize("NFD")
+        .replace(/[^\p{L}0-9]/gu, "")
+        .toLowerCase();
+    const mapped = PURPOSE_MAP[normalized];
+    if (!mapped || !ALLOWED_PURPOSES.has(mapped)) {
+        return null;
+    }
+    return mapped;
+}
+function purposeAllowsDeal(purpose, dealType) {
+    const normalized = normalizePurpose(purpose) ?? purpose;
+    const lower = normalized.toLowerCase();
+    if (dealType === "sale") {
+        return lower.includes("vend");
+    }
+    return lower.includes("alug");
+}
+function parseOptionalPrice(value) {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+    return parsePrice(value);
+}
 function parsePrice(value) {
     const parsed = Number(value);
     if (!Number.isFinite(parsed) || parsed < 0) {
         throw new Error("Preço inválido.");
     }
     return parsed;
+}
+function normalizeDealType(value) {
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value
+        .normalize("NFD")
+        .replace(/[^\p{L}0-9]/gu, "")
+        .toLowerCase();
+    return DEAL_TYPE_MAP[normalized] ?? null;
+}
+function resolveDealTypeFromStatus(status) {
+    if (!status)
+        return null;
+    return STATUS_TO_DEAL[status] ?? null;
+}
+function normalizeRecurrenceInterval(value) {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+    if (typeof value !== "string") {
+        return null;
+    }
+    const normalized = value.trim().toLowerCase();
+    return RECURRENCE_INTERVALS.has(normalized) ? normalized : null;
+}
+function resolveDealAmount(value, fallback) {
+    if (value === undefined || value === null || value === "") {
+        return fallback;
+    }
+    return parsePrice(value);
+}
+function calculateCommissionAmount(amount, rate) {
+    return Number((amount * (rate / 100)).toFixed(2));
 }
 function parseDecimal(value) {
     if (value === undefined || value === null || value === "") {
@@ -120,6 +216,8 @@ function mapProperty(row) {
         purpose: row.purpose,
         status: row.status,
         price: Number(row.price),
+        price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+        price_rent: row.price_rent != null ? Number(row.price_rent) : null,
         code: row.code ?? null,
         address: row.address,
         quadra: row.quadra ?? null,
@@ -146,9 +244,57 @@ function mapProperty(row) {
         video_url: row.video_url ?? null,
         images,
         agency,
+        broker_name: row.broker_name ?? null,
+        broker_phone: row.broker_phone ?? null,
+        broker_email: row.broker_email ?? null,
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
+}
+async function upsertSaleRecord(db, payload) {
+    const { propertyId, brokerId, dealType, salePrice, commissionRate, commissionAmount, iptuValue, condominioValue, isRecurring, commissionCycles, recurrenceInterval, } = payload;
+    const [existingSaleRows] = await db.query("SELECT id FROM sales WHERE property_id = ? ORDER BY sale_date DESC LIMIT 1", [propertyId]);
+    if (existingSaleRows.length > 0) {
+        await db.query(`UPDATE sales
+         SET deal_type = ?,
+             sale_price = ?,
+             commission_rate = ?,
+             commission_amount = ?,
+             iptu_value = ?,
+             condominio_value = ?,
+             is_recurring = ?,
+             commission_cycles = ?,
+             recurrence_interval = ?,
+             sale_date = CURRENT_TIMESTAMP
+       WHERE id = ?`, [
+            dealType,
+            salePrice,
+            commissionRate,
+            commissionAmount,
+            iptuValue,
+            condominioValue,
+            isRecurring,
+            commissionCycles,
+            recurrenceInterval,
+            existingSaleRows[0].id,
+        ]);
+        return;
+    }
+    await db.query(`INSERT INTO sales
+       (property_id, broker_id, deal_type, sale_price, commission_rate, commission_amount, iptu_value, condominio_value, is_recurring, commission_cycles, recurrence_interval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+        propertyId,
+        brokerId,
+        dealType,
+        salePrice,
+        commissionRate,
+        commissionAmount,
+        iptuValue,
+        condominioValue,
+        isRecurring,
+        commissionCycles,
+        recurrenceInterval,
+    ]);
 }
 class PropertyController {
     async show(req, res) {
@@ -167,9 +313,13 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
+            ANY_VALUE(u.email) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
@@ -190,13 +340,36 @@ class PropertyController {
         if (!brokerId) {
             return res.status(401).json({ error: "Corretor não autenticado." });
         }
-        const { title, description, type, purpose, price, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, price, price_sale, price_rent, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         if (!title || !description || !type || !purpose || !address || !city || !state) {
-            return res.status(400).json({ error: "Campos obrigatórios não informados." });
+            return res.status(400).json({ error: "Campos obrigatorios nao informados." });
+        }
+        const normalizedPurpose = normalizePurpose(purpose);
+        if (!normalizedPurpose) {
+            return res.status(400).json({ error: "Finalidade do imovel invalida." });
         }
         let numericPrice;
+        let numericPriceSale = null;
+        let numericPriceRent = null;
         try {
-            numericPrice = parsePrice(price);
+            if (normalizedPurpose === "Venda") {
+                numericPriceSale = parseOptionalPrice(price_sale) ?? parsePrice(price);
+                numericPrice = numericPriceSale;
+            }
+            else if (normalizedPurpose === "Aluguel") {
+                numericPriceRent = parseOptionalPrice(price_rent) ?? parsePrice(price);
+                numericPrice = numericPriceRent;
+            }
+            else {
+                numericPriceSale = parseOptionalPrice(price_sale);
+                numericPriceRent = parseOptionalPrice(price_rent);
+                if (numericPriceSale == null || numericPriceRent == null) {
+                    return res.status(400).json({
+                        error: "Informe os precos de venda e aluguel para esta finalidade.",
+                    });
+                }
+                numericPrice = numericPriceSale;
+            }
         }
         catch (parseError) {
             return res.status(400).json({ error: parseError.message });
@@ -263,6 +436,8 @@ class PropertyController {
             purpose,
             status,
             price,
+            price_sale,
+            price_rent,
             code,
             address,
             quadra,
@@ -287,15 +462,17 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerId,
                 title,
                 description,
                 type,
-                purpose,
+                normalizedPurpose,
                 'pending_approval',
                 numericPrice,
+                numericPriceSale,
+                numericPriceRent,
                 stringOrNull(code),
                 address,
                 stringOrNull(quadra),
@@ -349,19 +526,19 @@ class PropertyController {
         const propertyId = Number(req.params.id);
         const brokerId = req.userId;
         if (!brokerId) {
-            return res.status(401).json({ error: 'Corretor não autenticado.' });
+            return res.status(401).json({ error: 'Corretor nao autenticado.' });
         }
         if (Number.isNaN(propertyId)) {
-            return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
+            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
         }
         try {
             const [propertyRows] = await connection_1.default.query('SELECT * FROM properties WHERE id = ?', [propertyId]);
             if (!propertyRows || propertyRows.length === 0) {
-                return res.status(404).json({ error: 'Imóvel não encontrado.' });
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
             const property = propertyRows[0];
             if (property.broker_id !== brokerId) {
-                return res.status(403).json({ error: 'Acesso não autorizado a este imóvel.' });
+                return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
             }
             const body = req.body ?? {};
             const bodyKeys = Object.keys(body);
@@ -369,7 +546,7 @@ class PropertyController {
                 const invalidKeys = bodyKeys.filter((key) => key !== 'status');
                 if (invalidKeys.length > 0) {
                     return res.status(403).json({
-                        error: 'Imóveis aprovados não podem ter seus dados alterados, apenas o status.',
+                        error: 'Imoveis aprovados nao podem ter seus dados alterados, apenas o status.',
                     });
                 }
             }
@@ -382,6 +559,8 @@ class PropertyController {
                     'purpose',
                     'status',
                     'price',
+                    'price_sale',
+                    'price_rent',
                     'code',
                     'address',
                     'quadra',
@@ -418,10 +597,19 @@ class PropertyController {
                     case 'status': {
                         const normalized = normalizeStatus(body.status);
                         if (!normalized) {
-                            return res.status(400).json({ error: 'Status informado é inválido.' });
+                            return res.status(400).json({ error: 'Status informado invalido.' });
                         }
                         nextStatus = normalized;
                         fields.push('status = ?');
+                        values.push(normalized);
+                        break;
+                    }
+                    case 'purpose': {
+                        const normalized = normalizePurpose(body.purpose);
+                        if (!normalized) {
+                            return res.status(400).json({ error: 'Finalidade informada e invalida.' });
+                        }
+                        fields.push('purpose = ?');
                         values.push(normalized);
                         break;
                     }
@@ -429,6 +617,17 @@ class PropertyController {
                         try {
                             fields.push('price = ?');
                             values.push(parsePrice(body.price));
+                        }
+                        catch (parseError) {
+                            return res.status(400).json({ error: parseError.message });
+                        }
+                        break;
+                    }
+                    case 'price_sale':
+                    case 'price_rent': {
+                        try {
+                            fields.push(`\`${key}\` = ?`);
+                            values.push(parsePrice(body[key]));
                         }
                         catch (parseError) {
                             return res.status(400).json({ error: parseError.message });
@@ -477,7 +676,7 @@ class PropertyController {
                 }
             }
             if (fields.length === 0) {
-                return res.status(400).json({ error: 'Nenhum dado fornecido para atualização.' });
+                return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });
             }
             values.push(propertyId);
             await connection_1.default.query(`UPDATE properties SET ${fields.join(', ')} WHERE id = ?`, values);
@@ -494,31 +693,76 @@ class PropertyController {
             if (nextStatus && NOTIFY_ON_STATUS.has(nextStatus)) {
                 try {
                     const action = nextStatus === 'sold' ? 'vendido' : 'alugado';
-                    await (0, notificationService_1.notifyAdmins)(`O imóvel '${property.title}' foi marcado como ${action}.`, 'property', propertyId);
+                    await (0, notificationService_1.notifyAdmins)(`O imovel '${property.title}' foi marcado como ${action}.`, 'property', propertyId);
                 }
                 catch (notifyError) {
-                    console.error('Erro ao registrar notificação:', notifyError);
+                    console.error('Erro ao registrar notificacao:', notifyError);
                 }
-                if (nextStatus === 'sold') {
-                    const salePrice = Number(body.price ?? property.price);
-                    const commissionRate = parseDecimal(body.commission_rate) ?? 5.0;
-                    const commissionAmount = Number((salePrice * (commissionRate / 100)).toFixed(2));
-                    const [existingSaleRows] = await connection_1.default.query('SELECT id FROM sales WHERE property_id = ?', [propertyId]);
-                    if (existingSaleRows.length > 0) {
-                        await connection_1.default.query(`UPDATE sales
-                 SET sale_price = ?, commission_rate = ?, commission_amount = ?, sale_date = CURRENT_TIMESTAMP
-               WHERE property_id = ?`, [salePrice, commissionRate, commissionAmount, propertyId]);
+                const dealType = resolveDealTypeFromStatus(nextStatus);
+                if (dealType) {
+                    let dealAmount;
+                    try {
+                        const fallbackPrice = dealType === 'sale'
+                            ? Number(property.price_sale ?? property.price)
+                            : Number(property.price_rent ?? property.price);
+                        dealAmount = resolveDealAmount(body.amount ?? body.sale_price ?? body.price, fallbackPrice);
                     }
-                    else {
-                        await connection_1.default.query(`INSERT INTO sales (property_id, broker_id, sale_price, commission_rate, commission_amount)
-               VALUES (?, ?, ?, ?, ?)`, [propertyId, brokerId, salePrice, commissionRate, commissionAmount]);
+                    catch (parseError) {
+                        return res.status(400).json({ error: parseError.message });
                     }
+                    let commissionRate;
+                    try {
+                        commissionRate =
+                            parseDecimal(body.commission_rate) ??
+                                (property.commission_rate != null ? Number(property.commission_rate) : 5.0);
+                    }
+                    catch (parseError) {
+                        return res.status(400).json({ error: parseError.message });
+                    }
+                    let commissionCycles = 0;
+                    try {
+                        const parsedCycles = parseInteger(body.commission_cycles);
+                        if (parsedCycles != null) {
+                            if (parsedCycles < 0) {
+                                return res.status(400).json({ error: 'Comissoes ja realizadas invalidas.' });
+                            }
+                            commissionCycles = parsedCycles;
+                        }
+                    }
+                    catch (parseError) {
+                        return res.status(400).json({ error: parseError.message });
+                    }
+                    const normalizedInterval = normalizeRecurrenceInterval(body.recurrence_interval);
+                    if (body.recurrence_interval !== undefined &&
+                        body.recurrence_interval !== null &&
+                        normalizedInterval == null) {
+                        return res.status(400).json({ error: 'Intervalo de recorrencia invalido.' });
+                    }
+                    const recurrenceInterval = normalizedInterval ?? 'none';
+                    const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
+                    const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
+                    const condominioValue = property.valor_condominio != null ? Number(property.valor_condominio) : null;
+                    const isRecurring = recurrenceInterval !== 'none' ? 1 : 0;
+                    await upsertSaleRecord(connection_1.default, {
+                        propertyId,
+                        brokerId,
+                        dealType,
+                        salePrice: dealAmount,
+                        commissionRate,
+                        commissionAmount,
+                        iptuValue,
+                        condominioValue,
+                        isRecurring,
+                        commissionCycles,
+                        recurrenceInterval,
+                    });
+                    await connection_1.default.query('UPDATE properties SET sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?', [dealAmount, commissionRate, commissionAmount, propertyId]);
                 }
             }
-            return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
+            return res.status(200).json({ message: 'Imovel atualizado com sucesso!' });
         }
         catch (error) {
-            console.error('Erro ao atualizar imóvel:', error);
+            console.error('Erro ao atualizar imovel:', error);
             return res.status(500).json({ error: 'Erro interno do servidor.' });
         }
     }
@@ -530,6 +774,172 @@ class PropertyController {
         }
         req.body = { status: normalized };
         return this.update(req, res);
+    }
+    async closeDeal(req, res) {
+        const propertyId = Number(req.params.id);
+        const brokerId = req.userId;
+        if (!brokerId) {
+            return res.status(401).json({ error: 'Corretor nÆo autenticado.' });
+        }
+        if (Number.isNaN(propertyId)) {
+            return res.status(400).json({ error: 'Identificador de im¢vel inv lido.' });
+        }
+        const { type, amount, commission_rate, commission_cycles, recurrence_interval } = req.body;
+        const dealType = normalizeDealType(type);
+        if (!dealType) {
+            return res.status(400).json({ error: 'Tipo de negocio invalido.' });
+        }
+        try {
+            const [propertyRows] = await connection_1.default.query('SELECT * FROM properties WHERE id = ?', [propertyId]);
+            if (!propertyRows || propertyRows.length === 0) {
+                return res.status(404).json({ error: 'Im¢vel nÆo encontrado.' });
+            }
+            const property = propertyRows[0];
+            if (property.broker_id !== brokerId) {
+                return res.status(403).json({ error: 'Acesso nÆo autorizado a este im¢vel.' });
+            }
+            if (property.status === 'pending_approval' || property.status === 'rejected') {
+                return res.status(403).json({ error: 'Imovel ainda nao pode ser fechado.' });
+            }
+            if (!purposeAllowsDeal(property.purpose, dealType)) {
+                return res.status(400).json({ error: 'Tipo de negocio nao permitido para esta finalidade.' });
+            }
+            const fallbackPrice = dealType === 'sale'
+                ? Number(property.price_sale ?? property.price)
+                : Number(property.price_rent ?? property.price);
+            let dealAmount;
+            try {
+                dealAmount = resolveDealAmount(amount, fallbackPrice);
+            }
+            catch (parseError) {
+                return res.status(400).json({ error: parseError.message });
+            }
+            let commissionRate;
+            try {
+                commissionRate =
+                    parseDecimal(commission_rate) ??
+                        (property.commission_rate != null ? Number(property.commission_rate) : 5.0);
+            }
+            catch (parseError) {
+                return res.status(400).json({ error: parseError.message });
+            }
+            let commissionCycles = 0;
+            try {
+                const parsedCycles = parseInteger(commission_cycles);
+                if (parsedCycles != null) {
+                    if (parsedCycles < 0) {
+                        return res.status(400).json({ error: "Comissoes ja realizadas invalidas." });
+                    }
+                    commissionCycles = parsedCycles;
+                }
+            }
+            catch (parseError) {
+                return res.status(400).json({ error: parseError.message });
+            }
+            const normalizedInterval = normalizeRecurrenceInterval(recurrence_interval);
+            if (recurrence_interval !== undefined &&
+                recurrence_interval !== null &&
+                normalizedInterval == null) {
+                return res.status(400).json({ error: "Intervalo de recorrencia invalido." });
+            }
+            const recurrenceInterval = normalizedInterval ?? "none";
+            const commissionAmount = calculateCommissionAmount(dealAmount, commissionRate);
+            const iptuValue = property.valor_iptu != null ? Number(property.valor_iptu) : null;
+            const condominioValue = property.valor_condominio != null ? Number(property.valor_condominio) : null;
+            const newStatus = dealType === 'sale' ? 'sold' : 'rented';
+            const isRecurring = recurrenceInterval !== "none" ? 1 : 0;
+            const db = await connection_1.default.getConnection();
+            try {
+                await db.beginTransaction();
+                await db.query('UPDATE properties SET status = ?, sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?', [newStatus, dealAmount, commissionRate, commissionAmount, propertyId]);
+                await upsertSaleRecord(db, {
+                    propertyId,
+                    brokerId,
+                    dealType,
+                    salePrice: dealAmount,
+                    commissionRate,
+                    commissionAmount,
+                    iptuValue,
+                    condominioValue,
+                    isRecurring,
+                    commissionCycles,
+                    recurrenceInterval,
+                });
+                await db.commit();
+            }
+            catch (error) {
+                await db.rollback();
+                throw error;
+            }
+            finally {
+                db.release();
+            }
+            return res.status(200).json({
+                message: 'Negocio fechado com sucesso.',
+                status: newStatus,
+                sale: {
+                    property_id: propertyId,
+                    deal_type: dealType,
+                    sale_price: dealAmount,
+                    commission_rate: commissionRate,
+                    commission_amount: commissionAmount,
+                    iptu_value: iptuValue,
+                    condominio_value: condominioValue,
+                    is_recurring: isRecurring,
+                    commission_cycles: commissionCycles,
+                    recurrence_interval: recurrenceInterval,
+                },
+            });
+        }
+        catch (error) {
+            console.error('Erro ao fechar negocio:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
+    async cancelDeal(req, res) {
+        const propertyId = Number(req.params.id);
+        const brokerId = req.userId;
+        if (!brokerId) {
+            return res.status(401).json({ error: 'Corretor nao autenticado.' });
+        }
+        if (Number.isNaN(propertyId)) {
+            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+        }
+        try {
+            const [propertyRows] = await connection_1.default.query('SELECT id, broker_id, status FROM properties WHERE id = ?', [propertyId]);
+            if (!propertyRows || propertyRows.length === 0) {
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+            }
+            const property = propertyRows[0];
+            if (property.broker_id !== brokerId) {
+                return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+            }
+            if (property.status !== 'sold' && property.status !== 'rented') {
+                return res.status(400).json({ error: 'Este imovel nao possui negocio fechado.' });
+            }
+            const db = await connection_1.default.getConnection();
+            try {
+                await db.beginTransaction();
+                await db.query('UPDATE properties SET status = ?, sale_value = NULL, commission_rate = NULL, commission_value = NULL WHERE id = ?', ['approved', propertyId]);
+                await db.query('DELETE FROM sales WHERE property_id = ?', [propertyId]);
+                await db.commit();
+            }
+            catch (error) {
+                await db.rollback();
+                throw error;
+            }
+            finally {
+                db.release();
+            }
+            return res.status(200).json({
+                message: 'Negocio cancelado com sucesso.',
+                status: 'approved',
+            });
+        }
+        catch (error) {
+            console.error('Erro ao cancelar negocio:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
     }
     async delete(req, res) {
         const propertyId = Number(req.params.id);
@@ -586,9 +996,24 @@ class PropertyController {
             whereClauses.push('p.type = ?');
             params.push(type);
         }
-        if (purpose) {
-            whereClauses.push('p.purpose = ?');
-            params.push(purpose);
+        const normalizedPurpose = normalizePurpose(purpose);
+        let priceColumn = 'p.price';
+        if (normalizedPurpose) {
+            if (normalizedPurpose === 'Venda') {
+                whereClauses.push('(p.purpose = ? OR p.purpose = ?)');
+                params.push('Venda', 'Venda e Aluguel');
+                priceColumn = 'COALESCE(p.price_sale, p.price)';
+            }
+            else if (normalizedPurpose === 'Aluguel') {
+                whereClauses.push('(p.purpose = ? OR p.purpose = ?)');
+                params.push('Aluguel', 'Venda e Aluguel');
+                priceColumn = 'COALESCE(p.price_rent, p.price)';
+            }
+            else {
+                whereClauses.push('p.purpose = ?');
+                params.push('Venda e Aluguel');
+                priceColumn = 'COALESCE(p.price_sale, p.price)';
+            }
         }
         if (city) {
             whereClauses.push('p.city LIKE ?');
@@ -601,14 +1026,14 @@ class PropertyController {
         if (minPrice) {
             const value = Number(minPrice);
             if (!Number.isNaN(value)) {
-                whereClauses.push('p.price >= ?');
+                whereClauses.push(`${priceColumn} >= ?`);
                 params.push(value);
             }
         }
         if (maxPrice) {
             const value = Number(maxPrice);
             if (!Number.isNaN(value)) {
-                whereClauses.push('p.price <= ?');
+                whereClauses.push(`${priceColumn} <= ?`);
                 params.push(value);
             }
         }
@@ -626,7 +1051,7 @@ class PropertyController {
         }
         const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
         const allowedSortColumns = {
-            price: 'p.price',
+            price: priceColumn,
             created_at: 'p.created_at',
             area_construida: 'p.area_construida',
         };
@@ -643,9 +1068,13 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
+            ANY_VALUE(u.email) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           ${where}

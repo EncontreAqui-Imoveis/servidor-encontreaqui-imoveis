@@ -10,7 +10,10 @@ propertyRoutes.post('/', auth_1.authMiddleware, auth_1.isBroker, uploadMiddlewar
     { name: 'video', maxCount: 1 },
 ]), (req, res) => PropertyController_1.propertyController.create(req, res));
 propertyRoutes.put('/:id', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.update(req, res));
+propertyRoutes.patch('/:id', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.update(req, res));
 propertyRoutes.patch('/:id/status', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.updateStatus(req, res));
+propertyRoutes.post('/:id/close', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.closeDeal(req, res));
+propertyRoutes.post('/:id/cancel-deal', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.cancelDeal(req, res));
 propertyRoutes.delete('/:id', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.delete(req, res));
 propertyRoutes.get('/', (req, res) => PropertyController_1.propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/public', (req, res) => PropertyController_1.propertyController.listPublicProperties(req, res));

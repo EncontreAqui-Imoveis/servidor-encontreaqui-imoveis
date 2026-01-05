@@ -24,6 +24,13 @@ propertyRoutes.put(
 );
 
 propertyRoutes.patch(
+  '/:id',
+  authMiddleware,
+  isBroker,
+  (req, res) => propertyController.update(req as any, res)
+);
+
+propertyRoutes.patch(
   '/:id/status',
   authMiddleware,
   isBroker,

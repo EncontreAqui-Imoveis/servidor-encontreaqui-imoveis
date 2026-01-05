@@ -83,9 +83,11 @@ const DDL_STATEMENTS = [
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
         type VARCHAR(100) NOT NULL,
-        purpose VARCHAR(100) NOT NULL,
+        purpose ENUM('Venda', 'Aluguel', 'Venda e Aluguel') NOT NULL,
         status ENUM('pending_approval', 'approved', 'rejected', 'rented', 'sold') NOT NULL DEFAULT 'pending_approval',
         price DECIMAL(12, 2) NOT NULL,
+        price_sale DECIMAL(12, 2) NULL,
+        price_rent DECIMAL(12, 2) NULL,
         code VARCHAR(100) NULL UNIQUE,
         address VARCHAR(255) NOT NULL,
         quadra VARCHAR(255) NULL,
@@ -142,9 +144,15 @@ const DDL_STATEMENTS = [
         id INT PRIMARY KEY AUTO_INCREMENT,
         property_id INT NOT NULL,
         broker_id INT NOT NULL,
+        deal_type ENUM('sale', 'rent') NOT NULL DEFAULT 'sale',
         sale_price DECIMAL(12, 2) NOT NULL,
         commission_rate DECIMAL(5, 2) NOT NULL DEFAULT 5.00,
         commission_amount DECIMAL(12, 2) NOT NULL,
+        iptu_value DECIMAL(12, 2) NULL,
+        condominio_value DECIMAL(12, 2) NULL,
+        is_recurring TINYINT(1) NOT NULL DEFAULT 0,
+        commission_cycles INT NOT NULL DEFAULT 0,
+        recurrence_interval ENUM('none','weekly','monthly','yearly') NOT NULL DEFAULT 'none',
         sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE,
         FOREIGN KEY (broker_id) REFERENCES brokers(id) ON DELETE CASCADE,
@@ -182,6 +190,21 @@ const DDL_STATEMENTS = [
         INDEX idx_notifications_is_read (is_read),
         INDEX idx_notifications_entity (related_entity_type, related_entity_id),
         INDEX idx_recipient (recipient_id)
+      );
+    `,
+    },
+    {
+        name: 'user_device_tokens',
+        sql: `
+      CREATE TABLE IF NOT EXISTS user_device_tokens (
+        id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        fcm_token VARCHAR(255) NOT NULL UNIQUE,
+        platform VARCHAR(50) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_user_device_tokens_user (user_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       );
     `,
     },

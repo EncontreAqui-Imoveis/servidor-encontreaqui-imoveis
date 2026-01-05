@@ -10,6 +10,7 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
 const notificationService_1 = require("../services/notificationService");
+const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
 const STATUS_MAP = {
     pendingapproval: 'pending_approval',
     pendente: 'pending_approval',
@@ -34,6 +35,15 @@ const ALLOWED_STATUS = new Set([
     'rented',
     'sold',
 ]);
+const PURPOSE_MAP = {
+    venda: 'Venda',
+    comprar: 'Venda',
+    aluguel: 'Aluguel',
+    alugar: 'Aluguel',
+    vendaealuguel: 'Venda e Aluguel',
+    vendaaluguel: 'Venda e Aluguel',
+};
+const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
 function normalizeStatus(value) {
     if (typeof value !== 'string') {
         return null;
@@ -47,6 +57,20 @@ function normalizeStatus(value) {
         return null;
     }
     return status;
+}
+function normalizePurpose(value) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value
+        .normalize('NFD')
+        .replace(/[^\p{L}0-9]/gu, '')
+        .toLowerCase();
+    const mapped = PURPOSE_MAP[normalized];
+    if (!mapped || !ALLOWED_PURPOSES.has(mapped)) {
+        return null;
+    }
+    return mapped;
 }
 function parseDecimal(value) {
     if (value === undefined || value === null || value === '') {
@@ -88,6 +112,7 @@ function stringOrNull(value) {
     const textual = String(value).trim();
     return textual.length > 0 ? textual : '';
 }
+const PUSH_BATCH_LIMIT = 500;
 function toNullableNumber(value) {
     if (value === undefined || value === null || value === '') {
         return null;
@@ -120,6 +145,8 @@ function mapAdminProperty(row) {
         purpose: row.purpose ?? null,
         status: row.status,
         price: toNullableNumber(row.price) ?? 0,
+        price_sale: toNullableNumber(row.price_sale),
+        price_rent: toNullableNumber(row.price_rent),
         address: row.address ?? null,
         quadra: row.quadra ?? null,
         lote: row.lote ?? null,
@@ -149,6 +176,103 @@ function mapAdminProperty(row) {
         created_at: row.created_at ? String(row.created_at) : null,
         updated_at: row.updated_at ? String(row.updated_at) : null,
     };
+}
+function chunkArray(items, size) {
+    const chunks = [];
+    for (let index = 0; index < items.length; index += size) {
+        chunks.push(items.slice(index, index + size));
+    }
+    return chunks;
+}
+async function fetchDeviceTokens(recipientIds) {
+    const params = [];
+    let sql = 'SELECT DISTINCT fcm_token FROM user_device_tokens';
+    if (recipientIds && recipientIds.length > 0) {
+        const placeholders = recipientIds.map(() => '?').join(', ');
+        sql += ` WHERE user_id IN (${placeholders})`;
+        params.push(...recipientIds);
+    }
+    const [rows] = await connection_1.default.query(sql, params);
+    return (rows ?? [])
+        .map((row) => (row.fcm_token ?? '').trim())
+        .filter((token) => token.length > 0);
+}
+async function removeInvalidTokens(tokens) {
+    if (tokens.length === 0) {
+        return;
+    }
+    await connection_1.default.query('DELETE FROM user_device_tokens WHERE fcm_token IN (?)', [tokens]);
+}
+async function sendPushNotifications(payload) {
+    const tokens = await fetchDeviceTokens(payload.recipientIds);
+    const errorCodes = new Set();
+    const summary = {
+        requested: tokens.length,
+        success: 0,
+        failure: 0,
+        errorCodes: [],
+    };
+    if (tokens.length === 0) {
+        return summary;
+    }
+    const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
+    for (const batch of batches) {
+        const response = await firebaseAdmin_1.default.messaging().sendEachForMulticast({
+            tokens: batch,
+            notification: {
+                title: 'Mais Imoveis',
+                body: payload.message,
+            },
+            android: {
+                priority: 'high',
+                notification: {
+                    channelId: 'default_channel',
+                },
+            },
+            apns: {
+                payload: {
+                    aps: {
+                        sound: 'default',
+                    },
+                },
+            },
+            data: {
+                message: payload.message,
+                related_entity_type: payload.relatedEntityType,
+                related_entity_id: payload.relatedEntityId != null ? String(payload.relatedEntityId) : '',
+            },
+        });
+        const invalidTokens = [];
+        response.responses.forEach((item, index) => {
+            if (item.success) {
+                return;
+            }
+            const code = item.error?.code ?? '';
+            if (code) {
+                errorCodes.add(code);
+            }
+            if (code === 'messaging/invalid-registration-token' ||
+                code === 'messaging/registration-token-not-registered') {
+                invalidTokens.push(batch[index]);
+            }
+        });
+        if (response.failureCount > 0) {
+            const errorCodes = response.responses
+                .map((item) => item.error?.code)
+                .filter((code) => Boolean(code));
+            console.warn('Falhas ao enviar push:', {
+                failures: response.failureCount,
+                codes: errorCodes,
+            });
+        }
+        if (invalidTokens.length > 0) {
+            await removeInvalidTokens(invalidTokens);
+        }
+        summary.success += response.successCount;
+        summary.failure += response.failureCount;
+    }
+    summary.errorCodes = Array.from(errorCodes);
+    return summary;
 }
 class AdminController {
     async login(req, res) {
@@ -225,6 +349,8 @@ class AdminController {
             p.type,
             p.status,
             p.price,
+            p.price_sale,
+            p.price_rent,
             p.city,
             p.bairro,
             p.purpose,
@@ -306,26 +432,37 @@ class AdminController {
             const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
             const offset = (page - 1) * limit;
             const searchTerm = String(req.query.search ?? '').trim();
+            const includeBrokers = String(req.query.includeBrokers ?? '').toLowerCase() === 'true';
             const sortByParam = String(req.query.sortBy ?? '').toLowerCase();
             const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
             const sortMap = {
-                name: 'name',
-                created_at: 'created_at',
+                name: 'u.name',
+                email: 'u.email',
+                created_at: 'u.created_at',
             };
-            const sortBy = sortMap[sortByParam] ?? 'created_at';
+            const sortBy = sortMap[sortByParam] ?? 'u.created_at';
             const whereClauses = [];
             const params = [];
-            whereClauses.push('id NOT IN (SELECT id FROM brokers)');
+            if (!includeBrokers) {
+                whereClauses.push('b.id IS NULL');
+            }
             if (searchTerm) {
-                whereClauses.push('(name LIKE ? OR email LIKE ?)');
+                whereClauses.push('(u.name LIKE ? OR u.email LIKE ?)');
                 params.push(`%${searchTerm}%`, `%${searchTerm}%`);
             }
             const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-            const [totalRows] = await connection_1.default.query(`SELECT COUNT(*) AS total FROM users ${whereSql}`, params);
+            const [totalRows] = await connection_1.default.query(`SELECT COUNT(*) AS total FROM users u LEFT JOIN brokers b ON u.id = b.id ${whereSql}`, params);
             const total = totalRows[0]?.total ?? 0;
             const [rows] = await connection_1.default.query(`
-          SELECT id, name, email, phone, created_at
-          FROM users
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.created_at,
+            CASE WHEN b.id IS NULL THEN 'client' ELSE 'broker' END AS role
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
           ${whereSql}
           ORDER BY ${sortBy} ${sortOrder}
           LIMIT ? OFFSET ?
@@ -385,6 +522,8 @@ class AdminController {
                 'purpose',
                 'status',
                 'price',
+                'price_sale',
+                'price_rent',
                 'code',
                 'address',
                 'quadra',
@@ -429,7 +568,18 @@ class AdminController {
                         params.push(normalized);
                         break;
                     }
+                    case 'purpose': {
+                        const normalized = normalizePurpose(value);
+                        if (!normalized) {
+                            return res.status(400).json({ error: 'Finalidade invalida.' });
+                        }
+                        setParts.push('purpose = ?');
+                        params.push(normalized);
+                        break;
+                    }
                     case 'price':
+                    case 'price_sale':
+                    case 'price_rent':
                     case 'sale_value':
                     case 'commission_rate':
                     case 'commission_value':
@@ -493,17 +643,44 @@ class AdminController {
         const files = req.files;
         const body = req.body ?? {};
         try {
-            const required = ['title', 'type', 'purpose', 'price', 'address', 'city', 'state'];
+            const required = ['title', 'type', 'purpose', 'address', 'city', 'state'];
             for (const field of required) {
                 if (!body[field]) {
                     return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
                 }
             }
-            const { title, description, type, purpose, status, price, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
+            const { title, description, type, purpose, status, price, price_sale, price_rent, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
             const normalizedStatus = normalizeStatus(status) ?? 'pending_approval';
+            const normalizedPurpose = normalizePurpose(purpose);
+            if (!normalizedPurpose) {
+                return res.status(400).json({ error: 'Finalidade invalida.' });
+            }
             const numericPrice = parseDecimal(price);
-            if (numericPrice === null) {
+            const numericPriceSale = parseDecimal(price_sale);
+            const numericPriceRent = parseDecimal(price_rent);
+            let resolvedPrice = null;
+            let resolvedPriceSale = null;
+            let resolvedPriceRent = null;
+            if (normalizedPurpose === 'Venda') {
+                resolvedPriceSale = numericPriceSale ?? numericPrice;
+                resolvedPrice = resolvedPriceSale;
+            }
+            else if (normalizedPurpose === 'Aluguel') {
+                resolvedPriceRent = numericPriceRent ?? numericPrice;
+                resolvedPrice = resolvedPriceRent;
+            }
+            else {
+                resolvedPriceSale = numericPriceSale;
+                resolvedPriceRent = numericPriceRent;
+                resolvedPrice = resolvedPriceSale;
+            }
+            if (!resolvedPrice || resolvedPrice <= 0) {
                 return res.status(400).json({ error: 'Preco invalido.' });
+            }
+            if (normalizedPurpose === 'Venda e Aluguel') {
+                if (!resolvedPriceSale || resolvedPriceSale <= 0 || !resolvedPriceRent || resolvedPriceRent <= 0) {
+                    return res.status(400).json({ error: 'Informe os precos de venda e aluguel.' });
+                }
             }
             const numericBedrooms = parseInteger(bedrooms);
             const numericBathrooms = parseInteger(bathrooms);
@@ -555,6 +732,8 @@ class AdminController {
             purpose,
             status,
             price,
+            price_sale,
+            price_rent,
             code,
             address,
             quadra,
@@ -579,15 +758,17 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerIdValue,
                 title,
                 description,
                 type,
-                purpose,
+                normalizedPurpose,
                 normalizedStatus,
-                numericPrice,
+                resolvedPrice,
+                resolvedPriceSale,
+                resolvedPriceRent,
                 stringOrNull(code),
                 address,
                 stringOrNull(quadra),
@@ -1136,6 +1317,8 @@ class AdminController {
             p.type,
             p.purpose,
             p.price,
+            p.price_sale,
+            p.price_rent,
             p.address,
             p.city,
             p.state,
@@ -1233,6 +1416,7 @@ async function sendNotification(req, res) {
         if (!message || typeof message !== 'string' || message.trim() === '') {
             return res.status(400).json({ error: 'A mensagem ? obrigat?ria.' });
         }
+        const trimmedMessage = message.trim();
         const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'other']);
         const entityType = allowedTypes.has(String(related_entity_type)) ? String(related_entity_type) : 'other';
         const entityId = related_entity_id != null ? Number(related_entity_id) : null;
@@ -1254,17 +1438,50 @@ async function sendNotification(req, res) {
         if (normalizedRecipients.length === 0) {
             normalizedRecipients.push(null);
         }
-        const values = normalizedRecipients.map((rid) => [
-            message.trim(),
+        const sendToAll = normalizedRecipients.some((rid) => rid === null);
+        let notificationRecipients = [];
+        if (sendToAll) {
+            const [userRows] = await connection_1.default.query('SELECT id FROM users');
+            notificationRecipients = (userRows ?? [])
+                .map((row) => Number(row.id))
+                .filter((id) => Number.isFinite(id));
+        }
+        else {
+            notificationRecipients = normalizedRecipients.filter((rid) => typeof rid === 'number');
+        }
+        if (notificationRecipients.length === 0) {
+            return res.status(404).json({ error: 'Nenhum destinatario encontrado.' });
+        }
+        const values = notificationRecipients.map((rid) => [
+            trimmedMessage,
             entityType,
             entityId,
             rid,
         ]);
-        await connection_1.default.query(`
-        INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
-        VALUES ?
-      `, [values]);
-        return res.status(201).json({ message: 'Notifica??o enviada com sucesso.' });
+        const batchSize = 500;
+        for (let i = 0; i < values.length; i += batchSize) {
+            const chunk = values.slice(i, i + batchSize);
+            await connection_1.default.query(`
+          INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id)
+          VALUES ?
+        `, [chunk]);
+        }
+        const pushRecipients = sendToAll ? null : notificationRecipients;
+        let pushSummary = null;
+        try {
+            pushSummary = await sendPushNotifications({
+                message: trimmedMessage,
+                recipientIds: pushRecipients,
+                relatedEntityType: entityType,
+                relatedEntityId: entityId,
+            });
+        }
+        catch (pushError) {
+            console.error('Erro ao enviar push de notificacao:', pushError);
+        }
+        return res
+            .status(201)
+            .json({ message: 'Notifica??o enviada com sucesso.', push: pushSummary });
     }
     catch (error) {
         console.error('Erro ao enviar notifica??o:', error);

@@ -27,6 +27,22 @@ function hasCompleteProfile(row) {
 function signToken(id, role) {
     return jsonwebtoken_1.default.sign({ id, role }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
 }
+function withTimeout(promise, ms, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`Timeout while waiting for ${label}`));
+        }, ms);
+        promise
+            .then((value) => {
+            clearTimeout(timer);
+            resolve(value);
+        })
+            .catch((error) => {
+            clearTimeout(timer);
+            reject(error);
+        });
+    });
+}
 class AuthController {
     async register(req, res) {
         const { name, email, password, phone, address, city, state, profileType, } = req.body;
@@ -103,30 +119,19 @@ class AuthController {
         const requestedProfile = profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
         const autoMode = requestedProfile === 'auto';
         try {
-            const decoded = await firebaseAdmin_1.default.auth().verifyIdToken(idToken);
+            const decoded = await withTimeout(firebaseAdmin_1.default.auth().verifyIdToken(idToken), 8000, 'firebase token verification');
             const uid = decoded.uid;
             const email = decoded.email;
             const displayName = decoded.name || decoded.email?.split('@')[0] || `User-${uid}`;
             if (!email) {
                 return res.status(400).json({ error: 'Email não disponível no token do Google.' });
             }
-            if (autoMode) {
-                const [existing] = await connection_1.default.query('SELECT id FROM users WHERE firebase_uid = ? OR email = ? LIMIT 1', [uid, email]);
-                const isNewUser = existing.length === 0;
-                return res.json({
-                    requiresProfileChoice: true,
-                    pending: { email, name: displayName },
-                    isNewUser,
-                    roleLocked: false,
-                    needsCompletion: true,
-                    requiresDocuments: false,
-                });
-            }
-            let requiresProfileChoice = false;
             const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid,
-                b.id AS broker_id, b.status AS broker_status
+                b.id AS broker_id, b.status AS broker_status,
+                bd.status AS broker_documents_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id
+           LEFT JOIN broker_documents bd ON u.id = bd.broker_id
           WHERE u.firebase_uid = ? OR u.email = ?
           LIMIT 1`, [uid, email]);
             let userId;
@@ -142,6 +147,8 @@ class AuthController {
             let requiresDocuments = false;
             let roleLocked = false;
             let brokerStatus = null;
+            let brokerDocumentsStatus = null;
+            let hasBrokerDocuments = false;
             if (existingRows.length > 0) {
                 const row = existingRows[0];
                 userId = row.id;
@@ -152,6 +159,8 @@ class AuthController {
                 state = row.state ?? null;
                 hasBrokerRow = !!row.broker_id;
                 brokerStatus = row.broker_status ?? null;
+                brokerDocumentsStatus = row.broker_documents_status ?? null;
+                hasBrokerDocuments = brokerDocumentsStatus != null;
                 blockedBrokerRequest = brokerStatus === 'rejected';
                 if (hasBrokerRow && !blockedBrokerRequest) {
                     effectiveProfile = 'broker';
@@ -166,7 +175,14 @@ class AuthController {
             }
             else {
                 if (autoMode) {
-                    requiresProfileChoice = true;
+                    return res.json({
+                        requiresProfileChoice: true,
+                        pending: { email, name: displayName },
+                        isNewUser: true,
+                        roleLocked: false,
+                        needsCompletion: true,
+                        requiresDocuments: false,
+                    });
                 }
                 const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, displayName]);
                 userId = result.insertId;
@@ -209,19 +225,9 @@ class AuthController {
                 }
             }
             const needsCompletion = !hasCompleteProfile({ phone, city, state, address });
-            requiresDocuments =
-                requiresDocuments ||
-                    (effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved');
-            if (autoMode && requiresProfileChoice) {
-                return res.json({
-                    requiresProfileChoice: true,
-                    isNewUser: true,
-                    roleLocked,
-                    needsCompletion: true,
-                    requiresDocuments,
-                    pending: { email, name: displayName },
-                });
-            }
+            const brokerDocsRequired = effectiveProfile === 'broker' &&
+                (!hasBrokerDocuments || brokerDocumentsStatus === 'rejected');
+            requiresDocuments = brokerDocsRequired;
             const token = signToken(userId, effectiveProfile);
             return res.json({
                 user: buildUserPayload({
@@ -245,9 +251,11 @@ class AuthController {
         catch (error) {
             console.error('Google auth error:', error);
             const details = error?.sqlMessage || error?.message || String(error);
-            return res.status(500).json({
+            const message = String(details).toLowerCase();
+            const status = message.includes('timeout') ? 504 : 500;
+            return res.status(status).json({
                 error: 'Erro ao autenticar com Google.',
-                details
+                details,
             });
         }
     }

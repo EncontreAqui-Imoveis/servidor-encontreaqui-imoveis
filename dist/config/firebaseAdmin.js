@@ -32,23 +32,48 @@ var __importStar = (this && this.__importStar) || (function () {
         return result;
     };
 })();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const admin = __importStar(require("firebase-admin"));
-const requiredEnvVars = [
-    'FIREBASE_PROJECT_ID',
-    'FIREBASE_PRIVATE_KEY',
-    'FIREBASE_CLIENT_EMAIL'
-];
-for (const envVar of requiredEnvVars) {
-    if (!process.env[envVar]) {
-        throw new Error(`Missing required environment variable: ${envVar}`);
+const fs_1 = __importDefault(require("fs"));
+function loadServiceAccountFromEnv() {
+    const requiredEnvVars = [
+        'FIREBASE_PROJECT_ID',
+        'FIREBASE_PRIVATE_KEY',
+        'FIREBASE_CLIENT_EMAIL',
+    ];
+    for (const envVar of requiredEnvVars) {
+        if (!process.env[envVar]) {
+            throw new Error(`Missing required environment variable: ${envVar}`);
+        }
     }
+    return {
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, ''),
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    };
 }
-const serviceAccount = {
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-};
+function loadServiceAccountFromFile(path) {
+    const raw = fs_1.default.readFileSync(path, 'utf-8');
+    const json = JSON.parse(raw);
+    return {
+        projectId: String(json.project_id ?? ''),
+        privateKey: String(json.private_key ?? ''),
+        clientEmail: String(json.client_email ?? ''),
+    };
+}
+let serviceAccount;
+const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+if (serviceAccountPath) {
+    serviceAccount = loadServiceAccountFromFile(serviceAccountPath);
+}
+else {
+    serviceAccount = loadServiceAccountFromEnv();
+}
 // Inicializar o Firebase Admin
 admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)

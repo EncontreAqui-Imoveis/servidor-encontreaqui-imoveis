@@ -8,6 +8,56 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
+function toDate(value) {
+    if (!value)
+        return null;
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+function diffInWeeks(start, end) {
+    const diffMs = end.getTime() - start.getTime();
+    return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
+}
+function diffInMonths(start, end) {
+    let months = (end.getFullYear() - start.getFullYear()) * 12;
+    months += end.getMonth() - start.getMonth();
+    if (end.getDate() < start.getDate()) {
+        months -= 1;
+    }
+    return Math.max(months, 0);
+}
+function diffInYears(start, end) {
+    let years = end.getFullYear() - start.getFullYear();
+    if (end.getMonth() < start.getMonth() ||
+        (end.getMonth() === start.getMonth() && end.getDate() < start.getDate())) {
+        years -= 1;
+    }
+    return Math.max(years, 0);
+}
+function calculateAutoCycles(intervalValue, saleDateValue) {
+    const interval = typeof intervalValue === "string"
+        ? intervalValue.trim().toLowerCase()
+        : "none";
+    if (interval !== "weekly" && interval !== "monthly" && interval !== "yearly") {
+        return 0;
+    }
+    const saleDate = toDate(saleDateValue);
+    if (!saleDate)
+        return 0;
+    const now = new Date();
+    if (now <= saleDate)
+        return 0;
+    switch (interval) {
+        case "weekly":
+            return diffInWeeks(saleDate, now);
+        case "monthly":
+            return diffInMonths(saleDate, now);
+        case "yearly":
+            return diffInYears(saleDate, now);
+        default:
+            return 0;
+    }
+}
 class BrokerController {
     async register(req, res) {
         const { name, email, password, creci, phone, address, city, state, agencyId, agency_id } = req.body;
@@ -162,6 +212,7 @@ class BrokerController {
             const total = totalResult[0]?.total ?? 0;
             const dataQuery = `
                 SELECT
+                    p.broker_id,
                     p.id,
                     p.title,
                     p.description,
@@ -169,6 +220,8 @@ class BrokerController {
                     p.status,
                     p.purpose,
                     p.price,
+                    p.price_sale,
+                    p.price_rent,
                     p.code,
                     p.address,
                     p.quadra,
@@ -194,17 +247,21 @@ class BrokerController {
                     p.valor_iptu,
                     p.video_url,
                     p.created_at,
+                    u.name AS broker_name,
+                    u.phone AS broker_phone,
+                    u.email AS broker_email,
                     GROUP_CONCAT(pi.image_url ORDER BY pi.id) AS images
                 FROM properties p
+                LEFT JOIN users u ON u.id = p.broker_id
                 LEFT JOIN property_images pi ON p.id = pi.property_id
                 WHERE p.broker_id = ?
                 GROUP BY
-                    p.id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.code,
+                    p.id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.price_sale, p.price_rent, p.code,
                     p.address, p.quadra, p.lote, p.numero, p.bairro, p.complemento, p.tipo_lote,
                     p.city, p.state, p.bedrooms, p.bathrooms, p.area_construida, p.area_terreno,
                     p.garage_spots, p.has_wifi, p.tem_piscina, p.tem_energia_solar, p.tem_automacao,
                     p.tem_ar_condicionado, p.eh_mobiliada, p.valor_condominio, p.valor_iptu,
-                    p.video_url, p.created_at
+                    p.video_url, p.created_at, u.name, u.phone, u.email
                 ORDER BY p.created_at DESC
                 LIMIT ? OFFSET ?
             `;
@@ -213,6 +270,8 @@ class BrokerController {
             const properties = dataRows.map((row) => ({
                 ...row,
                 price: Number(row.price),
+                price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+                price_rent: row.price_rent != null ? Number(row.price_rent) : null,
                 bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
                 bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
                 area_construida: row.area_construida != null ? Number(row.area_construida) : null,
@@ -248,7 +307,19 @@ class BrokerController {
         const brokerId = req.userId;
         try {
             const query = `
-                SELECT s.id, p.title, s.sale_price, s.commission_rate, s.commission_amount, s.sale_date 
+                SELECT
+                    s.id,
+                    p.title,
+                    s.deal_type,
+                    s.sale_price,
+                    s.commission_rate,
+                    s.commission_amount,
+                    s.iptu_value,
+                    s.condominio_value,
+                    s.is_recurring,
+                    s.commission_cycles,
+                    s.recurrence_interval,
+                    s.sale_date
                 FROM sales s
                 JOIN properties p ON s.property_id = p.id
                 WHERE s.broker_id = ?
@@ -257,7 +328,17 @@ class BrokerController {
             const [commissions] = await connection_1.default.query(query, [brokerId]);
             return res.json({
                 success: true,
-                data: commissions
+                data: commissions.map((row) => {
+                    const baseCycles = Math.max(Number(row.commission_cycles) || 0, 0);
+                    const autoCycles = calculateAutoCycles(row.recurrence_interval, row.sale_date);
+                    const totalCycles = baseCycles + autoCycles;
+                    const commissionAmount = Number(row.commission_amount) || 0;
+                    return {
+                        ...row,
+                        commission_cycles_total: totalCycles,
+                        commission_amount_total: Number((commissionAmount * totalCycles).toFixed(2)),
+                    };
+                })
             });
         }
         catch (error) {
@@ -271,14 +352,39 @@ class BrokerController {
     async getMyPerformanceReport(req, res) {
         const brokerId = req.userId;
         try {
-            const salesQuery = `
-                SELECT 
-                    COUNT(CASE WHEN status = 'sold' THEN 1 END) as total_sales,
-                    SUM(CASE WHEN status = 'sold' THEN commission_value ELSE 0 END) as total_commission
-                FROM properties
+            const [salesRows] = await connection_1.default.query(`
+                SELECT
+                    deal_type,
+                    commission_amount,
+                    commission_cycles,
+                    recurrence_interval,
+                    sale_date,
+                    iptu_value
+                FROM sales
                 WHERE broker_id = ?
-            `;
-            const [salesResult] = await connection_1.default.query(salesQuery, [brokerId]);
+                `, [brokerId]);
+            let totalDeals = 0;
+            let totalSales = 0;
+            let totalRents = 0;
+            let totalCommission = 0;
+            let totalIptu = 0;
+            for (const row of salesRows) {
+                totalDeals += 1;
+                const dealType = String(row.deal_type ?? "").toLowerCase();
+                if (dealType === "sale") {
+                    totalSales += 1;
+                }
+                else if (dealType === "rent") {
+                    totalRents += 1;
+                }
+                const baseCycles = Math.max(Number(row.commission_cycles) || 0, 0);
+                const autoCycles = calculateAutoCycles(row.recurrence_interval, row.sale_date);
+                const totalCycles = baseCycles + autoCycles;
+                const commissionAmount = Number(row.commission_amount) || 0;
+                totalCommission += commissionAmount * totalCycles;
+                const iptuValue = Number(row.iptu_value) || 0;
+                totalIptu += iptuValue;
+            }
             const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;
             const [propertiesResult] = await connection_1.default.query(propertiesQuery, [brokerId]);
             const statusQuery = `
@@ -295,8 +401,11 @@ class BrokerController {
                 statusBreakdown[row.status] = Number(row.count) || 0;
             }
             const report = {
-                totalSales: Number(salesResult[0]?.total_sales || 0),
-                totalCommission: Number(salesResult[0]?.total_commission || 0),
+                totalDeals: Number(totalDeals || 0),
+                totalSales: Number(totalSales || 0),
+                totalRents: Number(totalRents || 0),
+                totalCommission: Number(totalCommission.toFixed(2)),
+                totalIptu: Number(totalIptu.toFixed(2)),
                 totalProperties: Number(propertiesResult[0]?.total_properties || 0),
                 statusBreakdown: statusBreakdown
             };

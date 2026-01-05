@@ -7,7 +7,7 @@ import { uploadToCloudinary } from '../config/cloudinary';
 import { notifyAdmins } from '../services/notificationService';
 import { type PushNotificationResult } from '../services/pushNotificationService';
 import { notifyPriceDropIfNeeded } from '../services/priceDropNotificationService';
-import { notifyUsers, splitRecipientsByRole } from '../services/userNotificationService';
+import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
@@ -1126,8 +1126,9 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['approved', id]);
+      await connection.query('UPDATE brokers SET status = ?, creci = IFNULL(creci, NULL) WHERE id = ?', ['approved', id]);
       await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
+      await connection.query("UPDATE users SET role = 'broker' WHERE id = ?", [id]);
 
       try {
         await notifyAdmins(`Corretor #${id} aprovado pelo admin.`, 'broker', Number(id));
@@ -1137,13 +1138,16 @@ class AdminController {
       try {
         const brokerId = Number(id);
         if (Number.isFinite(brokerId)) {
-          await notifyUsers({
-            message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
-            recipientIds: [brokerId],
-            recipientRole: 'broker',
-            relatedEntityType: 'broker',
-            relatedEntityId: brokerId,
-          });
+          const role = await resolveUserNotificationRole(brokerId);
+          if (role === 'broker') {
+            await notifyUsers({
+              message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
+              recipientIds: [brokerId],
+              recipientRole: 'broker',
+              relatedEntityType: 'broker',
+              relatedEntityId: brokerId,
+            });
+          }
         }
       } catch (notifyError) {
         console.error('Erro ao notificar corretor aprovado:', notifyError);
@@ -1159,8 +1163,9 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('UPDATE brokers SET status = ? WHERE id = ?', ['rejected', id]);
-      await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['rejected', id]);
+      await connection.query('UPDATE brokers SET status = ?, creci = NULL WHERE id = ?', ['rejected', id]);
+      await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [id]);
+      await connection.query("UPDATE users SET role = 'client' WHERE id = ?", [id]);
 
       try {
         await notifyAdmins(`Corretor #${id} rejeitado pelo admin.`, 'broker', Number(id));
@@ -1203,11 +1208,18 @@ class AdminController {
         return res.status(404).json({ error: 'Corretor nao encontrado.' });
       }
 
-      if (normalizedStatus === 'approved' || normalizedStatus === 'rejected') {
+      if (normalizedStatus === 'approved') {
         await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
           normalizedStatus,
           brokerId,
         ]);
+        await connection.query("UPDATE users SET role = 'broker' WHERE id = ?", [brokerId]);
+      }
+
+      if (normalizedStatus === 'rejected') {
+        await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
+        await connection.query('UPDATE brokers SET creci = NULL WHERE id = ?', [brokerId]);
+        await connection.query("UPDATE users SET role = 'client' WHERE id = ?", [brokerId]);
       }
 
       try {
@@ -1217,13 +1229,16 @@ class AdminController {
       }
       if (normalizedStatus === 'approved') {
         try {
-          await notifyUsers({
-            message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
-            recipientIds: [brokerId],
-            recipientRole: 'broker',
-            relatedEntityType: 'broker',
-            relatedEntityId: brokerId,
-          });
+          const role = await resolveUserNotificationRole(brokerId);
+          if (role === 'broker') {
+            await notifyUsers({
+              message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
+              recipientIds: [brokerId],
+              recipientRole: 'broker',
+              relatedEntityType: 'broker',
+              relatedEntityId: brokerId,
+            });
+          }
         } catch (notifyError) {
           console.error('Erro ao notificar corretor aprovado:', notifyError);
         }
@@ -1423,13 +1438,16 @@ class AdminController {
       try {
         const { brokerId, title } = await fetchPropertyOwner(propertyId);
         if (brokerId) {
-          await notifyUsers({
-            message: `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`,
-            recipientIds: [brokerId],
-            recipientRole: 'broker',
-            relatedEntityType: 'property',
-            relatedEntityId: propertyId,
-          });
+          const role = await resolveUserNotificationRole(brokerId);
+          if (role === 'broker') {
+            await notifyUsers({
+              message: `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`,
+              recipientIds: [brokerId],
+              recipientRole: 'broker',
+              relatedEntityType: 'property',
+              relatedEntityId: propertyId,
+            });
+          }
         }
       } catch (notifyError) {
         console.error('Erro ao notificar corretor sobre aprovacao do imovel:', notifyError);
@@ -1467,13 +1485,16 @@ class AdminController {
       try {
         const { brokerId, title } = await fetchPropertyOwner(propertyId);
         if (brokerId) {
-          await notifyUsers({
-            message: `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`,
-            recipientIds: [brokerId],
-            recipientRole: 'broker',
-            relatedEntityType: 'property',
-            relatedEntityId: propertyId,
-          });
+          const role = await resolveUserNotificationRole(brokerId);
+          if (role === 'broker') {
+            await notifyUsers({
+              message: `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`,
+              recipientIds: [brokerId],
+              recipientRole: 'broker',
+              relatedEntityType: 'property',
+              relatedEntityId: propertyId,
+            });
+          }
         }
       } catch (notifyError) {
         console.error('Erro ao notificar corretor sobre rejeicao do imovel:', notifyError);
@@ -1528,13 +1549,16 @@ class AdminController {
               normalizedStatus === 'approved'
                 ? `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`
                 : `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`;
-            await notifyUsers({
-              message,
-              recipientIds: [brokerId],
-              recipientRole: 'broker',
-              relatedEntityType: 'property',
-              relatedEntityId: propertyId,
-            });
+            const role = await resolveUserNotificationRole(brokerId);
+            if (role === 'broker') {
+              await notifyUsers({
+                message,
+                recipientIds: [brokerId],
+                recipientRole: 'broker',
+                relatedEntityType: 'property',
+                relatedEntityId: propertyId,
+              });
+            }
           }
         } catch (notifyError) {
           console.error('Erro ao notificar corretor sobre status do imovel:', notifyError);

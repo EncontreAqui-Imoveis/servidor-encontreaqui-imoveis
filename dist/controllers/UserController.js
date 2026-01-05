@@ -529,6 +529,7 @@ class UserController {
         WHERE recipient_id = ?
           AND recipient_type = 'user'
           AND recipient_role = ?
+          AND recipient_id NOT IN (SELECT id FROM admins)
         ORDER BY created_at DESC
       `;
             const [rows] = await connection_1.default.query(sql, [userId, role]);
@@ -556,6 +557,7 @@ class UserController {
             AND recipient_id = ?
             AND recipient_type = 'user'
             AND recipient_role = ?
+            AND recipient_id NOT IN (SELECT id FROM admins)
         `, [notificationId, userId, role]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Notificacao nao encontrada.' });
@@ -579,6 +581,7 @@ class UserController {
           WHERE recipient_id = ?
             AND recipient_type = 'user'
             AND recipient_role = ?
+            AND recipient_id NOT IN (SELECT id FROM admins)
         `, [userId, role]);
             return res.status(204).send();
         }

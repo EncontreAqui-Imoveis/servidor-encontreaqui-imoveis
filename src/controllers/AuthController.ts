@@ -51,6 +51,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 class AuthController {
+  async checkEmail(req: Request, res: Response) {
+    const email = String(req.query.email ?? req.body?.email ?? '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: 'Email e obrigatorio.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM users WHERE email = ? LIMIT 1',
+        [email],
+      );
+      return res.status(200).json({ exists: rows.length > 0 });
+    } catch (error) {
+      console.error('Erro ao verificar email:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async register(req: Request, res: Response) {
     const {
       name,

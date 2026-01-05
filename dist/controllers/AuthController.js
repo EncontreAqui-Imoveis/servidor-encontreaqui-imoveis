@@ -44,6 +44,20 @@ function withTimeout(promise, ms, label) {
     });
 }
 class AuthController {
+    async checkEmail(req, res) {
+        const email = String(req.query.email ?? req.body?.email ?? '').trim().toLowerCase();
+        if (!email) {
+            return res.status(400).json({ error: 'Email e obrigatorio.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+            return res.status(200).json({ exists: rows.length > 0 });
+        }
+        catch (error) {
+            console.error('Erro ao verificar email:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
     async register(req, res) {
         const { name, email, password, phone, address, city, state, profileType, } = req.body;
         if (!name || !email || !password) {

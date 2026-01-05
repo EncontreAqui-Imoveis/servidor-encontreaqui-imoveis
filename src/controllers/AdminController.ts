@@ -1256,15 +1256,20 @@ class AdminController {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
       const offset = (page - 1) * limit;
 
-      const requestedStatus = String(req.query.status ?? '').trim();
+      const requestedStatusRaw = String(req.query.status ?? '').trim();
+      const requestedStatus = requestedStatusRaw.length == 0 ? 'approved' : requestedStatusRaw;
       const searchTerm = String(req.query.search ?? '').trim();
-      const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+      const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected', 'all']);
       const whereClauses: string[] = [];
       const params: Array<string | number> = [];
 
       if (requestedStatus && allowedStatuses.has(requestedStatus)) {
-        whereClauses.push('b.status = ?');
-        params.push(requestedStatus);
+        if (requestedStatus != 'all') {
+          whereClauses.push('b.status = ?');
+          params.push(requestedStatus);
+        }
+      } else if (requestedStatusRaw.length > 0) {
+        return res.status(400).json({ error: 'Status de corretor invalido.' });
       }
 
       if (searchTerm) {

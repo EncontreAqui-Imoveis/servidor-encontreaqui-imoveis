@@ -1162,8 +1162,8 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('UPDATE brokers SET status = ?, creci = NULL WHERE id = ?', ['rejected', id]);
       await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [id]);
+      await connection.query('DELETE FROM brokers WHERE id = ?', [id]);
 
       try {
         await notifyAdmins(`Corretor #${id} rejeitado pelo admin.`, 'broker', Number(id));
@@ -1173,6 +1173,25 @@ class AdminController {
       return res.status(200).json({ message: 'Corretor rejeitado com sucesso.' });
     } catch (error) {
       console.error('Erro ao rejeitar corretor:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async cleanupBroker(req: Request, res: Response) {
+    const brokerId = Number(req.params.id);
+
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    try {
+      await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
+      await connection.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
+      await connection.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
+
+      return res.status(200).json({ message: 'Corretor removido do sistema com sucesso.' });
+    } catch (error) {
+      console.error('Erro ao limpar corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -1215,7 +1234,11 @@ class AdminController {
 
       if (normalizedStatus === 'rejected') {
         await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
-        await connection.query('UPDATE brokers SET creci = NULL WHERE id = ?', [brokerId]);
+        await connection.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
+        return res.status(200).json({
+          message: 'Status do corretor atualizado com sucesso.',
+          status: normalizedStatus,
+        });
       }
 
       try {

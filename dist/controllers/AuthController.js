@@ -98,7 +98,10 @@ class AuthController {
         try {
             const [rows] = await connection_1.default.query(`
           SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.address, u.city, u.state,
-                 CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
+                 CASE
+                   WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
+                   ELSE 'client'
+                 END AS role,
                  b.status AS broker_status
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id

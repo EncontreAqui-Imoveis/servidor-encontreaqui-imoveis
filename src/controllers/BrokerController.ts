@@ -561,6 +561,16 @@ class BrokerController {
         const selfieUrl = selfieResult.url;
 
         try {
+            const [brokerStatusRows] = await connection.query<RowDataPacket[]>(
+                'SELECT status FROM brokers WHERE id = ?',
+                [brokerId]
+            );
+            if (brokerStatusRows.length > 0 && brokerStatusRows[0].status === 'rejected') {
+                return res.status(403).json({
+                    success: false,
+                    error: "Sua solicitacao foi rejeitada. Inicie novamente para se tornar corretor."
+                });
+            }
             // Garante que a linha em brokers existe; se não existir, cria com status pending_verification.
             const [brokerRows] = await connection.query<RowDataPacket[]>(
                 'SELECT id FROM brokers WHERE id = ?',
@@ -605,7 +615,6 @@ class BrokerController {
 }
 
 export const brokerController = new BrokerController();
-
 
 
 

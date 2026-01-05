@@ -59,6 +59,7 @@ adminRoutes.delete('/properties/:id/video', adminController.deletePropertyVideo)
 adminRoutes.delete('/properties/:id/images/:imageId', adminController.deletePropertyImage);
 
 adminRoutes.get('/notifications', adminController.getNotifications);
+adminRoutes.post('/brokers/:id/cleanup', adminController.cleanupBroker);
 
 adminRoutes.get('/dashboard/stats', getDashboardStats);
 adminRoutes.get('/stats/dashboard', getDashboardStats);

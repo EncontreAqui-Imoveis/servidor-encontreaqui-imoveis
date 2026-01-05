@@ -137,7 +137,7 @@ class UserController {
             }
             const user = userRows[0];
             const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [userId]);
-            if (brokerRows.length > 0) {
+            if (brokerRows.length > 0 && ['approved', 'pending_verification'].includes(String(brokerRows[0].status))) {
                 return res.json({
                     role: 'broker',
                     status: brokerRows[0].status,
@@ -181,8 +181,10 @@ class UserController {
             const [userRows] = await connection_1.default.query('SELECT id, name, email, phone, address, city, state FROM users WHERE id = ?', [userId]);
             const user = userRows[0];
             const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [userId]);
-            const role = brokerRows.length > 0 ? 'broker' : 'client';
-            const status = brokerRows.length > 0 ? brokerRows[0].status : undefined;
+            const brokerStatus = brokerRows.length > 0 ? String(brokerRows[0].status) : '';
+            const isBroker = ['approved', 'pending_verification'].includes(brokerStatus);
+            const role = isBroker ? 'broker' : 'client';
+            const status = isBroker ? brokerStatus : undefined;
             return res.json({
                 role,
                 status,

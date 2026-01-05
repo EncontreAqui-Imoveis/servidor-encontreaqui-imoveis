@@ -40,6 +40,7 @@ adminRoutes.post('/properties/:id/video', uploadMiddleware_1.mediaUpload.single(
 adminRoutes.delete('/properties/:id/video', AdminController_1.adminController.deletePropertyVideo);
 adminRoutes.delete('/properties/:id/images/:imageId', AdminController_1.adminController.deletePropertyImage);
 adminRoutes.get('/notifications', AdminController_1.adminController.getNotifications);
+adminRoutes.post('/brokers/:id/cleanup', AdminController_1.adminController.cleanupBroker);
 adminRoutes.get('/dashboard/stats', AdminController_1.getDashboardStats);
 adminRoutes.get('/stats/dashboard', AdminController_1.getDashboardStats);
 exports.default = adminRoutes;

@@ -1128,7 +1128,6 @@ class AdminController {
     try {
       await connection.query('UPDATE brokers SET status = ?, creci = IFNULL(creci, NULL) WHERE id = ?', ['approved', id]);
       await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
-      await connection.query("UPDATE users SET role = 'broker' WHERE id = ?", [id]);
 
       try {
         await notifyAdmins(`Corretor #${id} aprovado pelo admin.`, 'broker', Number(id));
@@ -1165,7 +1164,6 @@ class AdminController {
     try {
       await connection.query('UPDATE brokers SET status = ?, creci = NULL WHERE id = ?', ['rejected', id]);
       await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [id]);
-      await connection.query("UPDATE users SET role = 'client' WHERE id = ?", [id]);
 
       try {
         await notifyAdmins(`Corretor #${id} rejeitado pelo admin.`, 'broker', Number(id));
@@ -1213,13 +1211,11 @@ class AdminController {
           normalizedStatus,
           brokerId,
         ]);
-        await connection.query("UPDATE users SET role = 'broker' WHERE id = ?", [brokerId]);
       }
 
       if (normalizedStatus === 'rejected') {
         await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
         await connection.query('UPDATE brokers SET creci = NULL WHERE id = ?', [brokerId]);
-        await connection.query("UPDATE users SET role = 'client' WHERE id = ?", [brokerId]);
       }
 
       try {

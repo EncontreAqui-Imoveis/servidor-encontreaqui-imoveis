@@ -614,11 +614,13 @@ class PropertyController {
       const imageUrls: string[] = [];
       const files = req.files ?? {};
 
-      if (files.images) {
-        for (const file of files.images) {
-          const uploaded = await uploadToCloudinary(file, 'properties');
-          imageUrls.push(uploaded.url);
-        }
+      const imageFiles = files.images ?? [];
+      if (imageFiles.length < 2) {
+        return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imovel.' });
+      }
+      for (const file of imageFiles) {
+        const uploaded = await uploadToCloudinary(file, 'properties');
+        imageUrls.push(uploaded.url);
       }
 
       let videoUrl: string | null = null;

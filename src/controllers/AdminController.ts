@@ -1499,31 +1499,41 @@ class AdminController {
     const propertyId = Number(req.params.id);
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imovel inválido.' });
+      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>('UPDATE properties SET status = ? WHERE id = ?', [
-        'rejected',
-        propertyId,
-      ]);
+      const { brokerId, title } = await fetchPropertyOwner(propertyId);
+      if (!brokerId && !title) {
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      const [result] = await connection.query<ResultSetHeader>(
+        'DELETE FROM properties WHERE id = ?',
+        [propertyId],
+      );
 
       if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Imovel não encontrado.' });
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
+      const propertyLabel = title || `#${propertyId}`;
+
       try {
-        await notifyAdmins(`Imovel #${propertyId} rejeitado pelo admin.`, 'property', propertyId);
+        await notifyAdmins(
+          `Imovel #${propertyId} rejeitado e removido pelo admin.`,
+          'property',
+          propertyId,
+        );
       } catch (notifyError) {
-        console.error('Erro ao notificar admins sobre rejeição de imovel:', notifyError);
+        console.error('Erro ao notificar admins sobre rejeicao de imovel:', notifyError);
       }
       try {
-        const { brokerId, title } = await fetchPropertyOwner(propertyId);
         if (brokerId) {
           const role = await resolveUserNotificationRole(brokerId);
           if (role === 'broker') {
             await notifyUsers({
-              message: `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`,
+              message: `Seu imovel "${propertyLabel}" foi rejeitado e removido. Voce pode cadastrar novamente com as informacoes corrigidas.`,
               recipientIds: [brokerId],
               recipientRole: 'broker',
               relatedEntityType: 'property',
@@ -1532,12 +1542,12 @@ class AdminController {
           }
         }
       } catch (notifyError) {
-        console.error('Erro ao notificar corretor sobre rejeição do imovel:', notifyError);
+        console.error('Erro ao notificar corretor sobre rejeicao do imovel:', notifyError);
       }
 
-      return res.status(200).json({ message: 'Imóvel rejeitado com sucesso.' });
+      return res.status(200).json({ message: 'Imovel rejeitado e removido com sucesso.' });
     } catch (error) {
-      console.error('Erro ao rejeitar imóvel:', error);
+      console.error('Erro ao rejeitar imovel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

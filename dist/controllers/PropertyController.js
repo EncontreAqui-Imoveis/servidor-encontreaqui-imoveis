@@ -417,11 +417,13 @@ class PropertyController {
             const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
             const imageUrls = [];
             const files = req.files ?? {};
-            if (files.images) {
-                for (const file of files.images) {
-                    const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties');
-                    imageUrls.push(uploaded.url);
-                }
+            const imageFiles = files.images ?? [];
+            if (imageFiles.length < 2) {
+                return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imovel.' });
+            }
+            for (const file of imageFiles) {
+                const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties');
+                imageUrls.push(uploaded.url);
             }
             let videoUrl = null;
             if (files.video && files.video[0]) {

@@ -949,6 +949,18 @@ class AdminController {
             await connection_1.default.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
             await connection_1.default.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
             await connection_1.default.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
+            try {
+                await (0, userNotificationService_1.notifyUsers)({
+                    message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
+                    recipientIds: [brokerId],
+                    recipientRole: 'client',
+                    relatedEntityType: 'broker',
+                    relatedEntityId: brokerId,
+                });
+            }
+            catch (notifyError) {
+                console.error('Erro ao notificar rejeicao de corretor:', notifyError);
+            }
             return res.status(200).json({ message: 'Corretor removido do sistema com sucesso.' });
         }
         catch (error) {

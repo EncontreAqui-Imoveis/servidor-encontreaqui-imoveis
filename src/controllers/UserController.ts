@@ -633,7 +633,7 @@ class UserController {
       }
 
       const [favoriteRows] = await connection.query<RowDataPacket[]>(
-        'SELECT 1 FROM favoritos WHERE usuário_id = ? AND imóvel_id = ?',
+        'SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?',
         [userId, propertyId]
       );
 
@@ -641,7 +641,7 @@ class UserController {
         return res.status(409).json({ error: 'Este imóvel ja esta nos seus favoritos.' });
       }
 
-      await connection.query('INSERT INTO favoritos (usuário_id, imóvel_id) VALUES (?, ?)', [userId, propertyId]);
+      await connection.query('INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)', [userId, propertyId]);
 
       return res.status(201).json({ message: 'Imóvel adicionado aos favoritos.' });
     } catch (error) {
@@ -664,7 +664,7 @@ class UserController {
 
     try {
       const [result] = await connection.query<ResultSetHeader>(
-        'DELETE FROM favoritos WHERE usuário_id = ? AND imóvel_id = ?',
+        'DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?',
         [userId, propertyId]
       );
 
@@ -701,11 +701,11 @@ class UserController {
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
             MAX(f.created_at) AS favorited_at
           FROM favoritos f
-          JOIN properties p ON p.id = f.imóvel_id
+          JOIN properties p ON p.id = f.imovel_id
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
-          WHERE f.usuário_id = ?
+          WHERE f.usuario_id = ?
           GROUP BY p.id
           ORDER BY favorited_at DESC
         `,

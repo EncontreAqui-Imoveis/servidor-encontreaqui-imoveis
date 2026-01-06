@@ -729,13 +729,27 @@ class UserController {
     try {
       const role = await resolveUserNotificationRole(Number(userId));
       const sql = `
-        SELECT id, message, related_entity_type, related_entity_id, recipient_id, is_read, created_at
-        FROM notifications
-        WHERE recipient_id = ?
-          AND recipient_type = 'user'
-          AND recipient_role = ?
-          AND recipient_id NOT IN (SELECT id FROM admins)
-        ORDER BY created_at DESC
+        SELECT n.id,
+               n.message,
+               n.related_entity_type,
+               n.related_entity_id,
+               n.recipient_id,
+               n.is_read,
+               n.created_at
+        FROM notifications n
+        INNER JOIN (
+          SELECT MAX(id) AS max_id
+          FROM notifications
+          WHERE recipient_id = ?
+            AND recipient_type = 'user'
+            AND recipient_role = ?
+            AND recipient_id NOT IN (SELECT id FROM admins)
+          GROUP BY message,
+                   related_entity_type,
+                   COALESCE(related_entity_id, 0),
+                   recipient_id
+        ) latest ON latest.max_id = n.id
+        ORDER BY n.created_at DESC
       `;
 
       const [rows] = await connection.query<RowDataPacket[]>(sql, [userId, role]);

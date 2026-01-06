@@ -38,19 +38,20 @@ async function authMiddleware(req, res, next) {
     }
 }
 async function isBroker(req, res, next) {
-    if (req.userRole !== 'broker') {
-        return res.status(403).json({
-            error: 'Acesso negado. Rota exclusiva para corretores.',
-        });
-    }
     try {
         const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [req.userId]);
         const brokers = brokerRows;
-        if (brokers.length === 0 || brokers[0].status !== 'approved') {
+        if (brokers.length === 0) {
             return res.status(403).json({
-                error: 'Acesso negado. Sua conta de corretor não foi aprovada ou foi rejeitada. Para se registrar como cliente, use um email diferente.',
+                error: 'Acesso negado. Rota exclusiva para corretores.',
             });
         }
+        if (brokers[0].status !== 'approved') {
+            return res.status(403).json({
+                error: 'Acesso negado. Sua conta de corretor n??o foi aprovada ou foi rejeitada. Para se registrar como cliente, use um email diferente.',
+            });
+        }
+        req.userRole = 'broker';
         return next();
     }
     catch (error) {

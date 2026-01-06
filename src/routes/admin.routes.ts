@@ -45,6 +45,8 @@ adminRoutes.delete('/properties/:id', adminController.deleteProperty);
 adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
 adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
 adminRoutes.patch('/properties/:id/status', adminController.updatePropertyStatus);
+adminRoutes.get('/featured-properties', adminController.listFeaturedProperties);
+adminRoutes.put('/featured-properties', adminController.updateFeaturedProperties);
 adminRoutes.post(
   '/properties/:id/images',
   mediaUpload.array('images', 20),

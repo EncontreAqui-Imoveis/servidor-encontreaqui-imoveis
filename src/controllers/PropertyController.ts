@@ -1501,6 +1501,64 @@ class PropertyController {
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
+  async listFeaturedProperties(req: Request, res: Response) {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 20);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const offset = (page - 1) * limit;
+
+    try {
+      const [rows] = await connection.query<PropertyAggregateRow[]>(
+        `
+          SELECT
+            p.*,
+            ANY_VALUE(a.id) AS agency_id,
+            ANY_VALUE(a.name) AS agency_name,
+            ANY_VALUE(a.logo_url) AS agency_logo_url,
+            ANY_VALUE(a.address) AS agency_address,
+            ANY_VALUE(a.city) AS agency_city,
+            ANY_VALUE(a.state) AS agency_state,
+            ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(u.name) AS broker_name,
+            ANY_VALUE(u.phone) AS broker_phone,
+            ANY_VALUE(u.email) AS broker_email,
+            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+          FROM featured_properties fp
+          JOIN properties p ON p.id = fp.property_id
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          WHERE p.status = 'approved'
+          GROUP BY p.id, fp.position
+          ORDER BY fp.position ASC
+          LIMIT ? OFFSET ?
+        `,
+        [limit, offset]
+      );
+
+      const [countRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT COUNT(*) AS total
+          FROM featured_properties fp
+          JOIN properties p ON p.id = fp.property_id
+          WHERE p.status = 'approved'
+        `
+      );
+
+      const total = countRows[0]?.total ?? 0;
+
+      return res.json({
+        properties: rows.map(mapProperty),
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (error) {
+      console.error('Erro ao listar destaques:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
 }
 
 export const propertyController = new PropertyController();

@@ -284,6 +284,84 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
+    async listFeaturedProperties(req, res) {
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            fp.property_id AS id,
+            fp.position,
+            p.title,
+            p.city,
+            p.state,
+            p.status,
+            p.price,
+            p.price_sale,
+            p.price_rent,
+            p.purpose
+          FROM featured_properties fp
+          JOIN properties p ON p.id = fp.property_id
+          ORDER BY fp.position ASC
+        `);
+            return res.status(200).json({ data: rows });
+        }
+        catch (error) {
+            console.error('Erro ao listar destaques:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async updateFeaturedProperties(req, res) {
+        const rawList = req.body?.propertyIds;
+        const input = Array.isArray(rawList) ? rawList : [];
+        const seen = new Set();
+        const ids = [];
+        for (const value of input) {
+            const id = Number(value);
+            if (!Number.isFinite(id) || id <= 0)
+                continue;
+            if (seen.has(id))
+                continue;
+            seen.add(id);
+            ids.push(id);
+        }
+        if (ids.length > 20) {
+            return res.status(400).json({ error: 'Limite maximo de 20 destaques.' });
+        }
+        try {
+            if (ids.length > 0) {
+                const [approvedRows] = await connection_1.default.query('SELECT id FROM properties WHERE status = ? AND id IN (?)', ['approved', ids]);
+                const approvedIds = new Set(approvedRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id)));
+                const invalidIds = ids.filter((id) => !approvedIds.has(id));
+                if (invalidIds.length > 0) {
+                    return res.status(400).json({
+                        error: 'Alguns imoveis nao estao aprovados.',
+                        invalidIds,
+                    });
+                }
+            }
+            const db = await connection_1.default.getConnection();
+            try {
+                await db.beginTransaction();
+                await db.query('DELETE FROM featured_properties');
+                if (ids.length > 0) {
+                    const values = ids.map((id, index) => [id, index + 1]);
+                    await db.query('INSERT INTO featured_properties (property_id, position) VALUES ?', [values]);
+                }
+                await db.commit();
+            }
+            catch (error) {
+                await db.rollback();
+                throw error;
+            }
+            finally {
+                db.release();
+            }
+            return res.status(200).json({ data: ids });
+        }
+        catch (error) {
+            console.error('Erro ao atualizar destaques:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
     async updateBroker(req, res) {
         const { id } = req.params;
         const { name, email, phone, creci, status, agencyId, agency_id } = req.body;
@@ -1198,10 +1276,11 @@ class AdminController {
             try {
                 const { brokerId, title } = await fetchPropertyOwner(propertyId);
                 if (brokerId) {
+                    const propertyLabel = title && title.trim().length > 0 ? title.trim() : 'sem titulo';
                     const role = await (0, userNotificationService_1.resolveUserNotificationRole)(brokerId);
                     if (role === 'broker') {
                         await (0, userNotificationService_1.notifyUsers)({
-                            message: `Seu imóvel "${title || `#${propertyId}`}" foi aprovado e já esta disponível no app.`,
+                            message: `Seu imovel "${propertyLabel}" foi aprovado e ja esta disponivel no app.`,
                             recipientIds: [brokerId],
                             recipientRole: 'broker',
                             relatedEntityType: 'property',
@@ -1234,7 +1313,7 @@ class AdminController {
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
-            const propertyLabel = title || `#${propertyId}`;
+            const propertyLabel = title && title.trim().length > 0 ? title.trim() : 'sem titulo';
             try {
                 await (0, notificationService_1.notifyAdmins)(`Imovel #${propertyId} rejeitado e removido pelo admin.`, 'property', propertyId);
             }
@@ -1272,12 +1351,12 @@ class AdminController {
             return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
         }
         if (typeof status !== 'string') {
-            return res.status(400).json({ error: 'Status invalido.' });
+            return res.status(400).json({ error: 'Status inválido.' });
         }
         const normalizedStatus = status.trim();
         const allowedStatuses = new Set(['pending_approval', 'approved', 'rejected', 'rented', 'sold']);
         if (!allowedStatuses.has(normalizedStatus)) {
-            return res.status(400).json({ error: 'Status de imovel nao suportado.' });
+            return res.status(400).json({ error: 'Status de imóvel nao suportado.' });
         }
         if (normalizedStatus === 'rejected') {
             return this.rejectProperty(req, res);
@@ -1297,9 +1376,10 @@ class AdminController {
                 try {
                     const { brokerId, title } = await fetchPropertyOwner(propertyId);
                     if (brokerId) {
+                        const propertyLabel = title && title.trim().length > 0 ? title.trim() : 'sem titulo';
                         const message = normalizedStatus === 'approved'
-                            ? `Seu imovel "${title || `#${propertyId}`}" foi aprovado e ja esta disponivel no app.`
-                            : `Seu imovel "${title || `#${propertyId}`}" foi rejeitado. Revise as informacoes e tente novamente.`;
+                            ? `Seu imovel "${propertyLabel}" foi aprovado e ja esta disponivel no app.`
+                            : `Seu imovel "${propertyLabel}" foi rejeitado. Revise as informacoes e tente novamente.`;
                         const role = await (0, userNotificationService_1.resolveUserNotificationRole)(brokerId);
                         if (role === 'broker') {
                             await (0, userNotificationService_1.notifyUsers)({

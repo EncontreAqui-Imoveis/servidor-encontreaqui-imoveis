@@ -59,6 +59,7 @@ propertyRoutes.delete(
 );
 
 propertyRoutes.get('/', (req, res) => propertyController.listPublicProperties(req, res));
+propertyRoutes.get('/featured', (req, res) => propertyController.listFeaturedProperties(req, res));
 propertyRoutes.get('/public', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/public/list', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/cities', (req, res) => propertyController.getAvailableCities(req, res));

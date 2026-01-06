@@ -47,7 +47,7 @@ async function notifyPriceDropIfNeeded({ propertyId, propertyTitle, previousSale
     }
     const cutoff = new Date(Date.now() - PRICE_DROP_COOLDOWN_MS);
     const { clientIds, brokerIds } = await (0, userNotificationService_1.splitRecipientsByRole)(recipients);
-    const title = propertyTitle?.trim() ? propertyTitle.trim() : `#${propertyId}`;
+    const title = propertyTitle?.trim() ? propertyTitle.trim() : 'sem titulo';
     let message = `${PRICE_DROP_PREFIX}: o imovel "${title}" ficou mais barato.`;
     if (saleDrop >= PRICE_DROP_THRESHOLD && rentDrop >= PRICE_DROP_THRESHOLD) {
         message += ` Venda: de ${formatCurrency(previousSalePrice)} para ${formatCurrency(newSalePrice)}.`;

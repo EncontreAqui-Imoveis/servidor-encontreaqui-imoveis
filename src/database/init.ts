@@ -139,6 +139,19 @@ const DDL_STATEMENTS: DDLStatement[] = [
     `,
   },
   {
+    name: 'featured_properties',
+    sql: `
+      CREATE TABLE IF NOT EXISTS featured_properties (
+        property_id INT NOT NULL,
+        position INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (property_id),
+        UNIQUE KEY idx_featured_position (position),
+        FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+      );
+    `,
+  },
+  {
     name: 'sales',
     sql: `
       CREATE TABLE IF NOT EXISTS sales (

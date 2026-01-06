@@ -1356,6 +1356,14 @@ class PropertyController {
       minPrice,
       maxPrice,
       bedrooms,
+      bathrooms,
+      tipo_lote,
+      has_wifi,
+      tem_piscina,
+      tem_energia_solar,
+      tem_automacao,
+      tem_ar_condicionado,
+      eh_mobiliada,
       sortBy,
       order,
       searchTerm,
@@ -1426,9 +1434,64 @@ class PropertyController {
     if (bedrooms) {
       const value = Number(bedrooms);
       if (!Number.isNaN(value) && value > 0) {
-        whereClauses.push('p.bedrooms >= ?');
-        params.push(Math.trunc(value));
+        const normalized = Math.trunc(value);
+        if (normalized >= 4) {
+          whereClauses.push('p.bedrooms >= ?');
+          params.push(4);
+        } else {
+          whereClauses.push('p.bedrooms = ?');
+          params.push(normalized);
+        }
       }
+    }
+
+    if (bathrooms) {
+      const value = Number(bathrooms);
+      if (!Number.isNaN(value) && value > 0) {
+        const normalized = Math.trunc(value);
+        if (normalized >= 4) {
+          whereClauses.push('p.bathrooms >= ?');
+          params.push(4);
+        } else {
+          whereClauses.push('p.bathrooms = ?');
+          params.push(normalized);
+        }
+      }
+    }
+
+    if (tipo_lote) {
+      whereClauses.push('p.tipo_lote = ?');
+      params.push(tipo_lote);
+    }
+
+    if (has_wifi !== undefined) {
+      whereClauses.push('p.has_wifi = ?');
+      params.push(parseBoolean(has_wifi));
+    }
+
+    if (tem_piscina !== undefined) {
+      whereClauses.push('p.tem_piscina = ?');
+      params.push(parseBoolean(tem_piscina));
+    }
+
+    if (tem_energia_solar !== undefined) {
+      whereClauses.push('p.tem_energia_solar = ?');
+      params.push(parseBoolean(tem_energia_solar));
+    }
+
+    if (tem_automacao !== undefined) {
+      whereClauses.push('p.tem_automacao = ?');
+      params.push(parseBoolean(tem_automacao));
+    }
+
+    if (tem_ar_condicionado !== undefined) {
+      whereClauses.push('p.tem_ar_condicionado = ?');
+      params.push(parseBoolean(tem_ar_condicionado));
+    }
+
+    if (eh_mobiliada !== undefined) {
+      whereClauses.push('p.eh_mobiliada = ?');
+      params.push(parseBoolean(eh_mobiliada));
     }
 
     if (searchTerm) {

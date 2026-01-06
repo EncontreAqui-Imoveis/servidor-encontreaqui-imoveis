@@ -1279,6 +1279,9 @@ class AdminController {
         if (!allowedStatuses.has(normalizedStatus)) {
             return res.status(400).json({ error: 'Status de imovel nao suportado.' });
         }
+        if (normalizedStatus === 'rejected') {
+            return this.rejectProperty(req, res);
+        }
         try {
             const [result] = await connection_1.default.query('UPDATE properties SET status = ? WHERE id = ?', [normalizedStatus, propertyId]);
             if (result.affectedRows === 0) {

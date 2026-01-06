@@ -1,4 +1,5 @@
 import { RowDataPacket } from 'mysql2';
+import crypto from 'crypto';
 import admin from '../config/firebaseAdmin';
 import connection from '../database/connection';
 
@@ -70,6 +71,11 @@ export async function sendPushNotifications(
   }
 
   const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
+  const notificationTag = crypto
+    .createHash('sha1')
+    .update(`${payload.relatedEntityType}:${payload.relatedEntityId ?? ''}:${payload.message}`)
+    .digest('hex')
+    .slice(0, 24);
   for (const batch of batches) {
     const response = await admin.messaging().sendEachForMulticast({
       tokens: batch,
@@ -79,8 +85,10 @@ export async function sendPushNotifications(
       },
       android: {
         priority: 'high',
+        collapseKey: notificationTag,
         notification: {
           channelId: 'default_channel',
+          tag: notificationTag,
         },
       },
       apns: {

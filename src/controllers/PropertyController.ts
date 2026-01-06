@@ -530,7 +530,7 @@ class PropertyController {
 
     const normalizedPurpose = normalizePurpose(purpose);
     if (!normalizedPurpose) {
-      return res.status(400).json({ error: "Finalidade do imovel invalida." });
+      return res.status(400).json({ error: "Finalidade do imóvel invalida." });
     }
 
     let numericPrice: number;
@@ -616,7 +616,7 @@ class PropertyController {
 
       const imageFiles = files.images ?? [];
       if (imageFiles.length < 2) {
-        return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imovel.' });
+        return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imóvel.' });
       }
       for (const file of imageFiles) {
         const uploaded = await uploadToCloudinary(file, 'properties');
@@ -746,7 +746,7 @@ class PropertyController {
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+      return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
     }
 
     try {
@@ -756,13 +756,13 @@ class PropertyController {
       );
 
       if (!propertyRows || propertyRows.length === 0) {
-        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+        return res.status(404).json({ error: 'Imóvel nao encontrado.' });
       }
 
       const property = propertyRows[0];
 
       if (property.broker_id !== brokerId) {
-        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imóvel.' });
       }
 
       const previousSalePrice =
@@ -982,7 +982,7 @@ class PropertyController {
         try {
           const action = nextStatus === 'sold' ? 'vendido' : 'alugado';
           await notifyAdmins(
-            `O imovel '${property.title}' foi marcado como ${action}.`,
+            `O imóvel '${property.title}' foi marcado como ${action}.`,
             'property',
             propertyId
           );
@@ -1020,7 +1020,7 @@ class PropertyController {
             const parsedCycles = parseInteger(body.commission_cycles);
             if (parsedCycles != null) {
               if (parsedCycles < 0) {
-                return res.status(400).json({ error: 'Comissoes ja realizadas invalidas.' });
+                return res.status(400).json({ error: 'Comissões ja realizadas invalidas.' });
               }
               commissionCycles = parsedCycles;
             }
@@ -1065,9 +1065,9 @@ class PropertyController {
         }
       }
 
-      return res.status(200).json({ message: 'Imovel atualizado com sucesso!' });
+      return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
     } catch (error) {
-      console.error('Erro ao atualizar imovel:', error);
+      console.error('Erro ao atualizar imóvel:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
@@ -1089,11 +1089,11 @@ class PropertyController {
     const brokerId = req.userId;
 
     if (!brokerId) {
-      return res.status(401).json({ error: 'Corretor nÆo autenticado.' });
+      return res.status(401).json({ error: 'Corretor não autenticado.' });
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de im¢vel inv lido.' });
+      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
     }
 
     const { type, amount, commission_rate, commission_cycles, recurrence_interval } = req.body as {
@@ -1116,16 +1116,16 @@ class PropertyController {
       );
 
       if (!propertyRows || propertyRows.length === 0) {
-        return res.status(404).json({ error: 'Im¢vel nÆo encontrado.' });
+        return res.status(404).json({ error: 'Imóvel não encontrado.' });
       }
 
       const property = propertyRows[0];
       if (property.broker_id !== brokerId) {
-        return res.status(403).json({ error: 'Acesso nÆo autorizado a este im¢vel.' });
+        return res.status(403).json({ error: 'Acesso não autorizado a este imóvel.' });
       }
 
       if (property.status === 'pending_approval' || property.status === 'rejected') {
-        return res.status(403).json({ error: 'Imovel ainda nao pode ser fechado.' });
+        return res.status(403).json({ error: 'Imóvel ainda não pode ser fechado.' });
       }
 
       
@@ -1159,7 +1159,7 @@ class PropertyController {
         const parsedCycles = parseInteger(commission_cycles);
         if (parsedCycles != null) {
           if (parsedCycles < 0) {
-            return res.status(400).json({ error: "Comissoes ja realizadas invalidas." });
+            return res.status(400).json({ error: "Comissões já realizadas inválidas." });
           }
           commissionCycles = parsedCycles;
         }
@@ -1215,7 +1215,7 @@ class PropertyController {
       }
 
       return res.status(200).json({
-        message: 'Negocio fechado com sucesso.',
+        message: 'Negócio fechado com sucesso.',
         status: newStatus,
         sale: {
           property_id: propertyId,
@@ -1245,7 +1245,7 @@ class PropertyController {
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+      return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
     }
 
     try {
@@ -1255,16 +1255,16 @@ class PropertyController {
       );
 
       if (!propertyRows || propertyRows.length === 0) {
-        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+        return res.status(404).json({ error: 'Imóvel nao encontrado.' });
       }
 
       const property = propertyRows[0];
       if (property.broker_id !== brokerId) {
-        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imóvel.' });
       }
 
       if (property.status !== 'sold' && property.status !== 'rented') {
-        return res.status(400).json({ error: 'Este imovel nao possui negocio fechado.' });
+        return res.status(400).json({ error: 'Este imóvel nao possui negocio fechado.' });
       }
 
       const db = await connection.getConnection();

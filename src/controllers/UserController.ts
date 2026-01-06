@@ -131,7 +131,7 @@ class UserController {
     const { name, email, password, phone, address, city, state } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Nome, email e senha sao obrigatorios.' });
+      return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
     }
 
     try {
@@ -141,7 +141,7 @@ class UserController {
       );
 
       if (existingUserRows.length > 0) {
-        return res.status(409).json({ error: 'Este email ja esta em uso.' });
+        return res.status(409).json({ error: 'Este email já está em uso.' });
       }
 
       const passwordHash = await bcrypt.hash(password, 8);
@@ -154,9 +154,9 @@ class UserController {
         [name, email, passwordHash, stringOrNull(phone), stringOrNull(address), stringOrNull(city), stringOrNull(state)]
       );
 
-      return res.status(201).json({ message: 'Usuario criado com sucesso!' });
+      return res.status(201).json({ message: 'Usuário criado com sucesso!' });
     } catch (error) {
-      console.error('Erro no registro do usuario:', error);
+      console.error('Erro no registro do usuário:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -165,7 +165,7 @@ class UserController {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Email e senha sao obrigatorios.' });
+      return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
     }
 
     try {
@@ -175,14 +175,14 @@ class UserController {
       );
 
       if (rows.length === 0) {
-        return res.status(401).json({ error: 'Credenciais invalidas.' });
+        return res.status(401).json({ error: 'Credenciais inválidas.' });
       }
 
       const user = rows[0];
       const isPasswordCorrect = await bcrypt.compare(password, String(user.password_hash));
 
       if (!isPasswordCorrect) {
-        return res.status(401).json({ error: 'Credenciais invalidas.' });
+        return res.status(401).json({ error: 'Credenciais inválidas.' });
       }
 
       const token = jwt.sign(
@@ -203,7 +203,7 @@ class UserController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     try {
@@ -213,7 +213,7 @@ class UserController {
       );
 
       if (userRows.length === 0) {
-        return res.status(404).json({ error: 'Usuário nao encontrado.' });
+        return res.status(404).json({ error: 'Usuário não encontrado.' });
       }
 
       const user = userRows[0];
@@ -260,7 +260,7 @@ class UserController {
   async updateProfile(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     const { phone, address, city, state } = req.body ?? {};
@@ -311,13 +311,13 @@ class UserController {
     try {
       const secret = req.headers['x-sync-secret'];
       if (secret !== process.env.SYNC_SECRET_KEY) {
-        return res.status(401).json({ error: 'Acesso nao autorizado.' });
+        return res.status(401).json({ error: 'Acesso não autorizado.' });
       }
 
       const { uid, email } = req.body as { uid: string; email: string };
 
       if (!uid || !email) {
-        return res.status(400).json({ error: 'UID e email sao obrigatorios.' });
+        return res.status(400).json({ error: 'UID e email são obrigatórios.' });
       }
 
       const [existingUserRows] = await connection.query<RowDataPacket[]>(
@@ -326,7 +326,7 @@ class UserController {
       );
 
       if (existingUserRows.length > 0) {
-        return res.status(409).json({ error: 'Usuario ja existe.' });
+        return res.status(409).json({ error: 'Usuário já existe.' });
       }
 
       await connection.query(
@@ -334,9 +334,9 @@ class UserController {
         [uid, email, `User-${uid.substring(0, 8)}`]
       );
 
-      return res.status(201).json({ message: 'Usuario sincronizado com sucesso!' });
+      return res.status(201).json({ message: 'Usuário sincronizado com sucesso!' });
     } catch (error) {
-      console.error('Erro na sincronizacao do usuario:', error);
+      console.error('Erro na sincronizacao do usuário:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -345,7 +345,7 @@ class UserController {
     const { idToken, profileType } = req.body as { idToken?: string; profileType?: string };
 
     if (!idToken) {
-      return res.status(400).json({ error: 'Token do Google e obrigatorio.' });
+      return res.status(400).json({ error: 'Token do Google é obrigatório.' });
     }
 
     try {
@@ -511,7 +511,7 @@ class UserController {
       });
     } catch (error) {
       console.error('Erro no login com Google:', error);
-      return res.status(401).json({ error: 'Token do Google invalido.' });
+      return res.status(401).json({ error: 'Token do Google inválido.' });
     }
   }
 
@@ -606,7 +606,7 @@ class UserController {
       });
     } catch (error) {
       console.error('Erro no login com Firebase:', error);
-      return res.status(401).json({ error: 'Token do Firebase invalido.' });
+      return res.status(401).json({ error: 'Token do Firebase inválido.' });
     }
   }
 
@@ -615,11 +615,11 @@ class UserController {
     const propertyId = Number(req.params.propertyId);
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
     }
 
     try {
@@ -629,21 +629,21 @@ class UserController {
       );
 
       if (propertyRows.length === 0) {
-        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+        return res.status(404).json({ error: 'Imóvel não encontrado.' });
       }
 
       const [favoriteRows] = await connection.query<RowDataPacket[]>(
-        'SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?',
+        'SELECT 1 FROM favoritos WHERE usuário_id = ? AND imóvel_id = ?',
         [userId, propertyId]
       );
 
       if (favoriteRows.length > 0) {
-        return res.status(409).json({ error: 'Este imovel ja esta nos seus favoritos.' });
+        return res.status(409).json({ error: 'Este imóvel ja esta nos seus favoritos.' });
       }
 
-      await connection.query('INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)', [userId, propertyId]);
+      await connection.query('INSERT INTO favoritos (usuário_id, imóvel_id) VALUES (?, ?)', [userId, propertyId]);
 
-      return res.status(201).json({ message: 'Imovel adicionado aos favoritos.' });
+      return res.status(201).json({ message: 'Imóvel adicionado aos favoritos.' });
     } catch (error) {
       console.error('Erro ao adicionar favorito:', error);
       return res.status(500).json({ error: 'Ocorreu um erro no servidor.' });
@@ -655,24 +655,24 @@ class UserController {
     const propertyId = Number(req.params.propertyId);
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
     }
 
     try {
       const [result] = await connection.query<ResultSetHeader>(
-        'DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?',
+        'DELETE FROM favoritos WHERE usuário_id = ? AND imóvel_id = ?',
         [userId, propertyId]
       );
 
       if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Favorito nao encontrado.' });
+        return res.status(404).json({ error: 'Favorito não encontrado.' });
       }
 
-      return res.status(200).json({ message: 'Imovel removido dos favoritos.' });
+      return res.status(200).json({ message: 'Imóvel removido dos favoritos.' });
     } catch (error) {
       console.error('Erro ao remover favorito:', error);
       return res.status(500).json({ error: 'Ocorreu um erro no servidor.' });
@@ -683,7 +683,7 @@ class UserController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     try {
@@ -701,11 +701,11 @@ class UserController {
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
             MAX(f.created_at) AS favorited_at
           FROM favoritos f
-          JOIN properties p ON p.id = f.imovel_id
+          JOIN properties p ON p.id = f.imóvel_id
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
-          WHERE f.usuario_id = ?
+          WHERE f.usuário_id = ?
           GROUP BY p.id
           ORDER BY favorited_at DESC
         `,
@@ -723,7 +723,7 @@ class UserController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     try {
@@ -751,11 +751,11 @@ class UserController {
     const notificationId = Number(req.params.id);
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     if (Number.isNaN(notificationId)) {
-      return res.status(400).json({ error: 'Identificador de notificacao invalido.' });
+      return res.status(400).json({ error: 'Identificador de notificação inválido.' });
     }
 
     try {
@@ -773,12 +773,12 @@ class UserController {
       );
 
       if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Notificacao nao encontrada.' });
+        return res.status(404).json({ error: 'Notificação não encontrada.' });
       }
 
       return res.status(204).send();
     } catch (error) {
-      console.error('Erro ao remover notificacao:', error);
+      console.error('Erro ao remover notificação:', error);
       return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
     }
   }
@@ -787,7 +787,7 @@ class UserController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     try {
@@ -805,7 +805,7 @@ class UserController {
 
       return res.status(204).send();
     } catch (error) {
-      console.error('Erro ao limpar notificacoes:', error);
+      console.error('Erro ao limpar notificações:', error);
       return res.status(500).json({ error: 'Ocorreu um erro interno no servidor.' });
     }
   }
@@ -813,7 +813,7 @@ class UserController {
   async registerDeviceToken(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     const { token, platform } = req.body ?? {};
@@ -847,7 +847,7 @@ class UserController {
   async unregisterDeviceToken(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     const tokenFromQuery = typeof req.query.token === 'string' ? req.query.token : null;

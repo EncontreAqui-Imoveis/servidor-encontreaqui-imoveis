@@ -9,7 +9,7 @@ import {
 
 const PRICE_DROP_THRESHOLD = 0.1;
 const PRICE_DROP_COOLDOWN_MS = 6 * 60 * 60 * 1000;
-const PRICE_DROP_PREFIX = 'Preco reduzido';
+const PRICE_DROP_PREFIX = 'Preço reduzido';
 
 function formatCurrency(value: number): string {
   try {
@@ -77,8 +77,8 @@ export async function notifyPriceDropIfNeeded({
   const cutoff = new Date(Date.now() - PRICE_DROP_COOLDOWN_MS);
   const { clientIds, brokerIds } = await splitRecipientsByRole(recipients);
 
-  const title = propertyTitle?.trim() ? propertyTitle.trim() : 'sem titulo';
-  let message = `${PRICE_DROP_PREFIX}: o imovel "${title}" ficou mais barato.`;
+  const title = propertyTitle?.trim() ? propertyTitle.trim() : 'sem título';
+  let message = `${PRICE_DROP_PREFIX}: o imóvel "${title}" ficou mais barato.`;
 
   if (saleDrop >= PRICE_DROP_THRESHOLD && rentDrop >= PRICE_DROP_THRESHOLD) {
     message += ` Venda: de ${formatCurrency(previousSalePrice!)} para ${formatCurrency(newSalePrice!)}.`;

@@ -59,10 +59,12 @@ class AuthController {
 
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT id FROM users WHERE email = ? LIMIT 1',
+        'SELECT id, firebase_uid FROM users WHERE email = ? LIMIT 1',
         [email],
       );
-      return res.status(200).json({ exists: rows.length > 0 });
+      const exists = rows.length > 0;
+      const hasFirebaseUid = exists && rows[0].firebase_uid != null;
+      return res.status(200).json({ exists, hasFirebaseUid });
     } catch (error) {
       console.error('Erro ao verificar email:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });

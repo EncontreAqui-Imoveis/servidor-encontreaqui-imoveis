@@ -314,13 +314,14 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
-            ANY_VALUE(u.email) AS broker_email,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
@@ -347,7 +348,7 @@ class PropertyController {
         }
         const normalizedPurpose = normalizePurpose(purpose);
         if (!normalizedPurpose) {
-            return res.status(400).json({ error: "Finalidade do imovel invalida." });
+            return res.status(400).json({ error: "Finalidade do imóvel invalida." });
         }
         let numericPrice;
         let numericPriceSale = null;
@@ -419,7 +420,7 @@ class PropertyController {
             const files = req.files ?? {};
             const imageFiles = files.images ?? [];
             if (imageFiles.length < 2) {
-                return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imovel.' });
+                return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imóvel.' });
             }
             for (const file of imageFiles) {
                 const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties');
@@ -433,6 +434,7 @@ class PropertyController {
             const [result] = await connection_1.default.query(`
           INSERT INTO properties (
             broker_id,
+            owner_id,
             title,
             description,
             type,
@@ -465,9 +467,10 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerId,
+                null,
                 title,
                 description,
                 type,
@@ -525,22 +528,204 @@ class PropertyController {
             return res.status(500).json({ error: 'Erro interno do servidor.' });
         }
     }
+    async createForClient(req, res) {
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        const { title, description, type, purpose, price, price_sale, price_rent, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        if (!title || !description || !type || !purpose || !address || !city || !state) {
+            return res.status(400).json({ error: 'Campos obrigatorios nao informados.' });
+        }
+        const normalizedPurpose = normalizePurpose(purpose);
+        if (!normalizedPurpose) {
+            return res.status(400).json({ error: 'Finalidade do imovel invalida.' });
+        }
+        let numericPrice;
+        let numericPriceSale = null;
+        let numericPriceRent = null;
+        try {
+            if (normalizedPurpose === 'Venda') {
+                numericPriceSale = parseOptionalPrice(price_sale) ?? parsePrice(price);
+                numericPrice = numericPriceSale;
+            }
+            else if (normalizedPurpose === 'Aluguel') {
+                numericPriceRent = parseOptionalPrice(price_rent) ?? parsePrice(price);
+                numericPrice = numericPriceRent;
+            }
+            else {
+                numericPriceSale = parseOptionalPrice(price_sale);
+                numericPriceRent = parseOptionalPrice(price_rent);
+                if (numericPriceSale == null || numericPriceRent == null) {
+                    return res.status(400).json({
+                        error: 'Informe os precos de venda e aluguel para esta finalidade.',
+                    });
+                }
+                numericPrice = numericPriceSale;
+            }
+        }
+        catch (parseError) {
+            return res.status(400).json({ error: parseError.message });
+        }
+        try {
+            const [duplicateRows] = await connection_1.default.query(`
+          SELECT id FROM properties
+          WHERE address = ?
+            AND COALESCE(quadra, '') = COALESCE(?, '')
+            AND COALESCE(lote, '') = COALESCE(?, '')
+            AND COALESCE(numero, '') = COALESCE(?, '')
+            AND COALESCE(bairro, '') = COALESCE(?, '')
+          LIMIT 1
+        `, [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]);
+            if (duplicateRows.length > 0) {
+                return res
+                    .status(409)
+                    .json({ error: 'Imovel ja cadastrado no sistema.' });
+            }
+            const numericBedrooms = parseInteger(bedrooms);
+            const numericBathrooms = parseInteger(bathrooms);
+            const numericGarageSpots = parseInteger(garage_spots);
+            const numericAreaConstruida = parseDecimal(area_construida ?? area);
+            const numericAreaTerreno = parseDecimal(area_terreno);
+            const numericValorCondominio = parseDecimal(valor_condominio);
+            const numericValorIptu = parseDecimal(valor_iptu);
+            const hasWifiFlag = parseBoolean(has_wifi);
+            const temPiscinaFlag = parseBoolean(tem_piscina);
+            const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
+            const temAutomacaoFlag = parseBoolean(tem_automacao);
+            const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
+            const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+            const imageUrls = [];
+            const files = req.files ?? {};
+            const imageFiles = files.images ?? [];
+            if (imageFiles.length < 2) {
+                return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imovel.' });
+            }
+            for (const file of imageFiles) {
+                const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties');
+                imageUrls.push(uploaded.url);
+            }
+            let videoUrl = null;
+            if (files.video && files.video[0]) {
+                const uploadedVideo = await (0, cloudinary_1.uploadToCloudinary)(files.video[0], 'videos');
+                videoUrl = uploadedVideo.url;
+            }
+            const [result] = await connection_1.default.query(`
+          INSERT INTO properties (
+            broker_id,
+            owner_id,
+            title,
+            description,
+            type,
+            purpose,
+            status,
+            price,
+            price_sale,
+            price_rent,
+            code,
+            address,
+            quadra,
+            lote,
+            numero,
+            bairro,
+            complemento,
+            tipo_lote,
+            city,
+            state,
+            bedrooms,
+            bathrooms,
+            area_construida,
+            area_terreno,
+            garage_spots,
+            has_wifi,
+            tem_piscina,
+            tem_energia_solar,
+            tem_automacao,
+            tem_ar_condicionado,
+            eh_mobiliada,
+            valor_condominio,
+            valor_iptu,
+            video_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+                null,
+                userId,
+                title,
+                description,
+                type,
+                normalizedPurpose,
+                'pending_approval',
+                numericPrice,
+                numericPriceSale,
+                numericPriceRent,
+                stringOrNull(code),
+                address,
+                stringOrNull(quadra),
+                stringOrNull(lote),
+                stringOrNull(numero),
+                stringOrNull(bairro),
+                stringOrNull(complemento),
+                stringOrNull(tipo_lote),
+                city,
+                state,
+                numericBedrooms,
+                numericBathrooms,
+                numericAreaConstruida,
+                numericAreaTerreno,
+                numericGarageSpots,
+                hasWifiFlag,
+                temPiscinaFlag,
+                temEnergiaSolarFlag,
+                temAutomacaoFlag,
+                temArCondicionadoFlag,
+                ehMobiliadaFlag,
+                numericValorCondominio,
+                numericValorIptu,
+                videoUrl,
+            ]);
+            const propertyId = result.insertId;
+            if (imageUrls.length > 0) {
+                const values = imageUrls.map((url) => [propertyId, url]);
+                await connection_1.default.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
+            }
+            try {
+                await (0, notificationService_1.notifyAdmins)(`Novo imovel enviado por cliente: '${title}'.`, 'property', propertyId);
+            }
+            catch (notifyError) {
+                console.error('Erro ao notificar admins sobre imovel de cliente:', notifyError);
+            }
+            return res.status(201).json({
+                message: 'Imovel criado com sucesso!',
+                propertyId,
+                status: 'pending_approval',
+                images: imageUrls,
+                video: videoUrl,
+            });
+        }
+        catch (error) {
+            console.error('Erro ao criar imovel (cliente):', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
     async update(req, res) {
         const propertyId = Number(req.params.id);
-        const brokerId = req.userId;
-        if (!brokerId) {
-            return res.status(401).json({ error: 'Corretor nao autenticado.' });
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
         if (Number.isNaN(propertyId)) {
-            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+            return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
         }
         try {
             const [propertyRows] = await connection_1.default.query('SELECT * FROM properties WHERE id = ?', [propertyId]);
             if (!propertyRows || propertyRows.length === 0) {
-                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+                return res.status(404).json({ error: 'Imóvel nao encontrado.' });
             }
             const property = propertyRows[0];
-            if (property.broker_id !== brokerId) {
+            const brokerId = property.broker_id != null ? Number(property.broker_id) : null;
+            const isOwner = (property.broker_id != null && property.broker_id === userId) ||
+                (property.owner_id != null && property.owner_id === userId);
+            if (!isOwner) {
                 return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
             }
             const previousSalePrice = property.price_sale != null ? Number(property.price_sale) : Number(property.price);
@@ -742,9 +927,12 @@ class PropertyController {
                 }
             }
             if (nextStatus && NOTIFY_ON_STATUS.has(nextStatus)) {
+                if (brokerId == null) {
+                    return res.status(403).json({ error: 'Apenas corretores podem fechar negocio.' });
+                }
                 try {
                     const action = nextStatus === 'sold' ? 'vendido' : 'alugado';
-                    await (0, notificationService_1.notifyAdmins)(`O imovel '${property.title}' foi marcado como ${action}.`, 'property', propertyId);
+                    await (0, notificationService_1.notifyAdmins)(`O imóvel '${property.title}' foi marcado como ${action}.`, 'property', propertyId);
                 }
                 catch (notifyError) {
                     console.error('Erro ao registrar notificacao:', notifyError);
@@ -775,7 +963,7 @@ class PropertyController {
                         const parsedCycles = parseInteger(body.commission_cycles);
                         if (parsedCycles != null) {
                             if (parsedCycles < 0) {
-                                return res.status(400).json({ error: 'Comissoes ja realizadas invalidas.' });
+                                return res.status(400).json({ error: 'Comissões ja realizadas invalidas.' });
                             }
                             commissionCycles = parsedCycles;
                         }
@@ -810,10 +998,10 @@ class PropertyController {
                     await connection_1.default.query('UPDATE properties SET sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?', [dealAmount, commissionRate, commissionAmount, propertyId]);
                 }
             }
-            return res.status(200).json({ message: 'Imovel atualizado com sucesso!' });
+            return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
         }
         catch (error) {
-            console.error('Erro ao atualizar imovel:', error);
+            console.error('Erro ao atualizar imóvel:', error);
             return res.status(500).json({ error: 'Erro interno do servidor.' });
         }
     }
@@ -830,10 +1018,10 @@ class PropertyController {
         const propertyId = Number(req.params.id);
         const brokerId = req.userId;
         if (!brokerId) {
-            return res.status(401).json({ error: 'Corretor nÆo autenticado.' });
+            return res.status(401).json({ error: 'Corretor não autenticado.' });
         }
         if (Number.isNaN(propertyId)) {
-            return res.status(400).json({ error: 'Identificador de im¢vel inv lido.' });
+            return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
         }
         const { type, amount, commission_rate, commission_cycles, recurrence_interval } = req.body;
         const dealType = normalizeDealType(type);
@@ -843,14 +1031,14 @@ class PropertyController {
         try {
             const [propertyRows] = await connection_1.default.query('SELECT * FROM properties WHERE id = ?', [propertyId]);
             if (!propertyRows || propertyRows.length === 0) {
-                return res.status(404).json({ error: 'Im¢vel nÆo encontrado.' });
+                return res.status(404).json({ error: 'Imóvel não encontrado.' });
             }
             const property = propertyRows[0];
             if (property.broker_id !== brokerId) {
-                return res.status(403).json({ error: 'Acesso nÆo autorizado a este im¢vel.' });
+                return res.status(403).json({ error: 'Acesso não autorizado a este imóvel.' });
             }
             if (property.status === 'pending_approval' || property.status === 'rejected') {
-                return res.status(403).json({ error: 'Imovel ainda nao pode ser fechado.' });
+                return res.status(403).json({ error: 'Imóvel ainda não pode ser fechado.' });
             }
             if (!purposeAllowsDeal(property.purpose, dealType)) {
                 return res.status(400).json({ error: 'Tipo de negocio nao permitido para esta finalidade.' });
@@ -879,7 +1067,7 @@ class PropertyController {
                 const parsedCycles = parseInteger(commission_cycles);
                 if (parsedCycles != null) {
                     if (parsedCycles < 0) {
-                        return res.status(400).json({ error: "Comissoes ja realizadas invalidas." });
+                        return res.status(400).json({ error: "Comissões já realizadas inválidas." });
                     }
                     commissionCycles = parsedCycles;
                 }
@@ -926,7 +1114,7 @@ class PropertyController {
                 db.release();
             }
             return res.status(200).json({
-                message: 'Negocio fechado com sucesso.',
+                message: 'Negócio fechado com sucesso.',
                 status: newStatus,
                 sale: {
                     property_id: propertyId,
@@ -954,19 +1142,19 @@ class PropertyController {
             return res.status(401).json({ error: 'Corretor nao autenticado.' });
         }
         if (Number.isNaN(propertyId)) {
-            return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+            return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
         }
         try {
             const [propertyRows] = await connection_1.default.query('SELECT id, broker_id, status FROM properties WHERE id = ?', [propertyId]);
             if (!propertyRows || propertyRows.length === 0) {
-                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+                return res.status(404).json({ error: 'Imóvel nao encontrado.' });
             }
             const property = propertyRows[0];
             if (property.broker_id !== brokerId) {
-                return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+                return res.status(403).json({ error: 'Acesso nao autorizado a este imóvel.' });
             }
             if (property.status !== 'sold' && property.status !== 'rented') {
-                return res.status(400).json({ error: 'Este imovel nao possui negocio fechado.' });
+                return res.status(400).json({ error: 'Este imóvel nao possui negocio fechado.' });
             }
             const db = await connection_1.default.getConnection();
             try {
@@ -994,20 +1182,23 @@ class PropertyController {
     }
     async delete(req, res) {
         const propertyId = Number(req.params.id);
-        const brokerId = req.userId;
-        if (!brokerId) {
-            return res.status(401).json({ error: 'Corretor não autenticado.' });
+        const userId = req.userId;
+        if (!userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
         if (Number.isNaN(propertyId)) {
             return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
         }
         try {
-            const [propertyRows] = await connection_1.default.query('SELECT broker_id FROM properties WHERE id = ?', [propertyId]);
+            const [propertyRows] = await connection_1.default.query('SELECT broker_id, owner_id FROM properties WHERE id = ?', [propertyId]);
             if (!propertyRows || propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imóvel não encontrado.' });
             }
-            if (propertyRows[0].broker_id !== brokerId) {
-                return res.status(403).json({ error: 'Você não tem permissão para deletar este imóvel.' });
+            const property = propertyRows[0];
+            const isOwner = (property.broker_id != null && property.broker_id === userId) ||
+                (property.owner_id != null && property.owner_id === userId);
+            if (!isOwner) {
+                return res.status(403).json({ error: 'Voce nao tem permissao para deletar este imovel.' });
             }
             await connection_1.default.query('DELETE FROM properties WHERE id = ?', [propertyId]);
             return res.status(200).json({ message: 'Imóvel deletado com sucesso!' });
@@ -1033,7 +1224,7 @@ class PropertyController {
         }
     }
     async listPublicProperties(req, res) {
-        const { page = '1', limit = '20', type, purpose, city, bairro, minPrice, maxPrice, bedrooms, sortBy, order, searchTerm, status, } = req.query;
+        const { page = '1', limit = '20', type, purpose, city, bairro, minPrice, maxPrice, bedrooms, bathrooms, tipo_lote, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, sortBy, order, searchTerm, status, } = req.query;
         const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
         const numericPage = Math.max(Number(page) || 1, 1);
         const offset = (numericPage - 1) * numericLimit;
@@ -1091,9 +1282,58 @@ class PropertyController {
         if (bedrooms) {
             const value = Number(bedrooms);
             if (!Number.isNaN(value) && value > 0) {
-                whereClauses.push('p.bedrooms >= ?');
-                params.push(Math.trunc(value));
+                const normalized = Math.trunc(value);
+                if (normalized >= 4) {
+                    whereClauses.push('p.bedrooms >= ?');
+                    params.push(4);
+                }
+                else {
+                    whereClauses.push('p.bedrooms = ?');
+                    params.push(normalized);
+                }
             }
+        }
+        if (bathrooms) {
+            const value = Number(bathrooms);
+            if (!Number.isNaN(value) && value > 0) {
+                const normalized = Math.trunc(value);
+                if (normalized >= 4) {
+                    whereClauses.push('p.bathrooms >= ?');
+                    params.push(4);
+                }
+                else {
+                    whereClauses.push('p.bathrooms = ?');
+                    params.push(normalized);
+                }
+            }
+        }
+        if (tipo_lote) {
+            whereClauses.push('p.tipo_lote = ?');
+            params.push(tipo_lote);
+        }
+        if (has_wifi !== undefined) {
+            whereClauses.push('p.has_wifi = ?');
+            params.push(parseBoolean(has_wifi));
+        }
+        if (tem_piscina !== undefined) {
+            whereClauses.push('p.tem_piscina = ?');
+            params.push(parseBoolean(tem_piscina));
+        }
+        if (tem_energia_solar !== undefined) {
+            whereClauses.push('p.tem_energia_solar = ?');
+            params.push(parseBoolean(tem_energia_solar));
+        }
+        if (tem_automacao !== undefined) {
+            whereClauses.push('p.tem_automacao = ?');
+            params.push(parseBoolean(tem_automacao));
+        }
+        if (tem_ar_condicionado !== undefined) {
+            whereClauses.push('p.tem_ar_condicionado = ?');
+            params.push(parseBoolean(tem_ar_condicionado));
+        }
+        if (eh_mobiliada !== undefined) {
+            whereClauses.push('p.eh_mobiliada = ?');
+            params.push(parseBoolean(eh_mobiliada));
         }
         if (searchTerm) {
             const term = `%${searchTerm}%`;
@@ -1119,13 +1359,14 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
-            ANY_VALUE(u.email) AS broker_email,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           ${where}
@@ -1168,14 +1409,15 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
-            ANY_VALUE(u.email) AS broker_email,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM featured_properties fp
           JOIN properties p ON p.id = fp.property_id
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.status = 'approved'

@@ -5,7 +5,13 @@ import {
   type PushNotificationResult,
 } from './pushNotificationService';
 
-type RelatedEntityType = 'property' | 'broker' | 'agency' | 'user' | 'other';
+type RelatedEntityType =
+  | 'property'
+  | 'broker'
+  | 'agency'
+  | 'user'
+  | 'announcement'
+  | 'other';
 export type RecipientRole = 'client' | 'broker';
 
 const ACTIVE_BROKER_STATUSES = new Set(['pending_verification', 'approved']);

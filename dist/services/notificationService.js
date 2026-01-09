@@ -10,6 +10,7 @@ const RELATED_ENTITY_TYPES = new Set([
     'broker',
     'agency',
     'user',
+    'announcement',
     'other',
 ]);
 function isValidRelatedEntityType(value) {

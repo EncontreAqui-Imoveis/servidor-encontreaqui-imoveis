@@ -198,7 +198,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
       CREATE TABLE IF NOT EXISTS notifications (
         id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
         message TEXT NOT NULL,
-        related_entity_type ENUM('property','broker','agency','user','other') NOT NULL,
+        related_entity_type ENUM('property','broker','agency','user','announcement','other') NOT NULL,
         related_entity_id BIGINT UNSIGNED NULL,
         recipient_id BIGINT UNSIGNED NULL,
         recipient_type ENUM('admin','user') NOT NULL DEFAULT 'user',

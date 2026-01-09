@@ -858,7 +858,7 @@ class UserController {
       const label = email ? `${name} (${email})` : name;
       await notifyAdmins(
         `Solicitacao de anuncio recebida de ${label}.`,
-        'user',
+        'announcement',
         Number(userId)
       );
       return res.status(201).json({ message: 'Solicitacao enviada.' });

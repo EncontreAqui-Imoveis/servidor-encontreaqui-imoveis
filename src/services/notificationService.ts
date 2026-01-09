@@ -1,7 +1,13 @@
 ﻿import { RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
 
-type RelatedEntityType = 'property' | 'broker' | 'agency' | 'user' | 'other';
+type RelatedEntityType =
+  | 'property'
+  | 'broker'
+  | 'agency'
+  | 'user'
+  | 'announcement'
+  | 'other';
 
 interface AdminRow {
   id: number;
@@ -12,6 +18,7 @@ const RELATED_ENTITY_TYPES: Set<RelatedEntityType> = new Set([
   'broker',
   'agency',
   'user',
+  'announcement',
   'other',
 ]);
 

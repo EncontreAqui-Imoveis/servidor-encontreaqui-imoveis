@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sendPushNotifications = sendPushNotifications;
+const crypto_1 = __importDefault(require("crypto"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
 const connection_1 = __importDefault(require("../database/connection"));
 const PUSH_BATCH_LIMIT = 500;
@@ -46,17 +47,24 @@ async function sendPushNotifications(payload) {
         return summary;
     }
     const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
+    const notificationTag = crypto_1.default
+        .createHash('sha1')
+        .update(`${payload.relatedEntityType}:${payload.relatedEntityId ?? ''}:${payload.message}`)
+        .digest('hex')
+        .slice(0, 24);
     for (const batch of batches) {
         const response = await firebaseAdmin_1.default.messaging().sendEachForMulticast({
             tokens: batch,
             notification: {
-                title: 'Mais Imoveis',
+                title: 'Mais Imóveis',
                 body: payload.message,
             },
             android: {
                 priority: 'high',
+                collapseKey: notificationTag,
                 notification: {
                     channelId: 'default_channel',
+                    tag: notificationTag,
                 },
             },
             apns: {

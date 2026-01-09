@@ -50,8 +50,10 @@ class AuthController {
             return res.status(400).json({ error: 'Email e obrigatorio.' });
         }
         try {
-            const [rows] = await connection_1.default.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
-            return res.status(200).json({ exists: rows.length > 0 });
+            const [rows] = await connection_1.default.query('SELECT id, firebase_uid FROM users WHERE email = ? LIMIT 1', [email]);
+            const exists = rows.length > 0;
+            const hasFirebaseUid = exists && rows[0].firebase_uid != null;
+            return res.status(200).json({ exists, hasFirebaseUid });
         }
         catch (error) {
             console.error('Erro ao verificar email:', error);

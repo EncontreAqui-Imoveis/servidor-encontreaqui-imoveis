@@ -1884,6 +1884,22 @@ class AdminController {
       const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '20'), 10) || 20, 1), 100);
       const offset = (page - 1) * limit;
+      const rawType = String(req.query.type ?? '').trim();
+      const allowedTypes = new Set([
+        'property',
+        'broker',
+        'agency',
+        'user',
+        'announcement',
+        'other',
+      ]);
+      const typeFilter = allowedTypes.has(rawType) ? rawType : null;
+      const baseParams: Array<number | string> = [adminId];
+      let typeClause = '';
+      if (typeFilter) {
+        typeClause = ' AND related_entity_type = ?';
+        baseParams.push(typeFilter);
+      }
       const [rows] = await connection.query<RowDataPacket[]>(
         `
           SELECT
@@ -1896,15 +1912,22 @@ class AdminController {
           FROM notifications
           WHERE recipient_id = ?
             AND recipient_type = 'admin'
+            ${typeClause}
           ORDER BY created_at DESC
           LIMIT ? OFFSET ?
         `
         ,
-        [adminId, limit, offset]
+        [...baseParams, limit, offset]
       );
       const [countRows] = await connection.query<RowDataPacket[]>(
-        "SELECT COUNT(*) as total FROM notifications WHERE recipient_id = ? AND recipient_type = 'admin'",
-        [adminId],
+        `
+          SELECT COUNT(*) as total
+          FROM notifications
+          WHERE recipient_id = ?
+            AND recipient_type = 'admin'
+            ${typeClause}
+        `,
+        baseParams,
       );
       const total = countRows.length > 0 ? Number(countRows[0].total) : 0;
 

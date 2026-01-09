@@ -79,7 +79,8 @@ const DDL_STATEMENTS = [
         sql: `
       CREATE TABLE IF NOT EXISTS properties (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        broker_id INT NOT NULL,
+        broker_id INT NULL,
+        owner_id INT NULL,
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
         type VARCHAR(100) NOT NULL,
@@ -117,7 +118,8 @@ const DDL_STATEMENTS = [
         commission_value DECIMAL(12, 2) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (broker_id) REFERENCES brokers(id) ON DELETE CASCADE,
+        FOREIGN KEY (broker_id) REFERENCES brokers(id) ON DELETE SET NULL,
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL,
         INDEX idx_properties_status (status),
         INDEX idx_properties_city (city),
         INDEX idx_properties_bairro (bairro)
@@ -195,7 +197,7 @@ const DDL_STATEMENTS = [
       CREATE TABLE IF NOT EXISTS notifications (
         id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
         message TEXT NOT NULL,
-        related_entity_type ENUM('property','broker','agency','user','other') NOT NULL,
+        related_entity_type ENUM('property','broker','agency','user','announcement','other') NOT NULL,
         related_entity_id BIGINT UNSIGNED NULL,
         recipient_id BIGINT UNSIGNED NULL,
         recipient_type ENUM('admin','user') NOT NULL DEFAULT 'user',

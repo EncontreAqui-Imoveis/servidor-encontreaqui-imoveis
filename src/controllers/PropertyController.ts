@@ -91,7 +91,8 @@ const RECURRENCE_INTERVALS = new Set<RecurrenceInterval>([
 
 interface PropertyRow extends RowDataPacket {
   id: number;
-  broker_id: number;
+  broker_id: number | null;
+  owner_id?: number | null;
   broker_name?: string | null;
   broker_phone?: string | null;
   broker_email?: string | null;
@@ -457,13 +458,14 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
-            ANY_VALUE(u.email) AS broker_email,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
@@ -633,6 +635,7 @@ class PropertyController {
         `
           INSERT INTO properties (
             broker_id,
+            owner_id,
             title,
             description,
             type,
@@ -665,10 +668,11 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
+          null,
           title,
           description,
           type,
@@ -737,12 +741,249 @@ class PropertyController {
     }
   }
 
+  async createForClient(req: AuthRequestWithFiles, res: Response) {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    const {
+      title,
+      description,
+      type,
+      purpose,
+      price,
+      price_sale,
+      price_rent,
+      code,
+      address,
+      quadra,
+      lote,
+      numero,
+      bairro,
+      complemento,
+      tipo_lote,
+      city,
+      state,
+      bedrooms,
+      bathrooms,
+      area_construida,
+      area_terreno,
+      area,
+      garage_spots,
+      has_wifi,
+      tem_piscina,
+      tem_energia_solar,
+      tem_automacao,
+      tem_ar_condicionado,
+      eh_mobiliada,
+      valor_condominio,
+      valor_iptu,
+    } = req.body ?? {};
+
+    if (!title || !description || !type || !purpose || !address || !city || !state) {
+      return res.status(400).json({ error: 'Campos obrigatorios nao informados.' });
+    }
+
+    const normalizedPurpose = normalizePurpose(purpose);
+    if (!normalizedPurpose) {
+      return res.status(400).json({ error: 'Finalidade do imovel invalida.' });
+    }
+
+    let numericPrice: number;
+    let numericPriceSale: number | null = null;
+    let numericPriceRent: number | null = null;
+    try {
+      if (normalizedPurpose === 'Venda') {
+        numericPriceSale = parseOptionalPrice(price_sale) ?? parsePrice(price);
+        numericPrice = numericPriceSale;
+      } else if (normalizedPurpose === 'Aluguel') {
+        numericPriceRent = parseOptionalPrice(price_rent) ?? parsePrice(price);
+        numericPrice = numericPriceRent;
+      } else {
+        numericPriceSale = parseOptionalPrice(price_sale);
+        numericPriceRent = parseOptionalPrice(price_rent);
+        if (numericPriceSale == null || numericPriceRent == null) {
+          return res.status(400).json({
+            error: 'Informe os precos de venda e aluguel para esta finalidade.',
+          });
+        }
+        numericPrice = numericPriceSale;
+      }
+    } catch (parseError) {
+      return res.status(400).json({ error: (parseError as Error).message });
+    }
+
+    try {
+      const [duplicateRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT id FROM properties
+          WHERE address = ?
+            AND COALESCE(quadra, '') = COALESCE(?, '')
+            AND COALESCE(lote, '') = COALESCE(?, '')
+            AND COALESCE(numero, '') = COALESCE(?, '')
+            AND COALESCE(bairro, '') = COALESCE(?, '')
+          LIMIT 1
+        `,
+        [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]
+      );
+
+      if (duplicateRows.length > 0) {
+        return res
+          .status(409)
+          .json({ error: 'Imovel ja cadastrado no sistema.' });
+      }
+
+      const numericBedrooms = parseInteger(bedrooms);
+      const numericBathrooms = parseInteger(bathrooms);
+      const numericGarageSpots = parseInteger(garage_spots);
+      const numericAreaConstruida = parseDecimal(area_construida ?? area);
+      const numericAreaTerreno = parseDecimal(area_terreno);
+      const numericValorCondominio = parseDecimal(valor_condominio);
+      const numericValorIptu = parseDecimal(valor_iptu);
+
+      const hasWifiFlag = parseBoolean(has_wifi);
+      const temPiscinaFlag = parseBoolean(tem_piscina);
+      const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
+      const temAutomacaoFlag = parseBoolean(tem_automacao);
+      const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
+      const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+
+      const imageUrls: string[] = [];
+      const files = req.files ?? {};
+
+      const imageFiles = files.images ?? [];
+      if (imageFiles.length < 2) {
+        return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imovel.' });
+      }
+      for (const file of imageFiles) {
+        const uploaded = await uploadToCloudinary(file, 'properties');
+        imageUrls.push(uploaded.url);
+      }
+
+      let videoUrl: string | null = null;
+      if (files.video && files.video[0]) {
+        const uploadedVideo = await uploadToCloudinary(files.video[0], 'videos');
+        videoUrl = uploadedVideo.url;
+      }
+
+      const [result] = await connection.query<ResultSetHeader>(
+        `
+          INSERT INTO properties (
+            broker_id,
+            owner_id,
+            title,
+            description,
+            type,
+            purpose,
+            status,
+            price,
+            price_sale,
+            price_rent,
+            code,
+            address,
+            quadra,
+            lote,
+            numero,
+            bairro,
+            complemento,
+            tipo_lote,
+            city,
+            state,
+            bedrooms,
+            bathrooms,
+            area_construida,
+            area_terreno,
+            garage_spots,
+            has_wifi,
+            tem_piscina,
+            tem_energia_solar,
+            tem_automacao,
+            tem_ar_condicionado,
+            eh_mobiliada,
+            valor_condominio,
+            valor_iptu,
+            video_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          null,
+          userId,
+          title,
+          description,
+          type,
+          normalizedPurpose,
+          'pending_approval',
+          numericPrice,
+          numericPriceSale,
+          numericPriceRent,
+          stringOrNull(code),
+          address,
+          stringOrNull(quadra),
+          stringOrNull(lote),
+          stringOrNull(numero),
+          stringOrNull(bairro),
+          stringOrNull(complemento),
+          stringOrNull(tipo_lote),
+          city,
+          state,
+          numericBedrooms,
+          numericBathrooms,
+          numericAreaConstruida,
+          numericAreaTerreno,
+          numericGarageSpots,
+          hasWifiFlag,
+          temPiscinaFlag,
+          temEnergiaSolarFlag,
+          temAutomacaoFlag,
+          temArCondicionadoFlag,
+          ehMobiliadaFlag,
+          numericValorCondominio,
+          numericValorIptu,
+          videoUrl,
+        ]
+      );
+
+      const propertyId = result.insertId;
+
+      if (imageUrls.length > 0) {
+        const values = imageUrls.map((url) => [propertyId, url]);
+        await connection.query(
+          'INSERT INTO property_images (property_id, image_url) VALUES ?',
+          [values]
+        );
+      }
+
+      try {
+        await notifyAdmins(
+          `Novo imovel enviado por cliente: '${title}'.`,
+          'property',
+          propertyId
+        );
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre imovel de cliente:', notifyError);
+      }
+
+      return res.status(201).json({
+        message: 'Imovel criado com sucesso!',
+        propertyId,
+        status: 'pending_approval',
+        images: imageUrls,
+        video: videoUrl,
+      });
+    } catch (error) {
+      console.error('Erro ao criar imovel (cliente):', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async update(req: AuthRequest, res: Response) {
     const propertyId = Number(req.params.id);
-    const brokerId = req.userId;
+    const userId = req.userId;
 
-    if (!brokerId) {
-      return res.status(401).json({ error: 'Corretor nao autenticado.' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
     }
 
     if (Number.isNaN(propertyId)) {
@@ -760,9 +1001,13 @@ class PropertyController {
       }
 
       const property = propertyRows[0];
+      const brokerId = property.broker_id != null ? Number(property.broker_id) : null;
 
-      if (property.broker_id !== brokerId) {
-        return res.status(403).json({ error: 'Acesso nao autorizado a este imóvel.' });
+      const isOwner =
+        (property.broker_id != null && property.broker_id === userId) ||
+        (property.owner_id != null && property.owner_id === userId);
+      if (!isOwner) {
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
       }
 
       const previousSalePrice =
@@ -979,6 +1224,9 @@ class PropertyController {
       }
 
       if (nextStatus && NOTIFY_ON_STATUS.has(nextStatus)) {
+        if (brokerId == null) {
+          return res.status(403).json({ error: 'Apenas corretores podem fechar negocio.' });
+        }
         try {
           const action = nextStatus === 'sold' ? 'vendido' : 'alugado';
           await notifyAdmins(
@@ -1295,10 +1543,10 @@ class PropertyController {
 
   async delete(req: AuthRequest, res: Response) {
     const propertyId = Number(req.params.id);
-    const brokerId = req.userId;
+    const userId = req.userId;
 
-    if (!brokerId) {
-      return res.status(401).json({ error: 'Corretor não autenticado.' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
     }
 
     if (Number.isNaN(propertyId)) {
@@ -1307,7 +1555,7 @@ class PropertyController {
 
     try {
       const [propertyRows] = await connection.query<RowDataPacket[]>(
-        'SELECT broker_id FROM properties WHERE id = ?',
+        'SELECT broker_id, owner_id FROM properties WHERE id = ?',
         [propertyId]
       );
 
@@ -1315,8 +1563,12 @@ class PropertyController {
         return res.status(404).json({ error: 'Imóvel não encontrado.' });
       }
 
-      if (propertyRows[0].broker_id !== brokerId) {
-        return res.status(403).json({ error: 'Você não tem permissão para deletar este imóvel.' });
+      const property = propertyRows[0];
+      const isOwner =
+        (property.broker_id != null && property.broker_id === userId) ||
+        (property.owner_id != null && property.owner_id === userId);
+      if (!isOwner) {
+        return res.status(403).json({ error: 'Voce nao tem permissao para deletar este imovel.' });
       }
 
       await connection.query('DELETE FROM properties WHERE id = ?', [propertyId]);
@@ -1523,13 +1775,14 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
-            ANY_VALUE(u.email) AS broker_email,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           ${where}
@@ -1581,14 +1834,15 @@ class PropertyController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
-            ANY_VALUE(u.email) AS broker_email,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM featured_properties fp
           JOIN properties p ON p.id = fp.property_id
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.status = 'approved'

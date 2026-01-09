@@ -80,7 +80,8 @@ const DDL_STATEMENTS: DDLStatement[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS properties (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        broker_id INT NOT NULL,
+        broker_id INT NULL,
+        owner_id INT NULL,
         title VARCHAR(255) NOT NULL,
         description TEXT NOT NULL,
         type VARCHAR(100) NOT NULL,
@@ -118,7 +119,8 @@ const DDL_STATEMENTS: DDLStatement[] = [
         commission_value DECIMAL(12, 2) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (broker_id) REFERENCES brokers(id) ON DELETE CASCADE,
+        FOREIGN KEY (broker_id) REFERENCES brokers(id) ON DELETE SET NULL,
+        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL,
         INDEX idx_properties_status (status),
         INDEX idx_properties_city (city),
         INDEX idx_properties_bairro (bairro)

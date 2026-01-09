@@ -16,6 +16,16 @@ propertyRoutes.post(
   (req, res) => propertyController.create(req as AuthRequestWithFiles, res)
 );
 
+propertyRoutes.post(
+  '/client',
+  authMiddleware,
+  mediaUpload.fields([
+    { name: 'images', maxCount: 20 },
+    { name: 'video', maxCount: 1 },
+  ]),
+  (req, res) => propertyController.createForClient(req as AuthRequestWithFiles, res)
+);
+
 propertyRoutes.put(
   '/:id',
   authMiddleware,
@@ -23,10 +33,22 @@ propertyRoutes.put(
   (req, res) => propertyController.update(req as any, res)
 );
 
+propertyRoutes.put(
+  '/client/:id',
+  authMiddleware,
+  (req, res) => propertyController.update(req as any, res)
+);
+
 propertyRoutes.patch(
   '/:id',
   authMiddleware,
   isBroker,
+  (req, res) => propertyController.update(req as any, res)
+);
+
+propertyRoutes.patch(
+  '/client/:id',
+  authMiddleware,
   (req, res) => propertyController.update(req as any, res)
 );
 
@@ -55,6 +77,12 @@ propertyRoutes.delete(
   '/:id',
   authMiddleware,
   isBroker,
+  (req, res) => propertyController.delete(req as any, res)
+);
+
+propertyRoutes.delete(
+  '/client/:id',
+  authMiddleware,
   (req, res) => propertyController.delete(req as any, res)
 );
 

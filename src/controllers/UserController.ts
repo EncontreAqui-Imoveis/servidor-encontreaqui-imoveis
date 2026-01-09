@@ -5,6 +5,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import AuthRequest from '../middlewares/auth';
 import admin from '../config/firebaseAdmin';
+import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
 
 interface FavoriteRow extends RowDataPacket {
@@ -50,6 +51,9 @@ interface FavoriteRow extends RowDataPacket {
   agency_city?: string | null;
   agency_state?: string | null;
   agency_phone?: string | null;
+  broker_name?: string | null;
+  broker_phone?: string | null;
+  broker_email?: string | null;
 }
 
 function toBoolean(value: unknown): boolean {
@@ -122,6 +126,9 @@ function mapFavorite(row: FavoriteRow) {
     video_url: row.video_url ?? null,
     images,
     agency,
+    broker_name: row.broker_name ?? null,
+    broker_phone: row.broker_phone ?? null,
+    broker_email: row.broker_email ?? null,
     favorited_at: row.favorited_at ?? null,
   };
 }
@@ -698,11 +705,16 @@ class UserController {
             ANY_VALUE(a.city) AS agency_city,
             ANY_VALUE(a.state) AS agency_state,
             ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images,
             MAX(f.created_at) AS favorited_at
           FROM favoritos f
           JOIN properties p ON p.id = f.imovel_id
           LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE f.usuario_id = ?
@@ -716,6 +728,143 @@ class UserController {
     } catch (error) {
       console.error('Erro ao listar favoritos:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async getMyProperties(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    try {
+      const page = parseInt(req.query.page as string, 10) || 1;
+      const limit = parseInt(req.query.limit as string, 10) || 10;
+      const offset = (page - 1) * limit;
+
+      const countQuery = 'SELECT COUNT(*) as total FROM properties WHERE owner_id = ?';
+      const [totalResult] = await connection.query(countQuery, [userId]);
+      const total = (totalResult as any[])[0]?.total ?? 0;
+
+      const dataQuery = `
+        SELECT
+          p.owner_id,
+          p.broker_id,
+          p.id,
+          p.title,
+          p.description,
+          p.type,
+          p.status,
+          p.purpose,
+          p.price,
+          p.price_sale,
+          p.price_rent,
+          p.code,
+          p.address,
+          p.quadra,
+          p.lote,
+          p.numero,
+          p.bairro,
+          p.complemento,
+          p.tipo_lote,
+          p.city,
+          p.state,
+          p.bedrooms,
+          p.bathrooms,
+          p.area_construida,
+          p.area_terreno,
+          p.garage_spots,
+          p.has_wifi,
+          p.tem_piscina,
+          p.tem_energia_solar,
+          p.tem_automacao,
+          p.tem_ar_condicionado,
+          p.eh_mobiliada,
+          p.valor_condominio,
+          p.valor_iptu,
+          p.video_url,
+          p.created_at,
+          u.name AS broker_name,
+          u.phone AS broker_phone,
+          u.email AS broker_email,
+          GROUP_CONCAT(pi.image_url ORDER BY pi.id) AS images
+        FROM properties p
+        LEFT JOIN users u ON u.id = p.owner_id
+        LEFT JOIN property_images pi ON p.id = pi.property_id
+        WHERE p.owner_id = ?
+        GROUP BY
+          p.id, p.owner_id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose,
+          p.price, p.price_sale, p.price_rent, p.code, p.address, p.quadra, p.lote, p.numero,
+          p.bairro, p.complemento, p.tipo_lote, p.city, p.state, p.bedrooms, p.bathrooms,
+          p.area_construida, p.area_terreno, p.garage_spots, p.has_wifi, p.tem_piscina,
+          p.tem_energia_solar, p.tem_automacao, p.tem_ar_condicionado, p.eh_mobiliada,
+          p.valor_condominio, p.valor_iptu, p.video_url, p.created_at, u.name, u.phone, u.email
+        ORDER BY p.created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+      const [dataRows] = await connection.query(dataQuery, [userId, limit, offset]);
+
+      const parseBool = (value: unknown) => value === 1 || value === '1' || value === true;
+
+      const properties = (dataRows as any[]).map((row) => ({
+        ...row,
+        price: Number(row.price),
+        price_sale: row.price_sale != null ? Number(row.price_sale) : null,
+        price_rent: row.price_rent != null ? Number(row.price_rent) : null,
+        bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
+        bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
+        area_construida: row.area_construida != null ? Number(row.area_construida) : null,
+        area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
+        garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
+        has_wifi: parseBool(row.has_wifi),
+        tem_piscina: parseBool(row.tem_piscina),
+        tem_energia_solar: parseBool(row.tem_energia_solar),
+        tem_automacao: parseBool(row.tem_automacao),
+        tem_ar_condicionado: parseBool(row.tem_ar_condicionado),
+        eh_mobiliada: parseBool(row.eh_mobiliada),
+        valor_condominio: row.valor_condominio != null ? Number(row.valor_condominio) : null,
+        valor_iptu: row.valor_iptu != null ? Number(row.valor_iptu) : null,
+        images: row.images ? row.images.split(',') : [],
+      }));
+
+      return res.json({
+        success: true,
+        data: properties,
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (error) {
+      console.error('Erro ao buscar imoveis do usuario:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async requestSupport(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT name, email FROM users WHERE id = ?',
+        [userId]
+      );
+      const name = rows[0]?.name ? String(rows[0].name) : 'Usuario';
+      const email = rows[0]?.email ? String(rows[0].email) : '';
+      const label = email ? `${name} (${email})` : name;
+      await notifyAdmins(
+        `Solicitacao de anuncio recebida de ${label}.`,
+        'user',
+        Number(userId)
+      );
+      return res.status(201).json({ message: 'Solicitacao enviada.' });
+    } catch (error) {
+      console.error('Erro ao enviar solicitacao:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
 

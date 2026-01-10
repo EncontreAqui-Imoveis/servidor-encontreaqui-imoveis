@@ -130,6 +130,7 @@ function stringOrNull(value: unknown): string | null {
 interface PropertyDetailRow extends RowDataPacket {
   id: number;
   broker_id?: number | null;
+  owner_id?: number | null;
   code?: string | null;
   title: string;
   description?: string | null;
@@ -167,6 +168,8 @@ interface PropertyDetailRow extends RowDataPacket {
   images?: string | string[] | null;
   broker_name?: string | null;
   broker_phone?: string | null;
+  broker_status?: string | null;
+  broker_creci?: string | null;
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -196,6 +199,7 @@ function mapAdminProperty(row: PropertyDetailRow) {
   return {
     id: row.id,
     broker_id: row.broker_id ?? null,
+    owner_id: row.owner_id ?? null,
     code: row.code ?? null,
     title: row.title,
     description: row.description ?? null,
@@ -231,6 +235,8 @@ function mapAdminProperty(row: PropertyDetailRow) {
     images,
     broker_name: row.broker_name ?? null,
     broker_phone: row.broker_phone ?? null,
+    broker_status: row.broker_status ?? null,
+    broker_creci: row.broker_creci ?? null,
     created_at: row.created_at ? String(row.created_at) : null,
     updated_at: row.updated_at ? String(row.updated_at) : null,
   };
@@ -303,13 +309,22 @@ class AdminController {
       const sortBy = String(req.query.sortBy ?? 'p.created_at');
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-      const allowedSearchColumns = new Set(['p.id', 'p.title', 'p.type', 'p.city', 'p.code', 'u.name']);
+      const allowedSearchColumns = new Set([
+        'p.id',
+        'p.title',
+        'p.type',
+        'p.city',
+        'p.code',
+        'u.name',
+        'u_owner.name',
+      ]);
       const allowedSortColumns = new Set([
         'p.id',
         'p.title',
         'p.type',
         'p.city',
         'u.name',
+        'u_owner.name',
         'p.price',
         'p.created_at',
         'p.code',
@@ -340,7 +355,14 @@ class AdminController {
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
       const [totalRows] = await connection.query<RowDataPacket[]>(
-        `SELECT COUNT(*) AS total FROM properties p ${where}`,
+        `
+          SELECT COUNT(*) AS total
+          FROM properties p
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON b.id = u.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+          ${where}
+        `,
         params
       );
       const total = totalRows[0]?.total ?? 0;
@@ -360,11 +382,16 @@ class AdminController {
             p.bairro,
             p.purpose,
             p.created_at,
-            u.name AS broker_name,
-            u.phone AS broker_phone
+            p.broker_id,
+            p.owner_id,
+            COALESCE(u.name, u_owner.name) AS broker_name,
+            COALESCE(u.phone, u_owner.phone) AS broker_phone,
+            b.status AS broker_status,
+            b.creci AS broker_creci
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON b.id = u.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           ${where}
           ORDER BY ${safeSortBy} ${sortOrder}
           LIMIT ? OFFSET ?
@@ -1507,12 +1534,15 @@ class AdminController {
         `
           SELECT
             p.*,
-            ANY_VALUE(u.name) AS broker_name,
-            ANY_VALUE(u.phone) AS broker_phone,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(b.status) AS broker_status,
+            ANY_VALUE(b.creci) AS broker_creci,
             GROUP_CONCAT(DISTINCT CONCAT(pi.id, '|', pi.image_url) ORDER BY pi.id SEPARATOR ';') AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
           GROUP BY p.id
@@ -1873,6 +1903,43 @@ class AdminController {
     }
   }
 
+  async getClientProperties(req: Request, res: Response) {
+    const clientId = Number(req.params.id);
+
+    if (Number.isNaN(clientId)) {
+      return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+    }
+
+    try {
+      const [properties] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT
+            p.id,
+            p.title,
+            p.status,
+            p.type,
+            p.purpose,
+            p.price,
+            p.price_sale,
+            p.price_rent,
+            p.address,
+            p.city,
+            p.state,
+            p.created_at
+          FROM properties p
+          WHERE p.owner_id = ?
+          ORDER BY p.created_at DESC
+        `,
+        [clientId]
+      );
+
+      return res.status(200).json({ data: properties });
+    } catch (error) {
+      console.error('Erro ao buscar imoveis do cliente:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
   async getNotifications(req: AuthRequest, res: Response) {
     const adminId = Number(req.userId);
 
@@ -2056,13 +2123,14 @@ export async function sendNotification(req: Request, res: Response) {
     }
 
     const trimmedMessage = message.trim();
-    const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'other']);
+    const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'announcement', 'other']);
     const rawEntityType = String(related_entity_type);
     const entityType = (allowedTypes.has(rawEntityType) ? rawEntityType : 'other') as
       | 'property'
       | 'broker'
       | 'agency'
       | 'user'
+      | 'announcement'
       | 'other';
     const entityId = related_entity_id != null ? Number(related_entity_id) : null;
 

@@ -86,10 +86,24 @@ async function ensureFeaturedPropertiesTable(): Promise<void> {
   `);
 }
 
+async function ensureNotificationsType(): Promise<void> {
+  if (!(await tableExists('notifications'))) {
+    return;
+  }
+
+  const type = await getColumnType('notifications', 'related_entity_type');
+  if (type && !type.includes('announcement')) {
+    await connection.query(
+      "ALTER TABLE notifications MODIFY COLUMN related_entity_type ENUM('property','broker','agency','user','announcement','other') NOT NULL"
+    );
+  }
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
     await ensureFeaturedPropertiesTable();
+    await ensureNotificationsType();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

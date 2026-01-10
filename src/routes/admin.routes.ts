@@ -27,6 +27,7 @@ adminRoutes.delete('/users/:id', adminController.deleteUser);
 
 adminRoutes.get('/clients', adminController.getAllClients);
 adminRoutes.put('/clients/:id', adminController.updateClient);
+adminRoutes.get('/clients/:id/properties', adminController.getClientProperties);
 
 adminRoutes.post('/brokers', adminController.createBroker);
 adminRoutes.get('/brokers', adminController.listBrokers);

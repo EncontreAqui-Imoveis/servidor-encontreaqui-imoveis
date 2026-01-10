@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors'; 
 import mainRoutes from './routes';
 import publicRoutes from './routes/public.routes';  
+import { applyMigrations } from './database/migrations';
 
 const app = express();
 const PORT = process.env.API_PORT || 3333;
@@ -38,6 +39,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
-});
+async function startServer() {
+  await applyMigrations();
+
+  app.listen(PORT, () => {
+    console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
+  });
+}
+
+void startServer();

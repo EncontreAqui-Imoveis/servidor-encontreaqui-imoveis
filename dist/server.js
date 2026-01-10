@@ -8,6 +8,7 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const routes_1 = __importDefault(require("./routes"));
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
+const migrations_1 = require("./database/migrations");
 const app = (0, express_1.default)();
 const PORT = process.env.API_PORT || 3333;
 app.use((req, res, next) => {
@@ -35,6 +36,10 @@ app.get('/health', (req, res) => {
         charset: 'UTF-8'
     });
 });
-app.listen(PORT, () => {
-    console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
-});
+async function startServer() {
+    await (0, migrations_1.applyMigrations)();
+    app.listen(PORT, () => {
+        console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
+    });
+}
+void startServer();

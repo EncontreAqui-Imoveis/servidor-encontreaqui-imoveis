@@ -213,6 +213,34 @@ const DDL_STATEMENTS = [
     `,
     },
     {
+        name: 'support_requests',
+        sql: `
+      CREATE TABLE IF NOT EXISTS support_requests (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_support_requests_user_created (user_id, created_at),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+    `,
+    },
+    {
+        name: 'password_reset_tokens',
+        sql: `
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        token_hash VARCHAR(255) NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_password_reset_user (user_id),
+        INDEX idx_password_reset_token (token_hash),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+    `,
+    },
+    {
         name: 'user_device_tokens',
         sql: `
       CREATE TABLE IF NOT EXISTS user_device_tokens (

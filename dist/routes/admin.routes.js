@@ -19,6 +19,7 @@ adminRoutes.post('/users', AdminController_1.adminController.createUser);
 adminRoutes.delete('/users/:id', AdminController_1.adminController.deleteUser);
 adminRoutes.get('/clients', AdminController_1.adminController.getAllClients);
 adminRoutes.put('/clients/:id', AdminController_1.adminController.updateClient);
+adminRoutes.get('/clients/:id/properties', AdminController_1.adminController.getClientProperties);
 adminRoutes.post('/brokers', AdminController_1.adminController.createBroker);
 adminRoutes.get('/brokers', AdminController_1.adminController.listBrokers);
 adminRoutes.get('/brokers/pending', AdminController_1.adminController.listPendingBrokers);

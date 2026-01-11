@@ -10,6 +10,7 @@ const connection_1 = __importDefault(require("../database/connection"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
 const notificationService_1 = require("../services/notificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
+const supportRequestService_1 = require("../services/supportRequestService");
 function toBoolean(value) {
     return value === 1 || value === '1' || value === true;
 }
@@ -636,6 +637,24 @@ class UserController {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
         try {
+            const [lastRows] = await connection_1.default.query(`
+          SELECT created_at
+          FROM support_requests
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `, [userId]);
+            const lastRequestAt = lastRows[0]?.created_at
+                ? new Date(lastRows[0].created_at)
+                : null;
+            const cooldown = (0, supportRequestService_1.evaluateSupportRequestCooldown)(lastRequestAt);
+            if (!cooldown.allowed) {
+                return res.status(429).json({
+                    error: 'Voce ja enviou uma solicitacao nas ultimas 24 horas. Aguarde para reenviar.',
+                    retryAfterSeconds: cooldown.retryAfterSeconds,
+                });
+            }
+            await connection_1.default.query('INSERT INTO support_requests (user_id) VALUES (?)', [userId]);
             const [rows] = await connection_1.default.query('SELECT name, email FROM users WHERE id = ?', [userId]);
             const name = rows[0]?.name ? String(rows[0].name) : 'Usuario';
             const email = rows[0]?.email ? String(rows[0].email) : '';

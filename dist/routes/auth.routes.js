@@ -8,6 +8,7 @@ authRoutes.post('/register', (req, res) => AuthController_1.authController.regis
 authRoutes.post('/login', (req, res) => AuthController_1.authController.login(req, res));
 authRoutes.post('/google', (req, res) => AuthController_1.authController.google(req, res));
 authRoutes.get('/check-email', (req, res) => AuthController_1.authController.checkEmail(req, res));
+authRoutes.post('/password-reset/request', (req, res) => AuthController_1.authController.requestPasswordReset(req, res));
 // Perfil
 authRoutes.get('/me', auth_1.authMiddleware, (req, res) => {
     // delegar para user.routes GET /users/me, mas mantendo compatibilidade

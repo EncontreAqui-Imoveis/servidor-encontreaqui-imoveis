@@ -67,10 +67,54 @@ async function ensureFeaturedPropertiesTable() {
     )
   `);
 }
+async function ensureNotificationsType() {
+    if (!(await tableExists('notifications'))) {
+        return;
+    }
+    const type = await getColumnType('notifications', 'related_entity_type');
+    if (type && !type.includes('announcement')) {
+        await connection_1.default.query("ALTER TABLE notifications MODIFY COLUMN related_entity_type ENUM('property','broker','agency','user','announcement','other') NOT NULL");
+    }
+}
+async function ensureSupportRequestsTable() {
+    if (await tableExists('support_requests')) {
+        return;
+    }
+    await connection_1.default.query(`
+    CREATE TABLE support_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_support_requests_user_created (user_id, created_at),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
+async function ensurePasswordResetTokensTable() {
+    if (await tableExists('password_reset_tokens')) {
+        return;
+    }
+    await connection_1.default.query(`
+    CREATE TABLE password_reset_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      token_hash VARCHAR(255) NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_password_reset_user (user_id),
+      INDEX idx_password_reset_token (token_hash),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
 async function applyMigrations() {
     try {
         await ensurePropertiesColumns();
         await ensureFeaturedPropertiesTable();
+        await ensureNotificationsType();
+        await ensureSupportRequestsTable();
+        await ensurePasswordResetTokensTable();
         console.log('Migrations aplicadas com sucesso.');
     }
     catch (error) {

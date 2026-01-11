@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.authController = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
 const connection_1 = __importDefault(require("../database/connection"));
@@ -26,6 +27,13 @@ function hasCompleteProfile(row) {
 }
 function signToken(id, role) {
     return jsonwebtoken_1.default.sign({ id, role }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
+}
+function hashResetCode(code) {
+    return crypto_1.default.createHash('sha256').update(code).digest('hex');
+}
+function generateResetCode() {
+    const number = crypto_1.default.randomInt(100000, 1000000);
+    return String(number);
 }
 function withTimeout(promise, ms, label) {
     return new Promise((resolve, reject) => {
@@ -50,16 +58,69 @@ class AuthController {
             return res.status(400).json({ error: 'Email e obrigatorio.' });
         }
         try {
-            const [rows] = await connection_1.default.query('SELECT id, firebase_uid FROM users WHERE email = ? LIMIT 1', [email]);
+            const [rows] = await connection_1.default.query('SELECT id, firebase_uid, password_hash FROM users WHERE email = ? LIMIT 1', [email]);
             const exists = rows.length > 0;
             const hasFirebaseUid = exists && rows[0].firebase_uid != null;
-            return res.status(200).json({ exists, hasFirebaseUid });
+            const hasPassword = exists && !!rows[0].password_hash;
+            return res.status(200).json({ exists, hasFirebaseUid, hasPassword });
         }
         catch (error) {
             console.error('Erro ao verificar email:', error);
             return res.status(500).json({ error: 'Erro interno do servidor.' });
         }
     }
+    async requestPasswordReset(req, res) {
+        const email = String(req.body?.email ?? '').trim().toLowerCase();
+        if (!email) {
+            return res.status(400).json({ error: 'Email e obrigatorio.' });
+        }
+        try {
+            // 1. Check if user exists in SQL
+            const [rows] = await connection_1.default.query('SELECT id, name, firebase_uid FROM users WHERE email = ? LIMIT 1', [email]);
+            if (rows.length === 0) {
+                // Security: Don't reveal if user doesn't exist, but for now we follow existing pattern
+                return res.status(404).json({ error: 'Email nao encontrado.' });
+            }
+            const user = rows[0];
+            // 2. If user is Legacy (no firebase_uid), migrate them NOW.
+            if (!user.firebase_uid) {
+                try {
+                    // Check if user already exists in Firebase (edge case: registered in Firebase but not linked in SQL)
+                    let firebaseUser;
+                    try {
+                        firebaseUser = await firebaseAdmin_1.default.auth().getUserByEmail(email);
+                    }
+                    catch (e) {
+                        if (e.code === 'auth/user-not-found') {
+                            // Create user in Firebase
+                            firebaseUser = await firebaseAdmin_1.default.auth().createUser({
+                                email: email,
+                                emailVerified: true, // We trust our SQL verification or just assume true for legacy
+                                displayName: user.name,
+                            });
+                        }
+                        else {
+                            throw e;
+                        }
+                    }
+                    // Update SQL with new UID
+                    await connection_1.default.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [firebaseUser.uid, user.id]);
+                    console.log(`[Migration] User ${user.id} migrated to Firebase UID ${firebaseUser.uid}`);
+                }
+                catch (migrationError) {
+                    console.error('Erro na migracao para Firebase:', migrationError);
+                    return res.status(500).json({ error: 'Erro ao preparar conta para recuperacao.' });
+                }
+            }
+            // 3. Respond OK so Frontend can trigger the Firebase SDK email
+            return res.status(200).json({ message: 'Usuario pronto para reset via Firebase.' });
+        }
+        catch (error) {
+            console.error('Erro ao solicitar reset de senha:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
+    // confirmPasswordReset deprecated/removed as Firebase handles the UI.
     async register(req, res) {
         const { name, email, password, phone, address, city, state, profileType, } = req.body;
         if (!name || !email || !password) {

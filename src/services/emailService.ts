@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 let cachedTransporter: nodemailer.Transporter | null = null;
 
@@ -7,19 +8,36 @@ function getTransporter() {
 
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT ?? 587);
+  const service = process.env.SMTP_SERVICE;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  const secure = String(process.env.SMTP_SECURE ?? 'false').toLowerCase() === 'true';
+  const secureEnv = process.env.SMTP_SECURE;
+  const secure = secureEnv != null
+    ? String(secureEnv).toLowerCase() === 'true'
+    : port === 465;
+  const timeoutMs = Number(process.env.SMTP_TIMEOUT_MS ?? 10000);
+  const debug = String(process.env.SMTP_DEBUG ?? 'false').toLowerCase() === 'true';
 
-  if (!host || !user || !pass) {
-    throw new Error('SMTP nao configurado. Defina SMTP_HOST/SMTP_USER/SMTP_PASS.');
+  if ((!service && !host) || !user || !pass) {
+    throw new Error(
+      'SMTP nao configurado. Defina SMTP_HOST/SMTP_USER/SMTP_PASS ou SMTP_SERVICE.',
+    );
+  }
+
+  let transportOptions: SMTPTransport.Options;
+  if (service) {
+    transportOptions = { service, auth: { user, pass } };
+  } else {
+    transportOptions = { host: host!, port, secure, auth: { user, pass } };
   }
 
   cachedTransporter = nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: { user, pass },
+    ...transportOptions,
+    connectionTimeout: timeoutMs,
+    greetingTimeout: timeoutMs,
+    socketTimeout: timeoutMs,
+    logger: debug,
+    debug,
   });
 
   return cachedTransporter;

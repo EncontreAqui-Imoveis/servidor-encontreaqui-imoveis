@@ -11,9 +11,7 @@ authRoutes.get('/check-email', (req, res) => authController.checkEmail(req, res)
 authRoutes.post('/password-reset/request', (req, res) =>
   authController.requestPasswordReset(req, res),
 );
-authRoutes.post('/password-reset/confirm', (req, res) =>
-  authController.confirmPasswordReset(req, res),
-);
+
 
 // Perfil
 authRoutes.get('/me', authMiddleware, (req, res) => {

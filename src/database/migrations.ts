@@ -99,11 +99,49 @@ async function ensureNotificationsType(): Promise<void> {
   }
 }
 
+async function ensureSupportRequestsTable(): Promise<void> {
+  if (await tableExists('support_requests')) {
+    return;
+  }
+
+  await connection.query(`
+    CREATE TABLE support_requests (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_support_requests_user_created (user_id, created_at),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+async function ensurePasswordResetTokensTable(): Promise<void> {
+  if (await tableExists('password_reset_tokens')) {
+    return;
+  }
+
+  await connection.query(`
+    CREATE TABLE password_reset_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      token_hash VARCHAR(255) NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      used_at TIMESTAMP NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_password_reset_user (user_id),
+      INDEX idx_password_reset_token (token_hash),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
     await ensureFeaturedPropertiesTable();
     await ensureNotificationsType();
+    await ensureSupportRequestsTable();
+    await ensurePasswordResetTokensTable();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

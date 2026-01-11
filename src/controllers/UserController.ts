@@ -7,6 +7,7 @@ import AuthRequest from '../middlewares/auth';
 import admin from '../config/firebaseAdmin';
 import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
+import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -849,6 +850,32 @@ class UserController {
     }
 
     try {
+      const [lastRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT created_at
+          FROM support_requests
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        [userId],
+      );
+      const lastRequestAt = lastRows[0]?.created_at
+        ? new Date(lastRows[0].created_at)
+        : null;
+      const cooldown = evaluateSupportRequestCooldown(lastRequestAt);
+      if (!cooldown.allowed) {
+        return res.status(429).json({
+          error: 'Voce ja enviou uma solicitacao nas ultimas 24 horas. Aguarde para reenviar.',
+          retryAfterSeconds: cooldown.retryAfterSeconds,
+        });
+      }
+
+      await connection.query(
+        'INSERT INTO support_requests (user_id) VALUES (?)',
+        [userId],
+      );
+
       const [rows] = await connection.query<RowDataPacket[]>(
         'SELECT name, email FROM users WHERE id = ?',
         [userId]

@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
 import connection from '../database/connection';
+import { sendPasswordResetEmail } from '../services/emailService';
 
 type ProfileType = 'client' | 'broker';
 
@@ -31,6 +33,15 @@ function signToken(id: number, role: ProfileType) {
     process.env.JWT_SECRET || 'default_secret',
     { expiresIn: '7d' },
   );
+}
+
+function hashResetCode(code: string): string {
+  return crypto.createHash('sha256').update(code).digest('hex');
+}
+
+function generateResetCode(): string {
+  const number = crypto.randomInt(100000, 1000000);
+  return String(number);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -67,6 +78,125 @@ class AuthController {
       return res.status(200).json({ exists, hasFirebaseUid });
     } catch (error) {
       console.error('Erro ao verificar email:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async requestPasswordReset(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: 'Email e obrigatorio.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, name, firebase_uid, password_hash FROM users WHERE email = ? LIMIT 1',
+        [email],
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Email nao encontrado.' });
+      }
+
+      const user = rows[0];
+      if (user.firebase_uid) {
+        return res.status(400).json({ error: 'Conta Google nao possui senha.' });
+      }
+      if (!user.password_hash) {
+        return res.status(400).json({ error: 'Conta sem senha cadastrada.' });
+      }
+
+      const code = generateResetCode();
+      const tokenHash = hashResetCode(code);
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+      await connection.query(
+        'UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL',
+        [user.id],
+      );
+      await connection.query<ResultSetHeader>(
+        'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+        [user.id, tokenHash, expiresAt],
+      );
+
+      await sendPasswordResetEmail({
+        to: email,
+        name: user.name,
+        code,
+      });
+
+      return res.status(200).json({ message: 'Email de recuperacao enviado.' });
+    } catch (error) {
+      console.error('Erro ao solicitar reset de senha:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async confirmPasswordReset(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const code = String(req.body?.code ?? '').trim();
+    const password = String(req.body?.password ?? '');
+
+    if (!email || !code || !password) {
+      return res.status(400).json({ error: 'Email, codigo e senha sao obrigatorios.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'A senha deve ter ao menos 6 caracteres.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, firebase_uid FROM users WHERE email = ? LIMIT 1',
+        [email],
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Email nao encontrado.' });
+      }
+      const user = rows[0];
+      if (user.firebase_uid) {
+        return res.status(400).json({ error: 'Conta Google nao possui senha.' });
+      }
+
+      const tokenHash = hashResetCode(code);
+      const [tokenRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT id, expires_at
+          FROM password_reset_tokens
+          WHERE user_id = ?
+            AND token_hash = ?
+            AND used_at IS NULL
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        [user.id, tokenHash],
+      );
+
+      if (tokenRows.length === 0) {
+        return res.status(400).json({ error: 'Codigo invalido.' });
+      }
+
+      const token = tokenRows[0];
+      const expiresAt = new Date(token.expires_at);
+      if (expiresAt.getTime() < Date.now()) {
+        await connection.query(
+          'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?',
+          [token.id],
+        );
+        return res.status(400).json({ error: 'Codigo expirado.' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 8);
+      await connection.query(
+        'UPDATE users SET password_hash = ? WHERE id = ?',
+        [passwordHash, user.id],
+      );
+      await connection.query(
+        'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?',
+        [token.id],
+      );
+
+      return res.status(200).json({ message: 'Senha atualizada com sucesso.' });
+    } catch (error) {
+      console.error('Erro ao confirmar reset de senha:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }

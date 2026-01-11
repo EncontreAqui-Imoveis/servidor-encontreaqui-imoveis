@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
-import cors from 'cors'; 
+import cors from 'cors';
 import mainRoutes from './routes';
-import publicRoutes from './routes/public.routes';  
+import publicRoutes from './routes/public.routes';
 import { applyMigrations } from './database/migrations';
 
 const app = express();
@@ -16,12 +16,12 @@ app.use((req, res, next) => {
 
 app.use(cors());
 
-app.use(express.json({ 
+app.use(express.json({
   limit: '10mb',
   type: 'application/json'
 }));
 
-app.use(express.urlencoded({ 
+app.use(express.urlencoded({
   extended: true,
   limit: '10mb',
   parameterLimit: 10000,
@@ -32,11 +32,19 @@ app.use(mainRoutes);
 app.use(publicRoutes);
 
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Servidor funcionando',
     timestamp: new Date().toISOString(),
     charset: 'UTF-8'
   });
+});
+
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err.type === 'request.aborted' || err.code === 'ECONNRESET') {
+    return res.status(400).json({ error: 'Request aborted' });
+  }
+  console.error('Unhandled error:', err);
+  return res.status(500).json({ error: 'Internal Server Error' });
 });
 
 async function startServer() {

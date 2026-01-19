@@ -26,12 +26,14 @@ adminRoutes.post('/users', adminController.createUser);
 adminRoutes.delete('/users/:id', adminController.deleteUser);
 
 adminRoutes.get('/clients', adminController.getAllClients);
+adminRoutes.get('/clients/:id', adminController.getClientById);
 adminRoutes.put('/clients/:id', adminController.updateClient);
 adminRoutes.get('/clients/:id/properties', adminController.getClientProperties);
 
 adminRoutes.post('/brokers', adminController.createBroker);
 adminRoutes.get('/brokers', adminController.listBrokers);
 adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
+adminRoutes.get('/brokers/:id', adminController.getBrokerById);
 adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
 adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);

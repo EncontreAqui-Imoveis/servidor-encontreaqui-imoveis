@@ -1240,6 +1240,44 @@ class AdminController {
     }
   }
 
+  async getClientById(req: Request, res: Response) {
+    const clientId = Number(req.params.id);
+
+    if (Number.isNaN(clientId)) {
+      return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.address,
+            u.city,
+            u.state,
+            u.created_at
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.id = ? AND b.id IS NULL
+          LIMIT 1
+        `,
+        [clientId],
+      );
+
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: 'Cliente nao encontrado.' });
+      }
+
+      return res.status(200).json({ data: rows[0] });
+    } catch (error) {
+      console.error('Erro ao buscar cliente:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async approveBroker(req: Request, res: Response) {
     const { id } = req.params;
 
@@ -1258,7 +1296,7 @@ class AdminController {
           const role = await resolveUserNotificationRole(brokerId);
           if (role === 'broker') {
             await notifyUsers({
-              message: 'Sua conta de corretor foi aprovada. Você ja pode anunciar imóveis.',
+              message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
               recipientIds: [brokerId],
               recipientRole: 'broker',
               relatedEntityType: 'broker',
@@ -1308,7 +1346,7 @@ class AdminController {
       await connection.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
       try {
         await notifyUsers({
-          message: 'Sua solicitação para se tornar corretor foi rejeitada.',
+          message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
           recipientIds: [brokerId],
           recipientRole: 'client',
           relatedEntityType: 'broker',
@@ -1380,7 +1418,7 @@ class AdminController {
           const role = await resolveUserNotificationRole(brokerId);
           if (role === 'broker') {
             await notifyUsers({
-              message: 'Sua conta de corretor foi aprovada. Você ja pode anunciar imóveis.',
+              message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
               recipientIds: [brokerId],
               recipientRole: 'broker',
               relatedEntityType: 'broker',
@@ -1522,6 +1560,47 @@ class AdminController {
     }
   }
 
+  async getBrokerById(req: Request, res: Response) {
+    const brokerId = Number(req.params.id);
+
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT
+            b.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.address,
+            u.city,
+            u.state,
+            u.created_at,
+            b.creci,
+            b.status,
+            b.agency_id
+          FROM brokers b
+          INNER JOIN users u ON b.id = u.id
+          WHERE b.id = ?
+          LIMIT 1
+        `,
+        [brokerId],
+      );
+
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
+      }
+
+      return res.status(200).json({ data: rows[0] });
+    } catch (error) {
+      console.error('Erro ao buscar corretor:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async getPropertyDetails(req: Request, res: Response) {
     const propertyId = Number(req.params.id);
 
@@ -1587,7 +1666,7 @@ class AdminController {
       }
 
       try {
-        await notifyAdmins(`Imóvel #${propertyId} aprovado pelo admin.`, 'property', propertyId);
+        await notifyAdmins(`Imovel #${propertyId} aprovado pelo admin.`, 'property', propertyId);
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre aprovação de imovel:', notifyError);
       }
@@ -1598,7 +1677,7 @@ class AdminController {
             title && title.trim().length > 0 ? title.trim() : 'sem titulo';
           const role = await resolveUserNotificationRole(ownerId);
           await notifyUsers({
-            message: `Seu imóvel "${propertyLabel}" foi aprovado e já está disponivel no app.`,
+            message: `Seu imovel "${propertyLabel}" foi aprovado e ja esta disponivel no app.`,
             recipientIds: [ownerId],
             recipientRole: role,
             relatedEntityType: 'property',
@@ -1654,7 +1733,7 @@ class AdminController {
         if (ownerId) {
           const role = await resolveUserNotificationRole(ownerId);
           await notifyUsers({
-            message: `Seu imóvel "${propertyLabel}" foi rejeitado e removido. Você pode cadastrar novamente com as informações corrigidas.`,
+            message: `Seu imovel "${propertyLabel}" foi rejeitado e removido. Voce pode cadastrar novamente com as informacoes corrigidas.`,
             recipientIds: [ownerId],
             recipientRole: role,
             relatedEntityType: 'property',
@@ -1706,7 +1785,7 @@ class AdminController {
       }
 
       try {
-        await notifyAdmins(`Status do imóvel #${propertyId} atualizado para ${normalizedStatus}.`, 'property', propertyId);
+        await notifyAdmins(`Status do imovel #${propertyId} atualizado para ${normalizedStatus}.`, 'property', propertyId);
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre status de imovel:', notifyError);
       }
@@ -1718,8 +1797,8 @@ class AdminController {
               title && title.trim().length > 0 ? title.trim() : 'sem titulo';
             const message =
               normalizedStatus === 'approved'
-                ? `Seu imóvel "${propertyLabel}" foi aprovado e já está disponivel no app.`
-                : `Seu imóvel "${propertyLabel}" foi rejeitado. Revise as informações e tente novamente.`;
+                ? `Seu imovel "${propertyLabel}" foi aprovado e ja esta disponivel no app.`
+                : `Seu imovel "${propertyLabel}" foi rejeitado. Revise as informacoes e tente novamente.`;
             const role = await resolveUserNotificationRole(ownerId);
             await notifyUsers({
               message,

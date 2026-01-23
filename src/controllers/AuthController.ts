@@ -192,7 +192,7 @@ class AuthController {
         [email],
       );
       if (existingUserRows.length > 0) {
-        return res.status(409).json({ error: 'Este email j?? est?? em uso.' });
+        return res.status(409).json({ error: 'Este email já está em uso.' });
       }
 
       const addressResult = sanitizeAddressInput({

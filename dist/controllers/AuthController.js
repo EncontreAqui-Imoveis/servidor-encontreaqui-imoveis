@@ -145,7 +145,7 @@ class AuthController {
         try {
             const [existingUserRows] = await connection_1.default.query('SELECT id FROM users WHERE email = ?', [email]);
             if (existingUserRows.length > 0) {
-                return res.status(409).json({ error: 'Este email j?? est?? em uso.' });
+                return res.status(409).json({ error: 'Este email já está em uso.' });
             }
             const addressResult = (0, address_1.sanitizeAddressInput)({
                 street,

@@ -108,7 +108,7 @@ class UserController {
         try {
             const [existingUserRows] = await connection_1.default.query('SELECT id FROM users WHERE email = ?', [email]);
             if (existingUserRows.length > 0) {
-                return res.status(409).json({ error: 'Este email j? est? em uso.' });
+                return res.status(409).json({ error: 'Este email já está em uso.' });
             }
             const passwordHash = await bcryptjs_1.default.hash(password, 8);
             await connection_1.default.query(`
@@ -127,7 +127,7 @@ class UserController {
                 addressResult.value.state,
                 addressResult.value.cep,
             ]);
-            return res.status(201).json({ message: 'Usu?rio criado com sucesso!' });
+            return res.status(201).json({ message: 'Usuário criado com sucesso!' });
         }
         catch (error) {
             console.error('Erro no registro do usu?rio:', error);
@@ -229,7 +229,7 @@ class UserController {
     async updateProfile(req, res) {
         const userId = req.userId;
         if (!userId) {
-            return res.status(401).json({ error: 'Usu?rio n?o autenticado.' });
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
         }
         const { phone, street, number, complement, bairro, city, state, cep } = req.body ?? {};
         const addressResult = (0, address_1.sanitizeAddressInput)({

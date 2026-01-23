@@ -178,7 +178,7 @@ class UserController {
       );
 
       if (existingUserRows.length > 0) {
-        return res.status(409).json({ error: 'Este email j? est? em uso.' });
+        return res.status(409).json({ error: 'Este email já está em uso.' });
       }
 
       const passwordHash = await bcrypt.hash(password, 8);
@@ -203,7 +203,7 @@ class UserController {
         ]
       );
 
-      return res.status(201).json({ message: 'Usu?rio criado com sucesso!' });
+      return res.status(201).json({ message: 'Usuário criado com sucesso!' });
     } catch (error) {
       console.error('Erro no registro do usu?rio:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
@@ -332,7 +332,7 @@ class UserController {
   async updateProfile(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Usu?rio n?o autenticado.' });
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     const { phone, street, number, complement, bairro, city, state, cep } = req.body ?? {};

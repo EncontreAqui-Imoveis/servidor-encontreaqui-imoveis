@@ -48,9 +48,13 @@ const DDL_STATEMENTS = [
         email VARCHAR(255) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NULL,
         phone VARCHAR(25) NULL,
-        address VARCHAR(255) NULL,
+        street VARCHAR(255) NULL,
+        number VARCHAR(50) NULL,
+        complement VARCHAR(255) NULL,
+        bairro VARCHAR(255) NULL,
         city VARCHAR(100) NULL,
         state VARCHAR(100) NULL,
+        cep VARCHAR(20) NULL,
         role ENUM('client', 'broker', 'admin') DEFAULT 'client',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -62,8 +66,8 @@ const DDL_STATEMENTS = [
         sql: `
       CREATE TABLE IF NOT EXISTS brokers (
         id INT PRIMARY KEY,
-        creci VARCHAR(50) NOT NULL UNIQUE,
-        status ENUM('pending_verification', 'approved', 'rejected', 'suspended') NOT NULL DEFAULT 'pending_verification',
+        creci VARCHAR(50) NULL UNIQUE,
+        status ENUM('pending_documents', 'pending_verification', 'approved', 'rejected', 'suspended') NOT NULL DEFAULT 'pending_documents',
         agency_id INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

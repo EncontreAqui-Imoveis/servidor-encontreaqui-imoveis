@@ -99,6 +99,32 @@ async function ensureNotificationsType(): Promise<void> {
   }
 }
 
+async function ensureUserAddressColumns(): Promise<void> {
+  if (!(await tableExists('users'))) {
+    return;
+  }
+
+  if (!(await columnExists('users', 'street'))) {
+    await connection.query('ALTER TABLE users ADD COLUMN street VARCHAR(255) NULL');
+  }
+
+  if (!(await columnExists('users', 'number'))) {
+    await connection.query('ALTER TABLE users ADD COLUMN number VARCHAR(50) NULL');
+  }
+
+  if (!(await columnExists('users', 'complement'))) {
+    await connection.query('ALTER TABLE users ADD COLUMN complement VARCHAR(255) NULL');
+  }
+
+  if (!(await columnExists('users', 'bairro'))) {
+    await connection.query('ALTER TABLE users ADD COLUMN bairro VARCHAR(255) NULL');
+  }
+
+  if (!(await columnExists('users', 'cep'))) {
+    await connection.query('ALTER TABLE users ADD COLUMN cep VARCHAR(20) NULL');
+  }
+}
+
 async function ensureSupportRequestsTable(): Promise<void> {
   if (await tableExists('support_requests')) {
     return;
@@ -140,6 +166,7 @@ export async function applyMigrations(): Promise<void> {
     await ensurePropertiesColumns();
     await ensureFeaturedPropertiesTable();
     await ensureNotificationsType();
+    await ensureUserAddressColumns();
     await ensureSupportRequestsTable();
     await ensurePasswordResetTokensTable();
     console.log('Migrations aplicadas com sucesso.');

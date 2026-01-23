@@ -50,8 +50,8 @@ async function sendPasswordResetEmail(params) {
     const subject = 'Recuperacao de senha';
     const text = `${greeting}.\n\n` +
         'Recebemos um pedido para redefinir sua senha.\n' +
-        `Codigo de verificacao: ${params.code}\n\n` +
-        'Se nao foi voce, ignore este email.\n';
+        `Codigo de verificação: ${params.code}\n\n` +
+        'Se não foi voce, ignore este email.\n';
     await transporter.sendMail({
         from,
         to: params.to,

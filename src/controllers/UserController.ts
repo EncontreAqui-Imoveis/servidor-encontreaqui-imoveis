@@ -8,6 +8,7 @@ import admin from '../config/firebaseAdmin';
 import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
+import { sanitizeAddressInput } from '../utils/address';
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -136,10 +137,38 @@ function mapFavorite(row: FavoriteRow) {
 
 class UserController {
   async register(req: Request, res: Response) {
-    const { name, email, password, phone, address, city, state } = req.body;
+    const {
+      name,
+      email,
+      password,
+      phone,
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
+      return res.status(400).json({ error: 'Nome, email e senha s?o obrigat?rios.' });
+    }
+
+    const addressResult = sanitizeAddressInput({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    });
+    if (!addressResult.ok) {
+      return res.status(400).json({
+        error: 'Endereco incompleto ou invalido.',
+        fields: addressResult.errors,
+      });
     }
 
     try {
@@ -149,22 +178,34 @@ class UserController {
       );
 
       if (existingUserRows.length > 0) {
-        return res.status(409).json({ error: 'Este email já está em uso.' });
+        return res.status(409).json({ error: 'Este email j? est? em uso.' });
       }
 
       const passwordHash = await bcrypt.hash(password, 8);
 
       await connection.query(
         `
-          INSERT INTO users (name, email, password_hash, phone, address, city, state)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
-        [name, email, passwordHash, stringOrNull(phone), stringOrNull(address), stringOrNull(city), stringOrNull(state)]
+        [
+          name,
+          email,
+          passwordHash,
+          stringOrNull(phone),
+          addressResult.value.street,
+          addressResult.value.number,
+          addressResult.value.complement,
+          addressResult.value.bairro,
+          addressResult.value.city,
+          addressResult.value.state,
+          addressResult.value.cep,
+        ]
       );
 
-      return res.status(201).json({ message: 'Usuário criado com sucesso!' });
+      return res.status(201).json({ message: 'Usu?rio criado com sucesso!' });
     } catch (error) {
-      console.error('Erro no registro do usuário:', error);
+      console.error('Erro no registro do usu?rio:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -216,7 +257,7 @@ class UserController {
 
     try {
       const [userRows] = await connection.query<RowDataPacket[]>(
-        'SELECT id, name, email, phone, address, city, state FROM users WHERE id = ?',
+        'SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
         [userId]
       );
 
@@ -227,36 +268,59 @@ class UserController {
       const user = userRows[0];
 
       const [brokerRows] = await connection.query<RowDataPacket[]>(
-        'SELECT status FROM brokers WHERE id = ?',
+        `
+          SELECT b.status, bd.status AS broker_documents_status
+          FROM brokers b
+          LEFT JOIN broker_documents bd ON b.id = bd.broker_id
+          WHERE b.id = ?
+        `,
         [userId]
       );
 
-      if (brokerRows.length > 0 && ['approved', 'pending_verification'].includes(String(brokerRows[0].status))) {
-        return res.json({
-          role: 'broker',
-          status: brokerRows[0].status,
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            phone: user.phone,
-            address: user.address,
-            city: user.city,
-            state: user.state,
-          },
-        });
+      if (brokerRows.length > 0) {
+        const brokerStatus = String(brokerRows[0].status ?? '').trim();
+        const isBroker = ['approved', 'pending_verification', 'pending_documents'].includes(brokerStatus);
+        if (isBroker) {
+          const docsStatus = String(brokerRows[0].broker_documents_status ?? '')
+            .trim()
+            .toLowerCase();
+          const requiresDocuments = docsStatus.length === 0 || docsStatus === 'rejected';
+          return res.json({
+            role: 'broker',
+            status: brokerStatus,
+            requiresDocuments,
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              phone: user.phone,
+              street: user.street,
+              number: user.number,
+              complement: user.complement,
+              bairro: user.bairro,
+              city: user.city,
+              state: user.state,
+              cep: user.cep,
+            },
+          });
+        }
       }
 
       return res.json({
         role: 'client',
+        requiresDocuments: false,
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
           phone: user.phone,
-          address: user.address,
+          street: user.street,
+          number: user.number,
+          complement: user.complement,
+          bairro: user.bairro,
           city: user.city,
           state: user.state,
+          cep: user.cep,
         },
       });
     } catch (error) {
@@ -268,45 +332,85 @@ class UserController {
   async updateProfile(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Usuário não autenticado.' });
+      return res.status(401).json({ error: 'Usu?rio n?o autenticado.' });
     }
 
-    const { phone, address, city, state } = req.body ?? {};
+    const { phone, street, number, complement, bairro, city, state, cep } = req.body ?? {};
+
+    const addressResult = sanitizeAddressInput({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    });
+    if (!addressResult.ok) {
+      return res.status(400).json({
+        error: 'Endereco incompleto ou invalido.',
+        fields: addressResult.errors,
+      });
+    }
 
     try {
       await connection.query(
-        'UPDATE users SET phone = ?, address = ?, city = ?, state = ? WHERE id = ?',
-        [stringOrNull(phone), stringOrNull(address), stringOrNull(city), stringOrNull(state), userId]
+        'UPDATE users SET phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?',
+        [
+          stringOrNull(phone),
+          addressResult.value.street,
+          addressResult.value.number,
+          addressResult.value.complement,
+          addressResult.value.bairro,
+          addressResult.value.city,
+          addressResult.value.state,
+          addressResult.value.cep,
+          userId,
+        ]
       );
 
       const [userRows] = await connection.query<RowDataPacket[]>(
-        'SELECT id, name, email, phone, address, city, state FROM users WHERE id = ?',
+        'SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
         [userId]
       );
 
       const user = userRows[0];
 
       const [brokerRows] = await connection.query<RowDataPacket[]>(
-        'SELECT status FROM brokers WHERE id = ?',
+        `
+          SELECT b.status, bd.status AS broker_documents_status
+          FROM brokers b
+          LEFT JOIN broker_documents bd ON b.id = bd.broker_id
+          WHERE b.id = ?
+        `,
         [userId]
       );
 
       const brokerStatus = brokerRows.length > 0 ? String(brokerRows[0].status) : '';
-      const isBroker = ['approved', 'pending_verification'].includes(brokerStatus);
+      const isBroker = ['approved', 'pending_verification', 'pending_documents'].includes(brokerStatus);
       const role = isBroker ? 'broker' : 'client';
       const status = isBroker ? brokerStatus : undefined;
+      const docsStatus = String(brokerRows[0]?.broker_documents_status ?? '')
+        .trim()
+        .toLowerCase();
+      const requiresDocuments = isBroker && (docsStatus.length === 0 || docsStatus === 'rejected');
 
       return res.json({
         role,
         status,
+        requiresDocuments,
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
           phone: user.phone,
-          address: user.address,
+          street: user.street,
+          number: user.number,
+          complement: user.complement,
+          bairro: user.bairro,
           city: user.city,
           state: user.state,
+          cep: user.cep,
         },
       });
     } catch (error) {
@@ -366,11 +470,13 @@ class UserController {
       const [userRows] = await connection.query<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
-                 u.phone, u.address, u.city, u.state,
+                 u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
-                 b.status AS broker_status
+                 b.status AS broker_status,
+                 bd.status AS broker_documents_status
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
+          LEFT JOIN broker_documents bd ON u.id = bd.broker_id
           WHERE u.firebase_uid = ? OR u.email = ?
         `,
         [uid, email]
@@ -387,7 +493,7 @@ class UserController {
 
         const empty = (v: any) => v === null || v === undefined || String(v).trim() === '';
         const missingProfile =
-          (empty(user.phone) || empty(user.city) || empty(user.state) || empty(user.address)) &&
+          (empty(user.phone) || empty(user.street) || empty(user.number) || empty(user.bairro) || empty(user.city) || empty(user.state) || empty(user.cep)) &&
           user.broker_status == null;
         const missingRole = !user.role;
 
@@ -426,9 +532,9 @@ class UserController {
         if (chosenRole === 'broker') {
           await connection.query(
             'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-            [user.id, null, 'pending_verification']
+            [user.id, null, 'pending_documents']
           );
-          user.broker_status = 'pending_verification';
+          user.broker_status = 'pending_documents';
         }
       }
 
@@ -450,9 +556,9 @@ class UserController {
         if (brokerRows.length === 0) {
           await connection.query(
             'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-            [user.id, null, 'pending_verification']
+            [user.id, null, 'pending_documents']
           );
-          user.broker_status = 'pending_verification';
+          user.broker_status = 'pending_documents';
         } else {
           user.broker_status = brokerRows[0].status;
         }
@@ -471,15 +577,16 @@ class UserController {
         if (brokerRows.length > 0) {
           user.broker_status = brokerRows[0].status;
         } else {
-          user.broker_status = 'pending_verification';
+          user.broker_status = 'pending_documents';
         }
       }
 
       const needsCompletion =
-        !user.phone || !user.city || !user.state || !user.address;
+        !user.phone || !user.street || !user.number || !user.bairro || !user.city || !user.state || !user.cep;
+      const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
       const requiresDocuments =
         effectiveRole === 'broker' &&
-        (!user.broker_status || user.broker_status !== 'approved');
+        (brokerDocsStatus.length === 0 || brokerDocsStatus === 'rejected');
 
       // No modo auto, se a conta for nova ou estiver incompleta/pedindo docs, devolve escolha antes de emitir token
       if (autoMode && (isNewUser || needsCompletion || requiresDocuments)) {
@@ -506,9 +613,13 @@ class UserController {
           email: user.email,
           role: effectiveRole,
           phone: user.phone ?? null,
-          address: user.address ?? null,
+          street: user.street ?? null,
+          number: user.number ?? null,
+          complement: user.complement ?? null,
+          bairro: user.bairro ?? null,
           city: user.city ?? null,
           state: user.state ?? null,
+          cep: user.cep ?? null,
           broker_status: user.broker_status,
         },
         token,
@@ -524,18 +635,34 @@ class UserController {
   }
 
   async firebaseLogin(req: Request, res: Response) {
-    const { idToken, role, name: nameOverride, phone: phoneOverride, address, city, state } = req.body as {
+    const {
+      idToken,
+      role,
+      name: nameOverride,
+      phone: phoneOverride,
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    } = req.body as {
       idToken?: string;
       role?: string;
       name?: string;
       phone?: string;
-      address?: string;
+      street?: string;
+      number?: string;
+      complement?: string;
+      bairro?: string;
       city?: string;
       state?: string;
+      cep?: string;
     };
 
     if (!idToken) {
-      return res.status(400).json({ error: 'Token do Firebase é obrigatório.' });
+      return res.status(400).json({ error: 'Token do Firebase ? obrigat?rio.' });
     }
 
     try {
@@ -548,7 +675,7 @@ class UserController {
       const [userRows] = await connection.query<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
-                 u.phone,
+                 u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
                  b.status AS broker_status
           FROM users u
@@ -560,6 +687,15 @@ class UserController {
 
       let user: any;
 
+      const hasAddressInput =
+        street !== undefined ||
+        number !== undefined ||
+        complement !== undefined ||
+        bairro !== undefined ||
+        city !== undefined ||
+        state !== undefined ||
+        cep !== undefined;
+
       if (userRows.length > 0) {
         user = userRows[0];
         const updates: Array<[string, any]> = [];
@@ -569,18 +705,82 @@ class UserController {
         }
         if (email && user.email !== email) updates.push(['email', email]);
         if (nameOverride && user.name !== nameOverride) updates.push(['name', nameOverride]);
-        if (address !== undefined) updates.push(['address', address]);
-        if (city !== undefined) updates.push(['city', city]);
-        if (state !== undefined) updates.push(['state', state]);
+
+        if (hasAddressInput) {
+          const addressResult = sanitizeAddressInput({
+            street,
+            number,
+            complement,
+            bairro,
+            city,
+            state,
+            cep,
+          });
+          if (!addressResult.ok) {
+            return res.status(400).json({
+              error: 'Endereco incompleto ou invalido.',
+              fields: addressResult.errors,
+            });
+          }
+          updates.push(['street', addressResult.value.street]);
+          updates.push(['number', addressResult.value.number]);
+          updates.push(['complement', addressResult.value.complement]);
+          updates.push(['bairro', addressResult.value.bairro]);
+          updates.push(['city', addressResult.value.city]);
+          updates.push(['state', addressResult.value.state]);
+          updates.push(['cep', addressResult.value.cep]);
+        }
+
         if (updates.length > 0) {
           const set = updates.map(([field]) => `${field} = ?`).join(', ');
           const values = updates.map(([, value]) => value);
           await connection.query(`UPDATE users SET ${set} WHERE id = ?`, [...values, user.id]);
         }
       } else {
+        let addressPayload = {
+          street: null as string | null,
+          number: null as string | null,
+          complement: null as string | null,
+          bairro: null as string | null,
+          city: null as string | null,
+          state: null as string | null,
+          cep: null as string | null,
+        };
+
+        if (hasAddressInput) {
+          const addressResult = sanitizeAddressInput({
+            street,
+            number,
+            complement,
+            bairro,
+            city,
+            state,
+            cep,
+          });
+          if (!addressResult.ok) {
+            return res.status(400).json({
+              error: 'Endereco incompleto ou invalido.',
+              fields: addressResult.errors,
+            });
+          }
+          addressPayload = addressResult.value;
+        }
+
         const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name, phone, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)',
-          [uid, fallbackEmail, nameOverride ?? displayName, phoneOverride ?? phone ?? null, address ?? null, city ?? null, state ?? null]
+          'INSERT INTO users (firebase_uid, email, name, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            uid,
+            fallbackEmail,
+            nameOverride ?? displayName,
+            phoneOverride ?? phone ?? null,
+            addressPayload.street,
+            addressPayload.number,
+            addressPayload.complement,
+            addressPayload.bairro,
+            addressPayload.city,
+            addressPayload.state,
+            addressPayload.cep,
+          ]
         );
         user = {
           id: result.insertId,
@@ -605,16 +805,20 @@ class UserController {
           email: user.email ?? fallbackEmail,
           role: effectiveRole,
           phone: user.phone ?? phoneOverride ?? phone ?? null,
-          address: user.address ?? address ?? null,
+          street: user.street ?? street ?? null,
+          number: user.number ?? number ?? null,
+          complement: user.complement ?? complement ?? null,
+          bairro: user.bairro ?? bairro ?? null,
           city: user.city ?? city ?? null,
           state: user.state ?? state ?? null,
+          cep: user.cep ?? cep ?? null,
           broker_status: user.broker_status,
         },
         token,
       });
     } catch (error) {
       console.error('Erro no login com Firebase:', error);
-      return res.status(401).json({ error: 'Token do Firebase inválido.' });
+      return res.status(401).json({ error: 'Token do Firebase inv?lido.' });
     }
   }
 

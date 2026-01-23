@@ -36,6 +36,13 @@ app.get('/health', (req, res) => {
         charset: 'UTF-8'
     });
 });
+app.use((err, req, res, next) => {
+    if (err.type === 'request.aborted' || err.code === 'ECONNRESET') {
+        return res.status(400).json({ error: 'Request aborted' });
+    }
+    console.error('Unhandled error:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+});
 async function startServer() {
     await (0, migrations_1.applyMigrations)();
     app.listen(PORT, () => {

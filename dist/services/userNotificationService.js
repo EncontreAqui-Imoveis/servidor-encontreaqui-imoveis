@@ -9,7 +9,11 @@ exports.splitRecipientsByRole = splitRecipientsByRole;
 exports.resolveUserNotificationRole = resolveUserNotificationRole;
 const connection_1 = __importDefault(require("../database/connection"));
 const pushNotificationService_1 = require("./pushNotificationService");
-const ACTIVE_BROKER_STATUSES = new Set(['pending_verification', 'approved']);
+const ACTIVE_BROKER_STATUSES = new Set([
+    'pending_documents',
+    'pending_verification',
+    'approved',
+]);
 async function notifyUsers({ message, recipientIds, recipientRole, relatedEntityType, relatedEntityId = null, sendPush = true, }) {
     const trimmed = message.trim();
     if (!trimmed) {

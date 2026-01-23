@@ -9,6 +9,7 @@ import { type PushNotificationResult } from '../services/pushNotificationService
 import { notifyPriceDropIfNeeded } from '../services/priceDropNotificationService';
 import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
+import { sanitizeAddressInput } from '../utils/address';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
@@ -542,18 +543,38 @@ class AdminController {
 
   async updateClient(req: Request, res: Response) {
     const { id } = req.params;
-    const { name, email, phone, address, city, state } = req.body;
+    const { name, email, phone, street, number, complement, bairro, city, state, cep } = req.body;
+
+    const addressResult = sanitizeAddressInput({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    });
+    if (!addressResult.ok) {
+      return res.status(400).json({
+        error: 'Endereco incompleto ou invalido.',
+        fields: addressResult.errors,
+      });
+    }
 
     try {
       await connection.query(
-        'UPDATE users SET name = ?, email = ?, phone = ?, address = ?, city = ?, state = ? WHERE id = ?',
+        'UPDATE users SET name = ?, email = ?, phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?',
         [
           stringOrNull(name),
           stringOrNull(email),
           stringOrNull(phone),
-          stringOrNull(address),
-          stringOrNull(city),
-          stringOrNull(state),
+          addressResult.value.street,
+          addressResult.value.number,
+          addressResult.value.complement,
+          addressResult.value.bairro,
+          addressResult.value.city,
+          addressResult.value.state,
+          addressResult.value.cep,
           id,
         ]
       );
@@ -611,7 +632,7 @@ class AdminController {
             u.phone,
             u.created_at,
             CASE
-              WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification') THEN 'broker'
+            WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification','pending_documents') THEN 'broker'
               ELSE 'client'
             END AS role
           FROM users u
@@ -1111,10 +1132,26 @@ class AdminController {
   }
 
   async createBroker(req: Request, res: Response) {
-    const { name, email, phone, creci, agency_id, password } = req.body ?? {};
+    const { name, email, phone, creci, street, number, complement, bairro, city, state, cep, agency_id, password } = req.body ?? {};
 
     if (!name || !email || !creci) {
-      return res.status(400).json({ error: 'Nome, email e CRECI s�o obrigatorios.' });
+      return res.status(400).json({ error: 'Nome, email e CRECI s?o obrigatorios.' });
+    }
+
+    const addressResult = sanitizeAddressInput({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    });
+    if (!addressResult.ok) {
+      return res.status(400).json({
+        error: 'Endereco incompleto ou invalido.',
+        fields: addressResult.errors,
+      });
     }
 
     try {
@@ -1133,14 +1170,26 @@ class AdminController {
       }
 
       const [userResult] = await connection.query<ResultSetHeader>(
-        'INSERT INTO users (name, email, phone, password_hash) VALUES (?, ?, ?, ?)',
-        [name, email, stringOrNull(phone), passwordHash]
+        'INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          name,
+          email,
+          stringOrNull(phone),
+          passwordHash,
+          addressResult.value.street,
+          addressResult.value.number,
+          addressResult.value.complement,
+          addressResult.value.bairro,
+          addressResult.value.city,
+          addressResult.value.state,
+          addressResult.value.cep,
+        ]
       );
       const userId = userResult.insertId;
 
       await connection.query(
         'INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)',
-        [userId, creci, 'pending_verification', agency_id ? Number(agency_id) : null]
+        [userId, creci, 'pending_documents', agency_id ? Number(agency_id) : null]
       );
 
       try {
@@ -1157,10 +1206,26 @@ class AdminController {
   }
 
   async createUser(req: Request, res: Response) {
-    const { name, email, phone, password, address, city, state } = req.body ?? {};
+    const { name, email, phone, password, street, number, complement, bairro, city, state, cep } = req.body ?? {};
 
     if (!name || !email) {
-      return res.status(400).json({ error: 'Nome e email s�o obrigatorios.' });
+      return res.status(400).json({ error: 'Nome e email s?o obrigatorios.' });
+    }
+
+    const addressResult = sanitizeAddressInput({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    });
+    if (!addressResult.ok) {
+      return res.status(400).json({
+        error: 'Endereco incompleto ou invalido.',
+        fields: addressResult.errors,
+      });
     }
 
     try {
@@ -1179,8 +1244,20 @@ class AdminController {
       }
 
       const [userResult] = await connection.query<ResultSetHeader>(
-        'INSERT INTO users (name, email, phone, password_hash, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [name, email, stringOrNull(phone), passwordHash, stringOrNull(address), stringOrNull(city), stringOrNull(state)]
+        'INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          name,
+          email,
+          stringOrNull(phone),
+          passwordHash,
+          addressResult.value.street,
+          addressResult.value.number,
+          addressResult.value.complement,
+          addressResult.value.bairro,
+          addressResult.value.city,
+          addressResult.value.state,
+          addressResult.value.cep,
+        ]
       );
 
       return res.status(201).json({ message: 'Usuario criado com sucesso.', user_id: userResult.insertId });
@@ -1255,9 +1332,13 @@ class AdminController {
             u.name,
             u.email,
             u.phone,
-            u.address,
+            u.street,
+            u.number,
+            u.complement,
+            u.bairro,
             u.city,
             u.state,
+            u.cep,
             u.created_at
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
@@ -1376,7 +1457,7 @@ class AdminController {
     }
 
     const normalizedStatus = status.trim();
-    const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+    const allowedStatuses = new Set(['pending_documents', 'pending_verification', 'approved', 'rejected']);
 
     if (!allowedStatuses.has(normalizedStatus)) {
       return res.status(400).json({ error: 'Status de corretor não suportado.' });
@@ -1449,7 +1530,7 @@ class AdminController {
       const requestedStatusRaw = String(req.query.status ?? '').trim();
       const requestedStatus = requestedStatusRaw.length == 0 ? 'approved' : requestedStatusRaw;
       const searchTerm = String(req.query.search ?? '').trim();
-      const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected', 'all']);
+      const allowedStatuses = new Set(['pending_documents', 'pending_verification', 'approved', 'rejected', 'all']);
       const whereClauses: string[] = [];
       const params: Array<string | number> = [];
 
@@ -1575,9 +1656,13 @@ class AdminController {
             u.name,
             u.email,
             u.phone,
-            u.address,
+            u.street,
+            u.number,
+            u.complement,
+            u.bairro,
             u.city,
             u.state,
+            u.cep,
             u.created_at,
             b.creci,
             b.status,
@@ -2242,7 +2327,7 @@ export async function sendNotification(req: Request, res: Response) {
     if (sendToAll) {
       if (normalizedAudience === 'broker') {
         const [userRows] = await connection.query<RowDataPacket[]>(
-          "SELECT id FROM brokers WHERE status IN ('pending_verification','approved')",
+          "SELECT id FROM brokers WHERE status IN ('pending_documents','pending_verification','approved')",
         );
         notificationRecipients = (userRows ?? [])
           .map((row) => Number(row.id))

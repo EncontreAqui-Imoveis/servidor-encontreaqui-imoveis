@@ -740,50 +740,41 @@ class PropertyController {
             let nextRentPrice = previousRentPrice;
             let saleTouched = false;
             let rentTouched = false;
-            if (property.status === 'approved') {
-                const invalidKeys = bodyKeys.filter((key) => key !== 'status');
-                if (invalidKeys.length > 0) {
-                    return res.status(403).json({
-                        error: 'Imoveis aprovados nao podem ter seus dados alterados, apenas o status.',
-                    });
-                }
-            }
-            const updatableFields = property.status === 'approved'
-                ? new Set(['status'])
-                : new Set([
-                    'title',
-                    'description',
-                    'type',
-                    'purpose',
-                    'status',
-                    'price',
-                    'price_sale',
-                    'price_rent',
-                    'code',
-                    'address',
-                    'quadra',
-                    'lote',
-                    'numero',
-                    'bairro',
-                    'complemento',
-                    'tipo_lote',
-                    'city',
-                    'state',
-                    'bedrooms',
-                    'bathrooms',
-                    'area_construida',
-                    'area_terreno',
-                    'garage_spots',
-                    'has_wifi',
-                    'tem_piscina',
-                    'tem_energia_solar',
-                    'tem_automacao',
-                    'tem_ar_condicionado',
-                    'eh_mobiliada',
-                    'valor_condominio',
-                    'valor_iptu',
-                    'video_url',
-                ]);
+            // Always allow editing all fields, even if approved
+            const updatableFields = new Set([
+                'title',
+                'description',
+                'type',
+                'purpose',
+                'status',
+                'price',
+                'price_sale',
+                'price_rent',
+                'code',
+                'address',
+                'quadra',
+                'lote',
+                'numero',
+                'bairro',
+                'complemento',
+                'tipo_lote',
+                'city',
+                'state',
+                'bedrooms',
+                'bathrooms',
+                'area_construida',
+                'area_terreno',
+                'garage_spots',
+                'has_wifi',
+                'tem_piscina',
+                'tem_energia_solar',
+                'tem_automacao',
+                'tem_ar_condicionado',
+                'eh_mobiliada',
+                'valor_condominio',
+                'valor_iptu',
+                'video_url',
+            ]);
             const fields = [];
             const values = [];
             let nextStatus = null;

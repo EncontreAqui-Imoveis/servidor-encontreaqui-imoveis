@@ -18,6 +18,7 @@ router.post('/me/verify-documents', uploadMiddleware_1.brokerDocsUpload.fields([
     { name: 'creciBack', maxCount: 1 },
     { name: 'selfie', maxCount: 1 },
 ]), BrokerController_1.brokerController.uploadVerificationDocs);
+router.post('/me/request-upgrade', BrokerController_1.brokerController.requestUpgrade);
 router.get('/me/properties', auth_1.isBroker, BrokerController_1.brokerController.getMyProperties);
 router.get('/me/commissions', auth_1.isBroker, BrokerController_1.brokerController.getMyCommissions);
 router.get('/me/performance-report', auth_1.isBroker, BrokerController_1.brokerController.getMyPerformanceReport);

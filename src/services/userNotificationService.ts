@@ -14,7 +14,11 @@ type RelatedEntityType =
   | 'other';
 export type RecipientRole = 'client' | 'broker';
 
-const ACTIVE_BROKER_STATUSES = new Set(['pending_verification', 'approved']);
+const ACTIVE_BROKER_STATUSES = new Set([
+  'pending_documents',
+  'pending_verification',
+  'approved',
+]);
 
 interface NotifyUsersInput {
   message: string;

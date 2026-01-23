@@ -31,6 +31,8 @@ router.post(
   brokerController.uploadVerificationDocs
 );
 
+router.post('/me/request-upgrade', brokerController.requestUpgrade);
+
 router.get('/me/properties', isBroker, brokerController.getMyProperties);
 router.get('/me/commissions', isBroker, brokerController.getMyCommissions);
 router.get('/me/performance-report', isBroker, brokerController.getMyPerformanceReport);

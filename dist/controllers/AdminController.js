@@ -12,6 +12,7 @@ const cloudinary_1 = require("../config/cloudinary");
 const notificationService_1 = require("../services/notificationService");
 const priceDropNotificationService_1 = require("../services/priceDropNotificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
+const address_1 = require("../utils/address");
 const STATUS_MAP = {
     pendingapproval: 'pending_approval',
     pendente: 'pending_approval',
@@ -425,15 +426,34 @@ class AdminController {
     }
     async updateClient(req, res) {
         const { id } = req.params;
-        const { name, email, phone, address, city, state } = req.body;
+        const { name, email, phone, street, number, complement, bairro, city, state, cep } = req.body;
+        const addressResult = (0, address_1.sanitizeAddressInput)({
+            street,
+            number,
+            complement,
+            bairro,
+            city,
+            state,
+            cep,
+        });
+        if (!addressResult.ok) {
+            return res.status(400).json({
+                error: 'Endereco incompleto ou invalido.',
+                fields: addressResult.errors,
+            });
+        }
         try {
-            await connection_1.default.query('UPDATE users SET name = ?, email = ?, phone = ?, address = ?, city = ?, state = ? WHERE id = ?', [
+            await connection_1.default.query('UPDATE users SET name = ?, email = ?, phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?', [
                 stringOrNull(name),
                 stringOrNull(email),
                 stringOrNull(phone),
-                stringOrNull(address),
-                stringOrNull(city),
-                stringOrNull(state),
+                addressResult.value.street,
+                addressResult.value.number,
+                addressResult.value.complement,
+                addressResult.value.bairro,
+                addressResult.value.city,
+                addressResult.value.state,
+                addressResult.value.cep,
                 id,
             ]);
             return res.status(200).json({ message: 'Cliente atualizado com sucesso.' });
@@ -478,7 +498,7 @@ class AdminController {
             u.phone,
             u.created_at,
             CASE
-              WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification') THEN 'broker'
+            WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification','pending_documents') THEN 'broker'
               ELSE 'client'
             END AS role
           FROM users u
@@ -894,9 +914,24 @@ class AdminController {
         }
     }
     async createBroker(req, res) {
-        const { name, email, phone, creci, agency_id, password } = req.body ?? {};
+        const { name, email, phone, creci, street, number, complement, bairro, city, state, cep, agency_id, password } = req.body ?? {};
         if (!name || !email || !creci) {
-            return res.status(400).json({ error: 'Nome, email e CRECI s�o obrigatorios.' });
+            return res.status(400).json({ error: 'Nome, email e CRECI s?o obrigatorios.' });
+        }
+        const addressResult = (0, address_1.sanitizeAddressInput)({
+            street,
+            number,
+            complement,
+            bairro,
+            city,
+            state,
+            cep,
+        });
+        if (!addressResult.ok) {
+            return res.status(400).json({
+                error: 'Endereco incompleto ou invalido.',
+                fields: addressResult.errors,
+            });
         }
         try {
             const [existing] = await connection_1.default.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
@@ -908,9 +943,21 @@ class AdminController {
                 const salt = await bcryptjs_1.default.genSalt(10);
                 passwordHash = await bcryptjs_1.default.hash(String(password), salt);
             }
-            const [userResult] = await connection_1.default.query('INSERT INTO users (name, email, phone, password_hash) VALUES (?, ?, ?, ?)', [name, email, stringOrNull(phone), passwordHash]);
+            const [userResult] = await connection_1.default.query('INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+                name,
+                email,
+                stringOrNull(phone),
+                passwordHash,
+                addressResult.value.street,
+                addressResult.value.number,
+                addressResult.value.complement,
+                addressResult.value.bairro,
+                addressResult.value.city,
+                addressResult.value.state,
+                addressResult.value.cep,
+            ]);
             const userId = userResult.insertId;
-            await connection_1.default.query('INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)', [userId, creci, 'pending_verification', agency_id ? Number(agency_id) : null]);
+            await connection_1.default.query('INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)', [userId, creci, 'pending_documents', agency_id ? Number(agency_id) : null]);
             try {
                 await (0, notificationService_1.notifyAdmins)(`Novo corretor '${name}' cadastrado e pendente de verificacao.`, 'broker', userId);
             }
@@ -925,9 +972,24 @@ class AdminController {
         }
     }
     async createUser(req, res) {
-        const { name, email, phone, password, address, city, state } = req.body ?? {};
+        const { name, email, phone, password, street, number, complement, bairro, city, state, cep } = req.body ?? {};
         if (!name || !email) {
-            return res.status(400).json({ error: 'Nome e email s�o obrigatorios.' });
+            return res.status(400).json({ error: 'Nome e email s?o obrigatorios.' });
+        }
+        const addressResult = (0, address_1.sanitizeAddressInput)({
+            street,
+            number,
+            complement,
+            bairro,
+            city,
+            state,
+            cep,
+        });
+        if (!addressResult.ok) {
+            return res.status(400).json({
+                error: 'Endereco incompleto ou invalido.',
+                fields: addressResult.errors,
+            });
         }
         try {
             const [existing] = await connection_1.default.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
@@ -939,7 +1001,19 @@ class AdminController {
                 const salt = await bcryptjs_1.default.genSalt(10);
                 passwordHash = await bcryptjs_1.default.hash(String(password), salt);
             }
-            const [userResult] = await connection_1.default.query('INSERT INTO users (name, email, phone, password_hash, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)', [name, email, stringOrNull(phone), passwordHash, stringOrNull(address), stringOrNull(city), stringOrNull(state)]);
+            const [userResult] = await connection_1.default.query('INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+                name,
+                email,
+                stringOrNull(phone),
+                passwordHash,
+                addressResult.value.street,
+                addressResult.value.number,
+                addressResult.value.complement,
+                addressResult.value.bairro,
+                addressResult.value.city,
+                addressResult.value.state,
+                addressResult.value.cep,
+            ]);
             return res.status(201).json({ message: 'Usuario criado com sucesso.', user_id: userResult.insertId });
         }
         catch (error) {
@@ -990,6 +1064,41 @@ class AdminController {
             return res.status(500).json({ error: 'Erro interno do servidor.' });
         }
     }
+    async getClientById(req, res) {
+        const clientId = Number(req.params.id);
+        if (Number.isNaN(clientId)) {
+            return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.street,
+            u.number,
+            u.complement,
+            u.bairro,
+            u.city,
+            u.state,
+            u.cep,
+            u.created_at
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.id = ? AND b.id IS NULL
+          LIMIT 1
+        `, [clientId]);
+            if (!rows || rows.length === 0) {
+                return res.status(404).json({ error: 'Cliente nao encontrado.' });
+            }
+            return res.status(200).json({ data: rows[0] });
+        }
+        catch (error) {
+            console.error('Erro ao buscar cliente:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
     async approveBroker(req, res) {
         const { id } = req.params;
         try {
@@ -1007,7 +1116,7 @@ class AdminController {
                     const role = await (0, userNotificationService_1.resolveUserNotificationRole)(brokerId);
                     if (role === 'broker') {
                         await (0, userNotificationService_1.notifyUsers)({
-                            message: 'Sua conta de corretor foi aprovada. Você ja pode anunciar imóveis.',
+                            message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
                             recipientIds: [brokerId],
                             recipientRole: 'broker',
                             relatedEntityType: 'broker',
@@ -1055,7 +1164,7 @@ class AdminController {
             await connection_1.default.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
             try {
                 await (0, userNotificationService_1.notifyUsers)({
-                    message: 'Sua solicitação para se tornar corretor foi rejeitada.',
+                    message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
                     recipientIds: [brokerId],
                     recipientRole: 'client',
                     relatedEntityType: 'broker',
@@ -1082,7 +1191,7 @@ class AdminController {
             return res.status(400).json({ error: 'Status inválido.' });
         }
         const normalizedStatus = status.trim();
-        const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+        const allowedStatuses = new Set(['pending_documents', 'pending_verification', 'approved', 'rejected']);
         if (!allowedStatuses.has(normalizedStatus)) {
             return res.status(400).json({ error: 'Status de corretor não suportado.' });
         }
@@ -1116,7 +1225,7 @@ class AdminController {
                     const role = await (0, userNotificationService_1.resolveUserNotificationRole)(brokerId);
                     if (role === 'broker') {
                         await (0, userNotificationService_1.notifyUsers)({
-                            message: 'Sua conta de corretor foi aprovada. Você ja pode anunciar imóveis.',
+                            message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
                             recipientIds: [brokerId],
                             recipientRole: 'broker',
                             relatedEntityType: 'broker',
@@ -1146,7 +1255,7 @@ class AdminController {
             const requestedStatusRaw = String(req.query.status ?? '').trim();
             const requestedStatus = requestedStatusRaw.length == 0 ? 'approved' : requestedStatusRaw;
             const searchTerm = String(req.query.search ?? '').trim();
-            const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected', 'all']);
+            const allowedStatuses = new Set(['pending_documents', 'pending_verification', 'approved', 'rejected', 'all']);
             const whereClauses = [];
             const params = [];
             if (requestedStatus && allowedStatuses.has(requestedStatus)) {
@@ -1244,6 +1353,44 @@ class AdminController {
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
+    async getBrokerById(req, res) {
+        const brokerId = Number(req.params.id);
+        if (Number.isNaN(brokerId)) {
+            return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            b.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.street,
+            u.number,
+            u.complement,
+            u.bairro,
+            u.city,
+            u.state,
+            u.cep,
+            u.created_at,
+            b.creci,
+            b.status,
+            b.agency_id
+          FROM brokers b
+          INNER JOIN users u ON b.id = u.id
+          WHERE b.id = ?
+          LIMIT 1
+        `, [brokerId]);
+            if (!rows || rows.length === 0) {
+                return res.status(404).json({ error: 'Corretor nao encontrado.' });
+            }
+            return res.status(200).json({ data: rows[0] });
+        }
+        catch (error) {
+            console.error('Erro ao buscar corretor:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
     async getPropertyDetails(req, res) {
         const propertyId = Number(req.params.id);
         if (Number.isNaN(propertyId)) {
@@ -1297,7 +1444,7 @@ class AdminController {
                 return res.status(404).json({ error: 'Imovel não encontrado.' });
             }
             try {
-                await (0, notificationService_1.notifyAdmins)(`Imóvel #${propertyId} aprovado pelo admin.`, 'property', propertyId);
+                await (0, notificationService_1.notifyAdmins)(`Imovel #${propertyId} aprovado pelo admin.`, 'property', propertyId);
             }
             catch (notifyError) {
                 console.error('Erro ao notificar admins sobre aprovação de imovel:', notifyError);
@@ -1308,7 +1455,7 @@ class AdminController {
                     const propertyLabel = title && title.trim().length > 0 ? title.trim() : 'sem titulo';
                     const role = await (0, userNotificationService_1.resolveUserNotificationRole)(ownerId);
                     await (0, userNotificationService_1.notifyUsers)({
-                        message: `Seu imóvel "${propertyLabel}" foi aprovado e já está disponivel no app.`,
+                        message: `Seu imovel "${propertyLabel}" foi aprovado e ja esta disponivel no app.`,
                         recipientIds: [ownerId],
                         recipientRole: role,
                         relatedEntityType: 'property',
@@ -1351,7 +1498,7 @@ class AdminController {
                 if (ownerId) {
                     const role = await (0, userNotificationService_1.resolveUserNotificationRole)(ownerId);
                     await (0, userNotificationService_1.notifyUsers)({
-                        message: `Seu imóvel "${propertyLabel}" foi rejeitado e removido. Você pode cadastrar novamente com as informações corrigidas.`,
+                        message: `Seu imovel "${propertyLabel}" foi rejeitado e removido. Voce pode cadastrar novamente com as informacoes corrigidas.`,
                         recipientIds: [ownerId],
                         recipientRole: role,
                         relatedEntityType: 'property',
@@ -1392,7 +1539,7 @@ class AdminController {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
             try {
-                await (0, notificationService_1.notifyAdmins)(`Status do imóvel #${propertyId} atualizado para ${normalizedStatus}.`, 'property', propertyId);
+                await (0, notificationService_1.notifyAdmins)(`Status do imovel #${propertyId} atualizado para ${normalizedStatus}.`, 'property', propertyId);
             }
             catch (notifyError) {
                 console.error('Erro ao notificar admins sobre status de imovel:', notifyError);
@@ -1403,8 +1550,8 @@ class AdminController {
                     if (ownerId) {
                         const propertyLabel = title && title.trim().length > 0 ? title.trim() : 'sem titulo';
                         const message = normalizedStatus === 'approved'
-                            ? `Seu imóvel "${propertyLabel}" foi aprovado e já está disponivel no app.`
-                            : `Seu imóvel "${propertyLabel}" foi rejeitado. Revise as informações e tente novamente.`;
+                            ? `Seu imovel "${propertyLabel}" foi aprovado e ja esta disponivel no app.`
+                            : `Seu imovel "${propertyLabel}" foi rejeitado. Revise as informacoes e tente novamente.`;
                         const role = await (0, userNotificationService_1.resolveUserNotificationRole)(ownerId);
                         await (0, userNotificationService_1.notifyUsers)({
                             message,
@@ -1755,7 +1902,7 @@ async function sendNotification(req, res) {
         let notificationRecipients = [];
         if (sendToAll) {
             if (normalizedAudience === 'broker') {
-                const [userRows] = await connection_1.default.query("SELECT id FROM brokers WHERE status IN ('pending_verification','approved')");
+                const [userRows] = await connection_1.default.query("SELECT id FROM brokers WHERE status IN ('pending_documents','pending_verification','approved')");
                 notificationRecipients = (userRows ?? [])
                     .map((row) => Number(row.id))
                     .filter((id) => Number.isFinite(id));

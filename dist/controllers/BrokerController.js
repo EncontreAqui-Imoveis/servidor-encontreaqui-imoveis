@@ -8,6 +8,7 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
+const address_1 = require("../utils/address");
 function toDate(value) {
     if (!value)
         return null;
@@ -60,39 +61,81 @@ function calculateAutoCycles(intervalValue, saleDateValue) {
 }
 class BrokerController {
     async register(req, res) {
-        const { name, email, password, creci, phone, address, city, state, agencyId, agency_id } = req.body;
+        const { name, email, password, creci, phone, street, number, complement, bairro, city, state, cep, agencyId, agency_id } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
         try {
             const [existingUserRows] = await connection_1.default.query("SELECT id FROM users WHERE email = ?", [email]);
             const existingUsers = existingUserRows;
             if (existingUsers.length > 0) {
-                return res.status(409).json({ error: "Este email já está em uso." });
+                return res.status(409).json({ error: "Este email j? est? em uso." });
             }
             const [existingCreciRows] = await connection_1.default.query("SELECT id FROM brokers WHERE creci = ?", [creci]);
             const existingCreci = existingCreciRows;
             if (existingCreci.length > 0) {
-                return res.status(409).json({ error: "Este CRECI já está em uso." });
+                return res.status(409).json({ error: "Este CRECI j? est? em uso." });
+            }
+            const addressResult = (0, address_1.sanitizeAddressInput)({
+                street,
+                number,
+                complement,
+                bairro,
+                city,
+                state,
+                cep,
+            });
+            if (!addressResult.ok) {
+                return res.status(400).json({
+                    error: "Endereco incompleto ou invalido.",
+                    fields: addressResult.errors,
+                });
             }
             const passwordHash = await bcryptjs_1.default.hash(password, 8);
-            const [userResult] = await connection_1.default.query("INSERT INTO users (name, email, password_hash, phone, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)", [name, email, passwordHash, phone ?? null, address ?? null, city ?? null, state ?? null]);
+            const [userResult] = await connection_1.default.query("INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+                name,
+                email,
+                passwordHash,
+                phone ?? null,
+                addressResult.value.street,
+                addressResult.value.number,
+                addressResult.value.complement,
+                addressResult.value.bairro,
+                addressResult.value.city,
+                addressResult.value.state,
+                addressResult.value.cep,
+            ]);
             const userId = userResult.insertId;
-            await connection_1.default.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
+            await connection_1.default.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_documents", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
         }
         catch (error) {
             if (error?.code === "ER_DUP_ENTRY") {
-                return res.status(409).json({ error: "Este CRECI já está em uso." });
+                return res.status(409).json({ error: "Este CRECI j? est? em uso." });
             }
             console.error("Erro no registro do corretor:", error);
             return res.status(500).json({ error: "Erro interno do servidor." });
         }
     }
     async registerWithDocs(req, res) {
-        const { name, email, password, creci, phone, address, city, state, agencyId, agency_id } = req.body;
+        const { name, email, password, creci, phone, street, number, complement, bairro, city, state, cep, agencyId, agency_id } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
         const files = req.files;
         if (!name || !email || !password || !creci) {
-            return res.status(400).json({ error: "Nome, email, senha e CRECI são obrigatórios." });
+            return res.status(400).json({ error: "Nome, email, senha e CRECI s?o obrigat?rios." });
+        }
+        const addressResult = (0, address_1.sanitizeAddressInput)({
+            street,
+            number,
+            complement,
+            bairro,
+            city,
+            state,
+            cep,
+        });
+        if (!addressResult.ok) {
+            return res.status(400).json({
+                error: "Endereco incompleto ou invalido.",
+                fields: addressResult.errors,
+            });
         }
         if (!files || !files.creciFront || !files.creciBack || !files.selfie) {
             return res.status(400).json({ error: "Envie as imagens da frente e verso do CRECI e a selfie." });
@@ -107,16 +150,28 @@ class BrokerController {
             const existingUsers = existingUserRows;
             if (existingUsers.length > 0) {
                 await db.rollback();
-                return res.status(409).json({ error: "Este email já está em uso." });
+                return res.status(409).json({ error: "Este email j? est? em uso." });
             }
             const [existingCreciRows] = await db.query("SELECT id FROM brokers WHERE creci = ?", [creci]);
             const existingCreci = existingCreciRows;
             if (existingCreci.length > 0) {
                 await db.rollback();
-                return res.status(409).json({ error: "Este CRECI já está em uso." });
+                return res.status(409).json({ error: "Este CRECI j? est? em uso." });
             }
             const passwordHash = await bcryptjs_1.default.hash(password, 8);
-            const [userResult] = await db.query("INSERT INTO users (name, email, password_hash, phone, address, city, state) VALUES (?, ?, ?, ?, ?, ?, ?)", [name, email, passwordHash, phone ?? null, address ?? null, city ?? null, state ?? null]);
+            const [userResult] = await db.query("INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+                name,
+                email,
+                passwordHash,
+                phone ?? null,
+                addressResult.value.street,
+                addressResult.value.number,
+                addressResult.value.complement,
+                addressResult.value.bairro,
+                addressResult.value.city,
+                addressResult.value.state,
+                addressResult.value.cep,
+            ]);
             const userId = userResult.insertId;
             await db.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
             const creciFrontResult = await (0, cloudinary_1.uploadToCloudinary)(creciFrontFile, "brokers/documents");
@@ -135,15 +190,19 @@ class BrokerController {
                    updated_at = CURRENT_TIMESTAMP`, [userId, creciFrontUrl, creciBackUrl, selfieUrl]);
             await db.commit();
             return res.status(201).json({
-                message: "Corretor registrado com sucesso! Seus documentos foram enviados para análise.",
+                message: "Corretor registrado com sucesso! Seus documentos foram enviados para an?lise.",
                 broker: {
                     id: userId,
                     name,
                     email,
                     phone: phone ?? null,
-                    address: address ?? null,
-                    city: city ?? null,
-                    state: state ?? null,
+                    street: addressResult.value.street,
+                    number: addressResult.value.number,
+                    complement: addressResult.value.complement,
+                    bairro: addressResult.value.bairro,
+                    city: addressResult.value.city,
+                    state: addressResult.value.state,
+                    cep: addressResult.value.cep,
                     status: "pending_verification"
                 }
             });
@@ -151,13 +210,47 @@ class BrokerController {
         catch (error) {
             await db.rollback();
             if (error?.code == "ER_DUP_ENTRY") {
-                return res.status(409).json({ error: "Este CRECI já está em uso." });
+                return res.status(409).json({ error: "Este CRECI j? est? em uso." });
             }
             console.error("Erro no registro com documentos:", error);
             return res.status(500).json({ error: "Erro interno do servidor." });
         }
         finally {
             db.release();
+        }
+    }
+    async requestUpgrade(req, res) {
+        const brokerId = req.userId;
+        const creci = req.body?.creci?.toString().trim() ?? '';
+        if (!brokerId) {
+            return res.status(401).json({ error: "Usuario nao autenticado." });
+        }
+        if (!creci) {
+            return res.status(400).json({ error: "Informe o CRECI." });
+        }
+        try {
+            const [creciRows] = await connection_1.default.query('SELECT id FROM brokers WHERE creci = ? AND id <> ?', [creci, brokerId]);
+            if (creciRows.length > 0) {
+                return res.status(409).json({ error: "Este CRECI ja esta em uso." });
+            }
+            const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [brokerId]);
+            if (brokerRows.length === 0) {
+                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [brokerId, creci, 'pending_documents']);
+                await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', ['broker', brokerId]);
+                return res.status(201).json({ status: 'pending_documents', role: 'broker' });
+            }
+            const currentStatus = String(brokerRows[0].status ?? '').trim();
+            if (currentStatus === 'rejected' || currentStatus === 'suspended') {
+                return res.status(403).json({
+                    error: "Sua solicitacao de corretor foi rejeitada.",
+                });
+            }
+            await connection_1.default.query('UPDATE brokers SET creci = ? WHERE id = ?', [creci, brokerId]);
+            return res.status(200).json({ status: currentStatus, role: 'broker' });
+        }
+        catch (error) {
+            console.error("Erro ao solicitar upgrade de corretor:", error);
+            return res.status(500).json({ error: "Erro interno do servidor." });
         }
     }
     async login(req, res) {
@@ -169,9 +262,13 @@ class BrokerController {
                    u.email,
                    u.password_hash,
                    u.phone,
-                   u.address,
+                   u.street,
+                   u.number,
+                   u.complement,
+                   u.bairro,
                    u.city,
                    u.state,
+                   u.cep,
                    b.creci,
                    b.status AS broker_status
                  FROM users u
@@ -452,16 +549,21 @@ class BrokerController {
         const selfieUrl = selfieResult.url;
         try {
             const [brokerStatusRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [brokerId]);
-            if (brokerStatusRows.length > 0 && brokerStatusRows[0].status === 'rejected') {
+            const currentStatus = brokerStatusRows.length > 0
+                ? String(brokerStatusRows[0].status ?? '').trim().toLowerCase()
+                : '';
+            if (currentStatus === 'rejected' || currentStatus === 'suspended') {
                 return res.status(403).json({
                     success: false,
                     error: "Sua solicitacao foi rejeitada. Inicie novamente para se tornar corretor."
                 });
             }
-            // Garante que a linha em brokers existe; se não existir, cria com status pending_verification.
-            const [brokerRows] = await connection_1.default.query('SELECT id FROM brokers WHERE id = ?', [brokerId]);
-            if (brokerRows.length === 0) {
+            // Garante que a linha em brokers existe; se n?o existir, cria com status pending_verification.
+            if (brokerStatusRows.length === 0) {
                 await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [brokerId, creci, 'pending_verification']);
+            }
+            else if (currentStatus !== 'approved') {
+                await connection_1.default.query('UPDATE brokers SET creci = ?, status = ? WHERE id = ?', [creci, 'pending_verification', brokerId]);
             }
             else {
                 await connection_1.default.query('UPDATE brokers SET creci = ? WHERE id = ?', [creci, brokerId]);

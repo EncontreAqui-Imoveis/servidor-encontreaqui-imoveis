@@ -9,21 +9,32 @@ const crypto_1 = __importDefault(require("crypto"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
 const connection_1 = __importDefault(require("../database/connection"));
+const address_1 = require("../utils/address");
 function buildUserPayload(row, profileType) {
     return {
         id: row.id,
         name: row.name,
         email: row.email,
         phone: row.phone ?? null,
-        address: row.address ?? null,
+        street: row.street ?? null,
+        number: row.number ?? null,
+        complement: row.complement ?? null,
+        bairro: row.bairro ?? null,
         city: row.city ?? null,
         state: row.state ?? null,
+        cep: row.cep ?? null,
         role: profileType,
         broker_status: row.broker_status ?? null,
     };
 }
 function hasCompleteProfile(row) {
-    return !!(row.phone && row.city && row.state && row.address);
+    return !!(row.phone &&
+        row.street &&
+        row.number &&
+        row.bairro &&
+        row.city &&
+        row.state &&
+        row.cep);
 }
 function signToken(id, role) {
     return jsonwebtoken_1.default.sign({ id, role }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
@@ -122,30 +133,83 @@ class AuthController {
     }
     // confirmPasswordReset deprecated/removed as Firebase handles the UI.
     async register(req, res) {
-        const { name, email, password, phone, address, city, state, profileType, } = req.body;
+        const { name, email, password, phone, street, number, complement, bairro, city, state, cep, profileType, creci, } = req.body;
         if (!name || !email || !password) {
-            return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
+            return res.status(400).json({ error: 'Nome, email e senha s??o obrigat??rios.' });
         }
         const normalizedProfile = profileType === 'broker' ? 'broker' : 'client';
+        const brokerCreci = (creci ?? '').toString().trim();
+        if (normalizedProfile === 'broker' && !brokerCreci) {
+            return res.status(400).json({ error: 'CRECI e obrigatorio para corretores.' });
+        }
         try {
             const [existingUserRows] = await connection_1.default.query('SELECT id FROM users WHERE email = ?', [email]);
             if (existingUserRows.length > 0) {
-                return res.status(409).json({ error: 'Este email já está em uso.' });
+                return res.status(409).json({ error: 'Este email j?? est?? em uso.' });
+            }
+            const addressResult = (0, address_1.sanitizeAddressInput)({
+                street,
+                number,
+                complement,
+                bairro,
+                city,
+                state,
+                cep,
+            });
+            if (!addressResult.ok) {
+                return res.status(400).json({
+                    error: 'Endereco incompleto ou invalido.',
+                    fields: addressResult.errors,
+                });
             }
             const passwordHash = await bcryptjs_1.default.hash(password, 8);
             const [userResult] = await connection_1.default.query(`
-          INSERT INTO users (name, email, password_hash, phone, address, city, state)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-        `, [name, email, passwordHash, phone ?? null, address ?? null, city ?? null, state ?? null]);
+          INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+                name,
+                email,
+                passwordHash,
+                phone ?? null,
+                addressResult.value.street,
+                addressResult.value.number,
+                addressResult.value.complement,
+                addressResult.value.bairro,
+                addressResult.value.city,
+                addressResult.value.state,
+                addressResult.value.cep,
+            ]);
             const userId = userResult.insertId;
             if (normalizedProfile === 'broker') {
-                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, req.body.creci ?? '', 'pending_verification']);
+                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, brokerCreci, 'pending_documents']);
             }
             const token = signToken(userId, normalizedProfile);
             return res.status(201).json({
-                user: buildUserPayload({ id: userId, name, email, phone, address, city, state }, normalizedProfile),
+                user: buildUserPayload({
+                    id: userId,
+                    name,
+                    email,
+                    phone,
+                    street: addressResult.value.street,
+                    number: addressResult.value.number,
+                    complement: addressResult.value.complement,
+                    bairro: addressResult.value.bairro,
+                    city: addressResult.value.city,
+                    state: addressResult.value.state,
+                    cep: addressResult.value.cep,
+                    broker_status: normalizedProfile === 'broker' ? 'pending_documents' : null,
+                }, normalizedProfile),
                 token,
-                needsCompletion: !hasCompleteProfile({ phone, city, state, address }),
+                needsCompletion: !hasCompleteProfile({
+                    phone,
+                    street: addressResult.value.street,
+                    number: addressResult.value.number,
+                    bairro: addressResult.value.bairro,
+                    city: addressResult.value.city,
+                    state: addressResult.value.state,
+                    cep: addressResult.value.cep,
+                }),
+                requiresDocuments: normalizedProfile === 'broker',
             });
         }
         catch (error) {
@@ -160,14 +224,16 @@ class AuthController {
         }
         try {
             const [rows] = await connection_1.default.query(`
-          SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.address, u.city, u.state,
+          SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  CASE
-                   WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
+                   WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification', 'pending_documents') THEN 'broker'
                    ELSE 'client'
                  END AS role,
-                 b.status AS broker_status
+                 b.status AS broker_status,
+                 bd.status AS broker_documents_status
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
+          LEFT JOIN broker_documents bd ON b.id = bd.broker_id
           WHERE u.email = ?
         `, [email]);
             if (rows.length === 0) {
@@ -179,11 +245,14 @@ class AuthController {
                 return res.status(401).json({ error: 'Credenciais inválidas.' });
             }
             const profile = user.role === 'broker' ? 'broker' : 'client';
+            const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
+            const requiresDocuments = profile === 'broker' && (brokerDocsStatus.length === 0 || brokerDocsStatus == 'rejected');
             const token = signToken(user.id, profile);
             return res.json({
                 user: buildUserPayload(user, profile),
                 token,
                 needsCompletion: !hasCompleteProfile(user),
+                requiresDocuments,
             });
         }
         catch (error) {
@@ -206,7 +275,7 @@ class AuthController {
             if (!email) {
                 return res.status(400).json({ error: 'Email não disponível no token do Google.' });
             }
-            const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.address, u.city, u.state, u.firebase_uid,
+            const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid,
                 b.id AS broker_id, b.status AS broker_status,
                 bd.status AS broker_documents_status
            FROM users u
@@ -217,9 +286,13 @@ class AuthController {
             let userId;
             let userName = displayName;
             let phone = null;
-            let address = null;
+            let street = null;
+            let number = null;
+            let complement = null;
+            let bairro = null;
             let city = null;
             let state = null;
+            let cep = null;
             let hasBrokerRow = false;
             let createdNow = false;
             let blockedBrokerRequest = false;
@@ -234,14 +307,19 @@ class AuthController {
                 userId = row.id;
                 userName = row.name || displayName;
                 phone = row.phone ?? null;
-                address = row.address ?? null;
+                street = row.street ?? null;
+                number = row.number ?? null;
+                complement = row.complement ?? null;
+                bairro = row.bairro ?? null;
                 city = row.city ?? null;
                 state = row.state ?? null;
+                cep = row.cep ?? null;
                 hasBrokerRow = !!row.broker_id;
                 brokerStatus = row.broker_status ?? null;
                 brokerDocumentsStatus = row.broker_documents_status ?? null;
                 hasBrokerDocuments = brokerDocumentsStatus != null;
-                blockedBrokerRequest = brokerStatus === 'rejected';
+                blockedBrokerRequest =
+                    brokerStatus === 'rejected' || brokerStatus === 'suspended';
                 if (hasBrokerRow && !blockedBrokerRequest) {
                     effectiveProfile = 'broker';
                 }
@@ -269,8 +347,8 @@ class AuthController {
                 createdNow = true;
                 effectiveProfile = requestedProfile === 'broker' ? 'broker' : 'client';
                 if (requestedProfile === 'broker') {
-                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_verification']);
-                    brokerStatus = 'pending_verification';
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_documents']);
+                    brokerStatus = 'pending_documents';
                     hasBrokerRow = true;
                     requiresDocuments = true;
                 }
@@ -285,8 +363,8 @@ class AuthController {
                     effectiveProfile = 'broker';
                     roleLocked = false;
                     if (!hasBrokerRow) {
-                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_verification']);
-                        brokerStatus = 'pending_verification';
+                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_documents']);
+                        brokerStatus = 'pending_documents';
                         hasBrokerRow = true;
                     }
                     requiresDocuments = (brokerStatus ?? '') !== 'approved';
@@ -304,7 +382,7 @@ class AuthController {
                     effectiveProfile = 'client';
                 }
             }
-            const needsCompletion = !hasCompleteProfile({ phone, city, state, address });
+            const needsCompletion = !hasCompleteProfile({ phone, street, number, bairro, city, state, cep });
             const brokerDocsRequired = effectiveProfile === 'broker' &&
                 (!hasBrokerDocuments || brokerDocumentsStatus === 'rejected');
             requiresDocuments = brokerDocsRequired;
@@ -315,9 +393,13 @@ class AuthController {
                     name: userName,
                     email,
                     phone,
-                    address,
+                    street,
+                    number,
+                    complement,
+                    bairro,
                     city,
                     state,
+                    cep,
                     broker_status: brokerStatus,
                 }, effectiveProfile),
                 token,

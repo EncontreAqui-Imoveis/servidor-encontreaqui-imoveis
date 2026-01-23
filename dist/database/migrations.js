@@ -76,6 +76,26 @@ async function ensureNotificationsType() {
         await connection_1.default.query("ALTER TABLE notifications MODIFY COLUMN related_entity_type ENUM('property','broker','agency','user','announcement','other') NOT NULL");
     }
 }
+async function ensureUserAddressColumns() {
+    if (!(await tableExists('users'))) {
+        return;
+    }
+    if (!(await columnExists('users', 'street'))) {
+        await connection_1.default.query('ALTER TABLE users ADD COLUMN street VARCHAR(255) NULL');
+    }
+    if (!(await columnExists('users', 'number'))) {
+        await connection_1.default.query('ALTER TABLE users ADD COLUMN number VARCHAR(50) NULL');
+    }
+    if (!(await columnExists('users', 'complement'))) {
+        await connection_1.default.query('ALTER TABLE users ADD COLUMN complement VARCHAR(255) NULL');
+    }
+    if (!(await columnExists('users', 'bairro'))) {
+        await connection_1.default.query('ALTER TABLE users ADD COLUMN bairro VARCHAR(255) NULL');
+    }
+    if (!(await columnExists('users', 'cep'))) {
+        await connection_1.default.query('ALTER TABLE users ADD COLUMN cep VARCHAR(20) NULL');
+    }
+}
 async function ensureSupportRequestsTable() {
     if (await tableExists('support_requests')) {
         return;
@@ -113,6 +133,7 @@ async function applyMigrations() {
         await ensurePropertiesColumns();
         await ensureFeaturedPropertiesTable();
         await ensureNotificationsType();
+        await ensureUserAddressColumns();
         await ensureSupportRequestsTable();
         await ensurePasswordResetTokensTable();
         console.log('Migrations aplicadas com sucesso.');

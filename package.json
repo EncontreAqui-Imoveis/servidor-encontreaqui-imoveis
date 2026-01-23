@@ -7,7 +7,7 @@
     "dev": "ts-node-dev --exit-child --transpile-only --ignore-watch node_modules src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "vitest",
+    "test": "vitest run",
     "db:init": "ts-node src/database/init.ts"
   },
   "keywords": [],

@@ -132,6 +132,8 @@ interface PropertyDetailRow extends RowDataPacket {
   id: number;
   broker_id?: number | null;
   owner_id?: number | null;
+  owner_name?: string | null;
+  owner_phone?: string | null;
   code?: string | null;
   title: string;
   description?: string | null;
@@ -201,6 +203,8 @@ function mapAdminProperty(row: PropertyDetailRow) {
     id: row.id,
     broker_id: row.broker_id ?? null,
     owner_id: row.owner_id ?? null,
+    owner_name: row.owner_name ?? null,
+    owner_phone: row.owner_phone ?? null,
     code: row.code ?? null,
     title: row.title,
     description: row.description ?? null,
@@ -385,6 +389,8 @@ class AdminController {
             p.created_at,
             p.broker_id,
             p.owner_id,
+            p.owner_name,
+            p.owner_phone,
             COALESCE(u.name, u_owner.name) AS broker_name,
             COALESCE(u.phone, u_owner.phone) AS broker_phone,
             b.status AS broker_status,
@@ -752,6 +758,8 @@ class AdminController {
         'price_sale',
         'price_rent',
         'code',
+        'owner_name',
+        'owner_phone',
         'address',
         'quadra',
         'lote',
@@ -915,6 +923,8 @@ class AdminController {
         price_sale,
         price_rent,
         code,
+        owner_name,
+        owner_phone,
         address,
         quadra,
         lote,
@@ -1039,6 +1049,8 @@ class AdminController {
             price_sale,
             price_rent,
             code,
+            owner_name,
+            owner_phone,
             address,
             quadra,
             lote,
@@ -1062,7 +1074,7 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerIdValue,
@@ -1071,13 +1083,15 @@ class AdminController {
           type,
           normalizedPurpose,
           normalizedStatus,
-          resolvedPrice,
-          resolvedPriceSale,
-          resolvedPriceRent,
-          stringOrNull(code),
-          address,
-          stringOrNull(quadra),
-          stringOrNull(lote),
+            resolvedPrice,
+            resolvedPriceSale,
+            resolvedPriceRent,
+            stringOrNull(code),
+            stringOrNull(owner_name),
+            stringOrNull(owner_phone),
+            address,
+            stringOrNull(quadra),
+            stringOrNull(lote),
           stringOrNull(numero),
           stringOrNull(bairro),
           stringOrNull(complemento),

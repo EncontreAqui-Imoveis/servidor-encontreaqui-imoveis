@@ -140,6 +140,8 @@ function mapAdminProperty(row) {
         id: row.id,
         broker_id: row.broker_id ?? null,
         owner_id: row.owner_id ?? null,
+        owner_name: row.owner_name ?? null,
+        owner_phone: row.owner_phone ?? null,
         code: row.code ?? null,
         title: row.title,
         description: row.description ?? null,
@@ -292,6 +294,8 @@ class AdminController {
             p.created_at,
             p.broker_id,
             p.owner_id,
+            p.owner_name,
+            p.owner_phone,
             COALESCE(u.name, u_owner.name) AS broker_name,
             COALESCE(u.phone, u_owner.phone) AS broker_phone,
             b.status AS broker_status,
@@ -602,6 +606,8 @@ class AdminController {
                 'price_sale',
                 'price_rent',
                 'code',
+                'owner_name',
+                'owner_phone',
                 'address',
                 'quadra',
                 'lote',
@@ -744,7 +750,7 @@ class AdminController {
                     return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
                 }
             }
-            const { title, description, type, purpose, status, price, price_sale, price_rent, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
+            const { title, description, type, purpose, status, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
             const normalizedStatus = normalizeStatus(status) ?? 'pending_approval';
             const normalizedPurpose = normalizePurpose(purpose);
             if (!normalizedPurpose) {
@@ -830,6 +836,8 @@ class AdminController {
             price_sale,
             price_rent,
             code,
+            owner_name,
+            owner_phone,
             address,
             quadra,
             lote,
@@ -853,7 +861,7 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerIdValue,
                 title,
@@ -865,6 +873,8 @@ class AdminController {
                 resolvedPriceSale,
                 resolvedPriceRent,
                 stringOrNull(code),
+                stringOrNull(owner_name),
+                stringOrNull(owner_phone),
                 address,
                 stringOrNull(quadra),
                 stringOrNull(lote),

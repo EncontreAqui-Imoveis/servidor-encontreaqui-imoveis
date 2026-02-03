@@ -41,6 +41,12 @@ async function ensurePropertiesColumns() {
     if (!(await columnExists('properties', 'owner_id'))) {
         await connection_1.default.query('ALTER TABLE properties ADD COLUMN owner_id INT NULL');
     }
+    if (!(await columnExists('properties', 'owner_name'))) {
+        await connection_1.default.query('ALTER TABLE properties ADD COLUMN owner_name VARCHAR(255) NULL');
+    }
+    if (!(await columnExists('properties', 'owner_phone'))) {
+        await connection_1.default.query('ALTER TABLE properties ADD COLUMN owner_phone VARCHAR(50) NULL');
+    }
     if (!(await columnExists('properties', 'price_sale'))) {
         await connection_1.default.query('ALTER TABLE properties ADD COLUMN price_sale DECIMAL(12, 2) NULL');
     }

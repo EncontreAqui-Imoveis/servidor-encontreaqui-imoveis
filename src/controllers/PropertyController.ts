@@ -93,6 +93,8 @@ interface PropertyRow extends RowDataPacket {
   id: number;
   broker_id: number | null;
   owner_id?: number | null;
+  owner_name?: string | null;
+  owner_phone?: string | null;
   broker_name?: string | null;
   broker_phone?: string | null;
   broker_email?: string | null;
@@ -316,6 +318,8 @@ function mapProperty(row: PropertyAggregateRow) {
     price_sale: row.price_sale != null ? Number(row.price_sale) : null,
     price_rent: row.price_rent != null ? Number(row.price_rent) : null,
     code: row.code ?? null,
+    owner_name: row.owner_name ?? null,
+    owner_phone: row.owner_phone ?? null,
     address: row.address,
     quadra: row.quadra ?? null,
     lote: row.lote ?? null,
@@ -501,6 +505,8 @@ class PropertyController {
       price_sale,
       price_rent,
       code,
+      owner_name,
+      owner_phone,
       address,
       quadra,
       lote,
@@ -645,6 +651,8 @@ class PropertyController {
             price_sale,
             price_rent,
             code,
+            owner_name,
+            owner_phone,
             address,
             quadra,
             lote,
@@ -668,7 +676,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
@@ -682,6 +690,8 @@ class PropertyController {
           numericPriceSale,
           numericPriceRent,
           stringOrNull(code),
+          stringOrNull(owner_name),
+          stringOrNull(owner_phone),
           address,
           stringOrNull(quadra),
           stringOrNull(lote),
@@ -757,6 +767,8 @@ class PropertyController {
       price_sale,
       price_rent,
       code,
+      owner_name,
+      owner_phone,
       address,
       quadra,
       lote,
@@ -882,6 +894,8 @@ class PropertyController {
             price_sale,
             price_rent,
             code,
+            owner_name,
+            owner_phone,
             address,
             quadra,
             lote,
@@ -905,7 +919,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           null,
@@ -919,6 +933,8 @@ class PropertyController {
           numericPriceSale,
           numericPriceRent,
           stringOrNull(code),
+          stringOrNull(owner_name),
+          stringOrNull(owner_phone),
           address,
           stringOrNull(quadra),
           stringOrNull(lote),
@@ -1038,6 +1054,8 @@ class PropertyController {
         'price_sale',
         'price_rent',
         'code',
+        'owner_name',
+        'owner_phone',
         'address',
         'quadra',
         'lote',

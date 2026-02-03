@@ -220,6 +220,8 @@ function mapProperty(row) {
         price_sale: row.price_sale != null ? Number(row.price_sale) : null,
         price_rent: row.price_rent != null ? Number(row.price_rent) : null,
         code: row.code ?? null,
+        owner_name: row.owner_name ?? null,
+        owner_phone: row.owner_phone ?? null,
         address: row.address,
         quadra: row.quadra ?? null,
         lote: row.lote ?? null,
@@ -342,7 +344,7 @@ class PropertyController {
         if (!brokerId) {
             return res.status(401).json({ error: "Corretor não autenticado." });
         }
-        const { title, description, type, purpose, price, price_sale, price_rent, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: "Campos obrigatorios nao informados." });
         }
@@ -444,6 +446,8 @@ class PropertyController {
             price_sale,
             price_rent,
             code,
+            owner_name,
+            owner_phone,
             address,
             quadra,
             lote,
@@ -467,7 +471,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerId,
                 null,
@@ -478,9 +482,11 @@ class PropertyController {
                 'pending_approval',
                 numericPrice,
                 numericPriceSale,
-                numericPriceRent,
-                stringOrNull(code),
-                address,
+            numericPriceRent,
+            stringOrNull(code),
+            stringOrNull(owner_name),
+            stringOrNull(owner_phone),
+            address,
                 stringOrNull(quadra),
                 stringOrNull(lote),
                 stringOrNull(numero),
@@ -533,7 +539,7 @@ class PropertyController {
         if (!userId) {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
-        const { title, description, type, purpose, price, price_sale, price_rent, code, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: 'Campos obrigatorios nao informados.' });
         }
@@ -623,6 +629,8 @@ class PropertyController {
             price_sale,
             price_rent,
             code,
+            owner_name,
+            owner_phone,
             address,
             quadra,
             lote,
@@ -646,7 +654,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 null,
                 userId,
@@ -657,9 +665,11 @@ class PropertyController {
                 'pending_approval',
                 numericPrice,
                 numericPriceSale,
-                numericPriceRent,
-                stringOrNull(code),
-                address,
+            numericPriceRent,
+            stringOrNull(code),
+            stringOrNull(owner_name),
+            stringOrNull(owner_phone),
+            address,
                 stringOrNull(quadra),
                 stringOrNull(lote),
                 stringOrNull(numero),
@@ -751,6 +761,8 @@ class PropertyController {
                 'price_sale',
                 'price_rent',
                 'code',
+                'owner_name',
+                'owner_phone',
                 'address',
                 'quadra',
                 'lote',

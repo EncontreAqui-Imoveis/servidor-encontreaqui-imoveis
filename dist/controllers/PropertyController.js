@@ -223,6 +223,7 @@ function mapProperty(row) {
         owner_name: row.owner_name ?? null,
         owner_phone: row.owner_phone ?? null,
         address: row.address,
+        cep: row.cep ?? null,
         quadra: row.quadra ?? null,
         lote: row.lote ?? null,
         numero: row.numero ?? null,
@@ -344,7 +345,7 @@ class PropertyController {
         if (!brokerId) {
             return res.status(401).json({ error: "Corretor não autenticado." });
         }
-        const { title, description, type, purpose, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: "Campos obrigatorios nao informados." });
         }
@@ -457,6 +458,7 @@ class PropertyController {
             tipo_lote,
             city,
             state,
+            cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -492,10 +494,11 @@ class PropertyController {
                 stringOrNull(numero),
                 stringOrNull(bairro),
                 stringOrNull(complemento),
-                stringOrNull(tipo_lote),
-                city,
-                state,
-                numericBedrooms,
+            stringOrNull(tipo_lote),
+            city,
+            state,
+            stringOrNull(cep),
+            numericBedrooms,
                 numericBathrooms,
                 numericAreaConstruida,
                 numericAreaTerreno,
@@ -539,7 +542,7 @@ class PropertyController {
         if (!userId) {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
-        const { title, description, type, purpose, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: 'Campos obrigatorios nao informados.' });
         }
@@ -640,6 +643,7 @@ class PropertyController {
             tipo_lote,
             city,
             state,
+            cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -675,10 +679,11 @@ class PropertyController {
                 stringOrNull(numero),
                 stringOrNull(bairro),
                 stringOrNull(complemento),
-                stringOrNull(tipo_lote),
-                city,
-                state,
-                numericBedrooms,
+            stringOrNull(tipo_lote),
+            city,
+            state,
+            stringOrNull(cep),
+            numericBedrooms,
                 numericBathrooms,
                 numericAreaConstruida,
                 numericAreaTerreno,
@@ -772,6 +777,7 @@ class PropertyController {
                 'tipo_lote',
                 'city',
                 'state',
+                'cep',
                 'bedrooms',
                 'bathrooms',
                 'area_construida',

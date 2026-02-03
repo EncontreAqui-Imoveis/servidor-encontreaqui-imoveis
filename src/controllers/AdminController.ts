@@ -152,6 +152,7 @@ interface PropertyDetailRow extends RowDataPacket {
   tipo_lote?: string | null;
   city?: string | null;
   state?: string | null;
+  cep?: string | null;
   bedrooms?: number | string | null;
   bathrooms?: number | string | null;
   area_construida?: number | string | null;
@@ -215,6 +216,7 @@ function mapAdminProperty(row: PropertyDetailRow) {
     price_sale: toNullableNumber(row.price_sale),
     price_rent: toNullableNumber(row.price_rent),
     address: row.address ?? null,
+    cep: row.cep ?? null,
     quadra: row.quadra ?? null,
     lote: row.lote ?? null,
     numero: row.numero ?? null,
@@ -385,6 +387,7 @@ class AdminController {
             p.price_rent,
             p.city,
             p.bairro,
+            p.cep,
             p.purpose,
             p.created_at,
             p.broker_id,
@@ -769,6 +772,7 @@ class AdminController {
         'tipo_lote',
         'city',
         'state',
+        'cep',
         'bedrooms',
         'bathrooms',
         'area_construida',
@@ -934,6 +938,7 @@ class AdminController {
         tipo_lote,
         city,
         state,
+        cep,
         bedrooms,
         bathrooms,
         area_construida,
@@ -1060,6 +1065,7 @@ class AdminController {
             tipo_lote,
             city,
             state,
+            cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -1074,7 +1080,7 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerIdValue,
@@ -1098,6 +1104,7 @@ class AdminController {
           stringOrNull(tipo_lote),
           city,
           state,
+          stringOrNull(cep),
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,

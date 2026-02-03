@@ -116,6 +116,7 @@ interface PropertyRow extends RowDataPacket {
   tipo_lote?: string | null;
   city: string;
   state: string;
+  cep?: string | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
   area_construida?: number | string | null;
@@ -321,6 +322,7 @@ function mapProperty(row: PropertyAggregateRow) {
     owner_name: row.owner_name ?? null,
     owner_phone: row.owner_phone ?? null,
     address: row.address,
+    cep: row.cep ?? null,
     quadra: row.quadra ?? null,
     lote: row.lote ?? null,
     numero: row.numero ?? null,
@@ -516,6 +518,7 @@ class PropertyController {
       tipo_lote,
       city,
       state,
+      cep,
       bedrooms,
       bathrooms,
       area_construida,
@@ -662,6 +665,7 @@ class PropertyController {
             tipo_lote,
             city,
             state,
+            cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -701,6 +705,7 @@ class PropertyController {
           stringOrNull(tipo_lote),
           city,
           state,
+          stringOrNull(cep),
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
@@ -778,6 +783,7 @@ class PropertyController {
       tipo_lote,
       city,
       state,
+      cep,
       bedrooms,
       bathrooms,
       area_construida,
@@ -905,6 +911,7 @@ class PropertyController {
             tipo_lote,
             city,
             state,
+            cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -944,6 +951,7 @@ class PropertyController {
           stringOrNull(tipo_lote),
           city,
           state,
+          stringOrNull(cep),
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
@@ -1065,6 +1073,7 @@ class PropertyController {
         'tipo_lote',
         'city',
         'state',
+        'cep',
         'bedrooms',
         'bathrooms',
         'area_construida',

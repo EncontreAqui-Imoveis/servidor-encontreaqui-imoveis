@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { propertyController, AuthRequestWithFiles } from '../controllers/PropertyController';
-import { authMiddleware, isBroker } from '../middlewares/auth';
+import { authMiddleware, isBroker, isClient } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 
 const propertyRoutes = Router();
@@ -19,6 +19,7 @@ propertyRoutes.post(
 propertyRoutes.post(
   '/client',
   authMiddleware,
+  isClient,
   mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },
@@ -36,6 +37,7 @@ propertyRoutes.put(
 propertyRoutes.put(
   '/client/:id',
   authMiddleware,
+  isClient,
   (req, res) => propertyController.update(req as any, res)
 );
 
@@ -49,6 +51,7 @@ propertyRoutes.patch(
 propertyRoutes.patch(
   '/client/:id',
   authMiddleware,
+  isClient,
   (req, res) => propertyController.update(req as any, res)
 );
 
@@ -83,6 +86,7 @@ propertyRoutes.delete(
 propertyRoutes.delete(
   '/client/:id',
   authMiddleware,
+  isClient,
   (req, res) => propertyController.delete(req as any, res)
 );
 

@@ -110,4 +110,17 @@ export function isAdmin(
   return next();
 }
 
+export function isClient(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  if (req.userRole !== 'client') {
+    return res.status(403).json({
+      error: 'Acesso negado. Rota exclusiva para clientes.',
+    });
+  }
+  return next();
+}
+
 export default AuthRequest;

@@ -9,14 +9,22 @@ const cors_1 = __importDefault(require("cors"));
 const routes_1 = __importDefault(require("./routes"));
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
 const migrations_1 = require("./database/migrations");
+const security_1 = require("./middlewares/security");
+const requestSanitizer_1 = require("./middlewares/requestSanitizer");
+const logSanitizer_1 = require("./utils/logSanitizer");
 const app = (0, express_1.default)();
 const PORT = process.env.API_PORT || 3333;
+(0, logSanitizer_1.patchConsoleRedaction)();
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use((req, res, next) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Language', 'pt-BR');
     next();
 });
-app.use((0, cors_1.default)());
+app.use(security_1.securityHeaders);
+app.use(security_1.enforceHttps);
+app.use((0, cors_1.default)((0, security_1.buildCorsOptions)()));
 app.use(express_1.default.json({
     limit: '10mb',
     type: 'application/json'
@@ -27,6 +35,7 @@ app.use(express_1.default.urlencoded({
     parameterLimit: 10000,
     type: 'application/x-www-form-urlencoded'
 }));
+app.use(requestSanitizer_1.requestSanitizer);
 app.use(routes_1.default);
 app.use(public_routes_1.default);
 app.get('/health', (req, res) => {
@@ -40,7 +49,7 @@ app.use((err, req, res, next) => {
     if (err.type === 'request.aborted' || err.code === 'ECONNRESET') {
         return res.status(400).json({ error: 'Request aborted' });
     }
-    console.error('Unhandled error:', err);
+    console.error('Unhandled error:', (0, logSanitizer_1.redactValue)(err));
     return res.status(500).json({ error: 'Internal Server Error' });
 });
 async function startServer() {

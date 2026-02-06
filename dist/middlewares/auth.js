@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.authMiddleware = authMiddleware;
 exports.isBroker = isBroker;
 exports.isAdmin = isAdmin;
+exports.isClient = isClient;
 const connection_1 = __importDefault(require("../database/connection"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const env_1 = require("../config/env");
@@ -65,6 +66,14 @@ function isAdmin(req, res, next) {
     if (req.userRole !== 'admin') {
         return res.status(403).json({
             error: 'Acesso negado. Rota exclusiva para administradores.',
+        });
+    }
+    return next();
+}
+function isClient(req, res, next) {
+    if (req.userRole !== 'client') {
+        return res.status(403).json({
+            error: 'Acesso negado. Rota exclusiva para clientes.',
         });
     }
     return next();

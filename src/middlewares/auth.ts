@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import connection from '../database/connection';
 import { RowDataPacket } from 'mysql2';
 import jwt from 'jsonwebtoken';
+import { requireEnv } from '../config/env';
 
 interface UserFromDB extends RowDataPacket {
   id: number;
@@ -14,6 +15,8 @@ export interface AuthRequest extends Request {
   userRole?: string;
   firebase_uid?: string;
 }
+
+const jwtSecret = requireEnv('JWT_SECRET');
 
 export async function authMiddleware(
   req: AuthRequest,
@@ -32,7 +35,7 @@ export async function authMiddleware(
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+    const decoded = jwt.verify(token, jwtSecret) as {
       id: number;
       role: string;
     };

@@ -4,9 +4,12 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
+import { requireEnv } from '../config/env';
 import connection from '../database/connection';
 import { sendPasswordResetEmail } from '../services/emailService';
 import { sanitizeAddressInput } from '../utils/address';
+
+const jwtSecret = requireEnv('JWT_SECRET');
 
 type ProfileType = 'client' | 'broker';
 
@@ -43,7 +46,7 @@ function hasCompleteProfile(row: any) {
 function signToken(id: number, role: ProfileType) {
   return jwt.sign(
     { id, role },
-    process.env.JWT_SECRET || 'default_secret',
+    jwtSecret,
     { expiresIn: '7d' },
   );
 }

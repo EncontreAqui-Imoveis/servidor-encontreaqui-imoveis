@@ -8,10 +8,12 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
+const env_1 = require("../config/env");
 const notificationService_1 = require("../services/notificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
 const supportRequestService_1 = require("../services/supportRequestService");
 const address_1 = require("../utils/address");
+const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 function toBoolean(value) {
     return value === 1 || value === '1' || value === true;
 }
@@ -149,7 +151,7 @@ class UserController {
             if (!isPasswordCorrect) {
                 return res.status(401).json({ error: 'Credenciais inválidas.' });
             }
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: 'user' }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '1d' });
+            const token = jsonwebtoken_1.default.sign({ id: user.id, role: 'user' }, jwtSecret, { expiresIn: '1d' });
             delete user.password_hash;
             return res.status(200).json({ user, token });
         }
@@ -435,7 +437,7 @@ class UserController {
                     pending: { email, name },
                 });
             }
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
+            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, jwtSecret, { expiresIn: '7d' });
             return res.json({
                 user: {
                     id: user.id,
@@ -582,7 +584,7 @@ class UserController {
                 };
             }
             const effectiveRole = role ?? user.role ?? 'client';
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
+            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, jwtSecret, { expiresIn: '7d' });
             return res.json({
                 user: {
                     id: user.id,

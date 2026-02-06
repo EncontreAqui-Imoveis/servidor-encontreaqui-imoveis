@@ -8,8 +8,10 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
+const env_1 = require("../config/env");
 const connection_1 = __importDefault(require("../database/connection"));
 const address_1 = require("../utils/address");
+const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 function buildUserPayload(row, profileType) {
     return {
         id: row.id,
@@ -37,7 +39,7 @@ function hasCompleteProfile(row) {
         row.cep);
 }
 function signToken(id, role) {
-    return jsonwebtoken_1.default.sign({ id, role }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '7d' });
+    return jsonwebtoken_1.default.sign({ id, role }, jwtSecret, { expiresIn: '7d' });
 }
 function hashResetCode(code) {
     return crypto_1.default.createHash('sha256').update(code).digest('hex');

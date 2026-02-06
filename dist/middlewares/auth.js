@@ -8,6 +8,8 @@ exports.isBroker = isBroker;
 exports.isAdmin = isAdmin;
 const connection_1 = __importDefault(require("../database/connection"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const env_1 = require("../config/env");
+const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 async function authMiddleware(req, res, next) {
     const { authorization } = req.headers;
     if (!authorization) {
@@ -18,7 +20,7 @@ async function authMiddleware(req, res, next) {
         return res.status(401).json({ error: 'Token mal formatado.' });
     }
     try {
-        const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET);
+        const decoded = jsonwebtoken_1.default.verify(token, jwtSecret);
         req.userId = decoded.id;
         req.userRole = decoded.role;
         if (decoded.role === 'broker') {

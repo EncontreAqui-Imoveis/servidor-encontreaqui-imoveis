@@ -9,10 +9,12 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
+const env_1 = require("../config/env");
 const notificationService_1 = require("../services/notificationService");
 const priceDropNotificationService_1 = require("../services/priceDropNotificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
 const address_1 = require("../utils/address");
+const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 const STATUS_MAP = {
     pendingapproval: 'pending_approval',
     pendente: 'pending_approval',
@@ -152,6 +154,7 @@ function mapAdminProperty(row) {
         price_sale: toNullableNumber(row.price_sale),
         price_rent: toNullableNumber(row.price_rent),
         address: row.address ?? null,
+        cep: row.cep ?? null,
         quadra: row.quadra ?? null,
         lote: row.lote ?? null,
         numero: row.numero ?? null,
@@ -211,7 +214,7 @@ class AdminController {
             if (!isPasswordCorrect) {
                 return res.status(401).json({ error: 'Credenciais invalidas.' });
             }
-            const token = jsonwebtoken_1.default.sign({ id: admin.id, role: 'admin' }, process.env.JWT_SECRET || 'default_secret', { expiresIn: '1d' });
+            const token = jsonwebtoken_1.default.sign({ id: admin.id, role: 'admin' }, jwtSecret, { expiresIn: '1d' });
             delete admin.password_hash;
             return res.status(200).json({ admin, token });
         }

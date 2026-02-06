@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import { uploadToCloudinary } from '../config/cloudinary';
+import { requireEnv } from '../config/env';
 import { notifyAdmins } from '../services/notificationService';
 import { type PushNotificationResult } from '../services/pushNotificationService';
 import { notifyPriceDropIfNeeded } from '../services/priceDropNotificationService';
@@ -14,6 +15,8 @@ import { sanitizeAddressInput } from '../utils/address';
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
 type Nullable<T> = T | null;
+
+const jwtSecret = requireEnv('JWT_SECRET');
 
 const STATUS_MAP: Record<string, PropertyStatus> = {
   pendingapproval: 'pending_approval',
@@ -292,7 +295,7 @@ class AdminController {
 
       const token = jwt.sign(
         { id: admin.id, role: 'admin' },
-        process.env.JWT_SECRET || 'default_secret',
+        jwtSecret,
         { expiresIn: '1d' }
       );
 

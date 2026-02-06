@@ -5,10 +5,13 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import AuthRequest from '../middlewares/auth';
 import admin from '../config/firebaseAdmin';
+import { requireEnv } from '../config/env';
 import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
 import { sanitizeAddressInput } from '../utils/address';
+
+const jwtSecret = requireEnv('JWT_SECRET');
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -236,7 +239,7 @@ class UserController {
 
       const token = jwt.sign(
         { id: user.id, role: 'user' },
-        process.env.JWT_SECRET || 'default_secret',
+        jwtSecret,
         { expiresIn: '1d' }
       );
 
@@ -602,7 +605,7 @@ class UserController {
 
       const token = jwt.sign(
         { id: user.id, role: effectiveRole },
-        process.env.JWT_SECRET || 'default_secret',
+        jwtSecret,
         { expiresIn: '7d' }
       );
 
@@ -794,7 +797,7 @@ class UserController {
 
       const token = jwt.sign(
         { id: user.id, role: effectiveRole },
-        process.env.JWT_SECRET || 'default_secret',
+        jwtSecret,
         { expiresIn: '7d' }
       );
 

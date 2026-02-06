@@ -5,9 +5,12 @@ import connection from "../database/connection";
 import { RowDataPacket } from "mysql2";
 import AuthRequest from "../middlewares/auth";
 import { uploadToCloudinary } from "../config/cloudinary";
+import { requireEnv } from "../config/env";
 import { sanitizeAddressInput } from "../utils/address";
 
 type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
+
+const jwtSecret = requireEnv("JWT_SECRET");
 
 function toDate(value: unknown): Date | null {
     if (!value) return null;
@@ -395,7 +398,7 @@ class BrokerController {
 
             const token = jwt.sign(
                 { id: user.id, role: "broker" },
-                process.env.JWT_SECRET || "default_secret",
+                jwtSecret,
                 { expiresIn: "1d" }
             );
 

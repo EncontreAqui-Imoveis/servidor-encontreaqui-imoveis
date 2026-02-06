@@ -8,7 +8,9 @@ const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
+const env_1 = require("../config/env");
 const address_1 = require("../utils/address");
+const jwtSecret = (0, env_1.requireEnv)("JWT_SECRET");
 function toDate(value) {
     if (!value)
         return null;
@@ -283,7 +285,7 @@ class BrokerController {
             if (!isPasswordCorrect) {
                 return res.status(401).json({ error: "Credenciais inválidas." });
             }
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: "broker" }, process.env.JWT_SECRET || "default_secret", { expiresIn: "1d" });
+            const token = jsonwebtoken_1.default.sign({ id: user.id, role: "broker" }, jwtSecret, { expiresIn: "1d" });
             const { password_hash, ...userWithoutPassword } = user;
             return res.json({
                 broker: {

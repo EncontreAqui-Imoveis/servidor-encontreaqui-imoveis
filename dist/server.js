@@ -6,6 +6,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const helmet_1 = __importDefault(require("helmet"));
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const routes_1 = __importDefault(require("./routes"));
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
 const migrations_1 = require("./database/migrations");
@@ -14,9 +16,28 @@ const requestSanitizer_1 = require("./middlewares/requestSanitizer");
 const logSanitizer_1 = require("./utils/logSanitizer");
 const app = (0, express_1.default)();
 const PORT = process.env.API_PORT || 3333;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 300;
+const configuredRateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS);
+const configuredRateLimitMaxRequests = Number(process.env.RATE_LIMIT_MAX_REQUESTS);
+const rateLimitWindowMs = Number.isFinite(configuredRateLimitWindowMs) && configuredRateLimitWindowMs > 0
+    ? configuredRateLimitWindowMs
+    : DEFAULT_RATE_LIMIT_WINDOW_MS;
+const rateLimitMaxRequests = Number.isFinite(configuredRateLimitMaxRequests) && configuredRateLimitMaxRequests > 0
+    ? configuredRateLimitMaxRequests
+    : DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+const apiRateLimiter = (0, express_rate_limit_1.default)({
+    windowMs: rateLimitWindowMs,
+    limit: rateLimitMaxRequests,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    skip: (req) => req.path === '/health' || req.method === 'OPTIONS',
+    message: { error: 'Muitas requisições. Tente novamente em instantes.' },
+});
 (0, logSanitizer_1.patchConsoleRedaction)();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use((0, helmet_1.default)());
 app.use((req, res, next) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Language', 'pt-BR');
@@ -25,6 +46,7 @@ app.use((req, res, next) => {
 app.use(security_1.securityHeaders);
 app.use(security_1.enforceHttps);
 app.use((0, cors_1.default)((0, security_1.buildCorsOptions)()));
+app.use(apiRateLimiter);
 app.use(express_1.default.json({
     limit: '10mb',
     type: 'application/json'

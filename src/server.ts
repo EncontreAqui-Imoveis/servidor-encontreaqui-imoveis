@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import mainRoutes from './routes';
 import publicRoutes from './routes/public.routes';
 import { applyMigrations } from './database/migrations';
@@ -14,11 +16,33 @@ import { patchConsoleRedaction, redactValue } from './utils/logSanitizer';
 
 const app = express();
 const PORT = process.env.API_PORT || 3333;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 300;
+const configuredRateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS);
+const configuredRateLimitMaxRequests = Number(process.env.RATE_LIMIT_MAX_REQUESTS);
+const rateLimitWindowMs =
+  Number.isFinite(configuredRateLimitWindowMs) && configuredRateLimitWindowMs > 0
+    ? configuredRateLimitWindowMs
+    : DEFAULT_RATE_LIMIT_WINDOW_MS;
+const rateLimitMaxRequests =
+  Number.isFinite(configuredRateLimitMaxRequests) && configuredRateLimitMaxRequests > 0
+    ? configuredRateLimitMaxRequests
+    : DEFAULT_RATE_LIMIT_MAX_REQUESTS;
+
+const apiRateLimiter = rateLimit({
+  windowMs: rateLimitWindowMs,
+  limit: rateLimitMaxRequests,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health' || req.method === 'OPTIONS',
+  message: { error: 'Muitas requisições. Tente novamente em instantes.' },
+});
 
 patchConsoleRedaction();
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use(helmet());
 
 app.use((req, res, next) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -29,6 +53,7 @@ app.use((req, res, next) => {
 app.use(securityHeaders);
 app.use(enforceHttps);
 app.use(cors(buildCorsOptions()));
+app.use(apiRateLimiter);
 
 app.use(express.json({
   limit: '10mb',

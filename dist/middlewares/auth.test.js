@@ -35,9 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const vitest_1 = require("vitest");
 let isClient;
+let isAdmin;
 (0, vitest_1.beforeAll)(async () => {
     process.env.JWT_SECRET ??= 'test-secret';
-    ({ isClient } = await Promise.resolve().then(() => __importStar(require('./auth'))));
+    ({ isClient, isAdmin } = await Promise.resolve().then(() => __importStar(require('./auth'))));
 });
 function createResponseMock() {
     const json = vitest_1.vi.fn();
@@ -57,6 +58,23 @@ function createResponseMock() {
         const res = createResponseMock();
         const next = vitest_1.vi.fn();
         isClient(req, res, next);
+        (0, vitest_1.expect)(next).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(res.status).toHaveBeenCalledWith(403);
+    });
+});
+(0, vitest_1.describe)('isAdmin middleware', () => {
+    (0, vitest_1.it)('permite quando role e admin', () => {
+        const req = { userRole: 'admin' };
+        const res = createResponseMock();
+        const next = vitest_1.vi.fn();
+        isAdmin(req, res, next);
+        (0, vitest_1.expect)(next).toHaveBeenCalledTimes(1);
+    });
+    (0, vitest_1.it)('bloqueia quando role nao e admin', () => {
+        const req = { userRole: 'client' };
+        const res = createResponseMock();
+        const next = vitest_1.vi.fn();
+        isAdmin(req, res, next);
         (0, vitest_1.expect)(next).not.toHaveBeenCalled();
         (0, vitest_1.expect)(res.status).toHaveBeenCalledWith(403);
     });

@@ -30,4 +30,33 @@ const requestSanitizer_1 = require("./requestSanitizer");
         (0, vitest_1.expect)(req.body.bedrooms).toBe('3');
         (0, vitest_1.expect)(req.body.area_construida).toBe('126,50');
     });
+    (0, vitest_1.it)('limpa payload malicioso em campos numéricos sem quebrar campos textuais', () => {
+        const req = {
+            query: { page: '1 OR 1=1' },
+            params: { propertyId: '33;DROP TABLE properties;' },
+            body: {
+                owner_phone: '+55 (64) 99999-9999 --',
+                bedrooms: '2; DELETE FROM users;',
+                bathrooms: '3<script>alert(1)</script>',
+                garage_spots: '1 union select',
+                area_terreno: '450.70m2',
+                title: "Casa ' OR 1=1 --",
+            },
+        };
+        const res = {};
+        let nextCalled = false;
+        const next = (() => {
+            nextCalled = true;
+        });
+        (0, requestSanitizer_1.requestSanitizer)(req, res, next);
+        (0, vitest_1.expect)(nextCalled).toBe(true);
+        (0, vitest_1.expect)(req.query.page).toBe('1 OR 1=1');
+        (0, vitest_1.expect)(req.params.propertyId).toBe('33;DROP TABLE properties;');
+        (0, vitest_1.expect)(req.body.owner_phone).toBe('5564999999999');
+        (0, vitest_1.expect)(req.body.bedrooms).toBe('2');
+        (0, vitest_1.expect)(req.body.bathrooms).toBe('31');
+        (0, vitest_1.expect)(req.body.garage_spots).toBe('1');
+        (0, vitest_1.expect)(req.body.area_terreno).toBe('450.70');
+        (0, vitest_1.expect)(req.body.title).toBe("Casa ' OR 1=1 --");
+    });
 });

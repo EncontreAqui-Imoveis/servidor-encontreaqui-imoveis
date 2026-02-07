@@ -293,7 +293,7 @@ function toBoolean(value: unknown): boolean {
   return value === 1 || value === "1" || value === true;
 }
 
-function mapProperty(row: PropertyAggregateRow) {
+function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
   const images = row.images ? row.images.split(",").filter(Boolean) : [];
 
   const agency = row.agency_id
@@ -319,8 +319,8 @@ function mapProperty(row: PropertyAggregateRow) {
     price_sale: row.price_sale != null ? Number(row.price_sale) : null,
     price_rent: row.price_rent != null ? Number(row.price_rent) : null,
     code: row.code ?? null,
-    owner_name: row.owner_name ?? null,
-    owner_phone: row.owner_phone ?? null,
+    owner_name: includeOwnerInfo ? (row.owner_name ?? null) : null,
+    owner_phone: includeOwnerInfo ? (row.owner_phone ?? null) : null,
     address: row.address,
     cep: row.cep ?? null,
     quadra: row.quadra ?? null,
@@ -484,7 +484,14 @@ class PropertyController {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }
 
-      return res.status(200).json(mapProperty(rows[0]));
+      const property = rows[0];
+      const isOwner =
+        (property.broker_id != null && property.broker_id === (req as AuthRequest).userId) ||
+        (property.owner_id != null && property.owner_id === (req as AuthRequest).userId);
+      const isAdmin = (req as AuthRequest).userRole === 'admin';
+      const showOwnerInfo = isOwner || isAdmin;
+
+      return res.status(200).json(mapProperty(property, showOwnerInfo));
     } catch (error) {
       console.error("Erro ao buscar imóvel:", error);
       return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });
@@ -535,8 +542,8 @@ class PropertyController {
       valor_iptu,
     } = req.body ?? {};
 
-    if (!title || !description || !type || !purpose || !address || !city || !state) {
-      return res.status(400).json({ error: "Campos obrigatorios nao informados." });
+    if (!title || !description || !type || !purpose || !address || !city || !state || !owner_name || !owner_phone) {
+      return res.status(400).json({ error: "Campos obrigatórios não informados (incluindo nome e telefone do proprietário)." });
     }
 
     const normalizedPurpose = normalizePurpose(purpose);
@@ -800,8 +807,8 @@ class PropertyController {
       valor_iptu,
     } = req.body ?? {};
 
-    if (!title || !description || !type || !purpose || !address || !city || !state) {
-      return res.status(400).json({ error: 'Campos obrigatorios nao informados.' });
+    if (!title || !description || !type || !purpose || !address || !city || !state || !owner_name || !owner_phone) {
+      return res.status(400).json({ error: 'Campos obrigatórios não informados (incluindo nome e telefone do proprietário).' });
     }
 
     const normalizedPurpose = normalizePurpose(purpose);
@@ -1614,6 +1621,49 @@ class PropertyController {
     }
   }
 
+  async listUserProperties(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    try {
+      const [rows] = await connection.query<PropertyAggregateRow[]>(
+        `
+          SELECT
+            p.*,
+            ANY_VALUE(a.id) AS agency_id,
+            ANY_VALUE(a.name) AS agency_name,
+            ANY_VALUE(a.logo_url) AS agency_logo_url,
+            ANY_VALUE(a.address) AS agency_address,
+            ANY_VALUE(a.city) AS agency_city,
+            ANY_VALUE(a.state) AS agency_state,
+            ANY_VALUE(a.phone) AS agency_phone,
+            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
+            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+          FROM properties p
+          LEFT JOIN brokers b ON p.broker_id = b.id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+          LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          WHERE p.owner_id = ? OR p.broker_id = ?
+          GROUP BY p.id
+          ORDER BY p.created_at DESC
+        `,
+        [userId, userId]
+      );
+
+      return res.json(rows.map(row => mapProperty(row, true)));
+    } catch (error) {
+      console.error('Erro ao listar imóveis do usuário:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async listPublicProperties(req: Request, res: Response) {
     const {
       page = '1',
@@ -1818,7 +1868,7 @@ class PropertyController {
       const total = totalRows[0]?.total ?? 0;
 
       return res.json({
-        properties: rows.map(mapProperty),
+        properties: rows.map(row => mapProperty(row, false)),
         total,
         page: numericPage,
         totalPages: Math.ceil(total / numericLimit),
@@ -1882,7 +1932,7 @@ class PropertyController {
       const total = countRows[0]?.total ?? 0;
 
       return res.json({
-        properties: rows.map(mapProperty),
+        properties: rows.map(row => mapProperty(row, false)),
         total,
         page,
         totalPages: Math.ceil(total / limit),

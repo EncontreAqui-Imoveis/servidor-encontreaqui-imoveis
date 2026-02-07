@@ -90,6 +90,7 @@ propertyRoutes.delete(
   (req, res) => propertyController.delete(req as any, res)
 );
 
+propertyRoutes.get('/me', authMiddleware, (req, res) => propertyController.listUserProperties(req as any, res));
 propertyRoutes.get('/', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/featured', (req, res) => propertyController.listFeaturedProperties(req, res));
 propertyRoutes.get('/public', (req, res) => propertyController.listPublicProperties(req, res));

@@ -278,14 +278,14 @@ const DDL_STATEMENTS = [
     },
 ];
 async function ensureDefaultAdmin() {
-    const defaultEmail = 'admin@imobiliaria.com';
+    const defaultEmail = 'encontreaquiimoveisapp@gmail.com';
     const defaultPassword = 'admin123';
     const [existingAdmin] = await connection_1.default.query('SELECT id FROM admins WHERE email = ?', [defaultEmail]);
     if (Array.isArray(existingAdmin) && existingAdmin.length > 0) {
         return;
     }
     const passwordHash = await bcryptjs_1.default.hash(defaultPassword, 8);
-    await connection_1.default.query('INSERT INTO admins (name, email, password_hash) VALUES (?, ?, ?)', ['Admin Padrão', defaultEmail, passwordHash]);
+    await connection_1.default.query('INSERT INTO admins (name, email, password_hash) VALUES (?, ?, ?)', ['Admin EncontreAqui', defaultEmail, passwordHash]);
 }
 async function createTables() {
     try {

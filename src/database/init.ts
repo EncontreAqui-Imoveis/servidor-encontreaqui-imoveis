@@ -280,7 +280,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
 ];
 
 async function ensureDefaultAdmin(): Promise<void> {
-  const defaultEmail = 'admin@imobiliaria.com';
+  const defaultEmail = 'encontreaquiimoveisapp@gmail.com';
   const defaultPassword = 'admin123';
 
   const [existingAdmin] = await connection.query(
@@ -296,7 +296,7 @@ async function ensureDefaultAdmin(): Promise<void> {
 
   await connection.query(
     'INSERT INTO admins (name, email, password_hash) VALUES (?, ?, ?)',
-    ['Admin Padrão', defaultEmail, passwordHash]
+    ['Admin EncontreAqui', defaultEmail, passwordHash]
   );
 }
 

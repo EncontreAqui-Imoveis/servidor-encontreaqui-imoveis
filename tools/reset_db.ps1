@@ -17,17 +17,17 @@ if (!(Test-Path $SqlPath)) {
 }
 
 $content = Get-Content -Raw -Path $EnvPath
-$host = Get-EnvValue -name "DB_HOST" -content $content
+$dbHost = Get-EnvValue -name "DB_HOST" -content $content
 $port = Get-EnvValue -name "DB_PORT" -content $content
 $user = Get-EnvValue -name "DB_USER" -content $content
 $pass = Get-EnvValue -name "DB_PASSWORD" -content $content
 $db = Get-EnvValue -name "DB_DATABASE" -content $content
 
-if (!$host -or !$port -or !$user -or !$pass -or !$db) {
+if (!$dbHost -or !$port -or !$user -or !$pass -or !$db) {
   throw "Variaveis DB_* incompletas no .env"
 }
 
-$mysqlCmd = "mysql -h $host -P $port -u $user -p$pass $db < $SqlPath"
+$mysqlCmd = "mysql -h $dbHost -P $port -u $user -p$pass $db < $SqlPath"
 Write-Host "Executando reset do banco..."
 Write-Host "Comando: $mysqlCmd"
 cmd /c $mysqlCmd

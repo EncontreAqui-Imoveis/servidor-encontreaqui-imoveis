@@ -1250,6 +1250,14 @@ class AdminController {
       });
     } catch (error) {
       console.error('Erro ao criar imovel pelo admin:', error);
+      const knownError = error as { statusCode?: number; message?: string };
+      if (knownError?.statusCode === 413) {
+        return res.status(413).json({
+          error:
+            knownError.message ||
+            'Arquivo muito grande para upload. Reduza o tamanho do arquivo e tente novamente.',
+        });
+      }
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }

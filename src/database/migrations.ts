@@ -1,5 +1,6 @@
 import { RowDataPacket } from 'mysql2';
 import connection from './connection';
+import { PROPERTY_TYPE_LEGACY_UPDATES } from '../utils/propertyTypes';
 
 async function tableExists(tableName: string): Promise<boolean> {
   const [rows] = await connection.query<RowDataPacket[]>(
@@ -72,10 +73,41 @@ async function ensurePropertiesColumns(): Promise<void> {
     await connection.query('ALTER TABLE properties ADD COLUMN price_rent DECIMAL(12, 2) NULL');
   }
 
+  if (!(await columnExists('properties', 'is_promoted'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN is_promoted TINYINT(1) NOT NULL DEFAULT 0'
+    );
+  }
+
+  if (!(await columnExists('properties', 'promotion_percentage'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promotion_percentage DECIMAL(5, 2) NULL'
+    );
+  }
+
+  if (!(await columnExists('properties', 'promotion_start'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promotion_start DATETIME NULL'
+    );
+  }
+
+  if (!(await columnExists('properties', 'promotion_end'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promotion_end DATETIME NULL'
+    );
+  }
+
   const purposeType = await getColumnType('properties', 'purpose');
   if (purposeType && !purposeType.includes('Venda e Aluguel')) {
     await connection.query(
       "ALTER TABLE properties MODIFY COLUMN purpose ENUM('Venda', 'Aluguel', 'Venda e Aluguel') NOT NULL"
+    );
+  }
+
+  for (const { from, to } of PROPERTY_TYPE_LEGACY_UPDATES) {
+    await connection.query(
+      'UPDATE properties SET type = ? WHERE type = ?',
+      [to, from]
     );
   }
 }

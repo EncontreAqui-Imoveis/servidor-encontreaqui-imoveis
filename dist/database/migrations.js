@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.applyMigrations = applyMigrations;
 const connection_1 = __importDefault(require("./connection"));
+const propertyTypes_1 = require("../utils/propertyTypes");
 async function tableExists(tableName) {
     const [rows] = await connection_1.default.query(`
       SELECT 1
@@ -56,9 +57,24 @@ async function ensurePropertiesColumns() {
     if (!(await columnExists('properties', 'price_rent'))) {
         await connection_1.default.query('ALTER TABLE properties ADD COLUMN price_rent DECIMAL(12, 2) NULL');
     }
+    if (!(await columnExists('properties', 'is_promoted'))) {
+        await connection_1.default.query('ALTER TABLE properties ADD COLUMN is_promoted TINYINT(1) NOT NULL DEFAULT 0');
+    }
+    if (!(await columnExists('properties', 'promotion_percentage'))) {
+        await connection_1.default.query('ALTER TABLE properties ADD COLUMN promotion_percentage DECIMAL(5, 2) NULL');
+    }
+    if (!(await columnExists('properties', 'promotion_start'))) {
+        await connection_1.default.query('ALTER TABLE properties ADD COLUMN promotion_start DATETIME NULL');
+    }
+    if (!(await columnExists('properties', 'promotion_end'))) {
+        await connection_1.default.query('ALTER TABLE properties ADD COLUMN promotion_end DATETIME NULL');
+    }
     const purposeType = await getColumnType('properties', 'purpose');
     if (purposeType && !purposeType.includes('Venda e Aluguel')) {
         await connection_1.default.query("ALTER TABLE properties MODIFY COLUMN purpose ENUM('Venda', 'Aluguel', 'Venda e Aluguel') NOT NULL");
+    }
+    for (const { from, to } of propertyTypes_1.PROPERTY_TYPE_LEGACY_UPDATES) {
+        await connection_1.default.query('UPDATE properties SET type = ? WHERE type = ?', [to, from]);
     }
 }
 async function ensureFeaturedPropertiesTable() {

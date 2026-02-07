@@ -4,11 +4,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.notifyPriceDropIfNeeded = notifyPriceDropIfNeeded;
+exports.notifyPromotionStarted = notifyPromotionStarted;
 const connection_1 = __importDefault(require("../database/connection"));
 const userNotificationService_1 = require("./userNotificationService");
 const PRICE_DROP_THRESHOLD = 0.1;
 const PRICE_DROP_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const PRICE_DROP_PREFIX = 'Preço reduzido';
+const PROMOTION_PREFIX = 'Imóvel em oferta';
 function formatCurrency(value) {
     try {
         return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
@@ -68,6 +70,43 @@ async function notifyPriceDropIfNeeded({ propertyId, propertyTitle, previousSale
             continue;
         }
         const allowedRecipients = await (0, userNotificationService_1.filterRecipientsByCooldown)(group.ids, 'property', propertyId, PRICE_DROP_PREFIX, cutoff, group.role);
+        if (allowedRecipients.length === 0) {
+            continue;
+        }
+        await (0, userNotificationService_1.notifyUsers)({
+            message,
+            recipientIds: allowedRecipients,
+            recipientRole: group.role,
+            relatedEntityType: 'property',
+            relatedEntityId: propertyId,
+        });
+    }
+}
+async function notifyPromotionStarted(input) {
+    const { propertyId, propertyTitle, promotionPercentage } = input;
+    const [rows] = await connection_1.default.query('SELECT usuario_id FROM favoritos WHERE imovel_id = ?', [propertyId]);
+    const recipients = (rows ?? [])
+        .map((row) => Number(row.usuario_id))
+        .filter((id) => Number.isFinite(id));
+    if (recipients.length === 0) {
+        return;
+    }
+    const cutoff = new Date(Date.now() - PRICE_DROP_COOLDOWN_MS);
+    const { clientIds, brokerIds } = await (0, userNotificationService_1.splitRecipientsByRole)(recipients);
+    const cleanTitle = propertyTitle?.trim() ? propertyTitle.trim() : 'sem título';
+    const discountText = typeof promotionPercentage === 'number' && Number.isFinite(promotionPercentage)
+        ? ` Desconto de ${promotionPercentage.toFixed(2)}%.`
+        : '';
+    const message = `${PROMOTION_PREFIX}: o imóvel "${cleanTitle}" entrou em promoção.${discountText}`;
+    const recipientGroups = [
+        { role: 'client', ids: clientIds },
+        { role: 'broker', ids: brokerIds },
+    ];
+    for (const group of recipientGroups) {
+        if (group.ids.length === 0) {
+            continue;
+        }
+        const allowedRecipients = await (0, userNotificationService_1.filterRecipientsByCooldown)(group.ids, 'property', propertyId, PROMOTION_PREFIX, cutoff, group.role);
         if (allowedRecipients.length === 0) {
             continue;
         }

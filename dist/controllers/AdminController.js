@@ -14,6 +14,7 @@ const notificationService_1 = require("../services/notificationService");
 const priceDropNotificationService_1 = require("../services/priceDropNotificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
 const address_1 = require("../utils/address");
+const propertyTypes_1 = require("../utils/propertyTypes");
 const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 const STATUS_MAP = {
     pendingapproval: 'pending_approval',
@@ -48,6 +49,7 @@ const PURPOSE_MAP = {
     vendaaluguel: 'Venda e Aluguel',
 };
 const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
+const MAX_IMAGES_PER_PROPERTY = 20;
 function normalizeStatus(value) {
     if (typeof value !== 'string') {
         return null;
@@ -108,6 +110,26 @@ function parseBoolean(value) {
         return ['1', 'true', 'yes', 'sim', 'on'].includes(normalized) ? 1 : 0;
     }
     return 0;
+}
+function parsePromotionPercentage(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 100) {
+        throw new Error('Percentual de promocao invalido. Use valor entre 0 e 100.');
+    }
+    return Number(parsed.toFixed(2));
+}
+function parsePromotionDateTime(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const parsed = new Date(String(value));
+    if (Number.isNaN(parsed.getTime())) {
+        throw new Error('Data de promocao invalida.');
+    }
+    return parsed.toISOString().slice(0, 19).replace('T', ' ');
 }
 function normalizeTipoLote(value) {
     if (value === undefined || value === null) {
@@ -191,6 +213,10 @@ function mapAdminProperty(row) {
         type: row.type ?? '',
         purpose: row.purpose ?? null,
         status: row.status,
+        is_promoted: parseBoolean(row.is_promoted),
+        promotion_percentage: toNullableNumber(row.promotion_percentage),
+        promotion_start: row.promotion_start ? String(row.promotion_start) : null,
+        promotion_end: row.promotion_end ? String(row.promotion_end) : null,
         price: toNullableNumber(row.price) ?? 0,
         price_sale: toNullableNumber(row.price_sale),
         price_rent: toNullableNumber(row.price_rent),
@@ -600,7 +626,20 @@ class AdminController {
         const { id } = req.params;
         const body = req.body ?? {};
         try {
-            const [propertyRows] = await connection_1.default.query('SELECT id, status, price, price_sale, price_rent, purpose, title FROM properties WHERE id = ?', [id]);
+            const [propertyRows] = await connection_1.default.query(`
+          SELECT
+            id,
+            status,
+            price,
+            price_sale,
+            price_rent,
+            purpose,
+            title,
+            is_promoted,
+            promotion_percentage
+          FROM properties
+          WHERE id = ?
+        `, [id]);
             if (propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imovel não encontrado.' });
             }
@@ -616,6 +655,9 @@ class AdminController {
             let nextRentPrice = previousRentPrice;
             let saleTouched = false;
             let rentTouched = false;
+            const previousPromotionFlag = parseBoolean(property.is_promoted);
+            let nextPromotionFlag = previousPromotionFlag;
+            let nextPromotionPercentage = toNullableNumber(property.promotion_percentage);
             if (Object.prototype.hasOwnProperty.call(body, 'price_sale')) {
                 nextSalePrice = parseDecimal(body.price_sale);
                 saleTouched = true;
@@ -650,6 +692,10 @@ class AdminController {
                 'price',
                 'price_sale',
                 'price_rent',
+                'is_promoted',
+                'promotion_percentage',
+                'promotion_start',
+                'promotion_end',
                 'code',
                 'owner_name',
                 'owner_phone',
@@ -706,6 +752,15 @@ class AdminController {
                         params.push(normalized);
                         break;
                     }
+                    case 'type': {
+                        const normalized = (0, propertyTypes_1.normalizePropertyType)(value);
+                        if (!normalized) {
+                            return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
+                        }
+                        setParts.push('type = ?');
+                        params.push(normalized);
+                        break;
+                    }
                     case 'price':
                     case 'price_sale':
                     case 'price_rent':
@@ -752,6 +807,60 @@ class AdminController {
                         params.push(normalizeTipoLote(value));
                         break;
                     }
+                    case 'is_promoted': {
+                        const parsed = parseBoolean(value);
+                        nextPromotionFlag = parsed;
+                        if (parsed === 0) {
+                            nextPromotionPercentage = null;
+                            setParts.push('promotion_percentage = ?');
+                            params.push(null);
+                            setParts.push('promotion_start = ?');
+                            params.push(null);
+                            setParts.push('promotion_end = ?');
+                            params.push(null);
+                        }
+                        setParts.push('is_promoted = ?');
+                        params.push(parsed);
+                        break;
+                    }
+                    case 'promotion_percentage': {
+                        try {
+                            const parsed = parsePromotionPercentage(value);
+                            nextPromotionPercentage = parsed;
+                            setParts.push('promotion_percentage = ?');
+                            params.push(parsed);
+                        }
+                        catch (parseError) {
+                            return res.status(400).json({ error: parseError.message });
+                        }
+                        break;
+                    }
+                    case 'promotion_start':
+                    case 'promotion_end': {
+                        try {
+                            const parsed = parsePromotionDateTime(value);
+                            setParts.push(`${key} = ?`);
+                            params.push(parsed);
+                        }
+                        catch (parseError) {
+                            return res.status(400).json({ error: parseError.message });
+                        }
+                        break;
+                    }
+                    case 'owner_phone': {
+                        const text = String(value ?? '').trim();
+                        if (text.length === 0) {
+                            setParts.push('owner_phone = ?');
+                            params.push(null);
+                            break;
+                        }
+                        if (!hasValidPhone(text)) {
+                            return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
+                        }
+                        setParts.push('owner_phone = ?');
+                        params.push(normalizePhone(text));
+                        break;
+                    }
                     default: {
                         if (value === undefined) {
                             continue;
@@ -784,6 +893,21 @@ class AdminController {
                     console.error('Erro ao notificar queda de preço:', notifyError);
                 }
             }
+            if (!previousPromotionFlag && nextPromotionFlag === 1) {
+                try {
+                    const title = typeof body.title === 'string' && body.title.trim()
+                        ? body.title.trim()
+                        : String(property.title ?? '');
+                    await (0, priceDropNotificationService_1.notifyPromotionStarted)({
+                        propertyId: Number(id),
+                        propertyTitle: title,
+                        promotionPercentage: nextPromotionPercentage,
+                    });
+                }
+                catch (notifyError) {
+                    console.error('Erro ao notificar início de promoção:', notifyError);
+                }
+            }
             return res.status(200).json({ message: 'Imóvel atualizado com sucesso.' });
         }
         catch (error) {
@@ -800,17 +924,13 @@ class AdminController {
                 'description',
                 'type',
                 'purpose',
-                'owner_name',
-                'owner_phone',
                 'address',
-                'numero',
                 'bairro',
                 'quadra',
                 'lote',
                 'tipo_lote',
                 'city',
                 'state',
-                'cep',
                 'bedrooms',
                 'bathrooms',
                 'area_construida',
@@ -822,7 +942,11 @@ class AdminController {
                     return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
                 }
             }
-            const { title, description, type, purpose, status, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
+            const { title, description, type, purpose, status, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
+            const normalizedType = (0, propertyTypes_1.normalizePropertyType)(type);
+            if (!normalizedType) {
+                return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
+            }
             const normalizedStatus = normalizeStatus(status) ?? 'approved';
             const normalizedPurpose = normalizePurpose(purpose);
             if (!normalizedPurpose) {
@@ -869,14 +993,32 @@ class AdminController {
             const temAutomacaoFlag = parseBoolean(tem_automacao);
             const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
             const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+            let promotionFlag = 0;
+            let promotionPercentage = null;
+            let promotionStart = null;
+            let promotionEnd = null;
+            try {
+                promotionFlag = parseBoolean(is_promoted);
+                promotionPercentage = parsePromotionPercentage(promotion_percentage);
+                promotionStart = parsePromotionDateTime(promotion_start);
+                promotionEnd = parsePromotionDateTime(promotion_end);
+                if (promotionFlag === 0) {
+                    promotionPercentage = null;
+                    promotionStart = null;
+                    promotionEnd = null;
+                }
+            }
+            catch (parseError) {
+                return res.status(400).json({ error: parseError.message });
+            }
             const normalizedTipoLote = normalizeTipoLote(tipo_lote);
             if (!normalizedTipoLote) {
                 return res.status(400).json({ error: 'Tipo de lote inválido.' });
             }
-            if (!hasValidPhone(owner_phone)) {
+            if (owner_phone && String(owner_phone).trim().length > 0 && !hasValidPhone(owner_phone)) {
                 return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
             }
-            if (!normalizeDigits(numero)) {
+            if (numero && String(numero).trim().length > 0 && !normalizeDigits(numero)) {
                 return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
             }
             if (numericBedrooms == null ||
@@ -900,8 +1042,8 @@ class AdminController {
             }
             const imageUrls = [];
             const uploadImages = files?.images ?? [];
-            if (uploadImages.length < 2) {
-                return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imóvel.' });
+            if (uploadImages.length < 1) {
+                return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
             }
             for (const file of uploadImages) {
                 const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties/admin');
@@ -924,6 +1066,10 @@ class AdminController {
             type,
             purpose,
             status,
+            is_promoted,
+            promotion_percentage,
+            promotion_start,
+            promotion_end,
             price,
             price_sale,
             price_rent,
@@ -954,24 +1100,28 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerIdValue,
                 title,
                 description,
-                type,
+                normalizedType,
                 normalizedPurpose,
                 normalizedStatus,
+                promotionFlag,
+                promotionPercentage,
+                promotionStart,
+                promotionEnd,
                 resolvedPrice,
                 resolvedPriceSale,
                 resolvedPriceRent,
                 stringOrNull(code),
                 stringOrNull(owner_name),
-                normalizePhone(owner_phone),
+                owner_phone ? normalizePhone(owner_phone) : null,
                 address,
                 stringOrNull(quadra),
                 stringOrNull(lote),
-                normalizeDigits(numero),
+                numero ? normalizeDigits(numero) : null,
                 stringOrNull(bairro),
                 stringOrNull(complemento),
                 normalizedTipoLote,
@@ -997,6 +1147,18 @@ class AdminController {
             if (imageUrls.length > 0) {
                 const values = imageUrls.map((url) => [propertyId, url]);
                 await connection_1.default.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
+            }
+            if (promotionFlag === 1) {
+                try {
+                    await (0, priceDropNotificationService_1.notifyPromotionStarted)({
+                        propertyId,
+                        propertyTitle: title,
+                        promotionPercentage,
+                    });
+                }
+                catch (promotionNotifyError) {
+                    console.error('Erro ao notificar favoritos sobre promocao (create admin):', promotionNotifyError);
+                }
             }
             try {
                 await (0, notificationService_1.notifyAdmins)(`Um novo imovel '${title}' foi criado pelo admin.`, 'property', propertyId);
@@ -1753,6 +1915,19 @@ class AdminController {
             if (propertyRows.length === 0) {
                 return res.status(404).json({ error: 'Imovel nao encontrado.' });
             }
+            const [imageCountRows] = await connection_1.default.query('SELECT COUNT(*) AS total FROM property_images WHERE property_id = ?', [propertyId]);
+            const existingCount = Number(imageCountRows[0]?.total ?? 0);
+            const availableSlots = Math.max(0, MAX_IMAGES_PER_PROPERTY - existingCount);
+            if (availableSlots <= 0) {
+                return res.status(400).json({
+                    error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel atingido.`,
+                });
+            }
+            if (files.length > availableSlots) {
+                return res.status(400).json({
+                    error: `Este imovel aceita somente ${availableSlots} nova(s) imagem(ns).`,
+                });
+            }
             const uploadedUrls = [];
             for (const file of files) {
                 const result = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties/admin');
@@ -1766,6 +1941,12 @@ class AdminController {
         }
         catch (error) {
             console.error('Erro ao adicionar imagens:', error);
+            const knownError = error;
+            if (knownError?.statusCode === 413) {
+                return res.status(413).json({
+                    error: 'Arquivo muito grande. Reduza o tamanho da imagem e tente novamente.',
+                });
+            }
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }
@@ -1776,6 +1957,11 @@ class AdminController {
             return res.status(400).json({ error: 'Identificadores invalidos.' });
         }
         try {
+            const [imageCountRows] = await connection_1.default.query('SELECT COUNT(*) AS total FROM property_images WHERE property_id = ?', [propertyId]);
+            const totalImages = Number(imageCountRows[0]?.total ?? 0);
+            if (totalImages <= 1) {
+                return res.status(400).json({ error: 'O imóvel precisa manter ao menos 1 imagem.' });
+            }
             const [result] = await connection_1.default.query('DELETE FROM property_images WHERE id = ? AND property_id = ?', [imageId, propertyId]);
             if (result.affectedRows === 0) {
                 return res.status(404).json({ error: 'Imagem nao encontrada para este imovel.' });

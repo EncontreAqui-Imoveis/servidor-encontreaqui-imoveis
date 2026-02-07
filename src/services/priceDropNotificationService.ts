@@ -10,6 +10,7 @@ import {
 const PRICE_DROP_THRESHOLD = 0.1;
 const PRICE_DROP_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const PRICE_DROP_PREFIX = 'Preço reduzido';
+const PROMOTION_PREFIX = 'Imóvel em oferta';
 
 function formatCurrency(value: number): string {
   try {
@@ -104,6 +105,68 @@ export async function notifyPriceDropIfNeeded({
       'property',
       propertyId,
       PRICE_DROP_PREFIX,
+      cutoff,
+      group.role
+    );
+
+    if (allowedRecipients.length === 0) {
+      continue;
+    }
+
+    await notifyUsers({
+      message,
+      recipientIds: allowedRecipients,
+      recipientRole: group.role,
+      relatedEntityType: 'property',
+      relatedEntityId: propertyId,
+    });
+  }
+}
+
+export async function notifyPromotionStarted(input: {
+  propertyId: number;
+  propertyTitle: string;
+  promotionPercentage?: number | null;
+}): Promise<void> {
+  const { propertyId, propertyTitle, promotionPercentage } = input;
+
+  const [rows] = await connection.query<RowDataPacket[]>(
+    'SELECT usuario_id FROM favoritos WHERE imovel_id = ?',
+    [propertyId]
+  );
+
+  const recipients = (rows ?? [])
+    .map((row) => Number(row.usuario_id))
+    .filter((id) => Number.isFinite(id));
+
+  if (recipients.length === 0) {
+    return;
+  }
+
+  const cutoff = new Date(Date.now() - PRICE_DROP_COOLDOWN_MS);
+  const { clientIds, brokerIds } = await splitRecipientsByRole(recipients);
+  const cleanTitle = propertyTitle?.trim() ? propertyTitle.trim() : 'sem título';
+  const discountText =
+    typeof promotionPercentage === 'number' && Number.isFinite(promotionPercentage)
+      ? ` Desconto de ${promotionPercentage.toFixed(2)}%.`
+      : '';
+  const message = `${PROMOTION_PREFIX}: o imóvel "${cleanTitle}" entrou em promoção.${discountText}`;
+
+  const recipientGroups: Array<{ role: RecipientRole; ids: number[] }> = [
+    { role: 'client', ids: clientIds },
+    { role: 'broker', ids: brokerIds },
+  ];
+
+  for (const group of recipientGroups) {
+    if (group.ids.length === 0) {
+      continue;
+    }
+
+    const allowedRecipients = await filterRecipientsByCooldown(
+      group.ids,
+      'property',
+      propertyId,
+      PROMOTION_PREFIX,
       cutoff,
       group.role
     );

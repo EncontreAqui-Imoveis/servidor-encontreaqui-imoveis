@@ -123,12 +123,29 @@ function parseBoolean(value: unknown): 0 | 1 {
   return 0;
 }
 
+function normalizeTipoLote(value: unknown): 'meio' | 'inteiro' | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized === 'meio') {
+    return 'meio';
+  }
+  if (normalized === 'inteiro') {
+    return 'inteiro';
+  }
+  return null;
+}
+
 function stringOrNull(value: unknown): string | null {
   if (value === undefined || value === null) {
-    return '';
+    return null;
   }
   const textual = String(value).trim();
-  return textual.length > 0 ? textual : '';
+  return textual.length > 0 ? textual : null;
 }
 
 interface PropertyDetailRow extends RowDataPacket {
@@ -861,6 +878,11 @@ class AdminController {
             params.push(parseBoolean(value));
             break;
           }
+          case 'tipo_lote': {
+            setParts.push('tipo_lote = ?');
+            params.push(normalizeTipoLote(value));
+            break;
+          }
           default: {
             if (value === undefined) {
               continue;
@@ -1010,6 +1032,7 @@ class AdminController {
       const temAutomacaoFlag = parseBoolean(tem_automacao);
       const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
       const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+      const normalizedTipoLote = normalizeTipoLote(tipo_lote);
 
       const [duplicateRows] = await connection.query<RowDataPacket[]>(
         `
@@ -1104,7 +1127,7 @@ class AdminController {
           stringOrNull(numero),
           stringOrNull(bairro),
           stringOrNull(complemento),
-          stringOrNull(tipo_lote),
+          normalizedTipoLote,
           city,
           state,
           stringOrNull(cep),

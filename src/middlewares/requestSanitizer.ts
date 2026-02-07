@@ -43,6 +43,17 @@ function sanitizeDecimalField(
   payload[field] = match ? match[0] : '';
 }
 
+function sanitizeEnumField(
+  payload: Record<string, unknown>,
+  field: string,
+  allowedValues: readonly string[]
+): void {
+  const value = payload[field];
+  if (value == null || value === '') return;
+  const normalized = String(value).trim().toLowerCase();
+  payload[field] = allowedValues.includes(normalized) ? normalized : '';
+}
+
 function sanitizePropertyPayload(payload: Record<string, unknown>): void {
   sanitizeDigitField(payload, 'cep');
   sanitizeDigitField(payload, 'owner_phone');
@@ -56,6 +67,7 @@ function sanitizePropertyPayload(payload: Record<string, unknown>): void {
   sanitizeDecimalField(payload, 'price_rent');
   sanitizeDecimalField(payload, 'area_construida');
   sanitizeDecimalField(payload, 'area_terreno');
+  sanitizeEnumField(payload, 'tipo_lote', ['meio', 'inteiro']);
 }
 
 export function requestSanitizer(

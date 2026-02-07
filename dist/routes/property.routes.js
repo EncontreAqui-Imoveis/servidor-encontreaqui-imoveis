@@ -22,6 +22,7 @@ propertyRoutes.post('/:id/close', auth_1.authMiddleware, auth_1.isBroker, (req, 
 propertyRoutes.post('/:id/cancel-deal', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.cancelDeal(req, res));
 propertyRoutes.delete('/:id', auth_1.authMiddleware, auth_1.isBroker, (req, res) => PropertyController_1.propertyController.delete(req, res));
 propertyRoutes.delete('/client/:id', auth_1.authMiddleware, auth_1.isClient, (req, res) => PropertyController_1.propertyController.delete(req, res));
+propertyRoutes.get('/me', auth_1.authMiddleware, (req, res) => PropertyController_1.propertyController.listUserProperties(req, res));
 propertyRoutes.get('/', (req, res) => PropertyController_1.propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/featured', (req, res) => PropertyController_1.propertyController.listFeaturedProperties(req, res));
 propertyRoutes.get('/public', (req, res) => PropertyController_1.propertyController.listPublicProperties(req, res));

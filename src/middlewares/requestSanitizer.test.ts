@@ -44,6 +44,7 @@ describe('requestSanitizer', () => {
         bathrooms: '3<script>alert(1)</script>',
         garage_spots: '1 union select',
         area_terreno: '450.70m2',
+        tipo_lote: 'onmyown',
         title: "Casa ' OR 1=1 --",
       },
     } as unknown as Request;
@@ -63,6 +64,7 @@ describe('requestSanitizer', () => {
     expect((req.body as any).bathrooms).toBe('31');
     expect((req.body as any).garage_spots).toBe('1');
     expect((req.body as any).area_terreno).toBe('450.70');
+    expect((req.body as any).tipo_lote).toBe('');
     expect((req.body as any).title).toBe("Casa ' OR 1=1 --");
   });
 });

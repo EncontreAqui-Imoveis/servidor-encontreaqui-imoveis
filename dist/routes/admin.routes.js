@@ -4,6 +4,7 @@ const express_1 = require("express");
 const AdminController_1 = require("../controllers/AdminController");
 const auth_1 = require("../middlewares/auth");
 const uploadMiddleware_1 = require("../middlewares/uploadMiddleware");
+const uploadMiddleware_2 = require("../middlewares/uploadMiddleware");
 const adminRoutes = (0, express_1.Router)();
 adminRoutes.post('/login', AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
@@ -21,7 +22,11 @@ adminRoutes.get('/clients', AdminController_1.adminController.getAllClients);
 adminRoutes.get('/clients/:id', AdminController_1.adminController.getClientById);
 adminRoutes.put('/clients/:id', AdminController_1.adminController.updateClient);
 adminRoutes.get('/clients/:id/properties', AdminController_1.adminController.getClientProperties);
-adminRoutes.post('/brokers', AdminController_1.adminController.createBroker);
+adminRoutes.post('/brokers', uploadMiddleware_2.brokerDocsUpload.fields([
+    { name: 'creciFront', maxCount: 1 },
+    { name: 'creciBack', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+]), AdminController_1.adminController.createBroker);
 adminRoutes.get('/brokers', AdminController_1.adminController.listBrokers);
 adminRoutes.get('/brokers/pending', AdminController_1.adminController.listPendingBrokers);
 adminRoutes.get('/brokers/:id', AdminController_1.adminController.getBrokerById);

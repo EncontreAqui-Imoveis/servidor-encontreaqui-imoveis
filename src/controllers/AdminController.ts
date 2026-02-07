@@ -1180,9 +1180,22 @@ class AdminController {
 
   async createBroker(req: Request, res: Response) {
     const { name, email, phone, creci, street, number, complement, bairro, city, state, cep, agency_id, password } = req.body ?? {};
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
     if (!name || !email || !creci) {
       return res.status(400).json({ error: 'Nome, email e CRECI s?o obrigatorios.' });
+    }
+
+    const hasAnyBrokerDocument = Boolean(
+      files?.creciFront?.[0] || files?.creciBack?.[0] || files?.selfie?.[0]
+    );
+    if (
+      hasAnyBrokerDocument &&
+      (!files?.creciFront?.[0] || !files?.creciBack?.[0] || !files?.selfie?.[0])
+    ) {
+      return res.status(400).json({
+        error: 'Para cadastrar corretor com documentos, envie frente do CRECI, verso do CRECI e selfie.',
+      });
     }
 
     const addressResult = sanitizeAddressInput({
@@ -1201,12 +1214,16 @@ class AdminController {
       });
     }
 
+    const db = await connection.getConnection();
     try {
-      const [existing] = await connection.query<RowDataPacket[]>(
+      await db.beginTransaction();
+
+      const [existing] = await db.query<RowDataPacket[]>(
         'SELECT id FROM users WHERE email = ? LIMIT 1',
         [email]
       );
       if (existing.length > 0) {
+        await db.rollback();
         return res.status(409).json({ error: 'Email ja cadastrado.' });
       }
 
@@ -1216,7 +1233,7 @@ class AdminController {
         passwordHash = await bcrypt.hash(String(password), salt);
       }
 
-      const [userResult] = await connection.query<ResultSetHeader>(
+      const [userResult] = await db.query<ResultSetHeader>(
         'INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           name,
@@ -1234,10 +1251,42 @@ class AdminController {
       );
       const userId = userResult.insertId;
 
-      await connection.query(
+      const brokerStatus = hasAnyBrokerDocument
+        ? 'pending_verification'
+        : 'pending_documents';
+      await db.query(
         'INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)',
-        [userId, creci, 'pending_documents', agency_id ? Number(agency_id) : null]
+        [userId, creci, brokerStatus, agency_id ? Number(agency_id) : null]
       );
+
+      if (hasAnyBrokerDocument) {
+        const creciFrontResult = await uploadToCloudinary(
+          files!.creciFront[0],
+          'brokers/documents'
+        );
+        const creciBackResult = await uploadToCloudinary(
+          files!.creciBack[0],
+          'brokers/documents'
+        );
+        const selfieResult = await uploadToCloudinary(
+          files!.selfie[0],
+          'brokers/documents'
+        );
+
+        await db.query(
+          `INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
+           VALUES (?, ?, ?, ?, 'pending')
+           ON DUPLICATE KEY UPDATE
+             creci_front_url = VALUES(creci_front_url),
+             creci_back_url = VALUES(creci_back_url),
+             selfie_url = VALUES(selfie_url),
+             status = 'pending',
+             updated_at = CURRENT_TIMESTAMP`,
+          [userId, creciFrontResult.url, creciBackResult.url, selfieResult.url]
+        );
+      }
+
+      await db.commit();
 
       try {
         await notifyAdmins(`Novo corretor '${name}' cadastrado e pendente de verificacao.`, 'broker', userId);
@@ -1247,8 +1296,11 @@ class AdminController {
 
       return res.status(201).json({ message: 'Corretor criado com sucesso.', broker_id: userId });
     } catch (error) {
+      await db.rollback();
       console.error('Erro ao criar corretor:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
+    } finally {
+      db.release();
     }
   }
 

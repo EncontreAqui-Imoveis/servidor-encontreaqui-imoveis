@@ -954,8 +954,16 @@ class AdminController {
     }
     async createBroker(req, res) {
         const { name, email, phone, creci, street, number, complement, bairro, city, state, cep, agency_id, password } = req.body ?? {};
+        const files = req.files;
         if (!name || !email || !creci) {
             return res.status(400).json({ error: 'Nome, email e CRECI s?o obrigatorios.' });
+        }
+        const hasAnyBrokerDocument = Boolean(files?.creciFront?.[0] || files?.creciBack?.[0] || files?.selfie?.[0]);
+        if (hasAnyBrokerDocument &&
+            (!files?.creciFront?.[0] || !files?.creciBack?.[0] || !files?.selfie?.[0])) {
+            return res.status(400).json({
+                error: 'Para cadastrar corretor com documentos, envie frente do CRECI, verso do CRECI e selfie.',
+            });
         }
         const addressResult = (0, address_1.sanitizeAddressInput)({
             street,
@@ -972,9 +980,12 @@ class AdminController {
                 fields: addressResult.errors,
             });
         }
+        const db = await connection_1.default.getConnection();
         try {
-            const [existing] = await connection_1.default.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+            await db.beginTransaction();
+            const [existing] = await db.query('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
             if (existing.length > 0) {
+                await db.rollback();
                 return res.status(409).json({ error: 'Email ja cadastrado.' });
             }
             let passwordHash = null;
@@ -982,7 +993,7 @@ class AdminController {
                 const salt = await bcryptjs_1.default.genSalt(10);
                 passwordHash = await bcryptjs_1.default.hash(String(password), salt);
             }
-            const [userResult] = await connection_1.default.query('INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
+            const [userResult] = await db.query('INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [
                 name,
                 email,
                 stringOrNull(phone),
@@ -996,7 +1007,24 @@ class AdminController {
                 addressResult.value.cep,
             ]);
             const userId = userResult.insertId;
-            await connection_1.default.query('INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)', [userId, creci, 'pending_documents', agency_id ? Number(agency_id) : null]);
+            const brokerStatus = hasAnyBrokerDocument
+                ? 'pending_verification'
+                : 'pending_documents';
+            await db.query('INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)', [userId, creci, brokerStatus, agency_id ? Number(agency_id) : null]);
+            if (hasAnyBrokerDocument) {
+                const creciFrontResult = await (0, cloudinary_1.uploadToCloudinary)(files.creciFront[0], 'brokers/documents');
+                const creciBackResult = await (0, cloudinary_1.uploadToCloudinary)(files.creciBack[0], 'brokers/documents');
+                const selfieResult = await (0, cloudinary_1.uploadToCloudinary)(files.selfie[0], 'brokers/documents');
+                await db.query(`INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
+           VALUES (?, ?, ?, ?, 'pending')
+           ON DUPLICATE KEY UPDATE
+             creci_front_url = VALUES(creci_front_url),
+             creci_back_url = VALUES(creci_back_url),
+             selfie_url = VALUES(selfie_url),
+             status = 'pending',
+             updated_at = CURRENT_TIMESTAMP`, [userId, creciFrontResult.url, creciBackResult.url, selfieResult.url]);
+            }
+            await db.commit();
             try {
                 await (0, notificationService_1.notifyAdmins)(`Novo corretor '${name}' cadastrado e pendente de verificacao.`, 'broker', userId);
             }
@@ -1006,8 +1034,12 @@ class AdminController {
             return res.status(201).json({ message: 'Corretor criado com sucesso.', broker_id: userId });
         }
         catch (error) {
+            await db.rollback();
             console.error('Erro ao criar corretor:', error);
             return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+        finally {
+            db.release();
         }
     }
     async createUser(req, res) {

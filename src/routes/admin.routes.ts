@@ -1,7 +1,8 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { adminController, sendNotification, getDashboardStats } from '../controllers/AdminController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
+import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 
 const adminRoutes = Router();
 
@@ -30,7 +31,15 @@ adminRoutes.get('/clients/:id', adminController.getClientById);
 adminRoutes.put('/clients/:id', adminController.updateClient);
 adminRoutes.get('/clients/:id/properties', adminController.getClientProperties);
 
-adminRoutes.post('/brokers', adminController.createBroker);
+adminRoutes.post(
+  '/brokers',
+  brokerDocsUpload.fields([
+    { name: 'creciFront', maxCount: 1 },
+    { name: 'creciBack', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+  ]),
+  adminController.createBroker
+);
 adminRoutes.get('/brokers', adminController.listBrokers);
 adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
 adminRoutes.get('/brokers/:id', adminController.getBrokerById);
@@ -70,3 +79,4 @@ adminRoutes.get('/dashboard/stats', getDashboardStats);
 adminRoutes.get('/stats/dashboard', getDashboardStats);
 
 export default adminRoutes;
+

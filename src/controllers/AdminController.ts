@@ -148,6 +148,37 @@ function stringOrNull(value: unknown): string | null {
   return textual.length > 0 ? textual : null;
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeDigits(value: unknown): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return String(value).replace(/\D/g, '');
+}
+
+function isValidEmail(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  return EMAIL_REGEX.test(value.trim());
+}
+
+function normalizePhone(value: unknown): string {
+  return normalizeDigits(value).slice(0, 11);
+}
+
+function hasValidPhone(value: unknown): boolean {
+  return normalizePhone(value).length === 11;
+}
+
+function normalizeCreci(value: unknown): string {
+  return normalizeDigits(value).slice(0, 8);
+}
+
+function hasValidCreci(value: unknown): boolean {
+  const length = normalizeCreci(value).length;
+  return length >= 4 && length <= 8;
+}
+
 interface PropertyDetailRow extends RowDataPacket {
   id: number;
   broker_id?: number | null;
@@ -935,7 +966,28 @@ class AdminController {
     const body = req.body ?? {};
 
     try {
-      const required = ['title', 'type', 'purpose', 'address', 'city', 'state'];
+      const required = [
+        'title',
+        'description',
+        'type',
+        'purpose',
+        'owner_name',
+        'owner_phone',
+        'address',
+        'numero',
+        'bairro',
+        'quadra',
+        'lote',
+        'tipo_lote',
+        'city',
+        'state',
+        'cep',
+        'bedrooms',
+        'bathrooms',
+        'area_construida',
+        'area_terreno',
+        'garage_spots',
+      ];
       for (const field of required) {
         if (!body[field]) {
           return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
@@ -981,7 +1033,7 @@ class AdminController {
         broker_id,
       } = body;
 
-      const normalizedStatus = normalizeStatus(status) ?? 'pending_approval';
+      const normalizedStatus = normalizeStatus(status) ?? 'approved';
 
       const normalizedPurpose = normalizePurpose(purpose);
       if (!normalizedPurpose) {
@@ -1033,6 +1085,27 @@ class AdminController {
       const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
       const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
       const normalizedTipoLote = normalizeTipoLote(tipo_lote);
+      if (!normalizedTipoLote) {
+        return res.status(400).json({ error: 'Tipo de lote inválido.' });
+      }
+
+      if (!hasValidPhone(owner_phone)) {
+        return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
+      }
+
+      if (!normalizeDigits(numero)) {
+        return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+      }
+
+      if (
+        numericBedrooms == null ||
+        numericBathrooms == null ||
+        numericGarageSpots == null ||
+        numericAreaConstruida == null ||
+        numericAreaTerreno == null
+      ) {
+        return res.status(400).json({ error: 'Campos numéricos obrigatórios inválidos.' });
+      }
 
       const [duplicateRows] = await connection.query<RowDataPacket[]>(
         `
@@ -1053,6 +1126,9 @@ class AdminController {
 
       const imageUrls: string[] = [];
       const uploadImages = files?.images ?? [];
+      if (uploadImages.length < 2) {
+        return res.status(400).json({ error: 'Envie pelo menos 2 imagens do imóvel.' });
+      }
       for (const file of uploadImages) {
         const uploaded = await uploadToCloudinary(file, 'properties/admin');
         imageUrls.push(uploaded.url);
@@ -1120,11 +1196,11 @@ class AdminController {
             resolvedPriceRent,
             stringOrNull(code),
             stringOrNull(owner_name),
-            stringOrNull(owner_phone),
+            normalizePhone(owner_phone),
             address,
             stringOrNull(quadra),
             stringOrNull(lote),
-          stringOrNull(numero),
+          normalizeDigits(numero),
           stringOrNull(bairro),
           stringOrNull(complemento),
           normalizedTipoLote,
@@ -1179,24 +1255,46 @@ class AdminController {
   }
 
   async createBroker(req: Request, res: Response) {
-    const { name, email, phone, creci, street, number, complement, bairro, city, state, cep, agency_id, password } = req.body ?? {};
+    const {
+      name,
+      email,
+      phone,
+      creci,
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+      agency_id,
+      password,
+      status,
+    } = req.body ?? {};
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
-    if (!name || !email || !creci) {
-      return res.status(400).json({ error: 'Nome, email e CRECI s?o obrigatorios.' });
+    if (!name || !email || !creci || !password || !phone) {
+      return res.status(400).json({ error: 'Nome, email, telefone, senha e CRECI são obrigatórios.' });
+    }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Email inválido.' });
+    }
+    if (!hasValidPhone(phone)) {
+      return res.status(400).json({ error: 'Telefone inválido. Use 11 dígitos com DDD.' });
+    }
+    if (!hasValidCreci(creci)) {
+      return res.status(400).json({ error: 'CRECI inválido. Deve ter entre 4 e 8 dígitos.' });
+    }
+    if (!normalizeDigits(number)) {
+      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
     }
 
-    const hasAnyBrokerDocument = Boolean(
-      files?.creciFront?.[0] || files?.creciBack?.[0] || files?.selfie?.[0]
-    );
-    if (
-      hasAnyBrokerDocument &&
-      (!files?.creciFront?.[0] || !files?.creciBack?.[0] || !files?.selfie?.[0])
-    ) {
+    if (!files?.creciFront?.[0] || !files?.creciBack?.[0] || !files?.selfie?.[0]) {
       return res.status(400).json({
         error: 'Para cadastrar corretor com documentos, envie frente do CRECI, verso do CRECI e selfie.',
       });
     }
+    const hasAnyBrokerDocument = true;
 
     const addressResult = sanitizeAddressInput({
       street,
@@ -1233,15 +1331,20 @@ class AdminController {
         passwordHash = await bcrypt.hash(String(password), salt);
       }
 
+      const requestedStatus = normalizeStatus(status);
+      const brokerStatus =
+        requestedStatus === 'approved' ? 'approved' : 'pending_verification';
+      const documentStatus = brokerStatus === 'approved' ? 'approved' : 'pending';
+
       const [userResult] = await db.query<ResultSetHeader>(
         'INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           name,
           email,
-          stringOrNull(phone),
+          normalizePhone(phone),
           passwordHash,
           addressResult.value.street,
-          addressResult.value.number,
+          normalizeDigits(addressResult.value.number),
           addressResult.value.complement,
           addressResult.value.bairro,
           addressResult.value.city,
@@ -1251,12 +1354,9 @@ class AdminController {
       );
       const userId = userResult.insertId;
 
-      const brokerStatus = hasAnyBrokerDocument
-        ? 'pending_verification'
-        : 'pending_documents';
       await db.query(
         'INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)',
-        [userId, creci, brokerStatus, agency_id ? Number(agency_id) : null]
+        [userId, normalizeCreci(creci), brokerStatus, agency_id ? Number(agency_id) : null]
       );
 
       if (hasAnyBrokerDocument) {
@@ -1275,21 +1375,21 @@ class AdminController {
 
         await db.query(
           `INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
-           VALUES (?, ?, ?, ?, 'pending')
+           VALUES (?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE
              creci_front_url = VALUES(creci_front_url),
              creci_back_url = VALUES(creci_back_url),
              selfie_url = VALUES(selfie_url),
-             status = 'pending',
+             status = VALUES(status),
              updated_at = CURRENT_TIMESTAMP`,
-          [userId, creciFrontResult.url, creciBackResult.url, selfieResult.url]
+          [userId, creciFrontResult.url, creciBackResult.url, selfieResult.url, documentStatus]
         );
       }
 
       await db.commit();
 
       try {
-        await notifyAdmins(`Novo corretor '${name}' cadastrado e pendente de verificacao.`, 'broker', userId);
+        await notifyAdmins(`Novo corretor '${name}' cadastrado com status '${brokerStatus}'.`, 'broker', userId);
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre novo corretor:', notifyError);
       }
@@ -1307,8 +1407,17 @@ class AdminController {
   async createUser(req: Request, res: Response) {
     const { name, email, phone, password, street, number, complement, bairro, city, state, cep } = req.body ?? {};
 
-    if (!name || !email) {
-      return res.status(400).json({ error: 'Nome e email s?o obrigatorios.' });
+    if (!name || !email || !phone || !password) {
+      return res.status(400).json({ error: 'Nome, email, telefone e senha são obrigatórios.' });
+    }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Email inválido.' });
+    }
+    if (!hasValidPhone(phone)) {
+      return res.status(400).json({ error: 'Telefone inválido. Use 11 dígitos com DDD.' });
+    }
+    if (!normalizeDigits(number)) {
+      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
     }
 
     const addressResult = sanitizeAddressInput({
@@ -1347,10 +1456,10 @@ class AdminController {
         [
           name,
           email,
-          stringOrNull(phone),
+          normalizePhone(phone),
           passwordHash,
           addressResult.value.street,
-          addressResult.value.number,
+          normalizeDigits(addressResult.value.number),
           addressResult.value.complement,
           addressResult.value.bairro,
           addressResult.value.city,

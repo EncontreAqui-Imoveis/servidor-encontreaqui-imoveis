@@ -16,7 +16,7 @@ const address_1 = require("./address");
         (0, vitest_1.expect)(result.ok).toBe(true);
         if (result.ok) {
             (0, vitest_1.expect)(result.value.street).toBe('Rua Central');
-            (0, vitest_1.expect)(result.value.number).toBe('123A');
+            (0, vitest_1.expect)(result.value.number).toBe('123');
             (0, vitest_1.expect)(result.value.complement).toBe('Apt 12');
             (0, vitest_1.expect)(result.value.bairro).toBe('Centro');
             (0, vitest_1.expect)(result.value.city).toBe('Goiania');
@@ -36,6 +36,20 @@ const address_1 = require("./address");
         (0, vitest_1.expect)(result.ok).toBe(false);
         if (!result.ok) {
             (0, vitest_1.expect)(result.errors).toContain('street');
+            (0, vitest_1.expect)(result.errors).toContain('number');
+        }
+    });
+    (0, vitest_1.it)('fails when number has no digits', () => {
+        const result = (0, address_1.sanitizeAddressInput)({
+            street: 'Rua A',
+            number: 'ABC',
+            bairro: 'Centro',
+            city: 'Goiania',
+            state: 'GO',
+            cep: '74000000',
+        });
+        (0, vitest_1.expect)(result.ok).toBe(false);
+        if (!result.ok) {
             (0, vitest_1.expect)(result.errors).toContain('number');
         }
     });

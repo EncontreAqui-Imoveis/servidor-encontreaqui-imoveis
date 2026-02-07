@@ -37,6 +37,13 @@ function normalizeState(value: unknown): string | null {
   return normalized.length == STATE_LENGTH ? normalized : null;
 }
 
+function normalizeNumber(value: unknown): string | null {
+  const text = normalizeText(value);
+  if (!text) return null;
+  const normalized = text.replace(/\D/g, '');
+  return normalized.length > 0 ? normalized : null;
+}
+
 function normalizeCep(value: unknown): string | null {
   const text = normalizeText(value);
   if (!text) return null;
@@ -53,7 +60,7 @@ export function sanitizeAddressInput(input: AddressInput): AddressResult {
 
   const street = normalizeText(input.street);
   if (!street) errors.push('street');
-  const number = normalizeText(input.number);
+  const number = normalizeNumber(input.number);
   if (!number) errors.push('number');
   const bairro = normalizeText(input.bairro);
   if (!bairro) errors.push('bairro');

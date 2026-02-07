@@ -22,6 +22,13 @@ function normalizeState(value) {
     const normalized = text.toUpperCase().replace(/[^A-Z]/g, '');
     return normalized.length == STATE_LENGTH ? normalized : null;
 }
+function normalizeNumber(value) {
+    const text = normalizeText(value);
+    if (!text)
+        return null;
+    const normalized = text.replace(/\D/g, '');
+    return normalized.length > 0 ? normalized : null;
+}
 function normalizeCep(value) {
     const text = normalizeText(value);
     if (!text)
@@ -37,7 +44,7 @@ function sanitizeAddressInput(input) {
     const street = normalizeText(input.street);
     if (!street)
         errors.push('street');
-    const number = normalizeText(input.number);
+    const number = normalizeNumber(input.number);
     if (!number)
         errors.push('number');
     const bairro = normalizeText(input.bairro);

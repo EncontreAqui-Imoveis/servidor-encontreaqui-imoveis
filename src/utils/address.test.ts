@@ -17,7 +17,7 @@ describe('sanitizeAddressInput', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.street).toBe('Rua Central');
-      expect(result.value.number).toBe('123A');
+      expect(result.value.number).toBe('123');
       expect(result.value.complement).toBe('Apt 12');
       expect(result.value.bairro).toBe('Centro');
       expect(result.value.city).toBe('Goiania');
@@ -39,6 +39,22 @@ describe('sanitizeAddressInput', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors).toContain('street');
+      expect(result.errors).toContain('number');
+    }
+  });
+
+  it('fails when number has no digits', () => {
+    const result = sanitizeAddressInput({
+      street: 'Rua A',
+      number: 'ABC',
+      bairro: 'Centro',
+      city: 'Goiania',
+      state: 'GO',
+      cep: '74000000',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
       expect(result.errors).toContain('number');
     }
   });

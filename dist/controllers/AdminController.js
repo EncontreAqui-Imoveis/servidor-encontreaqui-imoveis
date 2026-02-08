@@ -50,6 +50,7 @@ const PURPOSE_MAP = {
 };
 const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
 const MAX_IMAGES_PER_PROPERTY = 20;
+const IMAGE_UPLOAD_CONCURRENCY = 4;
 function normalizeStatus(value) {
     if (typeof value !== 'string') {
         return null;
@@ -178,6 +179,26 @@ function normalizeCreci(value) {
 function hasValidCreci(value) {
     const length = normalizeCreci(value).length;
     return length >= 4 && length <= 8;
+}
+async function uploadImagesWithConcurrency(files, folder, concurrency = IMAGE_UPLOAD_CONCURRENCY) {
+    if (files.length === 0) {
+        return [];
+    }
+    const results = new Array(files.length);
+    let nextIndex = 0;
+    const workers = Array.from({ length: Math.min(concurrency, files.length) }, async () => {
+        while (true) {
+            const currentIndex = nextIndex;
+            nextIndex += 1;
+            if (currentIndex >= files.length) {
+                break;
+            }
+            const uploaded = await (0, cloudinary_1.uploadToCloudinary)(files[currentIndex], folder);
+            results[currentIndex] = uploaded.url;
+        }
+    });
+    await Promise.all(workers);
+    return results;
 }
 function toNullableNumber(value) {
     if (value === undefined || value === null || value === '') {
@@ -942,7 +963,8 @@ class AdminController {
                     return res.status(400).json({ error: `Campo obrigatorio ausente: ${field}` });
                 }
             }
-            const { title, description, type, purpose, status, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
+            const { title, description, type, purpose, status, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, video_url, broker_id, } = body;
+            const semNumeroFlag = parseBoolean(sem_numero);
             const normalizedType = (0, propertyTypes_1.normalizePropertyType)(type);
             if (!normalizedType) {
                 return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
@@ -1018,9 +1040,10 @@ class AdminController {
             if (owner_phone && String(owner_phone).trim().length > 0 && !hasValidPhone(owner_phone)) {
                 return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
             }
-            if (numero && String(numero).trim().length > 0 && !normalizeDigits(numero)) {
+            if (semNumeroFlag !== 1 && numero && String(numero).trim().length > 0 && !normalizeDigits(numero)) {
                 return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
             }
+            const normalizedNumero = semNumeroFlag === 1 ? null : stringOrNull(normalizeDigits(numero));
             if (numericBedrooms == null ||
                 numericBathrooms == null ||
                 numericGarageSpots == null ||
@@ -1036,19 +1059,15 @@ class AdminController {
             AND COALESCE(numero, '') = COALESCE(?, '')
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
-        `, [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]);
+        `, [address, quadra ?? null, lote ?? null, normalizedNumero, bairro ?? null]);
             if (duplicateRows.length > 0) {
                 return res.status(409).json({ error: 'Imovel ja cadastrado no sistema.' });
             }
-            const imageUrls = [];
             const uploadImages = files?.images ?? [];
             if (uploadImages.length < 1) {
                 return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
             }
-            for (const file of uploadImages) {
-                const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties/admin');
-                imageUrls.push(uploaded.url);
-            }
+            const imageUrls = await uploadImagesWithConcurrency(uploadImages, 'properties/admin');
             let finalVideoUrl = null;
             const uploadVideos = files?.video ?? [];
             if (uploadVideos[0]) {
@@ -1121,7 +1140,7 @@ class AdminController {
                 address,
                 stringOrNull(quadra),
                 stringOrNull(lote),
-                numero ? normalizeDigits(numero) : null,
+                normalizedNumero,
                 stringOrNull(bairro),
                 stringOrNull(complemento),
                 normalizedTipoLote,
@@ -1928,11 +1947,7 @@ class AdminController {
                     error: `Este imovel aceita somente ${availableSlots} nova(s) imagem(ns).`,
                 });
             }
-            const uploadedUrls = [];
-            for (const file of files) {
-                const result = await (0, cloudinary_1.uploadToCloudinary)(file, 'properties/admin');
-                uploadedUrls.push(result.url);
-            }
+            const uploadedUrls = await uploadImagesWithConcurrency(files, 'properties/admin');
             if (uploadedUrls.length > 0) {
                 const values = uploadedUrls.map((url) => [propertyId, url]);
                 await connection_1.default.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);

@@ -1174,6 +1174,7 @@ class AdminController {
         quadra,
         lote,
         numero,
+        sem_numero,
         bairro,
         complemento,
         tipo_lote,
@@ -1196,6 +1197,7 @@ class AdminController {
         video_url,
         broker_id,
       } = body;
+      const semNumeroFlag = parseBoolean(sem_numero);
 
       const normalizedType = normalizePropertyType(type);
       if (!normalizedType) {
@@ -1279,9 +1281,10 @@ class AdminController {
         return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
       }
 
-      if (numero && String(numero).trim().length > 0 && !normalizeDigits(numero)) {
+      if (semNumeroFlag !== 1 && numero && String(numero).trim().length > 0 && !normalizeDigits(numero)) {
         return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
       }
+      const normalizedNumero = semNumeroFlag === 1 ? null : stringOrNull(normalizeDigits(numero));
 
       if (
         numericBedrooms == null ||
@@ -1303,7 +1306,7 @@ class AdminController {
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
         `,
-        [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]
+        [address, quadra ?? null, lote ?? null, normalizedNumero, bairro ?? null]
       );
 
       if (duplicateRows.length > 0) {
@@ -1390,7 +1393,7 @@ class AdminController {
             address,
             stringOrNull(quadra),
             stringOrNull(lote),
-          numero ? normalizeDigits(numero) : null,
+          normalizedNumero,
           stringOrNull(bairro),
           stringOrNull(complemento),
           normalizedTipoLote,

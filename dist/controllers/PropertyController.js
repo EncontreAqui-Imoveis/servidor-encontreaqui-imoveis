@@ -376,7 +376,8 @@ class PropertyController {
         if (!brokerId) {
             return res.status(401).json({ error: "Corretor não autenticado." });
         }
-        const { title, description, type, purpose, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const semNumeroFlag = parseBoolean(sem_numero);
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: "Campos obrigatórios não informados." });
         }
@@ -396,6 +397,11 @@ class PropertyController {
                 });
             }
         }
+        const numeroDigits = String(numero ?? '').replace(/\D/g, '');
+        if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+            return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+        }
+        const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
         let promotionFlag = 0;
         let promotionPercentage = null;
         let promotionStart = null;
@@ -461,7 +467,7 @@ class PropertyController {
             AND COALESCE(numero, '') = COALESCE(?, '')
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
-        `, [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]);
+        `, [address, quadra ?? null, lote ?? null, numeroNormalizado, bairro ?? null]);
             if (duplicateRows.length > 0) {
                 return res
                     .status(409)
@@ -565,7 +571,7 @@ class PropertyController {
                 address,
                 stringOrNull(quadra),
                 stringOrNull(lote),
-                stringOrNull(numero),
+                numeroNormalizado,
                 stringOrNull(bairro),
                 stringOrNull(complemento),
                 stringOrNull(tipo_lote),
@@ -634,7 +640,8 @@ class PropertyController {
         if (!userId) {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
-        const { title, description, type, purpose, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const semNumeroFlag = parseBoolean(sem_numero);
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
         }
@@ -654,6 +661,11 @@ class PropertyController {
                 });
             }
         }
+        const numeroDigits = String(numero ?? '').replace(/\D/g, '');
+        if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+            return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+        }
+        const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
         let promotionFlag = 0;
         let promotionPercentage = null;
         let promotionStart = null;
@@ -707,7 +719,7 @@ class PropertyController {
             AND COALESCE(numero, '') = COALESCE(?, '')
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
-        `, [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]);
+        `, [address, quadra ?? null, lote ?? null, numeroNormalizado, bairro ?? null]);
             if (duplicateRows.length > 0) {
                 return res
                     .status(409)
@@ -811,7 +823,7 @@ class PropertyController {
                 address,
                 stringOrNull(quadra),
                 stringOrNull(lote),
-                stringOrNull(numero),
+                numeroNormalizado,
                 stringOrNull(bairro),
                 stringOrNull(complemento),
                 stringOrNull(tipo_lote),

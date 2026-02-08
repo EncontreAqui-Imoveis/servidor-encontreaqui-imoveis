@@ -11,6 +11,7 @@ adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
 adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
 adminRoutes.delete('/notifications/:id', AdminController_1.adminController.deleteNotification);
 adminRoutes.delete('/notifications', AdminController_1.adminController.clearNotifications);
+adminRoutes.post('/uploads/sign', AdminController_1.adminController.signCloudinaryUpload);
 adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },

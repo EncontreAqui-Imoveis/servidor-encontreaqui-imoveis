@@ -561,6 +561,7 @@ class PropertyController {
       quadra,
       lote,
       numero,
+      sem_numero,
       bairro,
       complemento,
       tipo_lote,
@@ -582,6 +583,7 @@ class PropertyController {
       valor_condominio,
       valor_iptu,
     } = req.body ?? {};
+    const semNumeroFlag = parseBoolean(sem_numero);
 
     if (!title || !description || !type || !purpose || !address || !city || !state) {
       return res.status(400).json({ error: "Campos obrigatórios não informados." });
@@ -605,6 +607,11 @@ class PropertyController {
         });
       }
     }
+    const numeroDigits = String(numero ?? '').replace(/\D/g, '');
+    if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+    }
+    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
@@ -678,7 +685,7 @@ class PropertyController {
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
         `,
-        [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]
+        [address, quadra ?? null, lote ?? null, numeroNormalizado, bairro ?? null]
       );
 
       if (duplicateRows.length > 0) {
@@ -792,7 +799,7 @@ class PropertyController {
           address,
           stringOrNull(quadra),
           stringOrNull(lote),
-          stringOrNull(numero),
+          numeroNormalizado,
           stringOrNull(bairro),
           stringOrNull(complemento),
           stringOrNull(tipo_lote),
@@ -893,6 +900,7 @@ class PropertyController {
       quadra,
       lote,
       numero,
+      sem_numero,
       bairro,
       complemento,
       tipo_lote,
@@ -914,6 +922,7 @@ class PropertyController {
       valor_condominio,
       valor_iptu,
     } = req.body ?? {};
+    const semNumeroFlag = parseBoolean(sem_numero);
 
     if (!title || !description || !type || !purpose || !address || !city || !state) {
       return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
@@ -937,6 +946,11 @@ class PropertyController {
         });
       }
     }
+    const numeroDigits = String(numero ?? '').replace(/\D/g, '');
+    if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+    }
+    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
@@ -991,7 +1005,7 @@ class PropertyController {
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
         `,
-        [address, quadra ?? null, lote ?? null, numero ?? null, bairro ?? null]
+        [address, quadra ?? null, lote ?? null, numeroNormalizado, bairro ?? null]
       );
 
       if (duplicateRows.length > 0) {
@@ -1105,7 +1119,7 @@ class PropertyController {
           address,
           stringOrNull(quadra),
           stringOrNull(lote),
-          stringOrNull(numero),
+          numeroNormalizado,
           stringOrNull(bairro),
           stringOrNull(complemento),
           stringOrNull(tipo_lote),

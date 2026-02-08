@@ -52,6 +52,8 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
   "sold",
 ]);
 
+const MAX_IMAGES_PER_PROPERTY = 20;
+
 const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
 
 const DEAL_TYPE_MAP: Record<string, DealType> = {
@@ -707,6 +709,11 @@ class PropertyController {
       if (imageFiles.length < 1) {
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
       }
+      if (imageFiles.length > MAX_IMAGES_PER_PROPERTY) {
+        return res.status(400).json({
+          error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel.`,
+        });
+      }
       for (const file of imageFiles) {
         const uploaded = await uploadToCloudinary(file, 'properties');
         imageUrls.push(uploaded.url);
@@ -850,6 +857,12 @@ class PropertyController {
       });
     } catch (error) {
       console.error('Erro ao criar imóvel:', error);
+      const knownError = error as { statusCode?: number } | null;
+      if (knownError?.statusCode === 413) {
+        return res.status(413).json({
+          error: 'Arquivo muito grande. Reduza o tamanho das imagens e tente novamente.',
+        });
+      }
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
@@ -1009,6 +1022,11 @@ class PropertyController {
       if (imageFiles.length < 1) {
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imovel.' });
       }
+      if (imageFiles.length > MAX_IMAGES_PER_PROPERTY) {
+        return res.status(400).json({
+          error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel.`,
+        });
+      }
       for (const file of imageFiles) {
         const uploaded = await uploadToCloudinary(file, 'properties');
         imageUrls.push(uploaded.url);
@@ -1152,6 +1170,12 @@ class PropertyController {
       });
     } catch (error) {
       console.error('Erro ao criar imovel (cliente):', error);
+      const knownError = error as { statusCode?: number } | null;
+      if (knownError?.statusCode === 413) {
+        return res.status(413).json({
+          error: 'Arquivo muito grande. Reduza o tamanho das imagens e tente novamente.',
+        });
+      }
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
@@ -1927,8 +1951,7 @@ class PropertyController {
     const whereClauses: string[] = [];
     const params: any[] = [];
 
-    const statusFilter = normalizeStatus(status);
-    const effectiveStatus = statusFilter ?? 'approved';
+    const effectiveStatus: PropertyStatus = 'approved';
     whereClauses.push('p.status = ?');
     params.push(effectiveStatus);
 

@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
-import { uploadToCloudinary } from '../config/cloudinary';
+import cloudinary, { uploadToCloudinary } from '../config/cloudinary';
 import { requireEnv } from '../config/env';
 import { notifyAdmins } from '../services/notificationService';
 import { type PushNotificationResult } from '../services/pushNotificationService';
@@ -60,6 +60,10 @@ const PURPOSE_MAP: Record<string, string> = {
 const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
 const MAX_IMAGES_PER_PROPERTY = 20;
 const IMAGE_UPLOAD_CONCURRENCY = 4;
+const DIRECT_UPLOAD_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+const DIRECT_UPLOAD_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+const CLOUDINARY_IMAGE_ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'];
+const CLOUDINARY_VIDEO_ALLOWED_FORMATS = ['mp4', 'mov', 'avi', 'webm', '3gp'];
 
 function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
   if (typeof value !== 'string') {
@@ -205,6 +209,53 @@ function normalizeCreci(value: unknown): string {
 function hasValidCreci(value: unknown): boolean {
   const length = normalizeCreci(value).length;
   return length >= 4 && length <= 8;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry).trim()).filter(Boolean);
+  }
+  if (typeof value !== 'string') {
+    return [];
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((entry) => String(entry).trim()).filter(Boolean);
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [trimmed];
+}
+
+function parseImageUrlsInput(body: Record<string, unknown>): string[] {
+  const fromArrayField = parseStringArray(body.image_urls);
+  const fromBracketField = parseStringArray(body['image_urls[]']);
+  return Array.from(new Set([...fromArrayField, ...fromBracketField]));
+}
+
+function isAllowedCloudinaryMediaUrl(urlValue: string, expectedFolder: string): boolean {
+  try {
+    const parsed = new URL(urlValue);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'res.cloudinary.com') {
+      return false;
+    }
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    if (!cloudName) return false;
+    if (!parsed.pathname.startsWith(`/${cloudName}/`)) {
+      return false;
+    }
+    return parsed.pathname.includes(`/${expectedFolder}/`);
+  } catch {
+    return false;
+  }
 }
 
 async function uploadImagesWithConcurrency(
@@ -1125,6 +1176,52 @@ class AdminController {
     }
   }
 
+  async signCloudinaryUpload(req: Request, res: Response) {
+    try {
+      const requestedType =
+        typeof req.body?.resource_type === 'string' ? req.body.resource_type.toLowerCase() : 'image';
+      if (requestedType !== 'image' && requestedType !== 'video') {
+        return res.status(400).json({ error: 'resource_type inválido. Use image ou video.' });
+      }
+
+      const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+      const apiKey = process.env.CLOUDINARY_API_KEY;
+      const apiSecret = process.env.CLOUDINARY_API_SECRET;
+      if (!cloudName || !apiKey || !apiSecret) {
+        return res.status(500).json({ error: 'Cloudinary não configurado no servidor.' });
+      }
+
+      const timestamp = Math.floor(Date.now() / 1000);
+      const folder = requestedType === 'image' ? 'conectimovel/properties/admin' : 'conectimovel/videos';
+      const maxFileSize =
+        requestedType === 'image' ? DIRECT_UPLOAD_IMAGE_MAX_BYTES : DIRECT_UPLOAD_VIDEO_MAX_BYTES;
+      const allowedFormats =
+        requestedType === 'image' ? CLOUDINARY_IMAGE_ALLOWED_FORMATS : CLOUDINARY_VIDEO_ALLOWED_FORMATS;
+      const paramsToSign: Record<string, string | number> = {
+        folder,
+        timestamp,
+        max_file_size: maxFileSize,
+        allowed_formats: allowedFormats.join(','),
+      };
+
+      const signature = cloudinary.utils.api_sign_request(paramsToSign, apiSecret);
+      return res.status(200).json({
+        apiKey,
+        cloudName,
+        signature,
+        timestamp,
+        folder,
+        maxFileSize,
+        allowedFormats,
+        resourceType: requestedType,
+        uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/${requestedType}/upload`,
+      });
+    } catch (error) {
+      console.error('Erro ao assinar upload do Cloudinary:', error);
+      return res.status(500).json({ error: 'Não foi possível preparar upload direto.' });
+    }
+  }
+
   async createProperty(req: Request, res: Response) {
     const files = (req as any).files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const body = req.body ?? {};
@@ -1314,17 +1411,28 @@ class AdminController {
       }
 
       const uploadImages = files?.images ?? [];
-      if (uploadImages.length < 1) {
+      const bodyRecord = body as Record<string, unknown>;
+      const providedImageUrls = parseImageUrlsInput(bodyRecord).filter((url) =>
+        isAllowedCloudinaryMediaUrl(url, 'conectimovel/properties/admin')
+      );
+      const uploadedImageUrls =
+        uploadImages.length > 0
+          ? await uploadImagesWithConcurrency(uploadImages, 'properties/admin')
+          : [];
+      const imageUrls = Array.from(new Set([...providedImageUrls, ...uploadedImageUrls]));
+      if (imageUrls.length < 1) {
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
       }
-      const imageUrls = await uploadImagesWithConcurrency(uploadImages, 'properties/admin');
+      if (imageUrls.length > MAX_IMAGES_PER_PROPERTY) {
+        return res.status(400).json({ error: `Limite máximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imóvel.` });
+      }
 
       let finalVideoUrl: string | null = null;
       const uploadVideos = files?.video ?? [];
       if (uploadVideos[0]) {
         const uploadedVideo = await uploadToCloudinary(uploadVideos[0], 'videos');
         finalVideoUrl = uploadedVideo.url;
-      } else if (video_url) {
+      } else if (video_url && isAllowedCloudinaryMediaUrl(String(video_url), 'conectimovel/videos')) {
         finalVideoUrl = String(video_url);
       }
 

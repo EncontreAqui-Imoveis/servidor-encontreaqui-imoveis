@@ -59,6 +59,7 @@ const PURPOSE_MAP: Record<string, string> = {
 
 const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
 const MAX_IMAGES_PER_PROPERTY = 20;
+const IMAGE_UPLOAD_CONCURRENCY = 4;
 
 function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
   if (typeof value !== 'string') {
@@ -204,6 +205,36 @@ function normalizeCreci(value: unknown): string {
 function hasValidCreci(value: unknown): boolean {
   const length = normalizeCreci(value).length;
   return length >= 4 && length <= 8;
+}
+
+async function uploadImagesWithConcurrency(
+  files: Express.Multer.File[],
+  folder: string,
+  concurrency = IMAGE_UPLOAD_CONCURRENCY
+): Promise<string[]> {
+  if (files.length === 0) {
+    return [];
+  }
+
+  const results: string[] = new Array(files.length);
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, files.length) },
+    async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        if (currentIndex >= files.length) {
+          break;
+        }
+        const uploaded = await uploadToCloudinary(files[currentIndex], folder);
+        results[currentIndex] = uploaded.url;
+      }
+    }
+  );
+
+  await Promise.all(workers);
+  return results;
 }
 
 interface PropertyDetailRow extends RowDataPacket {
@@ -1279,15 +1310,11 @@ class AdminController {
         return res.status(409).json({ error: 'Imovel ja cadastrado no sistema.' });
       }
 
-      const imageUrls: string[] = [];
       const uploadImages = files?.images ?? [];
       if (uploadImages.length < 1) {
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
       }
-      for (const file of uploadImages) {
-        const uploaded = await uploadToCloudinary(file, 'properties/admin');
-        imageUrls.push(uploaded.url);
-      }
+      const imageUrls = await uploadImagesWithConcurrency(uploadImages, 'properties/admin');
 
       let finalVideoUrl: string | null = null;
       const uploadVideos = files?.video ?? [];
@@ -2340,12 +2367,7 @@ class AdminController {
         });
       }
 
-      const uploadedUrls: string[] = [];
-
-      for (const file of files) {
-        const result = await uploadToCloudinary(file, 'properties/admin');
-        uploadedUrls.push(result.url);
-      }
+      const uploadedUrls = await uploadImagesWithConcurrency(files, 'properties/admin');
 
       if (uploadedUrls.length > 0) {
         const values = uploadedUrls.map((url) => [propertyId, url]);

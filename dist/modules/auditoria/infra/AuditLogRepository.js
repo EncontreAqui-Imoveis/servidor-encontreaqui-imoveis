@@ -6,24 +6,21 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AuditLogRepository = void 0;
 const connection_1 = __importDefault(require("../../../database/connection"));
 class AuditLogRepository {
-    async append(input) {
-        const [result] = await connection_1.default.query(`
-      INSERT INTO audit_logs (
-        entity_type,
-        entity_id,
-        action,
-        performed_by_user_id,
-        metadata_json,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, NOW())
-      `, [
-            input.entityType,
-            input.entityId,
-            input.action,
-            input.performedByUserId,
-            input.metadata ? JSON.stringify(input.metadata) : null,
+    async append(data, conn) {
+        const db = conn || connection_1.default;
+        await db.query(`INSERT INTO audit_logs (entity_type, entity_id, action, performed_by_user_id, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`, [
+            data.entityType,
+            data.entityId,
+            data.action,
+            data.performedByUserId,
+            data.metadata ? JSON.stringify(data.metadata) : null,
         ]);
-        return result.insertId;
+    }
+    async create(data, conn) {
+        const db = conn || connection_1.default;
+        await db.query(`INSERT INTO audit_logs (entity_type, entity_id, action, performed_by_user_id, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`, [data.entity_type, data.entity_id, data.action, data.performed_by_user_id, JSON.stringify(data.metadata || {})]);
     }
 }
 exports.AuditLogRepository = AuditLogRepository;

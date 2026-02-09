@@ -4,9 +4,18 @@ exports.negotiationsController = exports.NegotiationsController = void 0;
 const cloudinary_1 = require("../../../config/cloudinary");
 const NegotiationService_1 = require("../application/NegotiationService");
 const validators_1 = require("../application/validators");
+function getUploadedFile(files, fieldName) {
+    if (!files) {
+        return null;
+    }
+    if (Array.isArray(files)) {
+        return files[0] ?? null;
+    }
+    return files[fieldName]?.[0] ?? null;
+}
 async function resolveUploadedUrl(params) {
     const fallback = String(params.fallbackUrl ?? '').trim();
-    const file = params.files?.[params.fieldName]?.[0];
+    const file = getUploadedFile(params.files, params.fieldName);
     if (file) {
         const uploaded = await (0, cloudinary_1.uploadToCloudinary)(file, params.folder);
         return uploaded.url;
@@ -129,7 +138,7 @@ class NegotiationsController {
                 fallbackUrl: req.body.signed_file_url,
             });
             let signedProofImageUrl = null;
-            const proofFile = req.files?.signed_proof_image?.[0];
+            const proofFile = getUploadedFile(req.files, 'signed_proof_image');
             if (proofFile) {
                 const uploaded = await (0, cloudinary_1.uploadToCloudinary)(proofFile, 'negotiations/signature-proof');
                 signedProofImageUrl = uploaded.url;

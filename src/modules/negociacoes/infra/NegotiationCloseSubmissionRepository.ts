@@ -58,4 +58,19 @@ export class NegotiationCloseSubmissionRepository {
       [adminId, id]
     );
   }
+
+  async markNoCommission(
+    id: number,
+    adminId: number,
+    reason: string,
+    conn?: PoolConnection
+  ): Promise<void> {
+    const db = conn || connection;
+    await db.query(
+      `UPDATE negotiation_close_submissions
+       SET no_commission_reason = ?, approved_by_admin_id = ?, approved_at = NOW()
+       WHERE id = ?`,
+      [reason, adminId, id]
+    );
+  }
 }

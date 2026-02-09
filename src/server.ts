@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import mainRoutes from './routes';
 import publicRoutes from './routes/public.routes';
 import { applyMigrations } from './database/migrations';
+import { runSqlMigrations } from './database/migrationRunner';
 import {
   buildCorsOptions,
   enforceHttps,
@@ -89,10 +90,15 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 async function startServer() {
   await applyMigrations();
+  await runSqlMigrations('up');
 
   app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
   });
 }
 
-void startServer();
+export { app };
+
+if (require.main === module) {
+  void startServer();
+}

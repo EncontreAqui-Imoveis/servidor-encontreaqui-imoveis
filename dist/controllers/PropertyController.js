@@ -238,6 +238,8 @@ function mapProperty(row, includeOwnerInfo = false) {
         type: row.type,
         purpose: row.purpose,
         status: row.status,
+        visibility: row.visibility ?? 'PUBLIC',
+        lifecycle_status: row.lifecycle_status ?? 'AVAILABLE',
         is_promoted: toBoolean(row.is_promoted),
         promotion_percentage: row.promotion_percentage != null ? Number(row.promotion_percentage) : null,
         promotion_start: row.promotion_start ?? null,
@@ -1498,7 +1500,10 @@ class PropertyController {
             const [rows] = await connection_1.default.query(`
           SELECT DISTINCT city
           FROM properties
-          WHERE city IS NOT NULL AND city <> ''
+          WHERE city IS NOT NULL
+            AND city <> ''
+            AND status = 'approved'
+            AND COALESCE(visibility, 'PUBLIC') = 'PUBLIC'
           ORDER BY city ASC
         `);
             return res.status(200).json(rows.map((row) => row.city));
@@ -1555,6 +1560,7 @@ class PropertyController {
         const effectiveStatus = 'approved';
         whereClauses.push('p.status = ?');
         params.push(effectiveStatus);
+        whereClauses.push(`COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'`);
         if (type) {
             const normalizedType = (0, propertyTypes_1.normalizePropertyType)(type);
             if (!normalizedType) {
@@ -1746,6 +1752,7 @@ class PropertyController {
           LEFT JOIN agencies a ON b.agency_id = a.id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.status = 'approved'
+            AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
           GROUP BY p.id, fp.position
           ORDER BY fp.position ASC
           LIMIT ? OFFSET ?
@@ -1755,6 +1762,7 @@ class PropertyController {
           FROM featured_properties fp
           JOIN properties p ON p.id = fp.property_id
           WHERE p.status = 'approved'
+            AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
         `);
             const total = countRows[0]?.total ?? 0;
             return res.json({

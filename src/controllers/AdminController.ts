@@ -2230,13 +2230,11 @@ class AdminController {
             ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
             ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
             ANY_VALUE(b.status) AS broker_status,
-            ANY_VALUE(b.creci) AS broker_creci,
-            GROUP_CONCAT(DISTINCT CONCAT(pi.id, '|', pi.image_url) ORDER BY pi.id SEPARATOR ';') AS images
+            ANY_VALUE(b.creci) AS broker_creci
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
           LEFT JOIN users u_owner ON u_owner.id = p.owner_id
-          LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
           GROUP BY p.id
         `,
@@ -2248,12 +2246,25 @@ class AdminController {
       }
 
       const property = rows[0];
-
-      if (property.images === null) {
-        property.images = [];
-      } else if (typeof property.images === 'string') {
-        property.images = property.images.split(',').filter(Boolean);
-      }
+      const [imageRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT id, image_url
+          FROM property_images
+          WHERE property_id = ?
+          ORDER BY id ASC
+        `,
+        [propertyId]
+      );
+      property.images = imageRows
+        .map((row) => {
+          const imageId = Number(row.id);
+          const imageUrl = typeof row.image_url === 'string' ? row.image_url.trim() : '';
+          if (!Number.isFinite(imageId) || imageUrl.length === 0) {
+            return null;
+          }
+          return `${imageId}|${imageUrl}`;
+        })
+        .filter((item): item is string => Boolean(item));
 
       return res.status(200).json(mapAdminProperty(property));
     } catch (error) {

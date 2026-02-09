@@ -913,6 +913,7 @@ class PropertyController {
             const previousPromotionFlag = toBoolean(property.is_promoted);
             const body = req.body ?? {};
             const bodyKeys = Object.keys(body);
+            const semNumeroBody = body.sem_numero !== undefined ? parseBoolean(body.sem_numero) : null;
             const nextPurpose = normalizePurpose(body.purpose) ?? property.purpose;
             const purposeLower = String(nextPurpose ?? '').toLowerCase();
             const supportsSale = purposeLower.includes('vend');
@@ -946,6 +947,7 @@ class PropertyController {
                 'quadra',
                 'lote',
                 'numero',
+                'sem_numero',
                 'bairro',
                 'complemento',
                 'tipo_lote',
@@ -1137,11 +1139,34 @@ class PropertyController {
                         }
                         break;
                     }
+                    case 'sem_numero': {
+                        // `sem_numero` e uma flag de entrada; persistimos apenas `numero`.
+                        break;
+                    }
+                    case 'numero': {
+                        if (semNumeroBody === 1) {
+                            fields.push('numero = ?');
+                            values.push(null);
+                            break;
+                        }
+                        const rawNumero = String(body.numero ?? '').trim();
+                        const numeroDigits = rawNumero.replace(/\D/g, '');
+                        if (rawNumero.length > 0 && numeroDigits.length === 0) {
+                            return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+                        }
+                        fields.push('numero = ?');
+                        values.push(stringOrNull(numeroDigits));
+                        break;
+                    }
                     default: {
                         fields.push(`\`${key}\` = ?`);
                         values.push(stringOrNull(body[key]));
                     }
                 }
+            }
+            if (semNumeroBody === 1 && !bodyKeys.includes('numero')) {
+                fields.push('numero = ?');
+                values.push(null);
             }
             if (fields.length === 0) {
                 return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });

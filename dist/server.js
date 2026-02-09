@@ -11,6 +11,7 @@ const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const routes_1 = __importDefault(require("./routes"));
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
 const migrations_1 = require("./database/migrations");
+const migrationRunner_1 = require("./database/migrationRunner");
 const security_1 = require("./middlewares/security");
 const requestSanitizer_1 = require("./middlewares/requestSanitizer");
 const logSanitizer_1 = require("./utils/logSanitizer");
@@ -76,6 +77,7 @@ app.use((err, req, res, next) => {
 });
 async function startServer() {
     await (0, migrations_1.applyMigrations)();
+    await (0, migrationRunner_1.runSqlMigrations)('up');
     app.listen(PORT, () => {
         console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
     });

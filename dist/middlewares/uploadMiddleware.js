@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.brokerDocsUpload = exports.mediaUpload = void 0;
+exports.negotiationUpload = exports.brokerDocsUpload = exports.mediaUpload = void 0;
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 // --- Storage in memory (you can switch to disk/S3 later)
@@ -18,6 +18,15 @@ const allowedVideoMime = new Set([
     'video/x-msvideo', // .avi
     'video/webm',
     'video/3gpp', // Android
+]);
+const allowedDocumentMime = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'image/heic',
+    'image/heif',
 ]);
 // Helpers
 function getExtLower(filename) {
@@ -103,5 +112,44 @@ exports.brokerDocsUpload = (0, multer_1.default)({
             return;
         }
         cb(new Error(`Campo de upload inválido para documentos: ${field}`));
+    },
+});
+function isAllowedDocument(mime, originalname) {
+    const normalized = (mime || '').toLowerCase();
+    if (allowedDocumentMime.has(normalized))
+        return true;
+    const ext = getExtLower(originalname);
+    return ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext);
+}
+exports.negotiationUpload = (0, multer_1.default)({
+    storage,
+    limits: {
+        fileSize: 25 * 1024 * 1024,
+        files: 3,
+    },
+    fileFilter: (req, file, cb) => {
+        const field = file.fieldname;
+        const mime = (file.mimetype || '').toLowerCase();
+        const name = file.originalname || '';
+        const documentFields = ['doc_file', 'contract_file', 'signed_file', 'payment_proof'];
+        if (documentFields.includes(field)) {
+            if (isAllowedDocument(mime, name)) {
+                cb(null, true);
+            }
+            else {
+                cb(new Error('Tipo de arquivo nao suportado para negociacao.'));
+            }
+            return;
+        }
+        if (field === 'signed_proof_image') {
+            if (isAllowedImage(mime, name)) {
+                cb(null, true);
+            }
+            else {
+                cb(new Error('Tipo de imagem nao suportado para comprovacao de assinatura.'));
+            }
+            return;
+        }
+        cb(new Error(`Campo de upload inválido para negociação: ${field}`));
     },
 });

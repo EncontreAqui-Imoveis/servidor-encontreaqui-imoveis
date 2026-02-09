@@ -16,6 +16,16 @@ const allowedVideoMime = new Set([
   'video/3gpp',        // Android
 ]);
 
+const allowedDocumentMime = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
 // Helpers
 function getExtLower(filename: string): string {
   return path.extname(filename || '').toLowerCase().replace(/^\./, '');
@@ -107,5 +117,46 @@ export const brokerDocsUpload = multer({
     }
 
     cb(new Error(`Campo de upload inválido para documentos: ${field}`));
+  },
+});
+
+function isAllowedDocument(mime: string, originalname: string): boolean {
+  const normalized = (mime || '').toLowerCase();
+  if (allowedDocumentMime.has(normalized)) return true;
+  const ext = getExtLower(originalname);
+  return ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext);
+}
+
+export const negotiationUpload = multer({
+  storage,
+  limits: {
+    fileSize: 25 * 1024 * 1024,
+    files: 3,
+  },
+  fileFilter: (req, file, cb: FileFilterCallback) => {
+    const field = file.fieldname;
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = file.originalname || '';
+
+    const documentFields = ['doc_file', 'contract_file', 'signed_file', 'payment_proof'];
+    if (documentFields.includes(field)) {
+      if (isAllowedDocument(mime, name)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Tipo de arquivo nao suportado para negociacao.'));
+      }
+      return;
+    }
+
+    if (field === 'signed_proof_image') {
+      if (isAllowedImage(mime, name)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Tipo de imagem nao suportado para comprovacao de assinatura.'));
+      }
+      return;
+    }
+
+    cb(new Error(`Campo de upload inválido para negociação: ${field}`));
   },
 });

@@ -5,6 +5,8 @@ const AdminController_1 = require("../controllers/AdminController");
 const auth_1 = require("../middlewares/auth");
 const uploadMiddleware_1 = require("../middlewares/uploadMiddleware");
 const uploadMiddleware_2 = require("../middlewares/uploadMiddleware");
+const uploadMiddleware_3 = require("../middlewares/uploadMiddleware");
+const NegotiationsController_1 = require("../modules/negociacoes/http/NegotiationsController");
 const adminRoutes = (0, express_1.Router)();
 adminRoutes.post('/login', AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
@@ -12,6 +14,12 @@ adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
 adminRoutes.delete('/notifications/:id', AdminController_1.adminController.deleteNotification);
 adminRoutes.delete('/notifications', AdminController_1.adminController.clearNotifications);
 adminRoutes.post('/uploads/sign', AdminController_1.adminController.signCloudinaryUpload);
+adminRoutes.post('/negotiations/:id/activate', NegotiationsController_1.negotiationsController.activateByAdmin);
+adminRoutes.post('/negotiations/:id/documents/:docId/review', NegotiationsController_1.negotiationsController.reviewDocument);
+adminRoutes.post('/negotiations/:id/contract', uploadMiddleware_3.negotiationUpload.fields([{ name: 'contract_file', maxCount: 1 }]), NegotiationsController_1.negotiationsController.publishContract);
+adminRoutes.post('/negotiations/:id/signatures/:sigId/validate', NegotiationsController_1.negotiationsController.validateSignature);
+adminRoutes.post('/negotiations/:id/close/approve', NegotiationsController_1.negotiationsController.approveClose);
+adminRoutes.post('/negotiations/:id/close/no-commission', NegotiationsController_1.negotiationsController.markNoCommission);
 adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },

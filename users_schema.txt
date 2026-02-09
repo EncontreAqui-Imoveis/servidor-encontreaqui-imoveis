@@ -1,0 +1,122 @@
+[
+  {
+    Field: 'id',
+    Type: 'int',
+    Null: 'NO',
+    Key: 'PRI',
+    Default: null,
+    Extra: 'auto_increment'
+  },
+  {
+    Field: 'firebase_uid',
+    Type: 'varchar(255)',
+    Null: 'YES',
+    Key: 'UNI',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'name',
+    Type: 'varchar(255)',
+    Null: 'NO',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'email',
+    Type: 'varchar(255)',
+    Null: 'NO',
+    Key: 'UNI',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'password_hash',
+    Type: 'varchar(255)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'phone',
+    Type: 'varchar(20)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'address',
+    Type: 'varchar(255)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'city',
+    Type: 'varchar(100)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'state',
+    Type: 'varchar(50)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'created_at',
+    Type: 'timestamp',
+    Null: 'YES',
+    Key: '',
+    Default: 'CURRENT_TIMESTAMP',
+    Extra: ''
+  },
+  {
+    Field: 'street',
+    Type: 'varchar(255)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'number',
+    Type: 'varchar(20)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'complement',
+    Type: 'varchar(255)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'bairro',
+    Type: 'varchar(255)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  },
+  {
+    Field: 'cep',
+    Type: 'varchar(20)',
+    Null: 'YES',
+    Key: '',
+    Default: null,
+    Extra: ''
+  }
+]

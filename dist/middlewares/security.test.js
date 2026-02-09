@@ -101,11 +101,16 @@ function createResponseMock() {
 });
 (0, vitest_1.describe)('buildCorsOptions', () => {
     (0, vitest_1.it)('aceita origem configurada e bloqueia origem fora da lista', () => {
-        process.env.CORS_ORIGINS = 'https://painel.exemplo.com,https://app.exemplo.com';
+        process.env.CORS_ORIGINS =
+            'https://painel.exemplo.com/, https://app.exemplo.com';
         const options = (0, security_1.buildCorsOptions)();
         const originFn = options.origin;
         let allowed;
         originFn('https://painel.exemplo.com', (_err, isAllowed) => {
+            allowed = isAllowed;
+        });
+        (0, vitest_1.expect)(allowed).toBe(true);
+        originFn('https://PAINEL.EXEMPLO.COM/', (_err, isAllowed) => {
             allowed = isAllowed;
         });
         (0, vitest_1.expect)(allowed).toBe(true);

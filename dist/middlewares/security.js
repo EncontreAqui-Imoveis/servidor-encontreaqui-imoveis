@@ -4,6 +4,21 @@ exports.securityHeaders = securityHeaders;
 exports.enforceHttps = enforceHttps;
 exports.buildCorsOptions = buildCorsOptions;
 const ONE_YEAR_IN_SECONDS = 31536000;
+function normalizeOrigin(value) {
+    const trimmed = value.trim();
+    if (!trimmed)
+        return '';
+    try {
+        const parsed = new URL(trimmed);
+        const protocol = parsed.protocol.toLowerCase();
+        const host = parsed.hostname.toLowerCase();
+        const port = parsed.port ? `:${parsed.port}` : '';
+        return `${protocol}//${host}${port}`;
+    }
+    catch {
+        return trimmed.replace(/\/+$/, '').toLowerCase();
+    }
+}
 function securityHeaders(_req, res, next) {
     res.setHeader('Strict-Transport-Security', `max-age=${ONE_YEAR_IN_SECONDS}; includeSubDomains`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -40,8 +55,9 @@ function enforceHttps(req, res, next) {
 function buildCorsOptions() {
     const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
         .split(',')
-        .map((origin) => origin.trim())
+        .map((origin) => normalizeOrigin(origin))
         .filter((origin) => origin.length > 0);
+    const allowedOriginSet = new Set(allowedOrigins);
     if (allowedOrigins.length === 0) {
         return {
             origin: true,
@@ -50,7 +66,12 @@ function buildCorsOptions() {
     }
     return {
         origin: (origin, callback) => {
-            if (!origin || allowedOrigins.includes(origin)) {
+            if (!origin) {
+                callback(null, true);
+                return;
+            }
+            const normalizedRequestOrigin = normalizeOrigin(origin);
+            if (allowedOriginSet.has(normalizedRequestOrigin)) {
                 callback(null, true);
                 return;
             }

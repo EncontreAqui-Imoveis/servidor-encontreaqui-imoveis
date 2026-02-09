@@ -120,7 +120,8 @@ describe('enforceHttps', () => {
 
 describe('buildCorsOptions', () => {
   it('aceita origem configurada e bloqueia origem fora da lista', () => {
-    process.env.CORS_ORIGINS = 'https://painel.exemplo.com,https://app.exemplo.com';
+    process.env.CORS_ORIGINS =
+      'https://painel.exemplo.com/, https://app.exemplo.com';
     const options = buildCorsOptions();
     const originFn = options.origin as (
       origin: string | undefined,
@@ -129,6 +130,11 @@ describe('buildCorsOptions', () => {
 
     let allowed: boolean | undefined;
     originFn('https://painel.exemplo.com', (_err, isAllowed) => {
+      allowed = isAllowed;
+    });
+    expect(allowed).toBe(true);
+
+    originFn('https://PAINEL.EXEMPLO.COM/', (_err, isAllowed) => {
       allowed = isAllowed;
     });
     expect(allowed).toBe(true);

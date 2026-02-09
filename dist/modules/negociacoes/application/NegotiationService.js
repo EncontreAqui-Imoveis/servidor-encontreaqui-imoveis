@@ -46,22 +46,22 @@ function normalizeSplits(rawSplits, mode) {
         if (mode === 'PERCENT') {
             const percent = (0, validators_1.ensurePositiveNumber)(item.percent_value, `percent_value (${splitRole})`);
             return {
-                split_role: splitRole,
-                recipient_user_id: recipientUserId,
-                percent_value: Number(percent.toFixed(4)),
-                amount_value: null,
+                splitRole,
+                recipientUserId,
+                percentValue: Number(percent.toFixed(4)),
+                amountValue: null,
             };
         }
         const amount = (0, validators_1.ensurePositiveNumber)(item.amount_value, `amount_value (${splitRole})`);
         return {
-            split_role: splitRole,
-            recipient_user_id: recipientUserId,
-            percent_value: null,
-            amount_value: Number(amount.toFixed(2)),
+            splitRole,
+            recipientUserId,
+            percentValue: null,
+            amountValue: Number(amount.toFixed(2)),
         };
     });
     const requiredRoles = ['CAPTADOR', 'PLATFORM', 'SELLER_BROKER'];
-    const roleSet = new Set(mapped.map((item) => item.split_role));
+    const roleSet = new Set(mapped.map((item) => item.splitRole));
     for (const role of requiredRoles) {
         if (!roleSet.has(role)) {
             throw new validators_1.ValidationError(`Split obrigatório não informado: ${role}`);
@@ -77,7 +77,7 @@ function validateSplitTotals(mode, splits, totalPercent, totalAmount) {
         if (totalPercent == null) {
             throw new validators_1.ValidationError('commission_total_percent é obrigatório para commission_mode=PERCENT.');
         }
-        const sum = splits.reduce((acc, split) => acc + Number(split.percent_value ?? 0), 0);
+        const sum = splits.reduce((acc, split) => acc + Number(split.percentValue ?? 0), 0);
         const diff = Math.abs(sum - 100);
         if (diff > 0.0001) {
             throw new validators_1.ValidationError('Soma dos splits em percentual deve fechar em 100%.');
@@ -87,7 +87,7 @@ function validateSplitTotals(mode, splits, totalPercent, totalAmount) {
     if (totalAmount == null) {
         throw new validators_1.ValidationError('commission_total_amount é obrigatório para commission_mode=AMOUNT.');
     }
-    const sum = splits.reduce((acc, split) => acc + Number(split.amount_value ?? 0), 0);
+    const sum = splits.reduce((acc, split) => acc + Number(split.amountValue ?? 0), 0);
     const diff = Math.abs(sum - totalAmount);
     if (diff > 0.01) {
         throw new validators_1.ValidationError('Soma dos splits em valor deve fechar no total de comissão.');
@@ -144,8 +144,7 @@ class NegotiationService {
                 seller_broker_user_id: sellerBrokerUserId,
             },
         });
-        const negotiation = await this.negotiations.findById(id);
-        return negotiation;
+        return this.negotiations.findById(id);
     }
     async submitForActivation(params) {
         ensureRoleBroker(params.actorRole);
@@ -184,7 +183,6 @@ class NegotiationService {
         try {
             await db.beginTransaction();
             const negotiationsRepo = new NegotiationRepository_1.NegotiationRepository(db);
-            const auditRepo = new AuditLogRepository_1.AuditLogRepository();
             const negotiation = await negotiationsRepo.findById(negotiationId);
             if (!negotiation) {
                 throw new validators_1.ValidationError('Negociação não encontrada.', 404);
@@ -252,10 +250,10 @@ class NegotiationService {
             throw new validators_1.ValidationError('Status atual da negociação não permite upload de documentos.', 409);
         }
         const id = await this.documents.create({
-            negotiationId,
-            docName,
-            docUrl,
-            uploadedByUserId: params.actorUserId,
+            negotiation_id: negotiationId,
+            doc_name: docName,
+            doc_url: docUrl,
+            uploaded_by_user_id: params.actorUserId,
         });
         await this.negotiations.touch(negotiationId);
         await this.auditLogs.append({
@@ -283,12 +281,7 @@ class NegotiationService {
         if (!doc || doc.negotiation_id !== negotiationId) {
             throw new validators_1.ValidationError('Documento não encontrado para esta negociação.', 404);
         }
-        await this.documents.review({
-            id: docId,
-            status,
-            reviewComment,
-            reviewedByAdminId: params.actorUserId,
-        });
+        await this.documents.updateStatus(docId, status, reviewComment, params.actorUserId);
         await this.negotiations.touch(negotiationId);
         await this.auditLogs.append({
             entityType: 'negotiation',
@@ -312,10 +305,13 @@ class NegotiationService {
         if (!negotiation) {
             throw new validators_1.ValidationError('Negociação não encontrada.', 404);
         }
-        const contract = await this.contracts.create({
-            negotiationId,
-            contractUrl,
-            uploadedByAdminId: params.actorUserId,
+        const latest = await this.contracts.findLatestByNegotiationId(negotiationId);
+        const nextVersion = latest ? latest.version + 1 : 1;
+        await this.contracts.create({
+            negotiation_id: negotiationId,
+            version: nextVersion,
+            contract_url: contractUrl,
+            uploaded_by_admin_id: params.actorUserId,
         });
         await this.negotiations.updateStatus({
             id: negotiationId,
@@ -328,11 +324,10 @@ class NegotiationService {
             action: 'CONTRACT_PUBLISHED',
             performedByUserId: params.actorUserId,
             metadata: {
-                contract_id: contract.id,
-                version: contract.version,
+                version: nextVersion,
             },
         });
-        return this.contracts.latestByNegotiationId(negotiationId);
+        return this.contracts.findLatestByNegotiationId(negotiationId);
     }
     async uploadSignature(params) {
         ensureRoleBroker(params.actorRole);
@@ -349,11 +344,11 @@ class NegotiationService {
             throw new validators_1.ValidationError('Negociação não encontrada.', 404);
         }
         const signatureId = await this.signatures.create({
-            negotiationId,
-            signedByRole,
-            signedFileUrl,
-            signedProofImageUrl,
-            signedByUserId,
+            negotiation_id: negotiationId,
+            signed_by_role: signedByRole,
+            signed_file_url: signedFileUrl,
+            signed_proof_image_url: signedProofImageUrl ?? undefined,
+            signed_by_user_id: signedByUserId ?? undefined,
         });
         await this.negotiations.updateStatus({
             id: negotiationId,
@@ -385,12 +380,7 @@ class NegotiationService {
         if (!signature || signature.negotiation_id !== negotiationId) {
             throw new validators_1.ValidationError('Assinatura não encontrada para esta negociação.', 404);
         }
-        await this.signatures.validate({
-            id: signatureId,
-            status,
-            comment,
-            validatedByAdminId: params.actorUserId,
-        });
+        await this.signatures.updateValidation(signatureId, status, comment, params.actorUserId);
         await this.negotiations.touch(negotiationId);
         await this.auditLogs.append({
             entityType: 'negotiation',
@@ -418,8 +408,8 @@ class NegotiationService {
         const commissionTotalAmount = params.commissionTotalAmount == null || params.commissionTotalAmount === ''
             ? null
             : Number(params.commissionTotalAmount);
-        const splits = normalizeSplits(params.splits, commissionMode);
-        validateSplitTotals(commissionMode, splits, commissionTotalPercent, commissionTotalAmount);
+        const normalizedSplits = normalizeSplits(params.splits, commissionMode);
+        validateSplitTotals(commissionMode, normalizedSplits, commissionTotalPercent, commissionTotalAmount);
         const negotiation = await this.negotiations.findById(negotiationId);
         if (!negotiation) {
             throw new validators_1.ValidationError('Negociação não encontrada.', 404);
@@ -428,17 +418,17 @@ class NegotiationService {
             throw new validators_1.ValidationError('Negociação já finalizada.', 409);
         }
         const submissionId = await this.closeSubmissions.create({
-            negotiationId,
-            closeType,
-            commissionMode,
-            commissionTotalPercent,
-            commissionTotalAmount,
-            paymentProofUrl,
-            submittedByUserId: params.actorUserId,
+            negotiation_id: negotiationId,
+            close_type: closeType,
+            commission_mode: commissionMode,
+            commission_total_percent: commissionTotalPercent ?? undefined,
+            commission_total_amount: commissionTotalAmount ?? undefined,
+            payment_proof_url: paymentProofUrl,
+            submitted_by_user_id: params.actorUserId,
         });
         await this.splits.replaceForSubmission({
             closeSubmissionId: submissionId,
-            splits,
+            splits: normalizedSplits,
         });
         await this.negotiations.updateStatus({
             id: negotiationId,
@@ -456,7 +446,7 @@ class NegotiationService {
                 commission_mode: commissionMode,
             },
         });
-        return this.closeSubmissions.findLatestByNegotiationId(negotiationId);
+        return this.closeSubmissions.findByNegotiationId(negotiationId);
     }
     async approveClose(params) {
         ensureRoleAdmin(params.actorRole);
@@ -465,11 +455,11 @@ class NegotiationService {
         if (!negotiation) {
             throw new validators_1.ValidationError('Negociação não encontrada.', 404);
         }
-        const submission = await this.closeSubmissions.findLatestByNegotiationId(negotiationId);
+        const submission = await this.closeSubmissions.findByNegotiationId(negotiationId);
         if (!submission) {
             throw new validators_1.ValidationError('Submissão de fechamento não encontrada.', 404);
         }
-        await this.closeSubmissions.markApproved(submission.id, params.actorUserId);
+        await this.closeSubmissions.approve(submission.id, params.actorUserId);
         const finalStatus = submission.close_type === 'SOLD'
             ? 'SOLD_COMMISSIONED'
             : 'RENTED_COMMISSIONED';
@@ -502,7 +492,7 @@ class NegotiationService {
         if (!negotiation) {
             throw new validators_1.ValidationError('Negociação não encontrada.', 404);
         }
-        const submission = await this.closeSubmissions.findLatestByNegotiationId(negotiationId);
+        const submission = await this.closeSubmissions.findByNegotiationId(negotiationId);
         if (!submission) {
             throw new validators_1.ValidationError('Submissão de fechamento não encontrada.', 404);
         }
@@ -548,10 +538,10 @@ class NegotiationService {
             throw new validators_1.ValidationError('Acesso negado para esta negociação.', 403);
         }
         const [documents, latestContract, signatures, closeSubmission] = await Promise.all([
-            this.documents.listByNegotiationId(negotiationId),
-            this.contracts.latestByNegotiationId(negotiationId),
-            this.signatures.listByNegotiationId(negotiationId),
-            this.closeSubmissions.findLatestByNegotiationId(negotiationId),
+            this.documents.findByNegotiationId(negotiationId),
+            this.contracts.findLatestByNegotiationId(negotiationId),
+            this.signatures.findByNegotiationId(negotiationId),
+            this.closeSubmissions.findByNegotiationId(negotiationId),
         ]);
         const splits = closeSubmission
             ? await this.splits.listBySubmissionId(closeSubmission.id)

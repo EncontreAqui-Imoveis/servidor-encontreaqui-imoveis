@@ -1,10 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CommissionSplitsRepository = void 0;
-const db_1 = require("./db");
+const connection_1 = __importDefault(require("../../../database/connection"));
 class CommissionSplitsRepository {
     db;
-    constructor(db = (0, db_1.getDefaultQueryRunner)()) {
+    constructor(db = connection_1.default) {
         this.db = db;
     }
     async replaceForSubmission(params) {

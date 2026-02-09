@@ -1,25 +1,39 @@
 import { Router } from 'express';
+import { authMiddleware, isBroker } from '../../../middlewares/auth';
+import { negotiationUpload } from '../../../middlewares/uploadMiddleware';
 import { negotiationsController } from './NegotiationsController';
-import { authMiddleware, isBroker, isAdmin } from '../../../middlewares/auth';
 
 const negotiationsRoutes = Router();
 
-// Broker routes
+negotiationsRoutes.use(authMiddleware);
+
+negotiationsRoutes.post('/', isBroker, negotiationsController.create);
+negotiationsRoutes.post('/:id/submit-for-activation', isBroker, negotiationsController.submitForActivation);
+
 negotiationsRoutes.post(
-  '/',
-  authMiddleware,
+  '/:id/documents',
   isBroker,
-  (req, res) => negotiationsController.create(req, res)
+  negotiationUpload.fields([{ name: 'doc_file', maxCount: 1 }]),
+  negotiationsController.uploadDocument
 );
 
 negotiationsRoutes.post(
-  '/:id/submit-for-activation',
-  authMiddleware,
+  '/:id/signatures',
   isBroker,
-  (req, res) => negotiationsController.submitForActivation(req, res)
+  negotiationUpload.fields([
+    { name: 'signed_file', maxCount: 1 },
+    { name: 'signed_proof_image', maxCount: 1 },
+  ]),
+  negotiationsController.uploadSignature
 );
 
-// Admin routes (placeholder/future)
-// negotiationsRoutes.post('/:id/activate', authMiddleware, isAdmin, ...);
+negotiationsRoutes.post(
+  '/:id/close/submit',
+  isBroker,
+  negotiationUpload.fields([{ name: 'payment_proof', maxCount: 1 }]),
+  negotiationsController.submitClose
+);
+
+negotiationsRoutes.get('/:id', negotiationsController.getDetails);
 
 export default negotiationsRoutes;

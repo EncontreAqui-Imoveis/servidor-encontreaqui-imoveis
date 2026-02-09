@@ -98,6 +98,7 @@ async function applyUpMigrations() {
     }
     for (const migration of pending) {
         console.log(`Aplicando migration: ${migration.name}`);
+        console.log('SQL:', migration.upSql.substring(0, 500) + '...');
         await executeSqlBlock(migration.upSql);
         await connection_1.default.query('INSERT INTO schema_migrations (name) VALUES (?)', [migration.name]);
     }

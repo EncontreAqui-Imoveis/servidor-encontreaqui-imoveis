@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.app = void 0;
 require("dotenv/config");
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
@@ -16,6 +17,7 @@ const security_1 = require("./middlewares/security");
 const requestSanitizer_1 = require("./middlewares/requestSanitizer");
 const logSanitizer_1 = require("./utils/logSanitizer");
 const app = (0, express_1.default)();
+exports.app = app;
 const PORT = process.env.API_PORT || 3333;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 300;
@@ -82,4 +84,6 @@ async function startServer() {
         console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
     });
 }
-void startServer();
+if (require.main === module) {
+    void startServer();
+}

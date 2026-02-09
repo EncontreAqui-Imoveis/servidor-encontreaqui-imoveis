@@ -43,10 +43,10 @@ describe('Negotiation Repositories Integration', () => {
 
     it('should create and retrieve a negotiation', async () => {
         const negId = await negotiationRepo.create({
-            property_id: 101,
-            captador_user_id: 1,
-            seller_broker_user_id: 2,
-            created_by_user_id: 2
+            propertyId: 101,
+            captadorUserId: 1,
+            sellerBrokerUserId: 2,
+            createdByUserId: 2
         });
 
         const neg = await negotiationRepo.findById(negId);
@@ -58,31 +58,32 @@ describe('Negotiation Repositories Integration', () => {
 
     it('should update negotiation status', async () => {
         const negId = await negotiationRepo.create({
-            property_id: 101,
-            captador_user_id: 1,
-            seller_broker_user_id: 2,
-            created_by_user_id: 2
+            propertyId: 101,
+            captadorUserId: 1,
+            sellerBrokerUserId: 2,
+            createdByUserId: 2
         });
 
-        await negotiationRepo.updateStatus(negId, 'PENDING_ACTIVATION');
+        await negotiationRepo.updateStatus({ id: negId, status: 'PENDING_ACTIVATION' });
         const neg = await negotiationRepo.findById(negId);
         expect(neg?.status).toBe('PENDING_ACTIVATION');
     });
 
     it('should activate a negotiation', async () => {
         const negId = await negotiationRepo.create({
-            property_id: 101,
-            captador_user_id: 1,
-            seller_broker_user_id: 2,
-            created_by_user_id: 2
+            propertyId: 101,
+            captadorUserId: 1,
+            sellerBrokerUserId: 2,
+            createdByUserId: 2
         });
 
-        const conn = await connection.getConnection();
-        try {
-            await negotiationRepo.activate(negId, new Date('2026-12-31'), conn);
-        } finally {
-            conn.release();
-        }
+        await negotiationRepo.updateStatus({
+            id: negId,
+            status: 'DOCS_IN_REVIEW',
+            active: 1,
+            startedAt: new Date('2026-12-01'),
+            expiresAt: new Date('2026-12-31')
+        });
 
         const neg = await negotiationRepo.findById(negId);
         expect(neg?.active).toBe(1);
@@ -93,10 +94,10 @@ describe('Negotiation Repositories Integration', () => {
 
     it('should create and find documents', async () => {
         const negId = await negotiationRepo.create({
-            property_id: 101,
-            captador_user_id: 1,
-            seller_broker_user_id: 2,
-            created_by_user_id: 2
+            propertyId: 101,
+            captadorUserId: 1,
+            sellerBrokerUserId: 2,
+            createdByUserId: 2
         });
 
         await docsRepo.create({

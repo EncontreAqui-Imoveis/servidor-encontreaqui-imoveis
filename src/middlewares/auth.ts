@@ -70,6 +70,10 @@ export async function isBroker(
   next: NextFunction
 ) {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
     const [brokerRows] = await connection.query(
       'SELECT status FROM brokers WHERE id = ?',
       [req.userId]
@@ -77,9 +81,25 @@ export async function isBroker(
     const brokers = brokerRows as any[];
 
     if (brokers.length === 0) {
-      return res.status(403).json({
-        error: 'Acesso negado. Rota exclusiva para corretores.',
-      });
+      const [userRows] = await connection.query(
+        'SELECT role FROM users WHERE id = ?',
+        [req.userId]
+      );
+      const users = userRows as any[];
+      const role = String(users[0]?.role ?? '').trim().toLowerCase();
+      if (role !== 'broker') {
+        return res.status(403).json({
+          error: 'Acesso negado. Rota exclusiva para corretores.',
+        });
+      }
+
+      // Garante registro do corretor quando o usuario ja tem role broker.
+      await connection.query(
+        'INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+        [req.userId, null, 'approved']
+      );
+      req.userRole = 'broker';
+      return next();
     }
 
     if (brokers[0].status !== 'approved') {

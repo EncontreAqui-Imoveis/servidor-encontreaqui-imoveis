@@ -26,8 +26,8 @@ describe('Negotiations API Integration', () => {
             await conn.query('SET FOREIGN_KEY_CHECKS = 0');
 
             // Insert User (Broker)
-            await conn.query(`INSERT IGNORE INTO users (id, name, email, role) VALUES 
-            (1, "Broker User", "broker@test.com", "BROKER")`);
+            await conn.query(`INSERT IGNORE INTO users (id, name, email) VALUES 
+            (1, "Broker User", "broker@test.com")`);
 
             // Insert Broker record (required for auth middleware)
             // Check broker table schema? Assuming id matches user_id or similar.
@@ -38,12 +38,17 @@ describe('Negotiations API Integration', () => {
 
             // Need to know brokers schema. Assuming basics.
             // If unknown, I might fail here. But let's try.
-            await conn.query(`INSERT IGNORE INTO brokers (id, status, creci, state) VALUES 
-            (1, "approved", "12345", "SP")`);
+            await conn.query(`INSERT IGNORE INTO brokers (id, status, creci) VALUES 
+            (1, "approved", "12345")`);
 
             // Insert Property
-            await conn.query(`INSERT IGNORE INTO properties (id, title, owner_id, status, visibility, lifecycle_status, sem_numero) VALUES 
-            (101, "Test API Prop", 1, "approved", "PUBLIC", "AVAILABLE", 0)`);
+            await conn.query(`INSERT IGNORE INTO properties (
+              id, title, description, type, purpose, status, price, address, city, state,
+              owner_id, visibility, lifecycle_status, sem_numero
+            ) VALUES (
+              101, "Test API Prop", "Descricao", "Casa", "Venda", "approved", 1000,
+              "Rua A", "Goiania", "GO", 1, "PUBLIC", "AVAILABLE", 0
+            )`);
 
             await conn.query('SET FOREIGN_KEY_CHECKS = 1');
         } finally {

@@ -3,6 +3,21 @@ import type { CorsOptions } from 'cors';
 
 const ONE_YEAR_IN_SECONDS = 31536000;
 
+function normalizeOrigin(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  try {
+    const parsed = new URL(trimmed);
+    const protocol = parsed.protocol.toLowerCase();
+    const host = parsed.hostname.toLowerCase();
+    const port = parsed.port ? `:${parsed.port}` : '';
+    return `${protocol}//${host}${port}`;
+  } catch {
+    return trimmed.replace(/\/+$/, '').toLowerCase();
+  }
+}
+
 export function securityHeaders(
   _req: Request,
   res: Response,
@@ -60,8 +75,9 @@ export function enforceHttps(
 export function buildCorsOptions(): CorsOptions {
   const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => normalizeOrigin(origin))
     .filter((origin) => origin.length > 0);
+  const allowedOriginSet = new Set(allowedOrigins);
 
   if (allowedOrigins.length === 0) {
     return {
@@ -72,7 +88,13 @@ export function buildCorsOptions(): CorsOptions {
 
   return {
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      const normalizedRequestOrigin = normalizeOrigin(origin);
+      if (allowedOriginSet.has(normalizedRequestOrigin)) {
         callback(null, true);
         return;
       }

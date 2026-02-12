@@ -1,0 +1,4 @@
+exit status 0xffffffff
+ten tcp :18080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+2026/02/12 15:01:12 failed to start server: listen tcp :18080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+exit status 1

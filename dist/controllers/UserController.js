@@ -584,6 +584,21 @@ class UserController {
                 };
             }
             const effectiveRole = role ?? user.role ?? 'client';
+            let brokerStatus = user.broker_status ?? null;
+            if (effectiveRole === 'broker') {
+                if (user.role !== 'broker') {
+                    await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', ['broker', user.id]);
+                    user.role = 'broker';
+                }
+                const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ? LIMIT 1', [user.id]);
+                if (brokerRows.length === 0) {
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_documents']);
+                    brokerStatus = 'pending_documents';
+                }
+                else {
+                    brokerStatus = String(brokerRows[0].status ?? '').trim() || null;
+                }
+            }
             const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, jwtSecret, { expiresIn: '7d' });
             return res.json({
                 user: {
@@ -599,7 +614,7 @@ class UserController {
                     city: user.city ?? city ?? null,
                     state: user.state ?? state ?? null,
                     cep: user.cep ?? cep ?? null,
-                    broker_status: user.broker_status,
+                    broker_status: brokerStatus,
                 },
                 token,
             });

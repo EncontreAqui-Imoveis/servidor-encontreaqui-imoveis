@@ -1,4 +1,4 @@
--- +migrate Up
+fe-- +migrate Up
 CREATE TABLE IF NOT EXISTS negotiations (
   id INT PRIMARY KEY AUTO_INCREMENT,
   property_id INT NOT NULL,

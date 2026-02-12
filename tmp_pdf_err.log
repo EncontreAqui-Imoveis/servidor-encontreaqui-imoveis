@@ -1,0 +1,20 @@
+=shared_test_secret_2026 : O termo '=shared_test_secret_2026' n∆o Ç reconhecido como nome de cmdlet, funá∆o, arquivo 
+de script ou programa oper†vel. Verifique a grafia do nome ou, se um caminho tiver sido inclu°do, veja se o caminho 
+est† correto e tente novamente.
+No linha:1 caractere:1
++ ='shared_test_secret_2026'; ='18080'; Set-Location 'D:\pdf-service';  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (=shared_test_secret_2026:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+=18080 : O termo '=18080' n∆o Ç reconhecido como nome de cmdlet, funá∆o, arquivo de script ou programa oper†vel. 
+Verifique a grafia do nome ou, se um caminho tiver sido inclu°do, veja se o caminho est† correto e tente novamente.
+No linha:1 caractere:29
++ ='shared_test_secret_2026'; ='18080'; Set-Location 'D:\pdf-service';  ...
++                             ~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (=18080:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+[GIN-debug] [ERROR] listen tcp :8080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+2026/02/12 14:57:51 failed to start server: listen tcp :8080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
+exit status 1

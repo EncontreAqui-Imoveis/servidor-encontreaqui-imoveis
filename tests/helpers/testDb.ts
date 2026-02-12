@@ -6,13 +6,6 @@ export const cleanDb = async () => {
         await db.query('SET FOREIGN_KEY_CHECKS = 0');
         // Truncate tables in reverse order of dependency
         const tables = [
-            'audit_logs',
-            'commission_splits',
-            'negotiation_close_submissions',
-            'negotiation_signatures',
-            'negotiation_contracts',
-            'negotiation_documents',
-            'negotiations',
             'properties',
             'users'
         ];

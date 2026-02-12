@@ -42,12 +42,24 @@ async function authMiddleware(req, res, next) {
 }
 async function isBroker(req, res, next) {
     try {
+        if (!req.userId) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
         const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [req.userId]);
         const brokers = brokerRows;
         if (brokers.length === 0) {
-            return res.status(403).json({
-                error: 'Acesso negado. Rota exclusiva para corretores.',
-            });
+            const [userRows] = await connection_1.default.query('SELECT role FROM users WHERE id = ?', [req.userId]);
+            const users = userRows;
+            const role = String(users[0]?.role ?? '').trim().toLowerCase();
+            if (role !== 'broker') {
+                return res.status(403).json({
+                    error: 'Acesso negado. Rota exclusiva para corretores.',
+                });
+            }
+            // Garante registro do corretor quando o usuario ja tem role broker.
+            await connection_1.default.query('INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)', [req.userId, null, 'approved']);
+            req.userRole = 'broker';
+            return next();
         }
         if (brokers[0].status !== 'approved') {
             return res.status(403).json({

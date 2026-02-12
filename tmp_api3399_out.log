@@ -1,0 +1,8 @@
+
+> imobiliaria-backend@1.0.0 dev
+> ts-node-dev --exit-child --transpile-only --ignore-watch node_modules src/server.ts
+
+[INFO] 15:03:53 ts-node-dev ver. 2.0.0 (using ts-node ver. 10.9.2, typescript ver. 5.8.3)
+Migrations aplicadas com sucesso.
+Nenhuma migration pendente.
+Servidor rodando na porta 3399 com suporte a UTF-8

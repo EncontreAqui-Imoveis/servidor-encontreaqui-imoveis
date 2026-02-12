@@ -3,8 +3,6 @@ import { adminController, sendNotification, getDashboardStats } from '../control
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
-import { negotiationUpload } from '../middlewares/uploadMiddleware';
-import { negotiationsController } from '../modules/negociacoes/http/NegotiationsController';
 
 const adminRoutes = Router();
 
@@ -16,16 +14,6 @@ adminRoutes.post('/notifications/send', sendNotification);
 adminRoutes.delete('/notifications/:id', adminController.deleteNotification);
 adminRoutes.delete('/notifications', adminController.clearNotifications);
 adminRoutes.post('/uploads/sign', adminController.signCloudinaryUpload);
-adminRoutes.post('/negotiations/:id/activate', negotiationsController.activateByAdmin);
-adminRoutes.post('/negotiations/:id/documents/:docId/review', negotiationsController.reviewDocument);
-adminRoutes.post(
-  '/negotiations/:id/contract',
-  negotiationUpload.fields([{ name: 'contract_file', maxCount: 1 }]),
-  negotiationsController.publishContract
-);
-adminRoutes.post('/negotiations/:id/signatures/:sigId/validate', negotiationsController.validateSignature);
-adminRoutes.post('/negotiations/:id/close/approve', negotiationsController.approveClose);
-adminRoutes.post('/negotiations/:id/close/no-commission', negotiationsController.markNoCommission);
 
 adminRoutes.post(
   '/properties',

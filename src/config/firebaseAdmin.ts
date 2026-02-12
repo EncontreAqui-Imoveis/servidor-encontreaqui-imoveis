@@ -1,5 +1,7 @@
-import * as admin from 'firebase-admin';
 import fs from 'fs';
+import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getMessaging, type Messaging } from 'firebase-admin/messaging';
 
 type ServiceAccount = {
   projectId: string;
@@ -47,9 +49,21 @@ if (serviceAccountPath) {
   serviceAccount = loadServiceAccountFromEnv();
 }
 
-// Inicializar o Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
+const app: App =
+  getApps().length > 0
+    ? getApps()[0]
+    : initializeApp({
+        credential: cert(serviceAccount),
+      });
 
-export default admin;
+const firebaseAdmin = {
+  app,
+  auth(): Auth {
+    return getAuth(app);
+  },
+  messaging(): Messaging {
+    return getMessaging(app);
+  },
+};
+
+export default firebaseAdmin;

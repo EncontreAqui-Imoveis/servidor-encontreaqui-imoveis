@@ -144,7 +144,7 @@ class BrokerController {
 
             await connection.query(
                 "INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)",
-                [userId, creci, "pending_documents", resolvedAgencyId ? Number(resolvedAgencyId) : null]
+                [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
             );
 
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
@@ -337,14 +337,13 @@ class BrokerController {
             if (brokerRows.length === 0) {
                 await connection.query(
                     'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-                    [brokerId, creci, 'pending_documents']
+                    [brokerId, creci, 'pending_verification']
                 );
-                await connection.query('UPDATE users SET role = ? WHERE id = ?', ['broker', brokerId]);
-                return res.status(201).json({ status: 'pending_documents', role: 'broker' });
+                return res.status(201).json({ status: 'pending_verification', role: 'broker' });
             }
 
             const currentStatus = String(brokerRows[0].status ?? '').trim();
-            if (currentStatus === 'rejected' || currentStatus === 'suspended') {
+            if (currentStatus === 'rejected') {
                 return res.status(403).json({
                     error: "Sua solicitacao de corretor foi rejeitada.",
                 });
@@ -705,7 +704,7 @@ class BrokerController {
             const currentStatus = brokerStatusRows.length > 0
                 ? String(brokerStatusRows[0].status ?? '').trim().toLowerCase()
                 : '';
-            if (currentStatus === 'rejected' || currentStatus === 'suspended') {
+            if (currentStatus === 'rejected') {
                 return res.status(403).json({
                     success: false,
                     error: "Sua solicitacao foi rejeitada. Inicie novamente para se tornar corretor."

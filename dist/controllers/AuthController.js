@@ -183,7 +183,7 @@ class AuthController {
             ]);
             const userId = userResult.insertId;
             if (normalizedProfile === 'broker') {
-                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, brokerCreci, 'pending_documents']);
+                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, brokerCreci, 'pending_verification']);
             }
             const token = signToken(userId, normalizedProfile);
             return res.status(201).json({
@@ -199,7 +199,7 @@ class AuthController {
                     city: addressResult.value.city,
                     state: addressResult.value.state,
                     cep: addressResult.value.cep,
-                    broker_status: normalizedProfile === 'broker' ? 'pending_documents' : null,
+                    broker_status: normalizedProfile === 'broker' ? 'pending_verification' : null,
                 }, normalizedProfile),
                 token,
                 needsCompletion: !hasCompleteProfile({
@@ -228,7 +228,7 @@ class AuthController {
             const [rows] = await connection_1.default.query(`
           SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  CASE
-                   WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification', 'pending_documents') THEN 'broker'
+                   WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
                    ELSE 'client'
                  END AS role,
                  b.status AS broker_status,
@@ -321,7 +321,7 @@ class AuthController {
                 brokerDocumentsStatus = row.broker_documents_status ?? null;
                 hasBrokerDocuments = brokerDocumentsStatus != null;
                 blockedBrokerRequest =
-                    brokerStatus === 'rejected' || brokerStatus === 'suspended';
+                    brokerStatus === 'rejected';
                 if (hasBrokerRow && !blockedBrokerRequest) {
                     effectiveProfile = 'broker';
                 }
@@ -349,8 +349,8 @@ class AuthController {
                 createdNow = true;
                 effectiveProfile = requestedProfile === 'broker' ? 'broker' : 'client';
                 if (requestedProfile === 'broker') {
-                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_documents']);
-                    brokerStatus = 'pending_documents';
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_verification']);
+                    brokerStatus = 'pending_verification';
                     hasBrokerRow = true;
                     requiresDocuments = true;
                 }
@@ -365,8 +365,8 @@ class AuthController {
                     effectiveProfile = 'broker';
                     roleLocked = false;
                     if (!hasBrokerRow) {
-                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_documents']);
-                        brokerStatus = 'pending_documents';
+                        await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, null, 'pending_verification']);
+                        brokerStatus = 'pending_verification';
                         hasBrokerRow = true;
                     }
                     requiresDocuments = (brokerStatus ?? '') !== 'approved';

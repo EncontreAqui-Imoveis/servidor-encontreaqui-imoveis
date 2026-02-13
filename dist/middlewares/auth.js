@@ -24,6 +24,12 @@ async function authMiddleware(req, res, next) {
         const decoded = jsonwebtoken_1.default.verify(token, jwtSecret);
         req.userId = decoded.id;
         req.userRole = decoded.role;
+        const [userRows] = await connection_1.default.query('SELECT id FROM users WHERE id = ? LIMIT 1', [decoded.id]);
+        if (userRows.length === 0) {
+            return res.status(401).json({
+                error: 'Sessao invalida. Faca login novamente.',
+            });
+        }
         if (decoded.role === 'broker') {
             const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [decoded.id]);
             const brokers = brokerRows;
@@ -48,18 +54,16 @@ async function isBroker(req, res, next) {
         const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [req.userId]);
         const brokers = brokerRows;
         if (brokers.length === 0) {
-            const [userRows] = await connection_1.default.query('SELECT role FROM users WHERE id = ?', [req.userId]);
-            const users = userRows;
-            const role = String(users[0]?.role ?? '').trim().toLowerCase();
-            if (role !== 'broker') {
-                return res.status(403).json({
-                    error: 'Acesso negado. Rota exclusiva para corretores.',
-                });
+            const roleFromToken = String(req.userRole ?? '').trim().toLowerCase();
+            if (roleFromToken === 'broker') {
+                // Mantem compatibilidade com tokens antigos quando a linha de broker ainda nao existe.
+                await connection_1.default.query('INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)', [req.userId, null, 'approved']);
+                req.userRole = 'broker';
+                return next();
             }
-            // Garante registro do corretor quando o usuario ja tem role broker.
-            await connection_1.default.query('INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)', [req.userId, null, 'approved']);
-            req.userRole = 'broker';
-            return next();
+            return res.status(403).json({
+                error: 'Acesso negado. Rota exclusiva para corretores.',
+            });
         }
         if (brokers[0].status !== 'approved') {
             return res.status(403).json({

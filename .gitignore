@@ -4,3 +4,4 @@ backup_file.sql
 backup.sql
 .env.*
 .env.local
+artifacts/

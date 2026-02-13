@@ -1,3 +1,6 @@
+import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+
 import { NegotiationEventBus } from '../../../src/modules/negotiations/domain/events/NegotiationEventBus';
 import { ConflictError } from '../../../src/modules/negotiations/domain/errors/ConflictError';
 import { ValidationError } from '../../../src/modules/negotiations/domain/errors/ValidationError';
@@ -5,6 +8,7 @@ import { AwaitingSignaturesState } from '../../../src/modules/negotiations/domai
 import { DocumentationPhaseState } from '../../../src/modules/negotiations/domain/states/DocumentationPhaseState';
 import { ProposalSentState } from '../../../src/modules/negotiations/domain/states/ProposalSentState';
 import type {
+  NegotiationDocumentsRepository,
   NegotiationRepositories,
   NegotiationSnapshot,
   NegotiationStateContext,
@@ -25,24 +29,24 @@ const createBaseSnapshot = (): NegotiationSnapshot => ({
 });
 
 const createContext = (overrides?: Partial<NegotiationStateContext>) => {
-  const trx = { execute: jest.fn() };
+  const trx = { execute: vi.fn() };
+  const mockDocsRepo = mock<NegotiationDocumentsRepository>();
+  mockDocsRepo.countPendingOrRejected.mockResolvedValue({
+    pendingOrRejected: 0,
+    approved: 1,
+  });
 
   const repositories: NegotiationRepositories = {
     negotiations: {
-      updateStatusWithOptimisticLock: jest.fn(),
-      updateDraftWithOptimisticLock: jest.fn(),
+      updateStatusWithOptimisticLock: vi.fn(),
+      updateDraftWithOptimisticLock: vi.fn(),
     },
-    negotiationDocuments: {
-      countPendingOrRejected: jest.fn().mockResolvedValue({
-        pendingOrRejected: 0,
-        approved: 1,
-      }),
-    },
+    negotiationDocuments: mockDocsRepo,
     properties: {
-      getPropertyValue: jest.fn(),
-      updateLifecycleStatus: jest.fn(),
-      markUnderNegotiation: jest.fn(),
-      markAvailable: jest.fn(),
+      getPropertyValue: vi.fn(),
+      updateLifecycleStatus: vi.fn(),
+      markUnderNegotiation: vi.fn(),
+      markAvailable: vi.fn(),
     },
   };
 
@@ -89,7 +93,7 @@ describe('DocumentationPhaseState', () => {
     const { context, repositories } = createContext({
       negotiation: { ...createBaseSnapshot(), status: 'DOCUMENTATION_PHASE' },
     });
-    repositories.negotiationDocuments.countPendingOrRejected = jest.fn().mockResolvedValue({
+    repositories.negotiationDocuments.countPendingOrRejected.mockResolvedValue({
       pendingOrRejected: 2,
       approved: 1,
     });
@@ -103,7 +107,7 @@ describe('DocumentationPhaseState', () => {
     const { context, repositories } = createContext({
       negotiation: { ...createBaseSnapshot(), status: 'DOCUMENTATION_PHASE' },
     });
-    repositories.negotiationDocuments.countPendingOrRejected = jest.fn().mockResolvedValue({
+    repositories.negotiationDocuments.countPendingOrRejected.mockResolvedValue({
       pendingOrRejected: 0,
       approved: 0,
     });

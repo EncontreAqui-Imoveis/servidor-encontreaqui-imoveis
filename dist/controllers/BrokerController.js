@@ -106,7 +106,7 @@ class BrokerController {
                 addressResult.value.cep,
             ]);
             const userId = userResult.insertId;
-            await connection_1.default.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_documents", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
+            await connection_1.default.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
         }
         catch (error) {
@@ -237,12 +237,11 @@ class BrokerController {
             }
             const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [brokerId]);
             if (brokerRows.length === 0) {
-                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [brokerId, creci, 'pending_documents']);
-                await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', ['broker', brokerId]);
-                return res.status(201).json({ status: 'pending_documents', role: 'broker' });
+                await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [brokerId, creci, 'pending_verification']);
+                return res.status(201).json({ status: 'pending_verification', role: 'broker' });
             }
             const currentStatus = String(brokerRows[0].status ?? '').trim();
-            if (currentStatus === 'rejected' || currentStatus === 'suspended') {
+            if (currentStatus === 'rejected') {
                 return res.status(403).json({
                     error: "Sua solicitacao de corretor foi rejeitada.",
                 });
@@ -554,7 +553,7 @@ class BrokerController {
             const currentStatus = brokerStatusRows.length > 0
                 ? String(brokerStatusRows[0].status ?? '').trim().toLowerCase()
                 : '';
-            if (currentStatus === 'rejected' || currentStatus === 'suspended') {
+            if (currentStatus === 'rejected') {
                 return res.status(403).json({
                     success: false,
                     error: "Sua solicitacao foi rejeitada. Inicie novamente para se tornar corretor."

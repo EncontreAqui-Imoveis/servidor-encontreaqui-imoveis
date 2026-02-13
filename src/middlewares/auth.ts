@@ -43,6 +43,16 @@ export async function authMiddleware(
     req.userId = decoded.id;
     req.userRole = decoded.role;
 
+    const [userRows] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM users WHERE id = ? LIMIT 1',
+      [decoded.id]
+    );
+    if (userRows.length === 0) {
+      return res.status(401).json({
+        error: 'Sessao invalida. Faca login novamente.',
+      });
+    }
+
     if (decoded.role === 'broker') {
       const [brokerRows] = await connection.query(
         'SELECT status FROM brokers WHERE id = ?',
@@ -81,25 +91,20 @@ export async function isBroker(
     const brokers = brokerRows as any[];
 
     if (brokers.length === 0) {
-      const [userRows] = await connection.query(
-        'SELECT role FROM users WHERE id = ?',
-        [req.userId]
-      );
-      const users = userRows as any[];
-      const role = String(users[0]?.role ?? '').trim().toLowerCase();
-      if (role !== 'broker') {
-        return res.status(403).json({
-          error: 'Acesso negado. Rota exclusiva para corretores.',
-        });
+      const roleFromToken = String(req.userRole ?? '').trim().toLowerCase();
+      if (roleFromToken === 'broker') {
+        // Mantem compatibilidade com tokens antigos quando a linha de broker ainda nao existe.
+        await connection.query(
+          'INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)',
+          [req.userId, null, 'approved']
+        );
+        req.userRole = 'broker';
+        return next();
       }
 
-      // Garante registro do corretor quando o usuario ja tem role broker.
-      await connection.query(
-        'INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-        [req.userId, null, 'approved']
-      );
-      req.userRole = 'broker';
-      return next();
+      return res.status(403).json({
+        error: 'Acesso negado. Rota exclusiva para corretores.',
+      });
     }
 
     if (brokers[0].status !== 'approved') {

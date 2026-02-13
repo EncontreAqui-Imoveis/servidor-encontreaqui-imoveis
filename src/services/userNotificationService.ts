@@ -15,7 +15,6 @@ type RelatedEntityType =
 export type RecipientRole = 'client' | 'broker';
 
 const ACTIVE_BROKER_STATUSES = new Set([
-  'pending_documents',
   'pending_verification',
   'approved',
 ]);

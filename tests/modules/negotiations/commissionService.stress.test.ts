@@ -1,13 +1,15 @@
+import { describe, expect, it, vi } from 'vitest';
+
 import { CommissionRulesRepository } from '../../../src/modules/negotiations/infra/CommissionRulesRepository';
 import { CommissionService } from '../../../src/modules/negotiations/infra/CommissionService';
 import { CommissionsRepository } from '../../../src/modules/negotiations/infra/CommissionsRepository';
 import { NegotiationEventBus } from '../../../src/modules/negotiations/domain/events/NegotiationEventBus';
 
 describe('CommissionService stress', () => {
-  it('handles multiple deal closed events concurrently', async () => {
-    jest.setTimeout(60000);
-
-    const execute = jest.fn(async (sql: string) => {
+  it(
+    'handles multiple deal closed events concurrently',
+    async () => {
+      const execute = vi.fn(async (sql: string) => {
       if (sql.includes('FROM negotiations')) {
         return [
           {
@@ -48,5 +50,7 @@ describe('CommissionService stress', () => {
     await Promise.all(tasks);
 
     expect(execute).toHaveBeenCalled();
-  });
+    },
+    60000
+  );
 });

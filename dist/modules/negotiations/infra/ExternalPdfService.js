@@ -23,7 +23,7 @@ class ExternalPdfService {
     }
     async generateProposal(data) {
         if (!this.jwtSecret) {
-            throw new Error('JWT_SECRET is not configured for PDF service auth.');
+            throw new Error('JWT_SECRET não está configurado para serviço de autenticação do PDF');
         }
         const token = jsonwebtoken_1.default.sign({ scope: 'pdf-service' }, this.jwtSecret, {
             algorithm: 'HS256',

@@ -10,7 +10,6 @@ exports.resolveUserNotificationRole = resolveUserNotificationRole;
 const connection_1 = __importDefault(require("../database/connection"));
 const pushNotificationService_1 = require("./pushNotificationService");
 const ACTIVE_BROKER_STATUSES = new Set([
-    'pending_documents',
     'pending_verification',
     'approved',
 ]);

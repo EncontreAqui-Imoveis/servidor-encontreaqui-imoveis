@@ -1,10 +1,12 @@
+import { describe, expect, it, vi } from 'vitest';
+
 import { NegotiationDocumentsRepository } from '../../../../src/modules/negotiations/infra/NegotiationDocumentsRepository';
 import type { SqlExecutor } from '../../../../src/modules/negotiations/infra/NegotiationRepository';
 
 describe('NegotiationDocumentsRepository.findById', () => {
   it('should return the document object with a Buffer when found', async () => {
     const expectedBuffer = Buffer.from('fake-pdf');
-    const execute = jest.fn().mockResolvedValue([
+    const execute = vi.fn().mockResolvedValue([
       [
         {
           file_content: expectedBuffer,
@@ -31,7 +33,7 @@ describe('NegotiationDocumentsRepository.findById', () => {
   });
 
   it('should return null when the ID does not exist', async () => {
-    const execute = jest.fn().mockResolvedValue([[], {}]);
+    const execute = vi.fn().mockResolvedValue([[], {}]);
 
     const repository = new NegotiationDocumentsRepository({
       execute,

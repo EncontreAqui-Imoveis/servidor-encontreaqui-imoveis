@@ -22,7 +22,7 @@ export class ExternalPdfService implements ProposalPdfService {
 
   async generateProposal(data: ProposalData): Promise<Buffer> {
     if (!this.jwtSecret) {
-      throw new Error('JWT_SECRET is not configured for PDF service auth.');
+      throw new Error('JWT_SECRET não está configurado para serviço de autenticação do PDF');
     }
 
     const token = jwt.sign({ scope: 'pdf-service' }, this.jwtSecret, {

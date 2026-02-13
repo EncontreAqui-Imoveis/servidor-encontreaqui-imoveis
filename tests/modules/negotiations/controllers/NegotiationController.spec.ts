@@ -1,30 +1,32 @@
+import { describe, expect, it, vi } from 'vitest';
 import type { Request, Response } from 'express';
 
-jest.mock('../../../../src/database/connection', () => ({
+vi.mock('../../../../src/database/connection', () => ({
   __esModule: true,
   default: {
-    execute: jest.fn(),
-    query: jest.fn(),
+    execute: vi.fn(),
+    query: vi.fn(),
   },
 }));
 
 import { negotiationController } from '../../../../src/controllers/NegotiationController';
 import { NegotiationDocumentsRepository } from '../../../../src/modules/negotiations/infra/NegotiationDocumentsRepository';
 
+type FnMock = ReturnType<typeof vi.fn>;
 type MockResponse = Response & {
-  status: jest.Mock;
-  json: jest.Mock;
-  send: jest.Mock;
-  setHeader: jest.Mock;
+  status: FnMock;
+  json: FnMock;
+  send: FnMock;
+  setHeader: FnMock;
 };
 
 function createMockResponse(): MockResponse {
   const res: Partial<MockResponse> = {};
 
-  res.status = jest.fn().mockReturnValue(res);
-  res.json = jest.fn().mockReturnValue(res);
-  res.send = jest.fn().mockReturnValue(res);
-  res.setHeader = jest.fn();
+  res.status = vi.fn().mockReturnValue(res);
+  res.json = vi.fn().mockReturnValue(res);
+  res.send = vi.fn().mockReturnValue(res);
+  res.setHeader = vi.fn();
 
   return res as MockResponse;
 }
@@ -32,7 +34,7 @@ function createMockResponse(): MockResponse {
 describe('NegotiationController.downloadDocument', () => {
   it('should set PDF headers and send buffer when document exists', async () => {
     const fileContent = Buffer.from('fake-pdf');
-    jest.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue({
+    vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue({
       fileContent,
       type: 'proposal',
     });
@@ -57,7 +59,7 @@ describe('NegotiationController.downloadDocument', () => {
   });
 
   it('should return 404 when document is not found', async () => {
-    jest.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue(null);
+    vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue(null);
 
     const req = {
       params: {
@@ -77,3 +79,4 @@ describe('NegotiationController.downloadDocument', () => {
     );
   });
 });
+

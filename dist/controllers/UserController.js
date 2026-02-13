@@ -179,7 +179,7 @@ class UserController {
         `, [userId]);
             if (brokerRows.length > 0) {
                 const brokerStatus = String(brokerRows[0].status ?? '').trim();
-                const isBroker = ['approved', 'pending_verification', 'pending_documents'].includes(brokerStatus);
+                const isBroker = ['approved', 'pending_verification'].includes(brokerStatus);
                 if (isBroker) {
                     const docsStatus = String(brokerRows[0].broker_documents_status ?? '')
                         .trim()
@@ -270,7 +270,7 @@ class UserController {
           WHERE b.id = ?
         `, [userId]);
             const brokerStatus = brokerRows.length > 0 ? String(brokerRows[0].status) : '';
-            const isBroker = ['approved', 'pending_verification', 'pending_documents'].includes(brokerStatus);
+            const isBroker = ['approved', 'pending_verification'].includes(brokerStatus);
             const role = isBroker ? 'broker' : 'client';
             const status = isBroker ? brokerStatus : undefined;
             const docsStatus = String(brokerRows[0]?.broker_documents_status ?? '')
@@ -354,8 +354,7 @@ class UserController {
                 const empty = (v) => v === null || v === undefined || String(v).trim() === '';
                 const missingProfile = (empty(user.phone) || empty(user.street) || empty(user.number) || empty(user.bairro) || empty(user.city) || empty(user.state) || empty(user.cep)) &&
                     user.broker_status == null;
-                const missingRole = !user.role;
-                if (autoMode && (missingProfile || missingRole)) {
+                if (autoMode && missingProfile) {
                     return res.json({
                         requiresProfileChoice: true,
                         isNewUser: false,
@@ -374,7 +373,7 @@ class UserController {
                     });
                 }
                 const chosenRole = requestedRole === 'broker' ? 'broker' : 'client';
-                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name, role) VALUES (?, ?, ?, ?)', [uid, email, name || `User-${uid.substring(0, 8)}`, chosenRole]);
+                const [result] = await connection_1.default.query('INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)', [uid, email, name || `User-${uid.substring(0, 8)}`]);
                 user = {
                     id: result.insertId,
                     name: name || `User-${uid.substring(0, 8)}`,
@@ -384,8 +383,8 @@ class UserController {
                 isNewUser = true;
                 user.broker_status = null;
                 if (chosenRole === 'broker') {
-                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_documents']);
-                    user.broker_status = 'pending_documents';
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
+                    user.broker_status = 'pending_verification';
                 }
             }
             // Papel efetivo:
@@ -397,20 +396,18 @@ class UserController {
             if (!autoMode && requestedRole === 'broker') {
                 effectiveRole = 'broker';
                 roleLocked = false;
-                await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
                 const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ?', [user.id]);
                 if (brokerRows.length === 0) {
-                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_documents']);
-                    user.broker_status = 'pending_documents';
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
+                    user.broker_status = 'pending_verification';
                 }
                 else {
                     user.broker_status = brokerRows[0].status;
                 }
             }
-            else if (!autoMode && requestedRole === 'client' && !user.role) {
+            else if (!autoMode && requestedRole === 'client') {
                 effectiveRole = 'client';
                 roleLocked = false;
-                await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', [effectiveRole, user.id]);
             }
             // Se papel final é corretor, garanta status carregado
             if (effectiveRole === 'broker') {
@@ -419,7 +416,7 @@ class UserController {
                     user.broker_status = brokerRows[0].status;
                 }
                 else {
-                    user.broker_status = 'pending_documents';
+                    user.broker_status = 'pending_verification';
                 }
             }
             const needsCompletion = !user.phone || !user.street || !user.number || !user.bairro || !user.city || !user.state || !user.cep;
@@ -586,14 +583,10 @@ class UserController {
             const effectiveRole = role ?? user.role ?? 'client';
             let brokerStatus = user.broker_status ?? null;
             if (effectiveRole === 'broker') {
-                if (user.role !== 'broker') {
-                    await connection_1.default.query('UPDATE users SET role = ? WHERE id = ?', ['broker', user.id]);
-                    user.role = 'broker';
-                }
                 const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ? LIMIT 1', [user.id]);
                 if (brokerRows.length === 0) {
-                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_documents']);
-                    brokerStatus = 'pending_documents';
+                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
+                    brokerStatus = 'pending_verification';
                 }
                 else {
                     brokerStatus = String(brokerRows[0].status ?? '').trim() || null;
@@ -949,6 +942,11 @@ class UserController {
             return res.status(400).json({ error: 'Token do dispositivo e obrigatorio.' });
         }
         try {
+            const [userRows] = await connection_1.default.query('SELECT id FROM users WHERE id = ? LIMIT 1', [userId]);
+            if (userRows.length === 0) {
+                console.warn(`Registro de token ignorado: usuario ${userId} nao existe em users.`);
+                return res.status(204).send();
+            }
             await connection_1.default.query(`
           INSERT INTO user_device_tokens (user_id, fcm_token, platform)
           VALUES (?, ?, ?)
@@ -960,6 +958,10 @@ class UserController {
             return res.status(204).send();
         }
         catch (error) {
+            if (error?.code === 'ER_NO_REFERENCED_ROW_2') {
+                console.warn(`Registro de token ignorado por FK (user_id=${userId} ausente em users).`);
+                return res.status(204).send();
+            }
             console.error('Erro ao registrar token do dispositivo:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }

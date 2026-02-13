@@ -56,7 +56,6 @@ const DDL_STATEMENTS: DDLStatement[] = [
         city VARCHAR(100) NULL,
         state VARCHAR(100) NULL,
         cep VARCHAR(20) NULL,
-        role ENUM('client', 'broker', 'admin') DEFAULT 'client',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       );
@@ -68,7 +67,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
       CREATE TABLE IF NOT EXISTS brokers (
         id INT PRIMARY KEY,
         creci VARCHAR(50) NULL UNIQUE,
-        status ENUM('pending_documents', 'pending_verification', 'approved', 'rejected', 'suspended') NOT NULL DEFAULT 'pending_documents',
+        status ENUM('pending_verification', 'approved', 'rejected') NOT NULL DEFAULT 'pending_verification',
         agency_id INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

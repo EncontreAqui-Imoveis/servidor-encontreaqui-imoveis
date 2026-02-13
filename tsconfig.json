@@ -10,5 +10,5 @@
     "skipLibCheck": true
   },
   "include": ["src"],
-  "exclude": ["tests", "tools", "jest.config.ts"]
+  "exclude": ["tests", "tools"]
 }

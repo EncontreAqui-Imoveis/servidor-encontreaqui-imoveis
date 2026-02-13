@@ -784,7 +784,7 @@ class AdminController {
       const params: Array<string | number> = [];
 
       if (!includeBrokers) {
-        whereClauses.push("(b.id IS NULL OR b.status IN ('rejected','suspended'))");
+        whereClauses.push("(b.id IS NULL OR b.status IN ('rejected'))");
       }
 
       if (searchTerm) {
@@ -809,7 +809,7 @@ class AdminController {
             u.phone,
             u.created_at,
             CASE
-            WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification','pending_documents') THEN 'broker'
+            WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification') THEN 'broker'
               ELSE 'client'
             END AS role
           FROM users u
@@ -1986,7 +1986,7 @@ class AdminController {
     }
 
     const normalizedStatus = status.trim();
-    const allowedStatuses = new Set(['pending_documents', 'pending_verification', 'approved', 'rejected']);
+    const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected']);
 
     if (!allowedStatuses.has(normalizedStatus)) {
       return res.status(400).json({ error: 'Status de corretor não suportado.' });
@@ -2059,7 +2059,7 @@ class AdminController {
       const requestedStatusRaw = String(req.query.status ?? '').trim();
       const requestedStatus = requestedStatusRaw.length == 0 ? 'approved' : requestedStatusRaw;
       const searchTerm = String(req.query.search ?? '').trim();
-      const allowedStatuses = new Set(['pending_documents', 'pending_verification', 'approved', 'rejected', 'all']);
+      const allowedStatuses = new Set(['pending_verification', 'approved', 'rejected', 'all']);
       const whereClauses: string[] = [];
       const params: Array<string | number> = [];
 
@@ -2896,7 +2896,7 @@ export async function sendNotification(req: Request, res: Response) {
     if (sendToAll) {
       if (normalizedAudience === 'broker') {
         const [userRows] = await connection.query<RowDataPacket[]>(
-          "SELECT id FROM brokers WHERE status IN ('pending_documents','pending_verification','approved')",
+          "SELECT id FROM brokers WHERE status IN ('pending_verification','approved')",
         );
         notificationRecipients = (userRows ?? [])
           .map((row) => Number(row.id))
@@ -2907,7 +2907,7 @@ export async function sendNotification(req: Request, res: Response) {
             SELECT u.id
             FROM users u
             LEFT JOIN brokers b ON u.id = b.id
-            WHERE b.id IS NULL OR b.status IN ('rejected','suspended')
+            WHERE b.id IS NULL OR b.status IN ('rejected')
           `
         );
         notificationRecipients = (userRows ?? [])

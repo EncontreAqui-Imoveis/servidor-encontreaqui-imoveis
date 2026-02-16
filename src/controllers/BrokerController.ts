@@ -7,6 +7,7 @@ import AuthRequest from "../middlewares/auth";
 import { uploadToCloudinary } from "../config/cloudinary";
 import { requireEnv } from "../config/env";
 import { sanitizeAddressInput } from "../utils/address";
+import { hasValidCreci, normalizeCreci } from "../utils/creci";
 
 type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
 
@@ -85,6 +86,14 @@ class BrokerController {
             agency_id
         } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
+        const normalizedCreci = normalizeCreci(creci);
+
+        if (!hasValidCreci(normalizedCreci)) {
+            return res.status(400).json({
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+            });
+        }
+
         try {
             const [existingUserRows] = await connection.query(
                 "SELECT id FROM users WHERE email = ?",
@@ -98,7 +107,7 @@ class BrokerController {
 
             const [existingCreciRows] = await connection.query(
                 "SELECT id FROM brokers WHERE creci = ?",
-                [creci]
+                [normalizedCreci]
             );
             const existingCreci = existingCreciRows as any[];
 
@@ -144,7 +153,7 @@ class BrokerController {
 
             await connection.query(
                 "INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)",
-                [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
+                [userId, normalizedCreci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
             );
 
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
@@ -176,11 +185,18 @@ class BrokerController {
         } = req.body;
 
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
+        const normalizedCreci = normalizeCreci(creci);
 
         const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
-        if (!name || !email || !password || !creci) {
+        if (!name || !email || !password || !normalizedCreci) {
             return res.status(400).json({ error: "Nome, email, senha e CRECI s?o obrigat?rios." });
+        }
+
+        if (!hasValidCreci(normalizedCreci)) {
+            return res.status(400).json({
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+            });
         }
 
         const addressResult = sanitizeAddressInput({
@@ -224,7 +240,7 @@ class BrokerController {
 
             const [existingCreciRows] = await db.query(
                 "SELECT id FROM brokers WHERE creci = ?",
-                [creci]
+                [normalizedCreci]
             );
             const existingCreci = existingCreciRows as any[];
 
@@ -254,7 +270,7 @@ class BrokerController {
 
             await db.query(
                 "INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)",
-                [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
+                [userId, normalizedCreci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
             );
 
             const creciFrontResult = await uploadToCloudinary(creciFrontFile, "brokers/documents");
@@ -310,14 +326,16 @@ class BrokerController {
 
     async requestUpgrade(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
-        const creci = (req.body as any)?.creci?.toString().trim() ?? '';
+        const creci = normalizeCreci((req.body as any)?.creci);
 
         if (!brokerId) {
             return res.status(401).json({ error: "Usuario nao autenticado." });
         }
 
-        if (!creci) {
-            return res.status(400).json({ error: "Informe o CRECI." });
+        if (!hasValidCreci(creci)) {
+            return res.status(400).json({
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+            });
         }
 
         try {
@@ -672,12 +690,12 @@ class BrokerController {
         }
 
         const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        const creci = (req.body as any)?.creci?.toString().trim() || '';
+        const creci = normalizeCreci((req.body as any)?.creci);
 
-        if (!creci) {
+        if (!hasValidCreci(creci)) {
             return res.status(400).json({
                 success: false,
-                error: "Informe o CRECI."
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F)."
             });
         }
 

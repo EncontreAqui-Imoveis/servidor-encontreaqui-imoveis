@@ -14,6 +14,8 @@ const userNotificationService_1 = require("../services/userNotificationService")
 const supportRequestService_1 = require("../services/supportRequestService");
 const address_1 = require("../utils/address");
 const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ADDRESS_FIELDS = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep'];
 function toBoolean(value) {
     return value === 1 || value === '1' || value === true;
 }
@@ -231,36 +233,80 @@ class UserController {
     async updateProfile(req, res) {
         const userId = req.userId;
         if (!userId) {
-            return res.status(401).json({ error: 'Usuário não autenticado.' });
-        }
-        const { phone, street, number, complement, bairro, city, state, cep } = req.body ?? {};
-        const addressResult = (0, address_1.sanitizeAddressInput)({
-            street,
-            number,
-            complement,
-            bairro,
-            city,
-            state,
-            cep,
-        });
-        if (!addressResult.ok) {
-            return res.status(400).json({
-                error: 'Endereco incompleto ou invalido.',
-                fields: addressResult.errors,
+            return res.status(401).json({
+                message: 'Usuário não autenticado.',
+                error: 'Usuário não autenticado.',
             });
         }
         try {
-            await connection_1.default.query('UPDATE users SET phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?', [
-                stringOrNull(phone),
-                addressResult.value.street,
-                addressResult.value.number,
-                addressResult.value.complement,
-                addressResult.value.bairro,
-                addressResult.value.city,
-                addressResult.value.state,
-                addressResult.value.cep,
-                userId,
-            ]);
+            const payload = (req.body ?? {});
+            const hasField = (field) => Object.prototype.hasOwnProperty.call(payload, field);
+            const updates = {};
+            if (hasField('name')) {
+                const name = stringOrNull(payload.name);
+                if (!name || name.length > 255) {
+                    return res.status(400).json({
+                        message: 'Nome invalido.',
+                        error: 'Nome invalido.',
+                    });
+                }
+                updates.name = name;
+            }
+            if (hasField('email')) {
+                const email = stringOrNull(payload.email)?.toLowerCase() ?? null;
+                if (!email || !EMAIL_REGEX.test(email)) {
+                    return res.status(400).json({
+                        message: 'Email invalido.',
+                        error: 'Email invalido.',
+                    });
+                }
+                const [existingEmailRows] = await connection_1.default.query('SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1', [email, userId]);
+                if (existingEmailRows.length > 0) {
+                    return res.status(409).json({
+                        message: 'Email ja cadastrado.',
+                        error: 'Email ja cadastrado.',
+                    });
+                }
+                updates.email = email;
+            }
+            if (hasField('phone')) {
+                const normalizedPhone = stringOrNull(payload.phone)?.replace(/\D/g, '') ?? null;
+                if (!normalizedPhone || normalizedPhone.length < 8 || normalizedPhone.length > 15) {
+                    return res.status(400).json({
+                        message: 'Telefone invalido.',
+                        error: 'Telefone invalido.',
+                    });
+                }
+                updates.phone = normalizedPhone;
+            }
+            const partialAddressInput = {};
+            for (const field of ADDRESS_FIELDS) {
+                if (hasField(field)) {
+                    partialAddressInput[field] = payload[field];
+                }
+            }
+            if (Object.keys(partialAddressInput).length > 0) {
+                const partialAddressResult = (0, address_1.sanitizePartialAddressInput)(partialAddressInput);
+                if (!partialAddressResult.ok) {
+                    return res.status(400).json({
+                        message: 'Endereco invalido.',
+                        error: 'Endereco invalido.',
+                        fields: partialAddressResult.errors,
+                    });
+                }
+                Object.assign(updates, partialAddressResult.value);
+            }
+            const fieldsToUpdate = Object.keys(updates);
+            if (fieldsToUpdate.length === 0) {
+                return res.status(400).json({
+                    message: 'Nenhum campo valido foi enviado para atualização.',
+                    error: 'Nenhum campo valido foi enviado para atualização.',
+                });
+            }
+            const setClause = fieldsToUpdate.map((field) => `${field} = ?`).join(', ');
+            const values = fieldsToUpdate.map((field) => updates[field]);
+            values.push(userId);
+            await connection_1.default.query(`UPDATE users SET ${setClause} WHERE id = ?`, values);
             const [userRows] = await connection_1.default.query('SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?', [userId]);
             const user = userRows[0];
             const [brokerRows] = await connection_1.default.query(`
@@ -298,7 +344,16 @@ class UserController {
         }
         catch (error) {
             console.error('Erro ao atualizar perfil:', error);
-            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+            if (error?.code == 'ER_DUP_ENTRY') {
+                return res.status(409).json({
+                    message: 'Email ja cadastrado.',
+                    error: 'Email ja cadastrado.',
+                });
+            }
+            return res.status(500).json({
+                message: 'Ocorreu um erro inesperado no servidor.',
+                error: 'Ocorreu um erro inesperado no servidor.',
+            });
         }
     }
     async syncUser(req, res) {

@@ -6,6 +6,7 @@ import adminRoutes from './admin.routes';
 import dashboardRoutes from './dashboard.routes'
 import authRoutes from './auth.routes';
 import negotiationRoutes from './negotiation.routes';
+import locationRoutes from './location.routes';
 
 const mainRoutes = Router();
 
@@ -18,6 +19,7 @@ mainRoutes.use('/users', userRoutes);
 mainRoutes.use('/brokers', brokerRoutes);
 mainRoutes.use('/properties', propertyRoutes);
 mainRoutes.use('/negotiations', negotiationRoutes);
+mainRoutes.use('/locations', locationRoutes);
 mainRoutes.use('/admin', adminRoutes);
 mainRoutes.use('/admin/dashboard', dashboardRoutes); 
 

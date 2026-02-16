@@ -10,6 +10,7 @@ const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = require("../config/cloudinary");
 const env_1 = require("../config/env");
 const address_1 = require("../utils/address");
+const creci_1 = require("../utils/creci");
 const jwtSecret = (0, env_1.requireEnv)("JWT_SECRET");
 function toDate(value) {
     if (!value)
@@ -65,13 +66,19 @@ class BrokerController {
     async register(req, res) {
         const { name, email, password, creci, phone, street, number, complement, bairro, city, state, cep, agencyId, agency_id } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
+        const normalizedCreci = (0, creci_1.normalizeCreci)(creci);
+        if (!(0, creci_1.hasValidCreci)(normalizedCreci)) {
+            return res.status(400).json({
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+            });
+        }
         try {
             const [existingUserRows] = await connection_1.default.query("SELECT id FROM users WHERE email = ?", [email]);
             const existingUsers = existingUserRows;
             if (existingUsers.length > 0) {
                 return res.status(409).json({ error: "Este email já está em uso." });
             }
-            const [existingCreciRows] = await connection_1.default.query("SELECT id FROM brokers WHERE creci = ?", [creci]);
+            const [existingCreciRows] = await connection_1.default.query("SELECT id FROM brokers WHERE creci = ?", [normalizedCreci]);
             const existingCreci = existingCreciRows;
             if (existingCreci.length > 0) {
                 return res.status(409).json({ error: "Este CRECI já está em uso." });
@@ -106,7 +113,7 @@ class BrokerController {
                 addressResult.value.cep,
             ]);
             const userId = userResult.insertId;
-            await connection_1.default.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
+            await connection_1.default.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, normalizedCreci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
         }
         catch (error) {
@@ -120,9 +127,15 @@ class BrokerController {
     async registerWithDocs(req, res) {
         const { name, email, password, creci, phone, street, number, complement, bairro, city, state, cep, agencyId, agency_id } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
+        const normalizedCreci = (0, creci_1.normalizeCreci)(creci);
         const files = req.files;
-        if (!name || !email || !password || !creci) {
+        if (!name || !email || !password || !normalizedCreci) {
             return res.status(400).json({ error: "Nome, email, senha e CRECI s?o obrigat?rios." });
+        }
+        if (!(0, creci_1.hasValidCreci)(normalizedCreci)) {
+            return res.status(400).json({
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+            });
         }
         const addressResult = (0, address_1.sanitizeAddressInput)({
             street,
@@ -154,7 +167,7 @@ class BrokerController {
                 await db.rollback();
                 return res.status(409).json({ error: "Este email já está em uso." });
             }
-            const [existingCreciRows] = await db.query("SELECT id FROM brokers WHERE creci = ?", [creci]);
+            const [existingCreciRows] = await db.query("SELECT id FROM brokers WHERE creci = ?", [normalizedCreci]);
             const existingCreci = existingCreciRows;
             if (existingCreci.length > 0) {
                 await db.rollback();
@@ -175,7 +188,7 @@ class BrokerController {
                 addressResult.value.cep,
             ]);
             const userId = userResult.insertId;
-            await db.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, creci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
+            await db.query("INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)", [userId, normalizedCreci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]);
             const creciFrontResult = await (0, cloudinary_1.uploadToCloudinary)(creciFrontFile, "brokers/documents");
             const creciBackResult = await (0, cloudinary_1.uploadToCloudinary)(creciBackFile, "brokers/documents");
             const selfieResult = await (0, cloudinary_1.uploadToCloudinary)(selfieFile, "brokers/documents");
@@ -223,12 +236,14 @@ class BrokerController {
     }
     async requestUpgrade(req, res) {
         const brokerId = req.userId;
-        const creci = req.body?.creci?.toString().trim() ?? '';
+        const creci = (0, creci_1.normalizeCreci)(req.body?.creci);
         if (!brokerId) {
             return res.status(401).json({ error: "Usuario nao autenticado." });
         }
-        if (!creci) {
-            return res.status(400).json({ error: "Informe o CRECI." });
+        if (!(0, creci_1.hasValidCreci)(creci)) {
+            return res.status(400).json({
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+            });
         }
         try {
             const [creciRows] = await connection_1.default.query('SELECT id FROM brokers WHERE creci = ? AND id <> ?', [creci, brokerId]);
@@ -529,11 +544,11 @@ class BrokerController {
             });
         }
         const files = req.files;
-        const creci = req.body?.creci?.toString().trim() || '';
-        if (!creci) {
+        const creci = (0, creci_1.normalizeCreci)(req.body?.creci);
+        if (!(0, creci_1.hasValidCreci)(creci)) {
             return res.status(400).json({
                 success: false,
-                error: "Informe o CRECI."
+                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F)."
             });
         }
         if (!files.creciFront || !files.creciBack || !files.selfie) {

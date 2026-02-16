@@ -10,9 +10,25 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const firebaseAdmin_1 = __importDefault(require("../config/firebaseAdmin"));
 const env_1 = require("../config/env");
 const connection_1 = __importDefault(require("../database/connection"));
+const phoneOtpService_1 = require("../services/phoneOtpService");
 const address_1 = require("../utils/address");
+const creci_1 = require("../utils/creci");
 const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
+function buildBrokerPayload(row) {
+    const hasBrokerData = row?.broker_id != null ||
+        row?.broker_status != null ||
+        row?.creci != null;
+    if (!hasBrokerData) {
+        return null;
+    }
+    return {
+        id: Number(row.broker_id ?? row.id),
+        status: row.broker_status != null ? String(row.broker_status) : null,
+        creci: row.creci != null ? String(row.creci) : null,
+    };
+}
 function buildUserPayload(row, profileType) {
+    const broker = buildBrokerPayload(row);
     return {
         id: row.id,
         name: row.name,
@@ -27,6 +43,7 @@ function buildUserPayload(row, profileType) {
         cep: row.cep ?? null,
         role: profileType,
         broker_status: row.broker_status ?? null,
+        broker,
     };
 }
 function hasCompleteProfile(row) {
@@ -65,6 +82,53 @@ function withTimeout(promise, ms, label) {
     });
 }
 class AuthController {
+    normalizePhoneOtpInput(value) {
+        return String(value ?? '').replace(/\D/g, '');
+    }
+    buildOtpIssueResponse(issue) {
+        const base = {
+            sessionToken: issue.sessionToken,
+            expiresAt: issue.expiresAt.toISOString(),
+        };
+        if (process.env.NODE_ENV === 'test') {
+            return {
+                ...base,
+                otpCode: issue.code,
+            };
+        }
+        return base;
+    }
+    async requestOtp(req, res) {
+        const phone = this.normalizePhoneOtpInput(req.body?.phone);
+        if (phone.length < 8) {
+            return res.status(400).json({ error: 'Telefone invalido.' });
+        }
+        const issue = phoneOtpService_1.phoneOtpService.requestOtp(phone);
+        return res.status(200).json(this.buildOtpIssueResponse(issue));
+    }
+    async resendOtp(req, res) {
+        const sessionToken = String(req.body?.sessionToken ?? '').trim();
+        if (!sessionToken) {
+            return res.status(400).json({ error: 'sessionToken e obrigatorio.' });
+        }
+        const issue = phoneOtpService_1.phoneOtpService.resendOtp(sessionToken);
+        if (!issue) {
+            return res.status(404).json({ error: 'Sessao OTP nao encontrada.' });
+        }
+        return res.status(200).json(this.buildOtpIssueResponse(issue));
+    }
+    async verifyOtp(req, res) {
+        const sessionToken = String(req.body?.sessionToken ?? '').trim();
+        const code = String(req.body?.code ?? '').replace(/\D/g, '');
+        if (!sessionToken || code.length !== 6) {
+            return res.status(400).json({ error: 'sessionToken e codigo sao obrigatorios.' });
+        }
+        const result = phoneOtpService_1.phoneOtpService.verifyOtp(sessionToken, code);
+        if (!result.ok) {
+            return res.status(400).json({ error: 'Codigo invalido ou expirado.' });
+        }
+        return res.status(200).json({ ok: true });
+    }
     async checkEmail(req, res) {
         const email = String(req.query.email ?? req.body?.email ?? '').trim().toLowerCase();
         if (!email) {
@@ -134,15 +198,65 @@ class AuthController {
         }
     }
     // confirmPasswordReset deprecated/removed as Firebase handles the UI.
+    async verifyPhone(req, res) {
+        const email = String(req.body?.email ?? '').trim().toLowerCase();
+        if (!email) {
+            return res.status(400).json({ error: 'Email e obrigatorio.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.street,
+            u.number,
+            u.complement,
+            u.bairro,
+            u.city,
+            u.state,
+            u.cep,
+            b.id AS broker_id,
+            b.status AS broker_status,
+            b.creci AS creci
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.email = ?
+          LIMIT 1
+        `, [email]);
+            if (rows.length === 0) {
+                return res.status(404).json({ error: 'Usuario nao encontrado.' });
+            }
+            const row = rows[0];
+            const brokerStatus = String(row.broker_status ?? '').trim();
+            const profile = row.broker_id != null &&
+                (brokerStatus === 'approved' || brokerStatus === 'pending_verification')
+                ? 'broker'
+                : 'client';
+            const userPayload = buildUserPayload(row, profile);
+            return res.status(200).json({
+                user: userPayload,
+                broker: userPayload.broker,
+                needsCompletion: !hasCompleteProfile(row),
+            });
+        }
+        catch (error) {
+            console.error('Erro ao verificar telefone:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
     async register(req, res) {
         const { name, email, password, phone, street, number, complement, bairro, city, state, cep, profileType, creci, } = req.body;
         if (!name || !email || !password) {
             return res.status(400).json({ error: 'Nome, email e senha s??o obrigat??rios.' });
         }
         const normalizedProfile = profileType === 'broker' ? 'broker' : 'client';
-        const brokerCreci = (creci ?? '').toString().trim();
-        if (normalizedProfile === 'broker' && !brokerCreci) {
-            return res.status(400).json({ error: 'CRECI e obrigatorio para corretores.' });
+        const brokerCreci = (0, creci_1.normalizeCreci)(creci);
+        if (normalizedProfile === 'broker' && !(0, creci_1.hasValidCreci)(brokerCreci)) {
+            return res.status(400).json({
+                error: 'CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).',
+            });
         }
         try {
             const [existingUserRows] = await connection_1.default.query('SELECT id FROM users WHERE email = ?', [email]);
@@ -186,21 +300,25 @@ class AuthController {
                 await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [userId, brokerCreci, 'pending_verification']);
             }
             const token = signToken(userId, normalizedProfile);
+            const userPayload = buildUserPayload({
+                id: userId,
+                name,
+                email,
+                phone,
+                street: addressResult.value.street,
+                number: addressResult.value.number,
+                complement: addressResult.value.complement,
+                bairro: addressResult.value.bairro,
+                city: addressResult.value.city,
+                state: addressResult.value.state,
+                cep: addressResult.value.cep,
+                broker_id: normalizedProfile === 'broker' ? userId : null,
+                broker_status: normalizedProfile === 'broker' ? 'pending_verification' : null,
+                creci: normalizedProfile === 'broker' ? brokerCreci : null,
+            }, normalizedProfile);
             return res.status(201).json({
-                user: buildUserPayload({
-                    id: userId,
-                    name,
-                    email,
-                    phone,
-                    street: addressResult.value.street,
-                    number: addressResult.value.number,
-                    complement: addressResult.value.complement,
-                    bairro: addressResult.value.bairro,
-                    city: addressResult.value.city,
-                    state: addressResult.value.state,
-                    cep: addressResult.value.cep,
-                    broker_status: normalizedProfile === 'broker' ? 'pending_verification' : null,
-                }, normalizedProfile),
+                user: userPayload,
+                broker: userPayload.broker,
                 token,
                 needsCompletion: !hasCompleteProfile({
                     phone,
@@ -231,7 +349,9 @@ class AuthController {
                    WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
                    ELSE 'client'
                  END AS role,
+                 b.id AS broker_id,
                  b.status AS broker_status,
+                 b.creci AS creci,
                  bd.status AS broker_documents_status
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
@@ -278,7 +398,7 @@ class AuthController {
                 return res.status(400).json({ error: 'Email não disponível no token do Google.' });
             }
             const [existingRows] = await connection_1.default.query(`SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid,
-                b.id AS broker_id, b.status AS broker_status,
+                b.id AS broker_id, b.status AS broker_status, b.creci AS creci,
                 bd.status AS broker_documents_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id

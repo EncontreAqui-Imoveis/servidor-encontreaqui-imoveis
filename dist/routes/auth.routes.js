@@ -7,6 +7,10 @@ const authRoutes = (0, express_1.Router)();
 authRoutes.post('/register', (req, res) => AuthController_1.authController.register(req, res));
 authRoutes.post('/login', (req, res) => AuthController_1.authController.login(req, res));
 authRoutes.post('/google', (req, res) => AuthController_1.authController.google(req, res));
+authRoutes.post('/otp/request', (req, res) => AuthController_1.authController.requestOtp(req, res));
+authRoutes.post('/otp/resend', (req, res) => AuthController_1.authController.resendOtp(req, res));
+authRoutes.post('/otp/verify', (req, res) => AuthController_1.authController.verifyOtp(req, res));
+authRoutes.post('/verify-phone', (req, res) => AuthController_1.authController.verifyPhone(req, res));
 authRoutes.get('/check-email', (req, res) => AuthController_1.authController.checkEmail(req, res));
 authRoutes.post('/password-reset/request', (req, res) => AuthController_1.authController.requestPasswordReset(req, res));
 // Perfil

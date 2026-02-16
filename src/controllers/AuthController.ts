@@ -7,13 +7,33 @@ import admin from '../config/firebaseAdmin';
 import { requireEnv } from '../config/env';
 import connection from '../database/connection';
 import { sendPasswordResetEmail } from '../services/emailService';
+import { phoneOtpService } from '../services/phoneOtpService';
 import { sanitizeAddressInput } from '../utils/address';
+import { hasValidCreci, normalizeCreci } from '../utils/creci';
 
 const jwtSecret = requireEnv('JWT_SECRET');
 
 type ProfileType = 'client' | 'broker';
 
+function buildBrokerPayload(row: any) {
+  const hasBrokerData =
+    row?.broker_id != null ||
+    row?.broker_status != null ||
+    row?.creci != null;
+
+  if (!hasBrokerData) {
+    return null;
+  }
+
+  return {
+    id: Number(row.broker_id ?? row.id),
+    status: row.broker_status != null ? String(row.broker_status) : null,
+    creci: row.creci != null ? String(row.creci) : null,
+  };
+}
+
 function buildUserPayload(row: any, profileType: ProfileType) {
+  const broker = buildBrokerPayload(row);
   return {
     id: row.id,
     name: row.name,
@@ -28,6 +48,7 @@ function buildUserPayload(row: any, profileType: ProfileType) {
     cep: row.cep ?? null,
     role: profileType,
     broker_status: row.broker_status ?? null,
+    broker,
   };
 }
 
@@ -78,6 +99,70 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 class AuthController {
+  private normalizePhoneOtpInput(value: unknown): string {
+    return String(value ?? '').replace(/\D/g, '');
+  }
+
+  private buildOtpIssueResponse(issue: {
+    sessionToken: string;
+    expiresAt: Date;
+    code: string;
+  }) {
+    const base = {
+      sessionToken: issue.sessionToken,
+      expiresAt: issue.expiresAt.toISOString(),
+    };
+
+    if (process.env.NODE_ENV === 'test') {
+      return {
+        ...base,
+        otpCode: issue.code,
+      };
+    }
+
+    return base;
+  }
+
+  async requestOtp(req: Request, res: Response) {
+    const phone = this.normalizePhoneOtpInput(req.body?.phone);
+    if (phone.length < 8) {
+      return res.status(400).json({ error: 'Telefone invalido.' });
+    }
+
+    const issue = phoneOtpService.requestOtp(phone);
+    return res.status(200).json(this.buildOtpIssueResponse(issue));
+  }
+
+  async resendOtp(req: Request, res: Response) {
+    const sessionToken = String(req.body?.sessionToken ?? '').trim();
+    if (!sessionToken) {
+      return res.status(400).json({ error: 'sessionToken e obrigatorio.' });
+    }
+
+    const issue = phoneOtpService.resendOtp(sessionToken);
+    if (!issue) {
+      return res.status(404).json({ error: 'Sessao OTP nao encontrada.' });
+    }
+
+    return res.status(200).json(this.buildOtpIssueResponse(issue));
+  }
+
+  async verifyOtp(req: Request, res: Response) {
+    const sessionToken = String(req.body?.sessionToken ?? '').trim();
+    const code = String(req.body?.code ?? '').replace(/\D/g, '');
+
+    if (!sessionToken || code.length !== 6) {
+      return res.status(400).json({ error: 'sessionToken e codigo sao obrigatorios.' });
+    }
+
+    const result = phoneOtpService.verifyOtp(sessionToken, code);
+    if (!result.ok) {
+      return res.status(400).json({ error: 'Codigo invalido ou expirado.' });
+    }
+
+    return res.status(200).json({ ok: true });
+  }
+
   async checkEmail(req: Request, res: Response) {
     const email = String(req.query.email ?? req.body?.email ?? '').trim().toLowerCase();
     if (!email) {
@@ -161,6 +246,64 @@ class AuthController {
 
   // confirmPasswordReset deprecated/removed as Firebase handles the UI.
 
+  async verifyPhone(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email e obrigatorio.' });
+    }
+
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.street,
+            u.number,
+            u.complement,
+            u.bairro,
+            u.city,
+            u.state,
+            u.cep,
+            b.id AS broker_id,
+            b.status AS broker_status,
+            b.creci AS creci
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.email = ?
+          LIMIT 1
+        `,
+        [email],
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Usuario nao encontrado.' });
+      }
+
+      const row = rows[0];
+      const brokerStatus = String(row.broker_status ?? '').trim();
+      const profile: ProfileType =
+        row.broker_id != null &&
+        (brokerStatus === 'approved' || brokerStatus === 'pending_verification')
+          ? 'broker'
+          : 'client';
+
+      const userPayload = buildUserPayload(row, profile);
+
+      return res.status(200).json({
+        user: userPayload,
+        broker: userPayload.broker,
+        needsCompletion: !hasCompleteProfile(row),
+      });
+    } catch (error) {
+      console.error('Erro ao verificar telefone:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async register(req: Request, res: Response) {
     const {
       name,
@@ -184,9 +327,11 @@ class AuthController {
 
     const normalizedProfile: ProfileType =
       profileType === 'broker' ? 'broker' : 'client';
-    const brokerCreci = (creci ?? '').toString().trim();
-    if (normalizedProfile === 'broker' && !brokerCreci) {
-      return res.status(400).json({ error: 'CRECI e obrigatorio para corretores.' });
+    const brokerCreci = normalizeCreci(creci);
+    if (normalizedProfile === 'broker' && !hasValidCreci(brokerCreci)) {
+      return res.status(400).json({
+        error: 'CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).',
+      });
     }
 
     try {
@@ -245,25 +390,29 @@ class AuthController {
       }
 
       const token = signToken(userId, normalizedProfile);
+      const userPayload = buildUserPayload(
+        {
+          id: userId,
+          name,
+          email,
+          phone,
+          street: addressResult.value.street,
+          number: addressResult.value.number,
+          complement: addressResult.value.complement,
+          bairro: addressResult.value.bairro,
+          city: addressResult.value.city,
+          state: addressResult.value.state,
+          cep: addressResult.value.cep,
+          broker_id: normalizedProfile === 'broker' ? userId : null,
+          broker_status: normalizedProfile === 'broker' ? 'pending_verification' : null,
+          creci: normalizedProfile === 'broker' ? brokerCreci : null,
+        },
+        normalizedProfile,
+      );
 
       return res.status(201).json({
-        user: buildUserPayload(
-          {
-            id: userId,
-            name,
-            email,
-            phone,
-            street: addressResult.value.street,
-            number: addressResult.value.number,
-            complement: addressResult.value.complement,
-            bairro: addressResult.value.bairro,
-            city: addressResult.value.city,
-            state: addressResult.value.state,
-            cep: addressResult.value.cep,
-            broker_status: normalizedProfile === 'broker' ? 'pending_verification' : null,
-          },
-          normalizedProfile,
-        ),
+        user: userPayload,
+        broker: userPayload.broker,
         token,
         needsCompletion: !hasCompleteProfile({
           phone,
@@ -297,7 +446,9 @@ class AuthController {
                    WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
                    ELSE 'client'
                  END AS role,
+                 b.id AS broker_id,
                  b.status AS broker_status,
+                 b.creci AS creci,
                  bd.status AS broker_documents_status
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
@@ -363,7 +514,7 @@ class AuthController {
 
       const [existingRows] = await connection.query<RowDataPacket[]>(
         `SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid,
-                b.id AS broker_id, b.status AS broker_status,
+                b.id AS broker_id, b.status AS broker_status, b.creci AS creci,
                 bd.status AS broker_documents_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id

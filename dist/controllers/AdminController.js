@@ -47,6 +47,7 @@ const notificationService_1 = require("../services/notificationService");
 const priceDropNotificationService_1 = require("../services/priceDropNotificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
 const address_1 = require("../utils/address");
+const creci_1 = require("../utils/creci");
 const propertyTypes_1 = require("../utils/propertyTypes");
 const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 const STATUS_MAP = {
@@ -209,13 +210,6 @@ function normalizePhone(value) {
 }
 function hasValidPhone(value) {
     return normalizePhone(value).length === 11;
-}
-function normalizeCreci(value) {
-    return normalizeDigits(value).slice(0, 8);
-}
-function hasValidCreci(value) {
-    const length = normalizeCreci(value).length;
-    return length >= 4 && length <= 8;
 }
 function parseStringArray(value) {
     if (Array.isArray(value)) {
@@ -1349,7 +1343,7 @@ class AdminController {
         if (!hasValidPhone(phone)) {
             return res.status(400).json({ error: 'Telefone inválido. Use 11 dígitos com DDD.' });
         }
-        if (!hasValidCreci(creci)) {
+        if (!(0, creci_1.hasValidCreci)(creci)) {
             return res.status(400).json({ error: 'CRECI inválido. Deve ter entre 4 e 8 dígitos.' });
         }
         if (!normalizeDigits(number)) {
@@ -1406,7 +1400,7 @@ class AdminController {
                 addressResult.value.cep,
             ]);
             const userId = userResult.insertId;
-            await db.query('INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)', [userId, normalizeCreci(creci), brokerStatus, agency_id ? Number(agency_id) : null]);
+            await db.query('INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)', [userId, (0, creci_1.normalizeCreci)(creci), brokerStatus, agency_id ? Number(agency_id) : null]);
             if (hasAnyBrokerDocument) {
                 const creciFrontResult = await (0, cloudinary_1.uploadToCloudinary)(files.creciFront[0], 'brokers/documents');
                 const creciBackResult = await (0, cloudinary_1.uploadToCloudinary)(files.creciBack[0], 'brokers/documents');

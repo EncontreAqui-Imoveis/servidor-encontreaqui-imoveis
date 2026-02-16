@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.sanitizeAddressInput = sanitizeAddressInput;
+exports.sanitizePartialAddressInput = sanitizePartialAddressInput;
 const MAX_STREET = 255;
 const MAX_NUMBER = 50;
 const MAX_COMPLEMENT = 255;
@@ -85,4 +86,75 @@ function sanitizeAddressInput(input) {
             cep: cep,
         },
     };
+}
+function sanitizePartialAddressInput(input) {
+    const errors = [];
+    const value = {};
+    if ('street' in input) {
+        const street = normalizeText(input.street);
+        if (!street || !withinLimit(street, MAX_STREET)) {
+            errors.push('street');
+        }
+        else {
+            value.street = street;
+        }
+    }
+    if ('number' in input) {
+        const number = normalizeNumber(input.number);
+        if (!number || !withinLimit(number, MAX_NUMBER)) {
+            errors.push('number');
+        }
+        else {
+            value.number = number;
+        }
+    }
+    if ('bairro' in input) {
+        const bairro = normalizeText(input.bairro);
+        if (!bairro || !withinLimit(bairro, MAX_BAIRRO)) {
+            errors.push('bairro');
+        }
+        else {
+            value.bairro = bairro;
+        }
+    }
+    if ('city' in input) {
+        const city = normalizeText(input.city);
+        if (!city || !withinLimit(city, MAX_CITY)) {
+            errors.push('city');
+        }
+        else {
+            value.city = city;
+        }
+    }
+    if ('state' in input) {
+        const state = normalizeState(input.state);
+        if (!state) {
+            errors.push('state');
+        }
+        else {
+            value.state = state;
+        }
+    }
+    if ('cep' in input) {
+        const cep = normalizeCep(input.cep);
+        if (!cep) {
+            errors.push('cep');
+        }
+        else {
+            value.cep = cep;
+        }
+    }
+    if ('complement' in input) {
+        const complement = normalizeText(input.complement);
+        if (complement && !withinLimit(complement, MAX_COMPLEMENT)) {
+            errors.push('complement');
+        }
+        else {
+            value.complement = complement ?? null;
+        }
+    }
+    if (errors.length > 0) {
+        return { ok: false, errors: Array.from(new Set(errors)) };
+    }
+    return { ok: true, value };
 }

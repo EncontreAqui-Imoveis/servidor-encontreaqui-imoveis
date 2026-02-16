@@ -14,6 +14,7 @@ import {
 import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
 import { sanitizeAddressInput } from '../utils/address';
+import { hasValidCreci, normalizeCreci } from '../utils/creci';
 import { normalizePropertyType } from '../utils/propertyTypes';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
@@ -200,15 +201,6 @@ function normalizePhone(value: unknown): string {
 
 function hasValidPhone(value: unknown): boolean {
   return normalizePhone(value).length === 11;
-}
-
-function normalizeCreci(value: unknown): string {
-  return normalizeDigits(value).slice(0, 8);
-}
-
-function hasValidCreci(value: unknown): boolean {
-  const length = normalizeCreci(value).length;
-  return length >= 4 && length <= 8;
 }
 
 function parseStringArray(value: unknown): string[] {

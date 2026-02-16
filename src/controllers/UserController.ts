@@ -9,9 +9,11 @@ import { requireEnv } from '../config/env';
 import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
-import { sanitizeAddressInput } from '../utils/address';
+import { sanitizeAddressInput, sanitizePartialAddressInput } from '../utils/address';
 
 const jwtSecret = requireEnv('JWT_SECRET');
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const ADDRESS_FIELDS = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep'] as const;
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -335,41 +337,96 @@ class UserController {
   async updateProfile(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Usuário não autenticado.' });
-    }
-
-    const { phone, street, number, complement, bairro, city, state, cep } = req.body ?? {};
-
-    const addressResult = sanitizeAddressInput({
-      street,
-      number,
-      complement,
-      bairro,
-      city,
-      state,
-      cep,
-    });
-    if (!addressResult.ok) {
-      return res.status(400).json({
-        error: 'Endereco incompleto ou invalido.',
-        fields: addressResult.errors,
+      return res.status(401).json({
+        message: 'Usuário não autenticado.',
+        error: 'Usuário não autenticado.',
       });
     }
 
     try {
+      const payload = (req.body ?? {}) as Record<string, unknown>;
+      const hasField = (field: string) =>
+        Object.prototype.hasOwnProperty.call(payload, field);
+
+      const updates: Record<string, string | null> = {};
+
+      if (hasField('name')) {
+        const name = stringOrNull(payload.name);
+        if (!name || name.length > 255) {
+          return res.status(400).json({
+            message: 'Nome invalido.',
+            error: 'Nome invalido.',
+          });
+        }
+        updates.name = name;
+      }
+
+      if (hasField('email')) {
+        const email = stringOrNull(payload.email)?.toLowerCase() ?? null;
+        if (!email || !EMAIL_REGEX.test(email)) {
+          return res.status(400).json({
+            message: 'Email invalido.',
+            error: 'Email invalido.',
+          });
+        }
+
+        const [existingEmailRows] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
+          [email, userId]
+        );
+        if (existingEmailRows.length > 0) {
+          return res.status(409).json({
+            message: 'Email ja cadastrado.',
+            error: 'Email ja cadastrado.',
+          });
+        }
+        updates.email = email;
+      }
+
+      if (hasField('phone')) {
+        const normalizedPhone = stringOrNull(payload.phone)?.replace(/\D/g, '') ?? null;
+        if (!normalizedPhone || normalizedPhone.length < 8 || normalizedPhone.length > 15) {
+          return res.status(400).json({
+            message: 'Telefone invalido.',
+            error: 'Telefone invalido.',
+          });
+        }
+        updates.phone = normalizedPhone;
+      }
+
+      const partialAddressInput: Record<string, unknown> = {};
+      for (const field of ADDRESS_FIELDS) {
+        if (hasField(field)) {
+          partialAddressInput[field] = payload[field];
+        }
+      }
+      if (Object.keys(partialAddressInput).length > 0) {
+        const partialAddressResult = sanitizePartialAddressInput(partialAddressInput);
+        if (!partialAddressResult.ok) {
+          return res.status(400).json({
+            message: 'Endereco invalido.',
+            error: 'Endereco invalido.',
+            fields: partialAddressResult.errors,
+          });
+        }
+        Object.assign(updates, partialAddressResult.value);
+      }
+
+      const fieldsToUpdate = Object.keys(updates);
+      if (fieldsToUpdate.length === 0) {
+        return res.status(400).json({
+          message: 'Nenhum campo valido foi enviado para atualização.',
+          error: 'Nenhum campo valido foi enviado para atualização.',
+        });
+      }
+
+      const setClause = fieldsToUpdate.map((field) => `${field} = ?`).join(', ');
+      const values: unknown[] = fieldsToUpdate.map((field) => updates[field]);
+      values.push(userId);
+
       await connection.query(
-        'UPDATE users SET phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?',
-        [
-          stringOrNull(phone),
-          addressResult.value.street,
-          addressResult.value.number,
-          addressResult.value.complement,
-          addressResult.value.bairro,
-          addressResult.value.city,
-          addressResult.value.state,
-          addressResult.value.cep,
-          userId,
-        ]
+        `UPDATE users SET ${setClause} WHERE id = ?`,
+        values
       );
 
       const [userRows] = await connection.query<RowDataPacket[]>(
@@ -416,9 +473,19 @@ class UserController {
           cep: user.cep,
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao atualizar perfil:', error);
-      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+      if (error?.code == 'ER_DUP_ENTRY') {
+        return res.status(409).json({
+          message: 'Email ja cadastrado.',
+          error: 'Email ja cadastrado.',
+        });
+      }
+
+      return res.status(500).json({
+        message: 'Ocorreu um erro inesperado no servidor.',
+        error: 'Ocorreu um erro inesperado no servidor.',
+      });
     }
   }
 

@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.negotiationController = void 0;
+const crypto_1 = require("crypto");
 const connection_1 = __importDefault(require("../database/connection"));
 const ExternalPdfService_1 = require("../modules/negotiations/infra/ExternalPdfService");
 const NegotiationDocumentsRepository_1 = require("../modules/negotiations/infra/NegotiationDocumentsRepository");
@@ -12,8 +13,30 @@ const executor = {
         return connection_1.default.execute(sql, params);
     },
 };
+const ACTIVE_NEGOTIATION_STATUSES = [
+    'PROPOSAL_DRAFT',
+    'PROPOSAL_SENT',
+    'IN_NEGOTIATION',
+    'DOCUMENTATION_PHASE',
+    'CONTRACT_DRAFTING',
+    'AWAITING_SIGNATURES',
+];
+const DEFAULT_WIZARD_STATUS = 'AWAITING_SIGNATURES';
 const pdfService = new ExternalPdfService_1.ExternalPdfService();
 const negotiationDocumentsRepository = new NegotiationDocumentsRepository_1.NegotiationDocumentsRepository(executor);
+function toCurrency(value) {
+    return value.toFixed(2);
+}
+function toCents(value) {
+    return Math.round(value * 100);
+}
+function parsePositiveNumber(input, fieldName) {
+    const parsed = Number(input);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error(`${fieldName} deve ser um numero maior ou igual a zero.`);
+    }
+    return parsed;
+}
 function parseProposalData(body) {
     const clientName = String(body.clientName ?? body.client_name ?? '').trim();
     const clientCpf = String(body.clientCpf ?? body.client_cpf ?? '').trim();
@@ -44,6 +67,79 @@ function parseProposalData(body) {
         validityDays,
     };
 }
+function parseProposalWizardBody(body) {
+    const propertyId = Number(body.propertyId);
+    const clientName = String(body.clientName ?? '').trim();
+    const clientCpfDigits = String(body.clientCpf ?? '').replace(/\D/g, '');
+    const validadeDiasRaw = body.validadeDias ?? 10;
+    const validadeDias = Number(validadeDiasRaw);
+    const pagamento = body.pagamento ?? {};
+    const dinheiro = parsePositiveNumber(pagamento.dinheiro ?? 0, 'pagamento.dinheiro');
+    const permuta = parsePositiveNumber(pagamento.permuta ?? 0, 'pagamento.permuta');
+    const financiamento = parsePositiveNumber(pagamento.financiamento ?? 0, 'pagamento.financiamento');
+    const outros = parsePositiveNumber(pagamento.outros ?? 0, 'pagamento.outros');
+    if (!Number.isInteger(propertyId) || propertyId <= 0) {
+        throw new Error('propertyId invalido.');
+    }
+    if (!clientName) {
+        throw new Error('clientName e obrigatorio.');
+    }
+    if (clientCpfDigits.length != 11) {
+        throw new Error('clientCpf invalido. Informe 11 digitos.');
+    }
+    if (!Number.isInteger(validadeDias) || validadeDias <= 0) {
+        throw new Error('validadeDias deve ser um inteiro maior que zero.');
+    }
+    return {
+        propertyId,
+        clientName,
+        clientCpf: clientCpfDigits,
+        validadeDias,
+        pagamento: {
+            dinheiro,
+            permuta,
+            financiamento,
+            outros,
+        },
+    };
+}
+function resolvePropertyAddress(row) {
+    const parts = [
+        row.address,
+        row.numero ? `Nº ${row.numero}` : null,
+        row.bairro,
+        row.city,
+        row.state,
+        row.quadra ? `Quadra ${row.quadra}` : null,
+        row.lote ? `Lote ${row.lote}` : null,
+    ]
+        .map((part) => String(part ?? '').trim())
+        .filter(Boolean);
+    return parts.join(', ');
+}
+function resolvePropertyValue(row) {
+    const sale = Number(row.price_sale ?? 0);
+    const rent = Number(row.price_rent ?? 0);
+    const fallback = Number(row.price ?? 0);
+    const resolved = sale > 0 ? sale : rent > 0 ? rent : fallback;
+    return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
+}
+function buildPaymentMethodString(values) {
+    return [
+        `Dinheiro: R$ ${toCurrency(values.dinheiro)}`,
+        `Permuta: R$ ${toCurrency(values.permuta)}`,
+        `Financiamento: R$ ${toCurrency(values.financiamento)}`,
+        `Outros: R$ ${toCurrency(values.outros)}`,
+    ].join(' | ');
+}
+function buildProposalValidityDate(days) {
+    const now = new Date();
+    now.setDate(now.getDate() + days);
+    const yyyy = now.getFullYear().toString().padStart(4, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+}
 class NegotiationController {
     async generateProposal(req, res) {
         if (!req.userId) {
@@ -66,8 +162,9 @@ class NegotiationController {
                 return res.status(404).json({ error: 'Negociacao nao encontrada.' });
             }
             const pdfBuffer = await pdfService.generateProposal(proposalData);
-            await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer);
+            const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer);
             return res.status(201).json({
+                id: documentId,
                 message: 'Proposta gerada e armazenada com sucesso.',
                 negotiationId,
                 sizeBytes: pdfBuffer.length,
@@ -76,6 +173,190 @@ class NegotiationController {
         catch (error) {
             console.error('Erro ao gerar/salvar proposta em BLOB:', error);
             return res.status(500).json({ error: 'Falha ao gerar e salvar proposta.' });
+        }
+    }
+    async generateProposalFromProperty(req, res) {
+        if (!req.userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        let payload;
+        try {
+            payload = parseProposalWizardBody((req.body ?? {}));
+        }
+        catch (error) {
+            return res.status(400).json({ error: error.message });
+        }
+        let tx = null;
+        try {
+            tx = await connection_1.default.getConnection();
+            await tx.beginTransaction();
+            const [propertyRows] = await tx.query(`
+          SELECT
+            id,
+            address,
+            numero,
+            quadra,
+            lote,
+            bairro,
+            city,
+            state,
+            price,
+            price_sale,
+            price_rent
+          FROM properties
+          WHERE id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [payload.propertyId]);
+            const property = propertyRows[0];
+            if (!property) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Imovel nao encontrado.' });
+            }
+            const propertyValue = resolvePropertyValue(property);
+            if (propertyValue <= 0) {
+                await tx.rollback();
+                return res.status(400).json({ error: 'Imovel sem valor valido para gerar proposta.' });
+            }
+            const paymentTotal = payload.pagamento.dinheiro +
+                payload.pagamento.permuta +
+                payload.pagamento.financiamento +
+                payload.pagamento.outros;
+            if (toCents(paymentTotal) !== toCents(propertyValue)) {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'A soma dos pagamentos deve ser exatamente igual ao valor do imovel.',
+                    propertyValue,
+                    paymentTotal,
+                });
+            }
+            const [brokerRows] = await tx.query('SELECT name FROM users WHERE id = ? LIMIT 1', [req.userId]);
+            const brokerName = String(brokerRows[0]?.name ?? '').trim();
+            if (!brokerName) {
+                await tx.rollback();
+                return res.status(400).json({ error: 'Corretor nao encontrado para gerar proposta.' });
+            }
+            const [existingRows] = await tx.query(`
+          SELECT id, status
+          FROM negotiations
+          WHERE property_id = ?
+            AND status IN (${ACTIVE_NEGOTIATION_STATUSES.map(() => '?').join(', ')})
+          LIMIT 1
+          FOR UPDATE
+        `, [payload.propertyId, ...ACTIVE_NEGOTIATION_STATUSES]);
+            const paymentDetails = JSON.stringify({
+                method: 'OTHER',
+                amount: Number(propertyValue.toFixed(2)),
+                details: payload.pagamento,
+            });
+            const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
+            let negotiationId = '';
+            let fromStatus = 'PROPOSAL_DRAFT';
+            if (existingRows.length > 0) {
+                negotiationId = existingRows[0].id;
+                fromStatus = existingRows[0].status;
+                await tx.execute(`
+            UPDATE negotiations
+            SET
+              capturing_broker_id = ?,
+              selling_broker_id = ?,
+              buyer_client_id = NULL,
+              status = ?,
+              final_value = ?,
+              payment_details = CAST(? AS JSON),
+              proposal_validity_date = ?,
+              version = version + 1
+            WHERE id = ?
+          `, [
+                    req.userId,
+                    req.userId,
+                    DEFAULT_WIZARD_STATUS,
+                    propertyValue,
+                    paymentDetails,
+                    proposalValidityDate,
+                    negotiationId,
+                ]);
+            }
+            else {
+                negotiationId = (0, crypto_1.randomUUID)();
+                await tx.execute(`
+            INSERT INTO negotiations (
+              id,
+              property_id,
+              capturing_broker_id,
+              selling_broker_id,
+              buyer_client_id,
+              status,
+              final_value,
+              payment_details,
+              proposal_validity_date,
+              version
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, CAST(? AS JSON), ?, 0)
+          `, [
+                    negotiationId,
+                    payload.propertyId,
+                    req.userId,
+                    req.userId,
+                    DEFAULT_WIZARD_STATUS,
+                    propertyValue,
+                    paymentDetails,
+                    proposalValidityDate,
+                ]);
+            }
+            await tx.execute(`
+          INSERT INTO negotiation_history (
+            id,
+            negotiation_id,
+            from_status,
+            to_status,
+            actor_id,
+            metadata_json,
+            created_at
+          ) VALUES (UUID(), ?, ?, ?, ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+        `, [
+                negotiationId,
+                fromStatus,
+                DEFAULT_WIZARD_STATUS,
+                req.userId,
+                JSON.stringify({
+                    source: 'mobile_proposal_wizard',
+                    payment: payload.pagamento,
+                }),
+            ]);
+            await tx.execute(`
+          UPDATE properties
+          SET status = 'negociacao'
+          WHERE id = ?
+        `, [payload.propertyId]);
+            const proposalData = {
+                clientName: payload.clientName,
+                clientCpf: payload.clientCpf,
+                propertyAddress: resolvePropertyAddress(property),
+                brokerName,
+                sellingBrokerName: brokerName,
+                value: propertyValue,
+                paymentMethod: buildPaymentMethodString(payload.pagamento),
+                validityDays: payload.validadeDias,
+            };
+            const pdfBuffer = await pdfService.generateProposal(proposalData);
+            const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer, tx);
+            await tx.commit();
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="proposal_${negotiationId}.pdf"`);
+            res.setHeader('Content-Length', pdfBuffer.length.toString());
+            res.setHeader('X-Negotiation-Id', negotiationId);
+            res.setHeader('X-Document-Id', String(documentId));
+            return res.status(201).send(pdfBuffer);
+        }
+        catch (error) {
+            if (tx) {
+                await tx.rollback();
+            }
+            console.error('Erro ao gerar proposta por imovel:', error);
+            return res.status(500).json({ error: 'Falha ao gerar proposta.' });
+        }
+        finally {
+            tx?.release();
         }
     }
     async downloadDocument(req, res) {

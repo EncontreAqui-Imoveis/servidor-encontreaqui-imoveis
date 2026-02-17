@@ -99,7 +99,7 @@ export interface NegotiationDocumentsRepository<Tx = OrmTransaction> {
     negotiationId: string,
     pdfBuffer: Buffer,
     trx?: Tx
-  ): Promise<void>;
+  ): Promise<number>;
 }
 
 export interface NegotiationRepositories<Tx = OrmTransaction> {

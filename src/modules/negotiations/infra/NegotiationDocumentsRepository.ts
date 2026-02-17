@@ -13,6 +13,10 @@ interface DocumentRow {
   type: string;
 }
 
+interface InsertResult {
+  insertId?: number;
+}
+
 const toRows = <T>(result: T[] | [T[], unknown]): T[] => {
   if (Array.isArray(result) && Array.isArray(result[0])) {
     return result[0];
@@ -85,7 +89,7 @@ export class NegotiationDocumentsRepository
     negotiationId: string,
     pdfBuffer: Buffer,
     trx?: SqlExecutor
-  ): Promise<void> {
+  ): Promise<number> {
     const executor = trx ?? this.executor;
 
     const sql = `
@@ -93,6 +97,8 @@ export class NegotiationDocumentsRepository
       VALUES (?, 'proposal', ?)
     `;
 
-    await executor.execute(sql, [negotiationId, pdfBuffer]);
+    const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);
+    const header = Array.isArray(result) ? result[0] : result;
+    return Number(header?.insertId ?? 0);
   }
 }

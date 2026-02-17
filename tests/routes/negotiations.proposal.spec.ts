@@ -148,4 +148,54 @@ describe('POST /negotiations/proposal', () => {
     expect(txMock.execute).not.toHaveBeenCalled();
     expect(generateProposalMock).not.toHaveBeenCalled();
   });
+
+  it('uses sellerBrokerId when partnership broker is informed', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: 'Q1',
+            lote: 'L2',
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ name: 'Broker Captador' }]])
+      .mockResolvedValueOnce([[{ name: 'Broker Vendedor' }]])
+      .mockResolvedValueOnce([[]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '111.222.333-44',
+      validadeDias: 10,
+      sellerBrokerId: 30004,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(201);
+    expect(txMock.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO negotiations'),
+      expect.arrayContaining([expect.any(String), 101, 30003, 30004, 'AWAITING_SIGNATURES'])
+    );
+    expect(generateProposalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brokerName: 'Broker Captador',
+        sellingBrokerName: 'Broker Vendedor',
+      })
+    );
+  });
 });

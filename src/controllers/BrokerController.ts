@@ -68,6 +68,57 @@ function calculateAutoCycles(intervalValue: unknown, saleDateValue: unknown): nu
 }
 
 class BrokerController {
+    async listApproved(req: AuthRequest, res: Response) {
+        if (!req.userId) {
+            return res.status(401).json({ error: "Usuario nao autenticado." });
+        }
+
+        const search = String(req.query.search ?? '').trim();
+        const limitInput = Number(req.query.limit ?? 20);
+        const limit = Math.min(Math.max(Number.isFinite(limitInput) ? Math.trunc(limitInput) : 20, 1), 50);
+        const params: unknown[] = ['approved'];
+        let searchSql = '';
+        if (search.length >= 2) {
+            const like = `%${search}%`;
+            searchSql = ' AND (u.name LIKE ? OR u.email LIKE ? OR b.creci LIKE ?)';
+            params.push(like, like, like);
+        }
+        params.push(limit);
+
+        try {
+            const [rows] = await connection.query<RowDataPacket[]>(
+                `
+                    SELECT
+                        b.id,
+                        b.creci,
+                        u.name,
+                        u.email,
+                        u.phone
+                    FROM brokers b
+                    JOIN users u ON u.id = b.id
+                    WHERE b.status = ?
+                    ${searchSql}
+                    ORDER BY u.name ASC
+                    LIMIT ?
+                `,
+                params
+            );
+
+            return res.status(200).json({
+                data: rows.map((row) => ({
+                    id: Number(row.id),
+                    name: String(row.name ?? '').trim(),
+                    email: String(row.email ?? '').trim(),
+                    phone: row.phone != null ? String(row.phone) : null,
+                    creci: row.creci != null ? String(row.creci) : null,
+                })),
+            });
+        } catch (error) {
+            console.error('Erro ao listar corretores aprovados:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
+
     async register(req: Request, res: Response) {
         const {
             name,

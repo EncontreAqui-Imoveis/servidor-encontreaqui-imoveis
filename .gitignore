@@ -5,5 +5,5 @@ backup.sql
 .env.*
 .env.local
 artifacts/
-scripts/reset_db.sql
 docs/sql/
+scripts/

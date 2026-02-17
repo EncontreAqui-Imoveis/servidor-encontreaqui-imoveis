@@ -21,6 +21,8 @@ router.post(
 
 router.use(authMiddleware);
 
+router.get('/approved', brokerController.listApproved);
+
 router.post(
   '/me/verify-documents',
   brokerDocsUpload.fields([

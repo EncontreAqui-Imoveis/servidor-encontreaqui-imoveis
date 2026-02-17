@@ -97,6 +97,24 @@ async function ensurePropertiesColumns(): Promise<void> {
     );
   }
 
+  if (!(await columnExists('properties', 'promo_percentage'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promo_percentage DECIMAL(5, 2) NULL'
+    );
+  }
+
+  if (!(await columnExists('properties', 'promo_start_date'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promo_start_date DATE NULL'
+    );
+  }
+
+  if (!(await columnExists('properties', 'promo_end_date'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promo_end_date DATE NULL'
+    );
+  }
+
   if (!(await columnExists('properties', 'quadra'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN quadra VARCHAR(100) NULL');
   }

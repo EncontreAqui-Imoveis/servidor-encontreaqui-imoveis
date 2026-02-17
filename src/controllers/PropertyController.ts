@@ -115,6 +115,9 @@ interface PropertyRow extends RowDataPacket {
   promotion_percentage?: number | string | null;
   promotion_start?: Date | string | null;
   promotion_end?: Date | string | null;
+  promo_percentage?: number | string | null;
+  promo_start_date?: Date | string | null;
+  promo_end_date?: Date | string | null;
   price: number | string;
   price_sale?: number | string | null;
   price_rent?: number | string | null;
@@ -315,6 +318,17 @@ function parsePromotionDateTime(value: unknown): Nullable<string> {
   return parsed.toISOString().slice(0, 19).replace("T", " ");
 }
 
+function parsePromotionDate(value: unknown): Nullable<string> {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Data de promocao invalida.");
+  }
+  return parsed.toISOString().slice(0, 10);
+}
+
 function stringOrNull(value: unknown): Nullable<string> {
   if (value === undefined || value === null) {
     return null;
@@ -353,9 +367,21 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     lifecycle_status: row.lifecycle_status ?? 'AVAILABLE',
     is_promoted: toBoolean(row.is_promoted),
     promotion_percentage:
-      row.promotion_percentage != null ? Number(row.promotion_percentage) : null,
-    promotion_start: row.promotion_start ?? null,
-    promotion_end: row.promotion_end ?? null,
+      row.promo_percentage != null
+        ? Number(row.promo_percentage)
+        : row.promotion_percentage != null
+          ? Number(row.promotion_percentage)
+          : null,
+    promotion_start: row.promo_start_date ?? row.promotion_start ?? null,
+    promotion_end: row.promo_end_date ?? row.promotion_end ?? null,
+    promo_percentage:
+      row.promo_percentage != null
+        ? Number(row.promo_percentage)
+        : row.promotion_percentage != null
+          ? Number(row.promotion_percentage)
+          : null,
+    promo_start_date: row.promo_start_date ?? null,
+    promo_end_date: row.promo_end_date ?? null,
     price: Number(row.price),
     price_sale: row.price_sale != null ? Number(row.price_sale) : null,
     price_rent: row.price_rent != null ? Number(row.price_rent) : null,
@@ -552,6 +578,9 @@ class PropertyController {
       type,
       purpose,
       is_promoted,
+      promo_percentage,
+      promo_start_date,
+      promo_end_date,
       promotion_percentage,
       promotion_start,
       promotion_end,
@@ -619,15 +648,24 @@ class PropertyController {
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
+    let promotionStartDate: string | null = null;
+    let promotionEndDate: string | null = null;
     let promotionStart: string | null = null;
     let promotionEnd: string | null = null;
     try {
+      const promotionPercentageInput = promo_percentage ?? promotion_percentage;
+      const promotionStartInput = promo_start_date ?? promotion_start;
+      const promotionEndInput = promo_end_date ?? promotion_end;
       promotionFlag = parseBoolean(is_promoted);
-      promotionPercentage = parsePromotionPercentage(promotion_percentage);
-      promotionStart = parsePromotionDateTime(promotion_start);
-      promotionEnd = parsePromotionDateTime(promotion_end);
+      promotionPercentage = parsePromotionPercentage(promotionPercentageInput);
+      promotionStartDate = parsePromotionDate(promotionStartInput);
+      promotionEndDate = parsePromotionDate(promotionEndInput);
+      promotionStart = parsePromotionDateTime(promotionStartInput);
+      promotionEnd = parsePromotionDateTime(promotionEndInput);
       if (promotionFlag === 0) {
         promotionPercentage = null;
+        promotionStartDate = null;
+        promotionEndDate = null;
         promotionStart = null;
         promotionEnd = null;
       }
@@ -750,6 +788,9 @@ class PropertyController {
             promotion_percentage,
             promotion_start,
             promotion_end,
+            promo_percentage,
+            promo_start_date,
+            promo_end_date,
             price,
             price_sale,
             price_rent,
@@ -780,7 +821,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
@@ -794,6 +835,9 @@ class PropertyController {
           promotionPercentage,
           promotionStart,
           promotionEnd,
+          promotionPercentage,
+          promotionStartDate,
+          promotionEndDate,
           numericPrice,
           numericPriceSale,
           numericPriceRent,
@@ -891,6 +935,9 @@ class PropertyController {
       type,
       purpose,
       is_promoted,
+      promo_percentage,
+      promo_start_date,
+      promo_end_date,
       promotion_percentage,
       promotion_start,
       promotion_end,
@@ -958,15 +1005,24 @@ class PropertyController {
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
+    let promotionStartDate: string | null = null;
+    let promotionEndDate: string | null = null;
     let promotionStart: string | null = null;
     let promotionEnd: string | null = null;
     try {
+      const promotionPercentageInput = promo_percentage ?? promotion_percentage;
+      const promotionStartInput = promo_start_date ?? promotion_start;
+      const promotionEndInput = promo_end_date ?? promotion_end;
       promotionFlag = parseBoolean(is_promoted);
-      promotionPercentage = parsePromotionPercentage(promotion_percentage);
-      promotionStart = parsePromotionDateTime(promotion_start);
-      promotionEnd = parsePromotionDateTime(promotion_end);
+      promotionPercentage = parsePromotionPercentage(promotionPercentageInput);
+      promotionStartDate = parsePromotionDate(promotionStartInput);
+      promotionEndDate = parsePromotionDate(promotionEndInput);
+      promotionStart = parsePromotionDateTime(promotionStartInput);
+      promotionEnd = parsePromotionDateTime(promotionEndInput);
       if (promotionFlag === 0) {
         promotionPercentage = null;
+        promotionStartDate = null;
+        promotionEndDate = null;
         promotionStart = null;
         promotionEnd = null;
       }
@@ -1070,6 +1126,9 @@ class PropertyController {
             promotion_percentage,
             promotion_start,
             promotion_end,
+            promo_percentage,
+            promo_start_date,
+            promo_end_date,
             price,
             price_sale,
             price_rent,
@@ -1100,7 +1159,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           null,
@@ -1114,6 +1173,9 @@ class PropertyController {
           promotionPercentage,
           promotionStart,
           promotionEnd,
+          promotionPercentage,
+          promotionStartDate,
+          promotionEndDate,
           numericPrice,
           numericPriceSale,
           numericPriceRent,
@@ -1251,9 +1313,11 @@ class PropertyController {
       let rentTouched = false;
       let nextPromotionFlag = previousPromotionFlag ? 1 : 0;
       let nextPromotionPercentage =
-        property.promotion_percentage != null
-          ? Number(property.promotion_percentage)
-          : null;
+        property.promo_percentage != null
+          ? Number(property.promo_percentage)
+          : property.promotion_percentage != null
+            ? Number(property.promotion_percentage)
+            : null;
 
       // Always allow editing all fields, even if approved
       const updatableFields = new Set([
@@ -1266,6 +1330,9 @@ class PropertyController {
         'price_sale',
         'price_rent',
         'is_promoted',
+        'promo_percentage',
+        'promo_start_date',
+        'promo_end_date',
         'promotion_percentage',
         'promotion_start',
         'promotion_end',
@@ -1413,6 +1480,12 @@ class PropertyController {
             nextPromotionFlag = parsed;
             if (parsed === 0) {
               nextPromotionPercentage = null;
+              fields.push('promo_percentage = ?');
+              values.push(null);
+              fields.push('promo_start_date = ?');
+              values.push(null);
+              fields.push('promo_end_date = ?');
+              values.push(null);
               fields.push('promotion_percentage = ?');
               values.push(null);
               fields.push('promotion_start = ?');
@@ -1424,10 +1497,13 @@ class PropertyController {
             values.push(parsed);
             break;
           }
+          case 'promo_percentage':
           case 'promotion_percentage': {
             try {
               const parsed = parsePromotionPercentage(body[key]);
               nextPromotionPercentage = parsed;
+              fields.push('promo_percentage = ?');
+              values.push(parsed);
               fields.push('promotion_percentage = ?');
               values.push(parsed);
             } catch (parseError) {
@@ -1435,12 +1511,24 @@ class PropertyController {
             }
             break;
           }
+          case 'promo_start_date':
           case 'promotion_start':
+          case 'promo_end_date':
           case 'promotion_end': {
             try {
-              const parsed = parsePromotionDateTime(body[key]);
-              fields.push(`\`${key}\` = ?`);
-              values.push(parsed);
+              const parsedDate = parsePromotionDate(body[key]);
+              const parsedDateTime = parsePromotionDateTime(body[key]);
+              if (key === 'promotion_start' || key === 'promo_start_date') {
+                fields.push('promo_start_date = ?');
+                values.push(parsedDate);
+                fields.push('promotion_start = ?');
+                values.push(parsedDateTime);
+              } else {
+                fields.push('promo_end_date = ?');
+                values.push(parsedDate);
+                fields.push('promotion_end = ?');
+                values.push(parsedDateTime);
+              }
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }

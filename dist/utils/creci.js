@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CRECI_REGEX = void 0;
 exports.normalizeCreci = normalizeCreci;
 exports.hasValidCreci = hasValidCreci;
-exports.CRECI_REGEX = /^\d{4,6}-?[A-Za-z]?$/;
+exports.CRECI_REGEX = /^\d{4,8}-?[A-Za-z]?$/;
 function normalizeCreci(value) {
     if (value === undefined || value === null) {
         return '';

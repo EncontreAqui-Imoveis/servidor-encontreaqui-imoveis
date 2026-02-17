@@ -2,12 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const UserController_1 = require("../controllers/UserController");
+const AuthController_1 = require("../controllers/AuthController");
 const auth_1 = require("../middlewares/auth");
 const userRoutes = (0, express_1.Router)();
 userRoutes.post('/register', UserController_1.userController.register);
 userRoutes.post('/login', UserController_1.userController.login);
 userRoutes.post('/sync', UserController_1.userController.syncUser);
-userRoutes.post('/auth/google', UserController_1.userController.googleLogin);
+userRoutes.post('/auth/google', (req, res) => AuthController_1.authController.google(req, res));
 userRoutes.post('/auth/firebase', UserController_1.userController.firebaseLogin);
 userRoutes.get('/me', auth_1.authMiddleware, (req, res) => UserController_1.userController.getProfile(req, res));
 userRoutes.put('/me', auth_1.authMiddleware, (req, res) => UserController_1.userController.updateProfile(req, res));

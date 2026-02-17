@@ -5,6 +5,10 @@ import { authMiddleware } from '../middlewares/auth';
 
 const negotiationRoutes = Router();
 
+negotiationRoutes.post('/proposal', authMiddleware, (req, res) =>
+  negotiationController.generateProposalFromProperty(req as any, res)
+);
+
 negotiationRoutes.post('/:id/proposals', authMiddleware, (req, res) =>
   negotiationController.generateProposal(req as any, res)
 );

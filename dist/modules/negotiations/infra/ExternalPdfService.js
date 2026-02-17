@@ -11,7 +11,10 @@ class ExternalPdfService {
     endpointUrl;
     jwtSecret;
     constructor(params) {
-        const rawBaseUrl = (params?.baseUrl ?? process.env.PDF_SERVICE_URL ?? 'http://localhost:8080')
+        const rawBaseUrl = (params?.baseUrl ??
+            process.env.GO_PDF_SERVICE_URL ??
+            process.env.PDF_SERVICE_URL ??
+            'http://localhost:8080')
             .trim()
             .replace(/\/+$/, '');
         const hasScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(rawBaseUrl);

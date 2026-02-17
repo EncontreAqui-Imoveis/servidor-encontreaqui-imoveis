@@ -9,7 +9,11 @@ export class ExternalPdfService implements ProposalPdfService {
   private readonly jwtSecret: string;
 
   constructor(params?: { baseUrl?: string; jwtSecret?: string }) {
-    const rawBaseUrl = (params?.baseUrl ?? process.env.PDF_SERVICE_URL ?? 'http://localhost:8080')
+    const rawBaseUrl = (
+      params?.baseUrl ??
+      process.env.PDF_SERVICE_URL ??
+      'http://localhost:8080'
+    )
       .trim()
       .replace(/\/+$/, '');
     const hasScheme = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(rawBaseUrl);

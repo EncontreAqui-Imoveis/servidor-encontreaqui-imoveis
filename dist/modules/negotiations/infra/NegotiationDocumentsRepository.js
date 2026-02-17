@@ -55,7 +55,9 @@ class NegotiationDocumentsRepository {
       INSERT INTO negotiation_documents (negotiation_id, type, file_content)
       VALUES (?, 'proposal', ?)
     `;
-        await executor.execute(sql, [negotiationId, pdfBuffer]);
+        const result = await executor.execute(sql, [negotiationId, pdfBuffer]);
+        const header = Array.isArray(result) ? result[0] : result;
+        return Number(header?.insertId ?? 0);
     }
 }
 exports.NegotiationDocumentsRepository = NegotiationDocumentsRepository;

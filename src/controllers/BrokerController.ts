@@ -90,7 +90,7 @@ class BrokerController {
 
         if (!hasValidCreci(normalizedCreci)) {
             return res.status(400).json({
-                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+                error: "CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A).",
             });
         }
 
@@ -195,7 +195,7 @@ class BrokerController {
 
         if (!hasValidCreci(normalizedCreci)) {
             return res.status(400).json({
-                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+                error: "CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A).",
             });
         }
 
@@ -334,7 +334,7 @@ class BrokerController {
 
         if (!hasValidCreci(creci)) {
             return res.status(400).json({
-                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).",
+                error: "CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A).",
             });
         }
 
@@ -695,7 +695,7 @@ class BrokerController {
         if (!hasValidCreci(creci)) {
             return res.status(400).json({
                 success: false,
-                error: "CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F)."
+                error: "CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A)."
             });
         }
 

@@ -1596,7 +1596,9 @@ class AdminController {
       return res.status(400).json({ error: 'Telefone inválido. Use 11 dígitos com DDD.' });
     }
     if (!hasValidCreci(creci)) {
-      return res.status(400).json({ error: 'CRECI inválido. Deve ter entre 4 e 8 dígitos.' });
+      return res.status(400).json({
+        error: 'CRECI inválido. Use 4 a 8 números com sufixo opcional (ex: 12345678-A).',
+      });
     }
     if (!normalizeDigits(number)) {
       return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });

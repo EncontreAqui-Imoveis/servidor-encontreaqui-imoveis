@@ -97,6 +97,24 @@ async function ensurePropertiesColumns(): Promise<void> {
     );
   }
 
+  if (!(await columnExists('properties', 'quadra'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN quadra VARCHAR(100) NULL');
+  }
+
+  if (!(await columnExists('properties', 'lote'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN lote VARCHAR(100) NULL');
+  }
+
+  const quadraType = await getColumnType('properties', 'quadra');
+  if (quadraType && !quadraType.toLowerCase().includes('varchar')) {
+    await connection.query('ALTER TABLE properties MODIFY COLUMN quadra VARCHAR(100) NULL');
+  }
+
+  const loteType = await getColumnType('properties', 'lote');
+  if (loteType && !loteType.toLowerCase().includes('varchar')) {
+    await connection.query('ALTER TABLE properties MODIFY COLUMN lote VARCHAR(100) NULL');
+  }
+
   const purposeType = await getColumnType('properties', 'purpose');
   if (purposeType && !purposeType.includes('Venda e Aluguel')) {
     await connection.query(

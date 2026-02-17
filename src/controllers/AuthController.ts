@@ -305,24 +305,28 @@ class AuthController {
   }
 
   async register(req: Request, res: Response) {
-    const {
-      name,
-      email,
-      password,
-      phone,
-      street,
-      number,
-      complement,
-      bairro,
-      city,
-      state,
-      cep,
-      profileType,
-      creci,
-    } = req.body as Record<string, string>;
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Nome, email e senha s??o obrigat??rios.' });
+    const name = String(body.name ?? '').trim();
+    const email = String(body.email ?? '').trim().toLowerCase();
+    const password = typeof body.password === 'string' ? body.password : '';
+    const phone = typeof body.phone === 'string' ? body.phone : undefined;
+    const street = body.street;
+    const number = body.number;
+    const complement = body.complement;
+    const bairro = body.bairro;
+    const city = body.city;
+    const state = body.state;
+    const cep = body.cep;
+    const profileType = String(body.profileType ?? '');
+    const creci = body.creci;
+    const googleIdToken =
+      typeof body.googleIdToken === 'string' ? body.googleIdToken.trim() : '';
+
+    if (!name || !email) {
+      return res.status(400).json({
+        error: 'Nome e email sao obrigatorios.',
+      });
     }
 
     const normalizedProfile: ProfileType =
@@ -330,17 +334,61 @@ class AuthController {
     const brokerCreci = normalizeCreci(creci);
     if (normalizedProfile === 'broker' && !hasValidCreci(brokerCreci)) {
       return res.status(400).json({
-        error: 'CRECI invalido. Use 4 a 6 numeros com sufixo opcional (ex: 12345-F).',
+        error: 'CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A).',
       });
     }
 
+    const isGoogleRegistration = googleIdToken.length > 0;
+    if (!isGoogleRegistration && !password) {
+      return res.status(400).json({
+        error: 'Senha obrigatoria para cadastro por email.',
+      });
+    }
+
+    let firebaseUid: string | null = null;
+
     try {
-      const [existingUserRows] = await connection.query<RowDataPacket[]>(
-        'SELECT id FROM users WHERE email = ?',
-        [email],
-      );
+      if (isGoogleRegistration) {
+        const decoded = await withTimeout(
+          admin.auth().verifyIdToken(googleIdToken),
+          8000,
+          'firebase token verification',
+        );
+
+        const tokenEmail = String(decoded.email ?? '')
+          .trim()
+          .toLowerCase();
+
+        if (!tokenEmail) {
+          return res.status(400).json({
+            error: 'Email nao encontrado no token do Google.',
+          });
+        }
+
+        if (tokenEmail !== email) {
+          return res.status(400).json({
+            error: 'Email informado nao corresponde ao token do Google.',
+          });
+        }
+
+        firebaseUid = decoded.uid;
+      }
+
+      let existingUserRows: RowDataPacket[];
+      if (firebaseUid) {
+        [existingUserRows] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? OR firebase_uid = ? LIMIT 1',
+          [email, firebaseUid],
+        );
+      } else {
+        [existingUserRows] = await connection.query<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? LIMIT 1',
+          [email],
+        );
+      }
+
       if (existingUserRows.length > 0) {
-        return res.status(409).json({ error: 'Este email já está em uso.' });
+        return res.status(409).json({ error: 'Este email ja esta em uso.' });
       }
 
       const addressResult = sanitizeAddressInput({
@@ -359,13 +407,17 @@ class AuthController {
         });
       }
 
-      const passwordHash = await bcrypt.hash(password, 8);
+      const passwordHash = isGoogleRegistration
+        ? null
+        : await bcrypt.hash(password, 8);
+
       const [userResult] = await connection.query<ResultSetHeader>(
         `
-          INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (firebase_uid, name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
+          firebaseUid,
           name,
           email,
           passwordHash,
@@ -404,7 +456,8 @@ class AuthController {
           state: addressResult.value.state,
           cep: addressResult.value.cep,
           broker_id: normalizedProfile === 'broker' ? userId : null,
-          broker_status: normalizedProfile === 'broker' ? 'pending_verification' : null,
+          broker_status:
+            normalizedProfile === 'broker' ? 'pending_verification' : null,
           creci: normalizedProfile === 'broker' ? brokerCreci : null,
         },
         normalizedProfile,
@@ -425,7 +478,10 @@ class AuthController {
         }),
         requiresDocuments: normalizedProfile === 'broker',
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({ error: 'Este email ja esta em uso.' });
+      }
       console.error('Erro no registro:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
@@ -488,15 +544,17 @@ class AuthController {
   }
 
   async google(req: Request, res: Response) {
-    const { idToken, profileType } = req.body as { idToken?: string; profileType?: string };
+    const { idToken, profileType } = req.body as {
+      idToken?: string;
+      profileType?: string;
+    };
 
     if (!idToken) {
-      return res.status(400).json({ error: 'idToken do Google é obrigatório.' });
+      return res.status(400).json({ error: 'idToken do Google e obrigatorio.' });
     }
 
     const requestedProfile: ProfileType | 'auto' =
       profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
-    const autoMode = requestedProfile === 'auto';
 
     try {
       const decoded = await withTimeout(
@@ -504,12 +562,18 @@ class AuthController {
         8000,
         'firebase token verification',
       );
+
       const uid = decoded.uid;
-      const email = decoded.email;
-      const displayName = decoded.name || decoded.email?.split('@')[0] || `User-${uid}`;
+      const email = String(decoded.email ?? '').trim().toLowerCase();
+      const displayName =
+        String(decoded.name ?? '').trim() ||
+        email.split('@')[0] ||
+        `User-${uid}`;
 
       if (!email) {
-        return res.status(400).json({ error: 'Email não disponível no token do Google.' });
+        return res.status(400).json({
+          error: 'Email nao disponivel no token do Google.',
+        });
       }
 
       const [existingRows] = await connection.query<RowDataPacket[]>(
@@ -524,145 +588,50 @@ class AuthController {
         [uid, email],
       );
 
-      let userId: number;
-      let userName = displayName;
-      let phone: string | null = null;
-      let street: string | null = null;
-      let number: string | null = null;
-      let complement: string | null = null;
-      let bairro: string | null = null;
-      let city: string | null = null;
-      let state: string | null = null;
-      let cep: string | null = null;
-      let hasBrokerRow = false;
-      let createdNow = false;
-      let blockedBrokerRequest = false;
-      let effectiveProfile: ProfileType = 'client';
-      let requiresDocuments = false;
-      let roleLocked = false;
-      let brokerStatus: string | null = null;
-      let brokerDocumentsStatus: string | null = null;
-      let hasBrokerDocuments = false;
-
-      if (existingRows.length > 0) {
-        const row = existingRows[0];
-        userId = row.id;
-        userName = row.name || displayName;
-        phone = row.phone ?? null;
-        street = row.street ?? null;
-        number = row.number ?? null;
-        complement = row.complement ?? null;
-        bairro = row.bairro ?? null;
-        city = row.city ?? null;
-        state = row.state ?? null;
-        cep = row.cep ?? null;
-        hasBrokerRow = !!row.broker_id;
-        brokerStatus = row.broker_status ?? null;
-        brokerDocumentsStatus = row.broker_documents_status ?? null;
-        hasBrokerDocuments = brokerDocumentsStatus != null;
-        blockedBrokerRequest =
-          brokerStatus === 'rejected';
-        if (hasBrokerRow && !blockedBrokerRequest) {
-          effectiveProfile = 'broker';
-        } else {
-          effectiveProfile = 'client';
-          requiresDocuments = hasBrokerRow;
-        }
-
-        if (!row.firebase_uid) {
-          await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, userId]);
-        }
-      } else {
-        if (autoMode) {
-          return res.json({
-            requiresProfileChoice: true,
-            pending: { email, name: displayName },
-            isNewUser: true,
-            roleLocked: false,
-            needsCompletion: true,
-            requiresDocuments: false,
-          });
-        }
-        const [result] = await connection.query<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
-          [uid, email, displayName],
-        );
-        userId = result.insertId;
-        createdNow = true;
-        effectiveProfile = requestedProfile === 'broker' ? 'broker' : 'client';
-        if (requestedProfile === 'broker') {
-          await connection.query(
-            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-            [userId, null, 'pending_verification'],
-          );
-          brokerStatus = 'pending_verification';
-          hasBrokerRow = true;
-          requiresDocuments = true;
-        }
-      }
-
-      if (!autoMode && requestedProfile === 'broker') {
-        if (blockedBrokerRequest) {
-          effectiveProfile = 'client';
-          roleLocked = true;
-          requiresDocuments = true;
-        } else {
-          effectiveProfile = 'broker';
-          roleLocked = false;
-          if (!hasBrokerRow) {
-            await connection.query(
-              'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-              [userId, null, 'pending_verification'],
-            );
-            brokerStatus = 'pending_verification';
-            hasBrokerRow = true;
-          }
-          requiresDocuments = (brokerStatus ?? '') !== 'approved';
-        }
-      } else if (!autoMode && requestedProfile === 'client') {
-        effectiveProfile = blockedBrokerRequest ? 'client' : effectiveProfile;
-        roleLocked = blockedBrokerRequest;
-      } else if (autoMode) {
-        roleLocked = blockedBrokerRequest || effectiveProfile === 'broker';
-        requiresDocuments =
-          effectiveProfile === 'broker' && (brokerStatus ?? '') !== 'approved';
-        if (effectiveProfile === 'broker' && blockedBrokerRequest) {
-          effectiveProfile = 'client';
-        }
-      }
-
-      const needsCompletion = !hasCompleteProfile({ phone, street, number, bairro, city, state, cep });
-      const brokerDocsRequired =
-        effectiveProfile === 'broker' &&
-        (!hasBrokerDocuments || brokerDocumentsStatus === 'rejected');
-      requiresDocuments = brokerDocsRequired;
-
-      const token = signToken(userId, effectiveProfile);
-
-      return res.json({
-        user: buildUserPayload(
-          {
-            id: userId,
-            name: userName,
+      if (existingRows.length === 0) {
+        return res.status(200).json({
+          isNewUser: true,
+          requiresProfileChoice: true,
+          pending: {
             email,
-            phone,
-            street,
-            number,
-            complement,
-            bairro,
-            city,
-            state,
-            cep,
-            broker_status: brokerStatus,
+            name: displayName,
+            googleUid: uid,
           },
-          effectiveProfile,
-        ),
+          roleLocked: false,
+          needsCompletion: true,
+          requiresDocuments: false,
+        });
+      }
+
+      const row = existingRows[0];
+      if (!row.firebase_uid) {
+        await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
+      }
+
+      const brokerStatus = String(row.broker_status ?? '').trim();
+      const brokerDocsStatus = String(row.broker_documents_status ?? '')
+        .trim()
+        .toLowerCase();
+      const blockedBrokerRequest = brokerStatus === 'rejected';
+      const isBroker =
+        row.broker_id != null &&
+        !blockedBrokerRequest &&
+        (brokerStatus === 'approved' || brokerStatus === 'pending_verification');
+      const effectiveProfile: ProfileType = isBroker ? 'broker' : 'client';
+      const requiresDocuments =
+        effectiveProfile === 'broker' &&
+        (brokerDocsStatus.length === 0 || brokerDocsStatus === 'rejected');
+      const token = signToken(row.id, effectiveProfile);
+
+      return res.status(200).json({
+        user: buildUserPayload(row, effectiveProfile),
         token,
-        needsCompletion,
+        needsCompletion: !hasCompleteProfile(row),
         requiresDocuments,
         blockedBrokerRequest,
-        roleLocked,
-        isNewUser: createdNow,
+        roleLocked: blockedBrokerRequest || effectiveProfile === 'broker',
+        isNewUser: false,
+        requestedProfile,
       });
     } catch (error: any) {
       console.error('Google auth error:', error);

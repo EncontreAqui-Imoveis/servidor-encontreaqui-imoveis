@@ -1,4 +1,4 @@
-export const CRECI_REGEX = /^\d{4,6}-?[A-Za-z]?$/;
+export const CRECI_REGEX = /^\d{4,8}-?[A-Za-z]?$/;
 
 export function normalizeCreci(value: unknown): string {
   if (value === undefined || value === null) {

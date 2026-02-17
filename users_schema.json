@@ -48,14 +48,6 @@
     "Extra": ""
   },
   {
-    "Field": "address",
-    "Type": "varchar(255)",
-    "Null": "YES",
-    "Key": "",
-    "Default": null,
-    "Extra": ""
-  },
-  {
     "Field": "city",
     "Type": "varchar(100)",
     "Null": "YES",

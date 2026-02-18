@@ -27,7 +27,13 @@ export interface ProposalData {
   brokerName: string;
   sellingBrokerName?: string | null;
   value: number;
-  paymentMethod: string;
+  payment: {
+    cash: number;
+    tradeIn: number;
+    financing: number;
+    others: number;
+  };
+  paymentMethod?: string;
   validityDays: number;
 }
 

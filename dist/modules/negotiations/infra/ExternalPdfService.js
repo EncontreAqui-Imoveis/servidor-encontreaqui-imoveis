@@ -38,7 +38,12 @@ class ExternalPdfService {
             broker_name: data.brokerName,
             selling_broker_name: data.sellingBrokerName ?? '',
             value: data.value,
-            payment_method: data.paymentMethod,
+            payment: {
+                cash: data.payment.cash,
+                trade_in: data.payment.tradeIn,
+                financing: data.payment.financing,
+                others: data.payment.others,
+            },
             validity_days: data.validityDays,
         };
         try {

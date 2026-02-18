@@ -63,6 +63,51 @@ function calculateAutoCycles(intervalValue, saleDateValue) {
     }
 }
 class BrokerController {
+    async listApproved(req, res) {
+        if (!req.userId) {
+            return res.status(401).json({ error: "Usuario nao autenticado." });
+        }
+        const search = String(req.query.search ?? '').trim();
+        const limitInput = Number(req.query.limit ?? 20);
+        const limit = Math.min(Math.max(Number.isFinite(limitInput) ? Math.trunc(limitInput) : 20, 1), 50);
+        const params = ['approved'];
+        let searchSql = '';
+        if (search.length >= 2) {
+            const like = `%${search}%`;
+            searchSql = ' AND (u.name LIKE ? OR u.email LIKE ? OR b.creci LIKE ?)';
+            params.push(like, like, like);
+        }
+        params.push(limit);
+        try {
+            const [rows] = await connection_1.default.query(`
+                    SELECT
+                        b.id,
+                        b.creci,
+                        u.name,
+                        u.email,
+                        u.phone
+                    FROM brokers b
+                    JOIN users u ON u.id = b.id
+                    WHERE b.status = ?
+                    ${searchSql}
+                    ORDER BY u.name ASC
+                    LIMIT ?
+                `, params);
+            return res.status(200).json({
+                data: rows.map((row) => ({
+                    id: Number(row.id),
+                    name: String(row.name ?? '').trim(),
+                    email: String(row.email ?? '').trim(),
+                    phone: row.phone != null ? String(row.phone) : null,
+                    creci: row.creci != null ? String(row.creci) : null,
+                })),
+            });
+        }
+        catch (error) {
+            console.error('Erro ao listar corretores aprovados:', error);
+            return res.status(500).json({ error: 'Erro interno do servidor.' });
+        }
+    }
     async register(req, res) {
         const { name, email, password, creci, phone, street, number, complement, bairro, city, state, cep, agencyId, agency_id } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
@@ -335,6 +380,13 @@ class BrokerController {
                     p.price,
                     p.price_sale,
                     p.price_rent,
+                    p.is_promoted,
+                    p.promo_percentage,
+                    p.promo_start_date,
+                    p.promo_end_date,
+                    p.promotion_percentage,
+                    p.promotion_start,
+                    p.promotion_end,
                     p.code,
                     p.address,
                     p.quadra,
@@ -385,6 +437,21 @@ class BrokerController {
                 price: Number(row.price),
                 price_sale: row.price_sale != null ? Number(row.price_sale) : null,
                 price_rent: row.price_rent != null ? Number(row.price_rent) : null,
+                is_promoted: row.is_promoted === 1 || row.is_promoted == true,
+                promo_percentage: row.promo_percentage != null
+                    ? Number(row.promo_percentage)
+                    : row.promotion_percentage != null
+                        ? Number(row.promotion_percentage)
+                        : null,
+                promo_start_date: row.promo_start_date ?? row.promotion_start ?? null,
+                promo_end_date: row.promo_end_date ?? row.promotion_end ?? null,
+                promoPercentage: row.promo_percentage != null
+                    ? Number(row.promo_percentage)
+                    : row.promotion_percentage != null
+                        ? Number(row.promotion_percentage)
+                        : null,
+                promoStartDate: row.promo_start_date ?? row.promotion_start ?? null,
+                promoEndDate: row.promo_end_date ?? row.promotion_end ?? null,
                 bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
                 bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
                 area_construida: row.area_construida != null ? Number(row.area_construida) : null,

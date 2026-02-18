@@ -6,5 +6,6 @@ const auth_1 = require("../middlewares/auth");
 const negotiationRoutes = (0, express_1.Router)();
 negotiationRoutes.post('/proposal', auth_1.authMiddleware, (req, res) => NegotiationController_1.negotiationController.generateProposalFromProperty(req, res));
 negotiationRoutes.post('/:id/proposals', auth_1.authMiddleware, (req, res) => NegotiationController_1.negotiationController.generateProposal(req, res));
+negotiationRoutes.get('/:id/proposals/download', auth_1.authMiddleware, (req, res) => NegotiationController_1.negotiationController.downloadLatestProposal(req, res));
 negotiationRoutes.get('/:id/documents/:documentId/download', auth_1.authMiddleware, (req, res) => NegotiationController_1.negotiationController.downloadDocument(req, res));
 exports.default = negotiationRoutes;

@@ -13,6 +13,10 @@ negotiationRoutes.post('/:id/proposals', authMiddleware, (req, res) =>
   negotiationController.generateProposal(req as any, res)
 );
 
+negotiationRoutes.get('/:id/proposals/download', authMiddleware, (req, res) =>
+  negotiationController.downloadLatestProposal(req, res)
+);
+
 negotiationRoutes.get('/:id/documents/:documentId/download', authMiddleware, (req, res) =>
   negotiationController.downloadDocument(req, res)
 );

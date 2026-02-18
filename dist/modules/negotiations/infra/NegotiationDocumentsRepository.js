@@ -59,5 +59,28 @@ class NegotiationDocumentsRepository {
         const header = Array.isArray(result) ? result[0] : result;
         return Number(header?.insertId ?? 0);
     }
+    async findLatestByNegotiationAndType(negotiationId, type, trx) {
+        const executor = trx ?? this.executor;
+        const sql = `
+      SELECT id, file_content, type
+      FROM negotiation_documents
+      WHERE negotiation_id = ? AND type = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `;
+        const rows = toRows(await executor.execute(sql, [negotiationId, type]));
+        const row = rows?.[0];
+        if (!row?.file_content) {
+            return null;
+        }
+        const fileContent = Buffer.isBuffer(row.file_content)
+            ? row.file_content
+            : Buffer.from(row.file_content);
+        return {
+            id: Number(row.id),
+            fileContent,
+            type: row.type,
+        };
+    }
 }
 exports.NegotiationDocumentsRepository = NegotiationDocumentsRepository;

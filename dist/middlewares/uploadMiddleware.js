@@ -9,9 +9,9 @@ const path_1 = __importDefault(require("path"));
 // --- Storage in memory (you can switch to disk/S3 later)
 const storage = multer_1.default.memoryStorage();
 // Accepted types
-const allowedImageSubtypes = new Set([
-    'jpeg', 'jpg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg+xml'
-]);
+const allowedImageSubtypes = new Set(['jpeg', 'jpg', 'png', 'webp']);
+const blockedImageMimes = new Set(['image/svg+xml', 'image/gif']);
+const blockedImageExtensions = new Set(['svg', 'svgz', 'gif']);
 const allowedVideoMime = new Set([
     'video/mp4',
     'video/quicktime', // iOS .mov
@@ -25,18 +25,18 @@ function getExtLower(filename) {
 }
 function isAllowedImage(mime, originalname) {
     const normalized = (mime || '').toLowerCase();
+    const ext = getExtLower(originalname);
+    if (blockedImageMimes.has(normalized) || blockedImageExtensions.has(ext)) {
+        return false;
+    }
     if (normalized.startsWith('image/')) {
         const subtype = normalized.split('/')[1] ?? '';
         if (allowedImageSubtypes.has(subtype))
             return true;
-        // Some cameras report odd things like image/pjpeg, image/x-citrix-jpeg, etc.
-        // Fall back to extension as a pragmatic check
-        const ext = getExtLower(originalname);
         return allowedImageSubtypes.has(ext);
     }
     // When the device sends empty or octet-stream, fall back to extension
     if (!normalized || normalized === 'application/octet-stream') {
-        const ext = getExtLower(originalname);
         return allowedImageSubtypes.has(ext);
     }
     return false;
@@ -65,7 +65,7 @@ exports.mediaUpload = (0, multer_1.default)({
                 cb(null, true);
             }
             else {
-                cb(new Error('Tipo de imagem nao suportado'));
+                cb(new Error('Formato de arquivo não suportado. Use apenas JPG, PNG ou WEBP.'));
             }
             return;
         }
@@ -98,7 +98,7 @@ exports.brokerDocsUpload = (0, multer_1.default)({
                 cb(null, true);
             }
             else {
-                cb(new Error('Tipo de imagem não suportado para documentos'));
+                cb(new Error('Formato de arquivo não suportado. Use apenas JPG, PNG ou WEBP.'));
             }
             return;
         }

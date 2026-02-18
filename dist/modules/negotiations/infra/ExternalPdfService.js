@@ -12,7 +12,6 @@ class ExternalPdfService {
     jwtSecret;
     constructor(params) {
         const rawBaseUrl = (params?.baseUrl ??
-            process.env.GO_PDF_SERVICE_URL ??
             process.env.PDF_SERVICE_URL ??
             'http://localhost:8080')
             .trim()

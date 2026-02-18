@@ -13,6 +13,7 @@ router.post('/register-with-docs', uploadMiddleware_1.brokerDocsUpload.fields([
     { name: 'selfie', maxCount: 1 },
 ]), BrokerController_1.brokerController.registerWithDocs);
 router.use(auth_1.authMiddleware);
+router.get('/approved', BrokerController_1.brokerController.listApproved);
 router.post('/me/verify-documents', uploadMiddleware_1.brokerDocsUpload.fields([
     { name: 'creciFront', maxCount: 1 },
     { name: 'creciBack', maxCount: 1 },

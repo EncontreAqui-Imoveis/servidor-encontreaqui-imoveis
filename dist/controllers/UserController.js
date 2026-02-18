@@ -16,6 +16,7 @@ const address_1 = require("../utils/address");
 const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ADDRESS_FIELDS = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep'];
+const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
 function toBoolean(value) {
     return value === 1 || value === '1' || value === true;
 }
@@ -811,9 +812,37 @@ class UserController {
           u.name AS broker_name,
           u.phone AS broker_phone,
           u.email AS broker_email,
+          n.id AS active_negotiation_id,
+          n.status AS active_negotiation_status,
+          n.final_value AS active_negotiation_value,
+          nbu.name AS active_negotiation_client_name,
           GROUP_CONCAT(pi.image_url ORDER BY pi.id) AS images
         FROM properties p
         LEFT JOIN users u ON u.id = p.owner_id
+        LEFT JOIN (
+          SELECT
+            ranked.property_id,
+            ranked.id,
+            ranked.status,
+            ranked.final_value,
+            ranked.buyer_client_id
+          FROM (
+            SELECT
+              n.property_id,
+              n.id,
+              n.status,
+              n.final_value,
+              n.buyer_client_id,
+              ROW_NUMBER() OVER (
+                PARTITION BY n.property_id
+                ORDER BY n.version DESC, n.id DESC
+              ) AS rn
+            FROM negotiations n
+            WHERE n.status NOT IN (?, ?, ?, ?, ?)
+          ) ranked
+          WHERE ranked.rn = 1
+        ) n ON n.property_id = p.id
+        LEFT JOIN users nbu ON nbu.id = n.buyer_client_id
         LEFT JOIN property_images pi ON p.id = pi.property_id
         WHERE p.owner_id = ?
         GROUP BY
@@ -822,11 +851,17 @@ class UserController {
           p.bairro, p.complemento, p.tipo_lote, p.city, p.state, p.bedrooms, p.bathrooms,
           p.area_construida, p.area_terreno, p.garage_spots, p.has_wifi, p.tem_piscina,
           p.tem_energia_solar, p.tem_automacao, p.tem_ar_condicionado, p.eh_mobiliada,
-          p.valor_condominio, p.valor_iptu, p.video_url, p.created_at, u.name, u.phone, u.email
+          p.valor_condominio, p.valor_iptu, p.video_url, p.created_at, u.name, u.phone, u.email,
+          n.id, n.status, n.final_value, nbu.name
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
       `;
-            const [dataRows] = await connection_1.default.query(dataQuery, [userId, limit, offset]);
+            const [dataRows] = await connection_1.default.query(dataQuery, [
+                ...NEGOTIATION_TERMINAL_STATUSES,
+                userId,
+                limit,
+                offset,
+            ]);
             const parseBool = (value) => value === 1 || value === '1' || value === true;
             const properties = dataRows.map((row) => ({
                 ...row,
@@ -847,6 +882,19 @@ class UserController {
                 valor_condominio: row.valor_condominio != null ? Number(row.valor_condominio) : null,
                 valor_iptu: row.valor_iptu != null ? Number(row.valor_iptu) : null,
                 images: row.images ? row.images.split(',') : [],
+                negotiation_id: row.active_negotiation_id ?? null,
+                active_negotiation_id: row.active_negotiation_id ?? null,
+                negotiation: row.active_negotiation_id
+                    ? {
+                        id: String(row.active_negotiation_id),
+                        status: row.active_negotiation_status ?? null,
+                        client_name: row.active_negotiation_client_name ?? null,
+                        clientName: row.active_negotiation_client_name ?? null,
+                        value: row.active_negotiation_value != null
+                            ? Number(row.active_negotiation_value)
+                            : null,
+                    }
+                    : null,
             }));
             return res.json({
                 success: true,

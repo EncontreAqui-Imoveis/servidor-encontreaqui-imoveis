@@ -38,6 +38,7 @@ const ALLOWED_STATUSES = new Set([
 ]);
 const MAX_IMAGES_PER_PROPERTY = 20;
 const NOTIFY_ON_STATUS = new Set(["sold", "rented"]);
+const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
 const DEAL_TYPE_MAP = {
     sale: "sale",
     sold: "sale",
@@ -230,6 +231,21 @@ function toBoolean(value) {
 }
 function mapProperty(row, includeOwnerInfo = false) {
     const images = row.images ? row.images.split(",").filter(Boolean) : [];
+    const activeNegotiationId = stringOrNull(row.active_negotiation_id);
+    const activeNegotiationStatus = stringOrNull(row.active_negotiation_status);
+    const activeNegotiationClientName = stringOrNull(row.active_negotiation_client_name);
+    const activeNegotiationValue = row.active_negotiation_value != null
+        ? Number(row.active_negotiation_value)
+        : null;
+    const negotiation = activeNegotiationId
+        ? {
+            id: activeNegotiationId,
+            status: activeNegotiationStatus,
+            client_name: activeNegotiationClientName,
+            clientName: activeNegotiationClientName,
+            value: activeNegotiationValue,
+        }
+        : null;
     const agency = row.agency_id
         ? {
             id: Number(row.agency_id),
@@ -309,6 +325,11 @@ function mapProperty(row, includeOwnerInfo = false) {
         broker_name: row.broker_name ?? null,
         broker_phone: row.broker_phone ?? null,
         broker_email: row.broker_email ?? null,
+        negotiation_id: activeNegotiationId,
+        active_negotiation_id: activeNegotiationId,
+        activeNegotiationId: activeNegotiationId,
+        negotiation,
+        activeNegotiation: negotiation,
         created_at: row.created_at,
         updated_at: row.updated_at,
     };
@@ -381,16 +402,44 @@ class PropertyController {
             ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
             ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
             ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
+            ANY_VALUE(an.id) AS active_negotiation_id,
+            ANY_VALUE(an.status) AS active_negotiation_status,
+            ANY_VALUE(an.final_value) AS active_negotiation_value,
+            ANY_VALUE(nbu.name) AS active_negotiation_client_name,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
           LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN (
+            SELECT
+              ranked.property_id,
+              ranked.id,
+              ranked.status,
+              ranked.final_value,
+              ranked.buyer_client_id
+            FROM (
+              SELECT
+                n.property_id,
+                n.id,
+                n.status,
+                n.final_value,
+                n.buyer_client_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY n.property_id
+                  ORDER BY n.version DESC, n.id DESC
+                ) AS rn
+              FROM negotiations n
+              WHERE n.status NOT IN (?, ?, ?, ?, ?)
+            ) ranked
+            WHERE ranked.rn = 1
+          ) an ON an.property_id = p.id
+          LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.id = ?
           GROUP BY p.id
-        `, [propertyId]);
+        `, [...NEGOTIATION_TERMINAL_STATUSES, propertyId]);
             if (!rows || rows.length === 0) {
                 return res.status(404).json({ error: "Imóvel não encontrado." });
             }
@@ -1625,17 +1674,45 @@ class PropertyController {
             ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
             ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
             ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
+            ANY_VALUE(an.id) AS active_negotiation_id,
+            ANY_VALUE(an.status) AS active_negotiation_status,
+            ANY_VALUE(an.final_value) AS active_negotiation_value,
+            ANY_VALUE(nbu.name) AS active_negotiation_client_name,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
           LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN (
+            SELECT
+              ranked.property_id,
+              ranked.id,
+              ranked.status,
+              ranked.final_value,
+              ranked.buyer_client_id
+            FROM (
+              SELECT
+                n.property_id,
+                n.id,
+                n.status,
+                n.final_value,
+                n.buyer_client_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY n.property_id
+                  ORDER BY n.version DESC, n.id DESC
+                ) AS rn
+              FROM negotiations n
+              WHERE n.status NOT IN (?, ?, ?, ?, ?)
+            ) ranked
+            WHERE ranked.rn = 1
+          ) an ON an.property_id = p.id
+          LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.owner_id = ? OR p.broker_id = ?
           GROUP BY p.id
           ORDER BY p.created_at DESC
-        `, [userId, userId]);
+        `, [...NEGOTIATION_TERMINAL_STATUSES, userId, userId]);
             return res.json(rows.map(row => mapProperty(row, true)));
         }
         catch (error) {
@@ -1789,18 +1866,46 @@ class PropertyController {
             ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
             ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
             ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
+            ANY_VALUE(an.id) AS active_negotiation_id,
+            ANY_VALUE(an.status) AS active_negotiation_status,
+            ANY_VALUE(an.final_value) AS active_negotiation_value,
+            ANY_VALUE(nbu.name) AS active_negotiation_client_name,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
           LEFT JOIN users u ON u.id = b.id
           LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN (
+            SELECT
+              ranked.property_id,
+              ranked.id,
+              ranked.status,
+              ranked.final_value,
+              ranked.buyer_client_id
+            FROM (
+              SELECT
+                n.property_id,
+                n.id,
+                n.status,
+                n.final_value,
+                n.buyer_client_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY n.property_id
+                  ORDER BY n.version DESC, n.id DESC
+                ) AS rn
+              FROM negotiations n
+              WHERE n.status NOT IN (?, ?, ?, ?, ?)
+            ) ranked
+            WHERE ranked.rn = 1
+          ) an ON an.property_id = p.id
+          LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           ${where}
           GROUP BY p.id
           ORDER BY ${sortColumn} ${sortDirection}
           LIMIT ? OFFSET ?
-        `, [...params, numericLimit, offset]);
+        `, [...NEGOTIATION_TERMINAL_STATUSES, ...params, numericLimit, offset]);
             const [totalRows] = await connection_1.default.query(`SELECT COUNT(DISTINCT p.id) AS total FROM properties p ${where}`, params);
             const total = totalRows[0]?.total ?? 0;
             return res.json({
@@ -1842,6 +1947,10 @@ class PropertyController {
             ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
             ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
             ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
+            ANY_VALUE(an.id) AS active_negotiation_id,
+            ANY_VALUE(an.status) AS active_negotiation_status,
+            ANY_VALUE(an.final_value) AS active_negotiation_value,
+            ANY_VALUE(nbu.name) AS active_negotiation_client_name,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM featured_properties fp
           JOIN properties p ON p.id = fp.property_id
@@ -1849,13 +1958,37 @@ class PropertyController {
           LEFT JOIN users u ON u.id = b.id
           LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           LEFT JOIN agencies a ON b.agency_id = a.id
+          LEFT JOIN (
+            SELECT
+              ranked.property_id,
+              ranked.id,
+              ranked.status,
+              ranked.final_value,
+              ranked.buyer_client_id
+            FROM (
+              SELECT
+                n.property_id,
+                n.id,
+                n.status,
+                n.final_value,
+                n.buyer_client_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY n.property_id
+                  ORDER BY n.version DESC, n.id DESC
+                ) AS rn
+              FROM negotiations n
+              WHERE n.status NOT IN (?, ?, ?, ?, ?)
+            ) ranked
+            WHERE ranked.rn = 1
+          ) an ON an.property_id = p.id
+          LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.status = 'approved'
             AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
           GROUP BY p.id, fp.position
           ORDER BY fp.position ASC
           LIMIT ? OFFSET ?
-        `, [limit, offset]);
+        `, [...NEGOTIATION_TERMINAL_STATUSES, limit, offset]);
             const [countRows] = await connection_1.default.query(`
           SELECT COUNT(*) AS total
           FROM featured_properties fp

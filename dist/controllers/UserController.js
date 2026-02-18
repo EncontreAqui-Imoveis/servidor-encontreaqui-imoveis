@@ -954,9 +954,11 @@ class UserController {
             const role = await (0, userNotificationService_1.resolveUserNotificationRole)(Number(userId));
             const sql = `
         SELECT n.id,
+               n.title,
                n.message,
                n.related_entity_type,
                n.related_entity_id,
+               n.metadata_json,
                n.recipient_id,
                n.is_read,
                n.created_at

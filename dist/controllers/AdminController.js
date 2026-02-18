@@ -2242,6 +2242,7 @@ class AdminController {
                 'agency',
                 'user',
                 'announcement',
+                'negotiation',
                 'other',
             ]);
             const typeFilter = allowedTypes.has(rawType) ? rawType : null;
@@ -2254,9 +2255,11 @@ class AdminController {
             const [rows] = await connection_1.default.query(`
           SELECT
             id,
+            title,
             message,
             related_entity_type,
             related_entity_id,
+            metadata_json,
             is_read,
             created_at
           FROM notifications
@@ -2374,7 +2377,7 @@ async function sendNotification(req, res) {
             return res.status(400).json({ error: 'A mensagem e obrigatoria.' });
         }
         const trimmedMessage = message.trim();
-        const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'announcement', 'other']);
+        const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'announcement', 'negotiation', 'other']);
         const rawEntityType = String(related_entity_type);
         const entityType = (allowedTypes.has(rawEntityType) ? rawEntityType : 'other');
         const entityId = related_entity_id != null ? Number(related_entity_id) : null;

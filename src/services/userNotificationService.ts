@@ -11,6 +11,7 @@ type RelatedEntityType =
   | 'agency'
   | 'user'
   | 'announcement'
+  | 'negotiation'
   | 'other';
 export type RecipientRole = 'client' | 'broker';
 

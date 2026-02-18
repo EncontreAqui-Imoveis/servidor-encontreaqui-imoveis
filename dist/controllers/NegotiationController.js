@@ -21,12 +21,9 @@ const ACTIVE_NEGOTIATION_STATUSES = [
     'CONTRACT_DRAFTING',
     'AWAITING_SIGNATURES',
 ];
-const DEFAULT_WIZARD_STATUS = 'AWAITING_SIGNATURES';
+const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
 const pdfService = new ExternalPdfService_1.ExternalPdfService();
 const negotiationDocumentsRepository = new NegotiationDocumentsRepository_1.NegotiationDocumentsRepository(executor);
-function toCurrency(value) {
-    return value.toFixed(2);
-}
 function toCents(value) {
     return Math.round(value * 100);
 }
@@ -47,14 +44,35 @@ function parseProposalData(body) {
     const numericValue = Number(body.value);
     const paymentMethod = String(body.paymentMethod ?? body.payment_method ?? '').trim();
     const validityDays = Number(body.validityDays ?? body.validity_days ?? 10);
-    if (!clientName || !clientCpf || !propertyAddress || !brokerName || !paymentMethod) {
-        throw new Error('Campos obrigatorios ausentes. Informe client_name, client_cpf, property_address, broker_name e payment_method.');
+    const payment = body.payment ?? {};
+    const parsePaymentField = (fieldName, ...values) => {
+        const firstDefined = values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+        if (firstDefined === undefined) {
+            return 0;
+        }
+        return parsePositiveNumber(firstDefined, fieldName);
+    };
+    let cash = parsePaymentField('payment.cash', payment.cash, payment.dinheiro);
+    const tradeIn = parsePaymentField('payment.trade_in', payment.trade_in, payment.tradeIn, payment.permuta);
+    const financing = parsePaymentField('payment.financing', payment.financing, payment.financiamento);
+    const others = parsePaymentField('payment.others', payment.others, payment.outros);
+    if (!clientName || !clientCpf || !propertyAddress || !brokerName) {
+        throw new Error('Campos obrigatorios ausentes. Informe client_name, client_cpf, property_address e broker_name.');
     }
     if (!Number.isFinite(numericValue) || numericValue <= 0) {
         throw new Error('Campo value deve ser um numero maior que zero.');
     }
     if (!Number.isInteger(validityDays) || validityDays <= 0) {
         throw new Error('Campo validity_days deve ser um inteiro maior que zero.');
+    }
+    let paymentTotal = cash + tradeIn + financing + others;
+    if (paymentTotal <= 0) {
+        // Compatibilidade retroativa: payload legado sem objeto payment.
+        cash = numericValue;
+        paymentTotal = numericValue;
+    }
+    if (toCents(paymentTotal) !== toCents(numericValue)) {
+        throw new Error('payment breakdown must match total value');
     }
     return {
         clientName,
@@ -63,7 +81,13 @@ function parseProposalData(body) {
         brokerName,
         sellingBrokerName: sellingBrokerName || null,
         value: numericValue,
-        paymentMethod,
+        payment: {
+            cash,
+            tradeIn,
+            financing,
+            others,
+        },
+        paymentMethod: paymentMethod || undefined,
         validityDays,
     };
 }
@@ -131,14 +155,6 @@ function resolvePropertyValue(row) {
     const fallback = Number(row.price ?? 0);
     const resolved = sale > 0 ? sale : rent > 0 ? rent : fallback;
     return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
-}
-function buildPaymentMethodString(values) {
-    return [
-        `Dinheiro: R$ ${toCurrency(values.dinheiro)}`,
-        `Permuta: R$ ${toCurrency(values.permuta)}`,
-        `Financiamento: R$ ${toCurrency(values.financiamento)}`,
-        `Outros: R$ ${toCurrency(values.outros)}`,
-    ].join(' | ');
 }
 function buildProposalValidityDate(days) {
     const now = new Date();
@@ -348,11 +364,6 @@ class NegotiationController {
                     sellerBrokerId,
                 }),
             ]);
-            await tx.execute(`
-          UPDATE properties
-          SET status = 'negociacao'
-          WHERE id = ?
-        `, [payload.propertyId]);
             const proposalData = {
                 clientName: payload.clientName,
                 clientCpf: payload.clientCpf,
@@ -360,7 +371,12 @@ class NegotiationController {
                 brokerName,
                 sellingBrokerName,
                 value: propertyValue,
-                paymentMethod: buildPaymentMethodString(payload.pagamento),
+                payment: {
+                    cash: payload.pagamento.dinheiro,
+                    tradeIn: payload.pagamento.permuta,
+                    financing: payload.pagamento.financiamento,
+                    others: payload.pagamento.outros,
+                },
                 validityDays: payload.validadeDias,
             };
             const pdfBuffer = await pdfService.generateProposal(proposalData);

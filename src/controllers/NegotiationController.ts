@@ -46,6 +46,17 @@ interface ProposalBody {
   value?: unknown;
   paymentMethod?: unknown;
   payment_method?: unknown;
+  payment?: {
+    cash?: unknown;
+    tradeIn?: unknown;
+    trade_in?: unknown;
+    financing?: unknown;
+    others?: unknown;
+    dinheiro?: unknown;
+    permuta?: unknown;
+    financiamento?: unknown;
+    outros?: unknown;
+  };
   validityDays?: unknown;
   validity_days?: unknown;
 }
@@ -97,10 +108,6 @@ const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
 const pdfService = new ExternalPdfService();
 const negotiationDocumentsRepository = new NegotiationDocumentsRepository(executor);
 
-function toCurrency(value: number): string {
-  return value.toFixed(2);
-}
-
 function toCents(value: number): number {
   return Math.round(value * 100);
 }
@@ -123,10 +130,30 @@ function parseProposalData(body: ProposalBody): ProposalData {
   const numericValue = Number(body.value);
   const paymentMethod = String(body.paymentMethod ?? body.payment_method ?? '').trim();
   const validityDays = Number(body.validityDays ?? body.validity_days ?? 10);
+  const payment = body.payment ?? {};
 
-  if (!clientName || !clientCpf || !propertyAddress || !brokerName || !paymentMethod) {
+  const parsePaymentField = (fieldName: string, ...values: unknown[]): number => {
+    const firstDefined = values.find(
+      (value) => value !== undefined && value !== null && String(value).trim() !== ''
+    );
+    if (firstDefined === undefined) {
+      return 0;
+    }
+    return parsePositiveNumber(firstDefined, fieldName);
+  };
+
+  let cash = parsePaymentField('payment.cash', payment.cash, payment.dinheiro);
+  const tradeIn = parsePaymentField('payment.trade_in', payment.trade_in, payment.tradeIn, payment.permuta);
+  const financing = parsePaymentField(
+    'payment.financing',
+    payment.financing,
+    payment.financiamento
+  );
+  const others = parsePaymentField('payment.others', payment.others, payment.outros);
+
+  if (!clientName || !clientCpf || !propertyAddress || !brokerName) {
     throw new Error(
-      'Campos obrigatorios ausentes. Informe client_name, client_cpf, property_address, broker_name e payment_method.'
+      'Campos obrigatorios ausentes. Informe client_name, client_cpf, property_address e broker_name.'
     );
   }
 
@@ -138,6 +165,17 @@ function parseProposalData(body: ProposalBody): ProposalData {
     throw new Error('Campo validity_days deve ser um inteiro maior que zero.');
   }
 
+  let paymentTotal = cash + tradeIn + financing + others;
+  if (paymentTotal <= 0) {
+    // Compatibilidade retroativa: payload legado sem objeto payment.
+    cash = numericValue;
+    paymentTotal = numericValue;
+  }
+
+  if (toCents(paymentTotal) !== toCents(numericValue)) {
+    throw new Error('payment breakdown must match total value');
+  }
+
   return {
     clientName,
     clientCpf,
@@ -145,7 +183,13 @@ function parseProposalData(body: ProposalBody): ProposalData {
     brokerName,
     sellingBrokerName: sellingBrokerName || null,
     value: numericValue,
-    paymentMethod,
+    payment: {
+      cash,
+      tradeIn,
+      financing,
+      others,
+    },
+    paymentMethod: paymentMethod || undefined,
     validityDays,
   };
 }
@@ -227,15 +271,6 @@ function resolvePropertyValue(row: PropertyRow): number {
   const fallback = Number(row.price ?? 0);
   const resolved = sale > 0 ? sale : rent > 0 ? rent : fallback;
   return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
-}
-
-function buildPaymentMethodString(values: ParsedProposalWizard['pagamento']): string {
-  return [
-    `Dinheiro: R$ ${toCurrency(values.dinheiro)}`,
-    `Permuta: R$ ${toCurrency(values.permuta)}`,
-    `Financiamento: R$ ${toCurrency(values.financiamento)}`,
-    `Outros: R$ ${toCurrency(values.outros)}`,
-  ].join(' | ');
 }
 
 function buildProposalValidityDate(days: number): string {
@@ -497,7 +532,12 @@ class NegotiationController {
         brokerName,
         sellingBrokerName,
         value: propertyValue,
-        paymentMethod: buildPaymentMethodString(payload.pagamento),
+        payment: {
+          cash: payload.pagamento.dinheiro,
+          tradeIn: payload.pagamento.permuta,
+          financing: payload.pagamento.financiamento,
+          others: payload.pagamento.outros,
+        },
         validityDays: payload.validadeDias,
       };
 

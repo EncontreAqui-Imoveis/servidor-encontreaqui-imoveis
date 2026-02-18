@@ -118,6 +118,9 @@ interface PropertyRow extends RowDataPacket {
   promo_percentage?: number | string | null;
   promo_start_date?: Date | string | null;
   promo_end_date?: Date | string | null;
+  promo_percentage_resolved?: number | string | null;
+  promo_start_date_resolved?: Date | string | null;
+  promo_end_date_resolved?: Date | string | null;
   price: number | string;
   price_sale?: number | string | null;
   price_rent?: number | string | null;
@@ -367,21 +370,37 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     lifecycle_status: row.lifecycle_status ?? 'AVAILABLE',
     is_promoted: toBoolean(row.is_promoted),
     promotion_percentage:
-      row.promo_percentage != null
-        ? Number(row.promo_percentage)
-        : row.promotion_percentage != null
-          ? Number(row.promotion_percentage)
-          : null,
-    promotion_start: row.promo_start_date ?? row.promotion_start ?? null,
-    promotion_end: row.promo_end_date ?? row.promotion_end ?? null,
+      row.promo_percentage_resolved != null
+        ? Number(row.promo_percentage_resolved)
+        : row.promo_percentage != null
+          ? Number(row.promo_percentage)
+          : row.promotion_percentage != null
+            ? Number(row.promotion_percentage)
+            : null,
+    promotion_start:
+      row.promo_start_date_resolved ?? row.promo_start_date ?? row.promotion_start ?? null,
+    promotion_end:
+      row.promo_end_date_resolved ?? row.promo_end_date ?? row.promotion_end ?? null,
     promo_percentage:
-      row.promo_percentage != null
-        ? Number(row.promo_percentage)
+      row.promo_percentage_resolved != null
+        ? Number(row.promo_percentage_resolved)
         : row.promotion_percentage != null
           ? Number(row.promotion_percentage)
           : null,
-    promo_start_date: row.promo_start_date ?? null,
-    promo_end_date: row.promo_end_date ?? null,
+    promo_start_date:
+      row.promo_start_date_resolved ?? row.promo_start_date ?? row.promotion_start ?? null,
+    promo_end_date:
+      row.promo_end_date_resolved ?? row.promo_end_date ?? row.promotion_end ?? null,
+    promoPercentage:
+      row.promo_percentage_resolved != null
+        ? Number(row.promo_percentage_resolved)
+        : row.promotion_percentage != null
+          ? Number(row.promotion_percentage)
+          : null,
+    promoStartDate:
+      row.promo_start_date_resolved ?? row.promo_start_date ?? row.promotion_start ?? null,
+    promoEndDate:
+      row.promo_end_date_resolved ?? row.promo_end_date ?? row.promotion_end ?? null,
     price: Number(row.price),
     price_sale: row.price_sale != null ? Number(row.price_sale) : null,
     price_rent: row.price_rent != null ? Number(row.price_rent) : null,
@@ -524,6 +543,9 @@ class PropertyController {
         `
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,
@@ -2024,6 +2046,9 @@ class PropertyController {
         `
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,
@@ -2230,6 +2255,9 @@ class PropertyController {
         `
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,
@@ -2289,6 +2317,9 @@ class PropertyController {
         `
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,

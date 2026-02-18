@@ -171,10 +171,18 @@ async function ensureNotificationsType(): Promise<void> {
   }
 
   const type = await getColumnType('notifications', 'related_entity_type');
-  if (type && !type.includes('announcement')) {
+  if (type && !type.includes('negotiation')) {
     await connection.query(
-      "ALTER TABLE notifications MODIFY COLUMN related_entity_type ENUM('property','broker','agency','user','announcement','other') NOT NULL"
+      "ALTER TABLE notifications MODIFY COLUMN related_entity_type ENUM('property','broker','agency','user','announcement','negotiation','other') NOT NULL"
     );
+  }
+
+  if (!(await columnExists('notifications', 'title'))) {
+    await connection.query('ALTER TABLE notifications ADD COLUMN title VARCHAR(255) NULL');
+  }
+
+  if (!(await columnExists('notifications', 'metadata_json'))) {
+    await connection.query('ALTER TABLE notifications ADD COLUMN metadata_json JSON NULL');
   }
 }
 

@@ -2685,6 +2685,7 @@ class AdminController {
         'agency',
         'user',
         'announcement',
+        'negotiation',
         'other',
       ]);
       const typeFilter = allowedTypes.has(rawType) ? rawType : null;
@@ -2698,9 +2699,11 @@ class AdminController {
         `
           SELECT
             id,
+            title,
             message,
             related_entity_type,
             related_entity_id,
+            metadata_json,
             is_read,
             created_at
           FROM notifications
@@ -2850,7 +2853,7 @@ export async function sendNotification(req: Request, res: Response) {
     }
 
     const trimmedMessage = message.trim();
-    const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'announcement', 'other']);
+    const allowedTypes = new Set(['property', 'broker', 'agency', 'user', 'announcement', 'negotiation', 'other']);
     const rawEntityType = String(related_entity_type);
     const entityType = (allowedTypes.has(rawEntityType) ? rawEntityType : 'other') as
       | 'property'
@@ -2858,6 +2861,7 @@ export async function sendNotification(req: Request, res: Response) {
       | 'agency'
       | 'user'
       | 'announcement'
+      | 'negotiation'
       | 'other';
     const entityId = related_entity_id != null ? Number(related_entity_id) : null;
 

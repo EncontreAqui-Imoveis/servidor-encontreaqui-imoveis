@@ -59,6 +59,16 @@ class NegotiationDocumentsRepository {
         const header = Array.isArray(result) ? result[0] : result;
         return Number(header?.insertId ?? 0);
     }
+    async saveSignedProposal(negotiationId, pdfBuffer, trx) {
+        const executor = trx ?? this.executor;
+        const sql = `
+      INSERT INTO negotiation_documents (negotiation_id, type, file_content)
+      VALUES (?, 'other', ?)
+    `;
+        const result = await executor.execute(sql, [negotiationId, pdfBuffer]);
+        const header = Array.isArray(result) ? result[0] : result;
+        return Number(header?.insertId ?? 0);
+    }
     async findLatestByNegotiationAndType(negotiationId, type, trx) {
         const executor = trx ?? this.executor;
         const sql = `

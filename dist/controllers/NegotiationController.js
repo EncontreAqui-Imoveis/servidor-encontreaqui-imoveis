@@ -8,6 +8,7 @@ const crypto_1 = require("crypto");
 const connection_1 = __importDefault(require("../database/connection"));
 const ExternalPdfService_1 = require("../modules/negotiations/infra/ExternalPdfService");
 const NegotiationDocumentsRepository_1 = require("../modules/negotiations/infra/NegotiationDocumentsRepository");
+const notificationService_1 = require("../services/notificationService");
 const executor = {
     execute(sql, params) {
         return connection_1.default.execute(sql, params);
@@ -22,6 +23,11 @@ const ACTIVE_NEGOTIATION_STATUSES = [
     'AWAITING_SIGNATURES',
 ];
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
+const SIGNED_PROPOSAL_REVIEW_STATUS = 'IN_NEGOTIATION';
+const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
+    'PROPOSAL_SENT',
+    'AWAITING_SIGNATURES',
+]);
 const pdfService = new ExternalPdfService_1.ExternalPdfService();
 const negotiationDocumentsRepository = new NegotiationDocumentsRepository_1.NegotiationDocumentsRepository(executor);
 function toCents(value) {
@@ -395,6 +401,122 @@ class NegotiationController {
             }
             console.error('Erro ao gerar proposta por imovel:', error);
             return res.status(500).json({ error: 'Falha ao gerar proposta.' });
+        }
+        finally {
+            tx?.release();
+        }
+    }
+    async uploadSignedProposal(req, res) {
+        if (!req.userId) {
+            return res.status(401).json({ error: 'Usuario nao autenticado.' });
+        }
+        const negotiationId = String(req.params.id ?? '').trim();
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        const uploadedFile = req.file;
+        if (!uploadedFile || !uploadedFile.buffer || uploadedFile.buffer.length === 0) {
+            return res.status(400).json({ error: 'PDF assinado não enviado.' });
+        }
+        const mime = String(uploadedFile.mimetype ?? '').toLowerCase();
+        if (mime && mime !== 'application/pdf') {
+            return res.status(400).json({ error: 'Arquivo inválido. Envie apenas PDF assinado.' });
+        }
+        let tx = null;
+        try {
+            tx = await connection_1.default.getConnection();
+            await tx.beginTransaction();
+            const [negotiationRows] = await tx.query(`
+          SELECT
+            n.id,
+            n.property_id,
+            n.status,
+            n.capturing_broker_id,
+            n.selling_broker_id,
+            p.code AS property_code,
+            p.address AS property_address,
+            u.name AS broker_name
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          LEFT JOIN users u ON u.id = n.capturing_broker_id
+          WHERE n.id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [negotiationId]);
+            const negotiation = negotiationRows[0];
+            if (!negotiation) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Negociação não encontrada.' });
+            }
+            const isAuthorizedBroker = req.userId === Number(negotiation.capturing_broker_id) ||
+                req.userId === Number(negotiation.selling_broker_id ?? 0);
+            if (!isAuthorizedBroker) {
+                await tx.rollback();
+                return res.status(403).json({ error: 'Você não possui permissão para enviar esta proposta.' });
+            }
+            const currentStatus = String(negotiation.status ?? '').trim().toUpperCase();
+            if (!SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS.has(currentStatus)) {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'A proposta assinada só pode ser enviada enquanto aguarda assinatura.',
+                });
+            }
+            const documentId = await negotiationDocumentsRepository.saveSignedProposal(negotiationId, uploadedFile.buffer, tx);
+            await tx.execute(`
+          UPDATE negotiations
+          SET status = ?, version = version + 1
+          WHERE id = ?
+        `, [SIGNED_PROPOSAL_REVIEW_STATUS, negotiationId]);
+            await tx.execute(`
+          INSERT INTO negotiation_history (
+            id,
+            negotiation_id,
+            from_status,
+            to_status,
+            actor_id,
+            metadata_json,
+            created_at
+          )
+          VALUES (UUID(), ?, ?, ?, ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+        `, [
+                negotiationId,
+                currentStatus,
+                SIGNED_PROPOSAL_REVIEW_STATUS,
+                req.userId,
+                JSON.stringify({
+                    action: 'signed_proposal_uploaded',
+                    documentId,
+                    filename: uploadedFile.originalname ?? null,
+                }),
+            ]);
+            await tx.commit();
+            const propertyRef = String(negotiation.property_code ?? negotiation.property_address ?? negotiation.property_id);
+            const brokerName = String(negotiation.broker_name ?? `#${req.userId}`);
+            await (0, notificationService_1.createAdminNotification)({
+                type: 'negotiation',
+                title: `Proposta Enviada: ${propertyRef}`,
+                message: `O corretor ${brokerName} enviou uma proposta assinada para o imóvel ${propertyRef}.`,
+                relatedEntityId: Number(negotiation.property_id),
+                metadata: {
+                    negotiationId,
+                    propertyId: Number(negotiation.property_id),
+                    brokerId: req.userId,
+                    documentId,
+                },
+            });
+            return res.status(201).json({
+                message: 'Proposta assinada enviada com sucesso. Em análise.',
+                status: 'UNDER_REVIEW',
+                negotiationId,
+                documentId,
+            });
+        }
+        catch (error) {
+            if (tx) {
+                await tx.rollback();
+            }
+            console.error('Erro ao enviar proposta assinada:', error);
+            return res.status(500).json({ error: 'Falha ao enviar proposta assinada.' });
         }
         finally {
             tx?.release();

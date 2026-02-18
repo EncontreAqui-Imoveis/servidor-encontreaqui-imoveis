@@ -50,6 +50,16 @@ function isAllowedVideo(mime: string, originalname: string): boolean {
   return ['mp4', 'mov', 'avi', 'webm', '3gp'].includes(ext);
 }
 
+function isAllowedPdf(mime: string, originalname: string): boolean {
+  const normalized = (mime || '').toLowerCase();
+  const ext = getExtLower(originalname);
+  if (normalized === 'application/pdf') return true;
+  if (!normalized || normalized === 'application/octet-stream') {
+    return ext === 'pdf';
+  }
+  return ext === 'pdf';
+}
+
 export const mediaUpload = multer({
   storage,
   limits: {
@@ -110,5 +120,24 @@ export const brokerDocsUpload = multer({
     }
 
     cb(new Error(`Campo de upload inválido para documentos: ${field}`));
+  },
+});
+
+export const signedProposalUpload = multer({
+  storage,
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 1,
+  },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = file.originalname || '';
+
+    if (isAllowedPdf(mime, name)) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new Error('Arquivo inválido. Envie apenas PDF assinado.'));
   },
 });

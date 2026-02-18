@@ -106,6 +106,23 @@ export class NegotiationDocumentsRepository
     return Number(header?.insertId ?? 0);
   }
 
+  async saveSignedProposal(
+    negotiationId: string,
+    pdfBuffer: Buffer,
+    trx?: SqlExecutor
+  ): Promise<number> {
+    const executor = trx ?? this.executor;
+
+    const sql = `
+      INSERT INTO negotiation_documents (negotiation_id, type, file_content)
+      VALUES (?, 'other', ?)
+    `;
+
+    const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);
+    const header = Array.isArray(result) ? result[0] : result;
+    return Number(header?.insertId ?? 0);
+  }
+
   async findLatestByNegotiationAndType(
     negotiationId: string,
     type: 'proposal' | 'contract' | 'other',

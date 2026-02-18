@@ -93,7 +93,7 @@ const ACTIVE_NEGOTIATION_STATUSES = [
   'AWAITING_SIGNATURES',
 ] as const;
 
-const DEFAULT_WIZARD_STATUS = 'AWAITING_SIGNATURES';
+const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
 const pdfService = new ExternalPdfService();
 const negotiationDocumentsRepository = new NegotiationDocumentsRepository(executor);
 
@@ -488,15 +488,6 @@ class NegotiationController {
             sellerBrokerId,
           }),
         ]
-      );
-
-      await tx.execute(
-        `
-          UPDATE properties
-          SET status = 'negociacao'
-          WHERE id = ?
-        `,
-        [payload.propertyId]
       );
 
       const proposalData: ProposalData = {

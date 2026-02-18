@@ -509,6 +509,13 @@ class BrokerController {
                     p.price,
                     p.price_sale,
                     p.price_rent,
+                    p.is_promoted,
+                    p.promo_percentage,
+                    p.promo_start_date,
+                    p.promo_end_date,
+                    p.promotion_percentage,
+                    p.promotion_start,
+                    p.promotion_end,
                     p.code,
                     p.address,
                     p.quadra,
@@ -561,6 +568,23 @@ class BrokerController {
                 price: Number(row.price),
                 price_sale: row.price_sale != null ? Number(row.price_sale) : null,
                 price_rent: row.price_rent != null ? Number(row.price_rent) : null,
+                is_promoted: row.is_promoted === 1 || row.is_promoted == true,
+                promo_percentage:
+                    row.promo_percentage != null
+                        ? Number(row.promo_percentage)
+                        : row.promotion_percentage != null
+                            ? Number(row.promotion_percentage)
+                            : null,
+                promo_start_date: row.promo_start_date ?? row.promotion_start ?? null,
+                promo_end_date: row.promo_end_date ?? row.promotion_end ?? null,
+                promoPercentage:
+                    row.promo_percentage != null
+                        ? Number(row.promo_percentage)
+                        : row.promotion_percentage != null
+                            ? Number(row.promotion_percentage)
+                            : null,
+                promoStartDate: row.promo_start_date ?? row.promotion_start ?? null,
+                promoEndDate: row.promo_end_date ?? row.promotion_end ?? null,
                 bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
                 bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
                 area_construida: row.area_construida != null ? Number(row.area_construida) : null,

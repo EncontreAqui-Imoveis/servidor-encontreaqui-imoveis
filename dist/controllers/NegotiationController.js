@@ -73,6 +73,10 @@ function parseProposalWizardBody(body) {
     const clientCpfDigits = String(body.clientCpf ?? '').replace(/\D/g, '');
     const validadeDiasRaw = body.validadeDias ?? 10;
     const validadeDias = Number(validadeDiasRaw);
+    const sellerBrokerIdRaw = body.sellerBrokerId;
+    const sellerBrokerId = sellerBrokerIdRaw === undefined || sellerBrokerIdRaw === null || sellerBrokerIdRaw === ''
+        ? null
+        : Number(sellerBrokerIdRaw);
     const pagamento = body.pagamento ?? {};
     const dinheiro = parsePositiveNumber(pagamento.dinheiro ?? 0, 'pagamento.dinheiro');
     const permuta = parsePositiveNumber(pagamento.permuta ?? 0, 'pagamento.permuta');
@@ -90,11 +94,15 @@ function parseProposalWizardBody(body) {
     if (!Number.isInteger(validadeDias) || validadeDias <= 0) {
         throw new Error('validadeDias deve ser um inteiro maior que zero.');
     }
+    if (sellerBrokerId !== null && (!Number.isInteger(sellerBrokerId) || sellerBrokerId <= 0)) {
+        throw new Error('sellerBrokerId invalido.');
+    }
     return {
         propertyId,
         clientName,
         clientCpf: clientCpfDigits,
         validadeDias,
+        sellerBrokerId,
         pagamento: {
             dinheiro,
             permuta,
@@ -236,6 +244,22 @@ class NegotiationController {
                 await tx.rollback();
                 return res.status(400).json({ error: 'Corretor nao encontrado para gerar proposta.' });
             }
+            const sellerBrokerId = payload.sellerBrokerId ?? req.userId;
+            let sellingBrokerName = brokerName;
+            if (sellerBrokerId !== req.userId) {
+                const [sellerRows] = await tx.query(`
+            SELECT u.name
+            FROM brokers b
+            JOIN users u ON u.id = b.id
+            WHERE b.id = ? AND b.status = 'approved'
+            LIMIT 1
+          `, [sellerBrokerId]);
+                sellingBrokerName = String(sellerRows[0]?.name ?? '').trim();
+                if (!sellingBrokerName) {
+                    await tx.rollback();
+                    return res.status(400).json({ error: 'Corretor vendedor invalido ou nao aprovado.' });
+                }
+            }
             const [existingRows] = await tx.query(`
           SELECT id, status
           FROM negotiations
@@ -269,7 +293,7 @@ class NegotiationController {
             WHERE id = ?
           `, [
                     req.userId,
-                    req.userId,
+                    sellerBrokerId,
                     DEFAULT_WIZARD_STATUS,
                     propertyValue,
                     paymentDetails,
@@ -296,7 +320,7 @@ class NegotiationController {
                     negotiationId,
                     payload.propertyId,
                     req.userId,
-                    req.userId,
+                    sellerBrokerId,
                     DEFAULT_WIZARD_STATUS,
                     propertyValue,
                     paymentDetails,
@@ -321,6 +345,7 @@ class NegotiationController {
                 JSON.stringify({
                     source: 'mobile_proposal_wizard',
                     payment: payload.pagamento,
+                    sellerBrokerId,
                 }),
             ]);
             await tx.execute(`
@@ -333,7 +358,7 @@ class NegotiationController {
                 clientCpf: payload.clientCpf,
                 propertyAddress: resolvePropertyAddress(property),
                 brokerName,
-                sellingBrokerName: brokerName,
+                sellingBrokerName,
                 value: propertyValue,
                 paymentMethod: buildPaymentMethodString(payload.pagamento),
                 validityDays: payload.validadeDias,
@@ -380,6 +405,27 @@ class NegotiationController {
         catch (error) {
             console.error('Erro ao baixar documento da negociacao:', error);
             return res.status(500).json({ error: 'Falha ao baixar documento.' });
+        }
+    }
+    async downloadLatestProposal(req, res) {
+        const negotiationId = String(req.params.id ?? '').trim();
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        try {
+            const document = await negotiationDocumentsRepository.findLatestByNegotiationAndType(negotiationId, 'proposal');
+            if (!document) {
+                return res.status(404).json({ error: 'Nenhuma proposta encontrada para esta negociação.' });
+            }
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', 'attachment; filename="proposta.pdf"');
+            res.setHeader('Content-Length', document.fileContent.length.toString());
+            res.setHeader('X-Document-Id', String(document.id));
+            return res.send(document.fileContent);
+        }
+        catch (error) {
+            console.error('Erro ao baixar proposta da negociação:', error);
+            return res.status(500).json({ error: 'Falha ao baixar proposta.' });
         }
     }
 }

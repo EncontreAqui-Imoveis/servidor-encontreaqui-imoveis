@@ -13,6 +13,10 @@ interface DocumentRow {
   type: string;
 }
 
+interface NegotiationDocumentRow extends DocumentRow {
+  id: number;
+}
+
 interface InsertResult {
   insertId?: number;
 }
@@ -100,5 +104,38 @@ export class NegotiationDocumentsRepository
     const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);
     const header = Array.isArray(result) ? result[0] : result;
     return Number(header?.insertId ?? 0);
+  }
+
+  async findLatestByNegotiationAndType(
+    negotiationId: string,
+    type: 'proposal' | 'contract' | 'other',
+    trx?: SqlExecutor
+  ): Promise<{ id: number; fileContent: Buffer; type: string } | null> {
+    const executor = trx ?? this.executor;
+    const sql = `
+      SELECT id, file_content, type
+      FROM negotiation_documents
+      WHERE negotiation_id = ? AND type = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `;
+
+    const rows = toRows<NegotiationDocumentRow>(
+      await executor.execute<NegotiationDocumentRow[]>(sql, [negotiationId, type])
+    );
+    const row = rows?.[0];
+    if (!row?.file_content) {
+      return null;
+    }
+
+    const fileContent = Buffer.isBuffer(row.file_content)
+      ? row.file_content
+      : Buffer.from(row.file_content);
+
+    return {
+      id: Number(row.id),
+      fileContent,
+      type: row.type,
+    };
   }
 }

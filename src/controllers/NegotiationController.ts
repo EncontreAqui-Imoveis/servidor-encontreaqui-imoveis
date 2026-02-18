@@ -563,6 +563,33 @@ class NegotiationController {
       return res.status(500).json({ error: 'Falha ao baixar documento.' });
     }
   }
+
+  async downloadLatestProposal(req: Request, res: Response): Promise<Response> {
+    const negotiationId = String(req.params.id ?? '').trim();
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID de negociação inválido.' });
+    }
+
+    try {
+      const document = await negotiationDocumentsRepository.findLatestByNegotiationAndType(
+        negotiationId,
+        'proposal'
+      );
+      if (!document) {
+        return res.status(404).json({ error: 'Nenhuma proposta encontrada para esta negociação.' });
+      }
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="proposta.pdf"');
+      res.setHeader('Content-Length', document.fileContent.length.toString());
+      res.setHeader('X-Document-Id', String(document.id));
+
+      return res.send(document.fileContent);
+    } catch (error) {
+      console.error('Erro ao baixar proposta da negociação:', error);
+      return res.status(500).json({ error: 'Falha ao baixar proposta.' });
+    }
+  }
 }
 
 export const negotiationController = new NegotiationController();

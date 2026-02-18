@@ -208,6 +208,16 @@ function parsePromotionDateTime(value) {
     }
     return parsed.toISOString().slice(0, 19).replace("T", " ");
 }
+function parsePromotionDate(value) {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+    const parsed = new Date(String(value));
+    if (Number.isNaN(parsed.getTime())) {
+        throw new Error("Data de promocao invalida.");
+    }
+    return parsed.toISOString().slice(0, 10);
+}
 function stringOrNull(value) {
     if (value === undefined || value === null) {
         return null;
@@ -241,9 +251,29 @@ function mapProperty(row, includeOwnerInfo = false) {
         visibility: row.visibility ?? 'PUBLIC',
         lifecycle_status: row.lifecycle_status ?? 'AVAILABLE',
         is_promoted: toBoolean(row.is_promoted),
-        promotion_percentage: row.promotion_percentage != null ? Number(row.promotion_percentage) : null,
-        promotion_start: row.promotion_start ?? null,
-        promotion_end: row.promotion_end ?? null,
+        promotion_percentage: row.promo_percentage_resolved != null
+            ? Number(row.promo_percentage_resolved)
+            : row.promo_percentage != null
+                ? Number(row.promo_percentage)
+                : row.promotion_percentage != null
+                    ? Number(row.promotion_percentage)
+                    : null,
+        promotion_start: row.promo_start_date_resolved ?? row.promo_start_date ?? row.promotion_start ?? null,
+        promotion_end: row.promo_end_date_resolved ?? row.promo_end_date ?? row.promotion_end ?? null,
+        promo_percentage: row.promo_percentage_resolved != null
+            ? Number(row.promo_percentage_resolved)
+            : row.promotion_percentage != null
+                ? Number(row.promotion_percentage)
+                : null,
+        promo_start_date: row.promo_start_date_resolved ?? row.promo_start_date ?? row.promotion_start ?? null,
+        promo_end_date: row.promo_end_date_resolved ?? row.promo_end_date ?? row.promotion_end ?? null,
+        promoPercentage: row.promo_percentage_resolved != null
+            ? Number(row.promo_percentage_resolved)
+            : row.promotion_percentage != null
+                ? Number(row.promotion_percentage)
+                : null,
+        promoStartDate: row.promo_start_date_resolved ?? row.promo_start_date ?? row.promotion_start ?? null,
+        promoEndDate: row.promo_end_date_resolved ?? row.promo_end_date ?? row.promotion_end ?? null,
         price: Number(row.price),
         price_sale: row.price_sale != null ? Number(row.price_sale) : null,
         price_rent: row.price_rent != null ? Number(row.price_rent) : null,
@@ -338,6 +368,9 @@ class PropertyController {
             const [rows] = await connection_1.default.query(`
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,
@@ -378,7 +411,7 @@ class PropertyController {
         if (!brokerId) {
             return res.status(401).json({ error: "Corretor não autenticado." });
         }
-        const { title, description, type, purpose, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, is_promoted, promo_percentage, promo_start_date, promo_end_date, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         const semNumeroFlag = parseBoolean(sem_numero);
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: "Campos obrigatórios não informados." });
@@ -406,15 +439,24 @@ class PropertyController {
         const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
         let promotionFlag = 0;
         let promotionPercentage = null;
+        let promotionStartDate = null;
+        let promotionEndDate = null;
         let promotionStart = null;
         let promotionEnd = null;
         try {
+            const promotionPercentageInput = promo_percentage ?? promotion_percentage;
+            const promotionStartInput = promo_start_date ?? promotion_start;
+            const promotionEndInput = promo_end_date ?? promotion_end;
             promotionFlag = parseBoolean(is_promoted);
-            promotionPercentage = parsePromotionPercentage(promotion_percentage);
-            promotionStart = parsePromotionDateTime(promotion_start);
-            promotionEnd = parsePromotionDateTime(promotion_end);
+            promotionPercentage = parsePromotionPercentage(promotionPercentageInput);
+            promotionStartDate = parsePromotionDate(promotionStartInput);
+            promotionEndDate = parsePromotionDate(promotionEndInput);
+            promotionStart = parsePromotionDateTime(promotionStartInput);
+            promotionEnd = parsePromotionDateTime(promotionEndInput);
             if (promotionFlag === 0) {
                 promotionPercentage = null;
+                promotionStartDate = null;
+                promotionEndDate = null;
                 promotionStart = null;
                 promotionEnd = null;
             }
@@ -521,6 +563,9 @@ class PropertyController {
             promotion_percentage,
             promotion_start,
             promotion_end,
+            promo_percentage,
+            promo_start_date,
+            promo_end_date,
             price,
             price_sale,
             price_rent,
@@ -551,7 +596,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerId,
                 null,
@@ -564,6 +609,9 @@ class PropertyController {
                 promotionPercentage,
                 promotionStart,
                 promotionEnd,
+                promotionPercentage,
+                promotionStartDate,
+                promotionEndDate,
                 numericPrice,
                 numericPriceSale,
                 numericPriceRent,
@@ -642,7 +690,7 @@ class PropertyController {
         if (!userId) {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
-        const { title, description, type, purpose, is_promoted, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, is_promoted, promo_percentage, promo_start_date, promo_end_date, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         const semNumeroFlag = parseBoolean(sem_numero);
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
@@ -670,15 +718,24 @@ class PropertyController {
         const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
         let promotionFlag = 0;
         let promotionPercentage = null;
+        let promotionStartDate = null;
+        let promotionEndDate = null;
         let promotionStart = null;
         let promotionEnd = null;
         try {
+            const promotionPercentageInput = promo_percentage ?? promotion_percentage;
+            const promotionStartInput = promo_start_date ?? promotion_start;
+            const promotionEndInput = promo_end_date ?? promotion_end;
             promotionFlag = parseBoolean(is_promoted);
-            promotionPercentage = parsePromotionPercentage(promotion_percentage);
-            promotionStart = parsePromotionDateTime(promotion_start);
-            promotionEnd = parsePromotionDateTime(promotion_end);
+            promotionPercentage = parsePromotionPercentage(promotionPercentageInput);
+            promotionStartDate = parsePromotionDate(promotionStartInput);
+            promotionEndDate = parsePromotionDate(promotionEndInput);
+            promotionStart = parsePromotionDateTime(promotionStartInput);
+            promotionEnd = parsePromotionDateTime(promotionEndInput);
             if (promotionFlag === 0) {
                 promotionPercentage = null;
+                promotionStartDate = null;
+                promotionEndDate = null;
                 promotionStart = null;
                 promotionEnd = null;
             }
@@ -773,6 +830,9 @@ class PropertyController {
             promotion_percentage,
             promotion_start,
             promotion_end,
+            promo_percentage,
+            promo_start_date,
+            promo_end_date,
             price,
             price_sale,
             price_rent,
@@ -803,7 +863,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 null,
                 userId,
@@ -816,6 +876,9 @@ class PropertyController {
                 promotionPercentage,
                 promotionStart,
                 promotionEnd,
+                promotionPercentage,
+                promotionStartDate,
+                promotionEndDate,
                 numericPrice,
                 numericPriceSale,
                 numericPriceRent,
@@ -925,9 +988,11 @@ class PropertyController {
             let saleTouched = false;
             let rentTouched = false;
             let nextPromotionFlag = previousPromotionFlag ? 1 : 0;
-            let nextPromotionPercentage = property.promotion_percentage != null
-                ? Number(property.promotion_percentage)
-                : null;
+            let nextPromotionPercentage = property.promo_percentage != null
+                ? Number(property.promo_percentage)
+                : property.promotion_percentage != null
+                    ? Number(property.promotion_percentage)
+                    : null;
             // Always allow editing all fields, even if approved
             const updatableFields = new Set([
                 'title',
@@ -939,6 +1004,9 @@ class PropertyController {
                 'price_sale',
                 'price_rent',
                 'is_promoted',
+                'promo_percentage',
+                'promo_start_date',
+                'promo_end_date',
                 'promotion_percentage',
                 'promotion_start',
                 'promotion_end',
@@ -1090,6 +1158,12 @@ class PropertyController {
                         nextPromotionFlag = parsed;
                         if (parsed === 0) {
                             nextPromotionPercentage = null;
+                            fields.push('promo_percentage = ?');
+                            values.push(null);
+                            fields.push('promo_start_date = ?');
+                            values.push(null);
+                            fields.push('promo_end_date = ?');
+                            values.push(null);
                             fields.push('promotion_percentage = ?');
                             values.push(null);
                             fields.push('promotion_start = ?');
@@ -1101,10 +1175,13 @@ class PropertyController {
                         values.push(parsed);
                         break;
                     }
+                    case 'promo_percentage':
                     case 'promotion_percentage': {
                         try {
                             const parsed = parsePromotionPercentage(body[key]);
                             nextPromotionPercentage = parsed;
+                            fields.push('promo_percentage = ?');
+                            values.push(parsed);
                             fields.push('promotion_percentage = ?');
                             values.push(parsed);
                         }
@@ -1113,12 +1190,25 @@ class PropertyController {
                         }
                         break;
                     }
+                    case 'promo_start_date':
                     case 'promotion_start':
+                    case 'promo_end_date':
                     case 'promotion_end': {
                         try {
-                            const parsed = parsePromotionDateTime(body[key]);
-                            fields.push(`\`${key}\` = ?`);
-                            values.push(parsed);
+                            const parsedDate = parsePromotionDate(body[key]);
+                            const parsedDateTime = parsePromotionDateTime(body[key]);
+                            if (key === 'promotion_start' || key === 'promo_start_date') {
+                                fields.push('promo_start_date = ?');
+                                values.push(parsedDate);
+                                fields.push('promotion_start = ?');
+                                values.push(parsedDateTime);
+                            }
+                            else {
+                                fields.push('promo_end_date = ?');
+                                values.push(parsedDate);
+                                fields.push('promotion_end = ?');
+                                values.push(parsedDateTime);
+                            }
                         }
                         catch (parseError) {
                             return res.status(400).json({ error: parseError.message });
@@ -1522,6 +1612,9 @@ class PropertyController {
             const [rows] = await connection_1.default.query(`
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,
@@ -1683,6 +1776,9 @@ class PropertyController {
             const [rows] = await connection_1.default.query(`
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,
@@ -1733,6 +1829,9 @@ class PropertyController {
             const [rows] = await connection_1.default.query(`
           SELECT
             p.*,
+            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
             ANY_VALUE(a.id) AS agency_id,
             ANY_VALUE(a.name) AS agency_name,
             ANY_VALUE(a.logo_url) AS agency_logo_url,

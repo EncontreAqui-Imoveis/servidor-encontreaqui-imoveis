@@ -64,7 +64,7 @@ describe('POST /negotiations/proposal', () => {
     generateProposalMock.mockResolvedValue(Buffer.from('%PDF-fake-proposal%'));
   });
 
-  it('persists negotiation as waiting signature and returns generated PDF', async () => {
+  it('persists negotiation as proposal sent and returns generated PDF', async () => {
     txMock.query
       .mockResolvedValueOnce([
         [
@@ -104,7 +104,7 @@ describe('POST /negotiations/proposal', () => {
     expect(Buffer.isBuffer(response.body)).toBe(true);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'AWAITING_SIGNATURES'])
+      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledTimes(1);
     expect(txMock.commit).toHaveBeenCalledTimes(1);
@@ -189,7 +189,7 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30004, 'AWAITING_SIGNATURES'])
+      expect.arrayContaining([expect.any(String), 101, 30003, 30004, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const AdminController_1 = require("../controllers/AdminController");
+const ContractController_1 = require("../controllers/ContractController");
 const auth_1 = require("../middlewares/auth");
 const uploadMiddleware_1 = require("../middlewares/uploadMiddleware");
 const uploadMiddleware_2 = require("../middlewares/uploadMiddleware");
@@ -17,6 +18,8 @@ adminRoutes.put('/negotiations/:id/approve', AdminController_1.adminController.a
 adminRoutes.put('/negotiations/:id/reject', AdminController_1.adminController.rejectNegotiation);
 adminRoutes.put('/negotiations/:id/cancel', AdminController_1.adminController.cancelNegotiation);
 adminRoutes.get('/negotiations/:id/signed-proposal/download', AdminController_1.adminController.downloadSignedProposal);
+adminRoutes.get('/contracts', (req, res) => ContractController_1.contractController.listForAdmin(req, res));
+adminRoutes.put('/contracts/:id/transition', (req, res) => ContractController_1.contractController.transitionStatus(req, res));
 adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },

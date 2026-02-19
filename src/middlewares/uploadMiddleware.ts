@@ -60,6 +60,10 @@ function isAllowedPdf(mime: string, originalname: string): boolean {
   return ext === 'pdf';
 }
 
+function isAllowedContractDocument(mime: string, originalname: string): boolean {
+  return isAllowedPdf(mime, originalname) || isAllowedImage(mime, originalname);
+}
+
 export const mediaUpload = multer({
   storage,
   limits: {
@@ -139,5 +143,28 @@ export const signedProposalUpload = multer({
     }
 
     cb(new Error('Arquivo inválido. Envie apenas PDF assinado.'));
+  },
+});
+
+export const contractDocumentUpload = multer({
+  storage,
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+    files: 1,
+  },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = file.originalname || '';
+
+    if (isAllowedContractDocument(mime, name)) {
+      cb(null, true);
+      return;
+    }
+
+    cb(
+      new Error(
+        'Formato de arquivo não suportado. Use apenas PDF, JPG, JPEG, PNG ou WEBP.'
+      )
+    );
   },
 });

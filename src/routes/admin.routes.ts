@@ -57,6 +57,8 @@ adminRoutes.delete('/brokers/:id', adminController.deleteBroker);
 adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
 
 adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
+adminRoutes.get('/properties/archive', adminController.listArchivedProperties);
+adminRoutes.put('/properties/:id/relist', adminController.relistProperty);
 adminRoutes.get('/properties/:id', adminController.getPropertyDetails);
 adminRoutes.put('/properties/:id', adminController.updateProperty);
 adminRoutes.delete('/properties/:id', adminController.deleteProperty);

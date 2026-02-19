@@ -51,6 +51,13 @@ const CONTRACT_DOCUMENT_TYPE_VALUES = [
     'boleto_vistoria',
 ];
 const CONTRACT_DOCUMENT_TYPE_ENUM_SQL = CONTRACT_DOCUMENT_TYPE_VALUES.map((value) => `'${value}'`).join(', ');
+const CONTRACT_APPROVAL_STATUS_VALUES = [
+    'PENDING',
+    'APPROVED',
+    'APPROVED_WITH_RES',
+    'REJECTED',
+];
+const CONTRACT_APPROVAL_STATUS_ENUM_SQL = CONTRACT_APPROVAL_STATUS_VALUES.map((value) => `'${value}'`).join(', ');
 async function ensurePropertiesColumns() {
     if (!(await columnExists('properties', 'owner_id'))) {
         await connection_1.default.query('ALTER TABLE properties ADD COLUMN owner_id INT NULL');
@@ -243,6 +250,10 @@ async function ensureContractsTable() {
       seller_info JSON NULL,
       buyer_info JSON NULL,
       commission_data JSON NULL,
+      seller_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING',
+      buyer_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING',
+      seller_approval_reason JSON NULL,
+      buyer_approval_reason JSON NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
@@ -255,6 +266,61 @@ async function ensureContractsTable() {
         FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
+}
+async function ensureContractApprovalColumns() {
+    if (!(await tableExists('contracts'))) {
+        return;
+    }
+    if (!(await columnExists('contracts', 'seller_approval_status'))) {
+        await connection_1.default.query(`
+      ALTER TABLE contracts
+      ADD COLUMN seller_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING'
+      AFTER commission_data
+    `);
+    }
+    if (!(await columnExists('contracts', 'buyer_approval_status'))) {
+        await connection_1.default.query(`
+      ALTER TABLE contracts
+      ADD COLUMN buyer_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING'
+      AFTER seller_approval_status
+    `);
+    }
+    if (!(await columnExists('contracts', 'seller_approval_reason'))) {
+        await connection_1.default.query(`
+      ALTER TABLE contracts
+      ADD COLUMN seller_approval_reason JSON NULL
+      AFTER buyer_approval_status
+    `);
+    }
+    if (!(await columnExists('contracts', 'buyer_approval_reason'))) {
+        await connection_1.default.query(`
+      ALTER TABLE contracts
+      ADD COLUMN buyer_approval_reason JSON NULL
+      AFTER seller_approval_reason
+    `);
+    }
+    const sellerApprovalType = await getColumnType('contracts', 'seller_approval_status');
+    if (sellerApprovalType) {
+        const lowerType = sellerApprovalType.toLowerCase();
+        const missingValue = CONTRACT_APPROVAL_STATUS_VALUES.find((value) => !lowerType.includes(`'${value.toLowerCase()}'`));
+        if (missingValue) {
+            await connection_1.default.query(`
+        ALTER TABLE contracts
+        MODIFY COLUMN seller_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING'
+      `);
+        }
+    }
+    const buyerApprovalType = await getColumnType('contracts', 'buyer_approval_status');
+    if (buyerApprovalType) {
+        const lowerType = buyerApprovalType.toLowerCase();
+        const missingValue = CONTRACT_APPROVAL_STATUS_VALUES.find((value) => !lowerType.includes(`'${value.toLowerCase()}'`));
+        if (missingValue) {
+            await connection_1.default.query(`
+        ALTER TABLE contracts
+        MODIFY COLUMN buyer_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING'
+      `);
+        }
+    }
 }
 async function ensureNegotiationDocumentTypeColumn() {
     if (!(await tableExists('negotiation_documents'))) {
@@ -289,6 +355,7 @@ async function applyMigrations() {
         await ensureSupportRequestsTable();
         await ensurePasswordResetTokensTable();
         await ensureContractsTable();
+        await ensureContractApprovalColumns();
         await ensureNegotiationDocumentTypeColumn();
         console.log('Migrations aplicadas com sucesso.');
     }

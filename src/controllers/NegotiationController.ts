@@ -117,7 +117,7 @@ const ACTIVE_NEGOTIATION_STATUSES = [
 ] as const;
 
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
-const SIGNED_PROPOSAL_REVIEW_STATUS = 'IN_NEGOTIATION';
+const SIGNED_PROPOSAL_REVIEW_STATUS = 'DOCUMENTATION_PHASE';
 const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
   'PROPOSAL_SENT',
   'AWAITING_SIGNATURES',
@@ -453,7 +453,11 @@ class NegotiationController {
       const paymentDetails = JSON.stringify({
         method: 'OTHER',
         amount: Number(propertyValue.toFixed(2)),
-        details: payload.pagamento,
+        details: {
+          ...payload.pagamento,
+          clientName: payload.clientName,
+          clientCpf: payload.clientCpf,
+        },
       });
       const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
 
@@ -538,6 +542,8 @@ class NegotiationController {
             source: 'mobile_proposal_wizard',
             payment: payload.pagamento,
             sellerBrokerId,
+            clientName: payload.clientName,
+            clientCpf: payload.clientCpf,
           }),
         ]
       );

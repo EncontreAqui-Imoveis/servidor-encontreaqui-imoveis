@@ -352,6 +352,100 @@ function mapAdminProperty(row) {
         updated_at: row.updated_at ? String(row.updated_at) : null,
     };
 }
+const NEGOTIATION_INTERNAL_STATUSES = new Set([
+    'PROPOSAL_DRAFT',
+    'PROPOSAL_SENT',
+    'IN_NEGOTIATION',
+    'DOCUMENTATION_PHASE',
+    'CONTRACT_DRAFTING',
+    'AWAITING_SIGNATURES',
+    'SOLD',
+    'RENTED',
+    'CANCELLED',
+]);
+function parseNegotiationStatusFilter(value) {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+        return null;
+    }
+    if (normalized === 'UNDER_REVIEW' || normalized === 'APPROVED') {
+        return normalized;
+    }
+    if (NEGOTIATION_INTERNAL_STATUSES.has(normalized)) {
+        return normalized;
+    }
+    return null;
+}
+function buildNegotiationStatusClause(statusFilter) {
+    if (!statusFilter) {
+        return { clause: '', params: [] };
+    }
+    if (statusFilter === 'UNDER_REVIEW') {
+        return {
+            clause: " AND (n.status = 'DOCUMENTATION_PHASE' OR (n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') <> 'negociacao'))",
+            params: [],
+        };
+    }
+    if (statusFilter === 'APPROVED' || statusFilter === 'IN_NEGOTIATION') {
+        return {
+            clause: " AND n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') = 'negociacao'",
+            params: [],
+        };
+    }
+    return {
+        clause: ' AND n.status = ?',
+        params: [statusFilter],
+    };
+}
+function toNegotiationMoney(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return 0;
+    }
+    return Number(parsed.toFixed(2));
+}
+function toAdminNegotiationStatus(row) {
+    const negotiationStatus = String(row.negotiation_status ?? '').toUpperCase();
+    const propertyStatus = String(row.property_status ?? '').toLowerCase();
+    if (negotiationStatus === 'DOCUMENTATION_PHASE' ||
+        (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus !== 'negociacao')) {
+        return 'UNDER_REVIEW';
+    }
+    if (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus === 'negociacao') {
+        return 'APPROVED';
+    }
+    return negotiationStatus;
+}
+function mapAdminNegotiation(row) {
+    return {
+        id: row.id,
+        status: toAdminNegotiationStatus(row),
+        internalStatus: String(row.negotiation_status ?? '').toUpperCase(),
+        propertyId: Number(row.property_id),
+        propertyCode: row.property_code ?? null,
+        propertyTitle: row.property_title ?? null,
+        propertyAddress: row.property_address ?? null,
+        brokerName: row.capturing_broker_name ?? row.selling_broker_name ?? null,
+        capturingBrokerName: row.capturing_broker_name ?? null,
+        sellingBrokerName: row.selling_broker_name ?? null,
+        clientName: row.client_name ?? null,
+        clientCpf: row.client_cpf ?? null,
+        value: toNullableNumber(row.final_value),
+        validityDate: row.proposal_validity_date ? String(row.proposal_validity_date) : null,
+        payment: {
+            dinheiro: toNegotiationMoney(row.payment_dinheiro),
+            permuta: toNegotiationMoney(row.payment_permuta),
+            financiamento: toNegotiationMoney(row.payment_financiamento),
+            outros: toNegotiationMoney(row.payment_outros),
+        },
+        updatedAt: row.last_event_at ? String(row.last_event_at) : null,
+        approvedAt: row.approved_at ? String(row.approved_at) : null,
+        signedDocumentId: row.signed_document_id != null ? Number(row.signed_document_id) : null,
+    };
+}
 async function fetchPropertyOwner(propertyId) {
     const [rows] = await connection_1.default.query('SELECT broker_id, owner_id, title FROM properties WHERE id = ?', [propertyId]);
     if (!rows || rows.length === 0) {
@@ -386,6 +480,406 @@ class AdminController {
         }
         catch (error) {
             console.error('Erro no login do admin:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async listNegotiations(req, res) {
+        try {
+            const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+            const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '20'), 10) || 20, 1), 100);
+            const offset = (page - 1) * limit;
+            const statusFilter = parseNegotiationStatusFilter(req.query.status);
+            const { clause, params } = buildNegotiationStatusClause(statusFilter);
+            const [countRows] = await connection_1.default.query(`
+          SELECT COUNT(*) AS total
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          WHERE 1 = 1
+          ${clause}
+        `, params);
+            const total = Number(countRows[0]?.total ?? 0);
+            const [rows] = await connection_1.default.query(`
+          SELECT
+            n.id,
+            n.status AS negotiation_status,
+            n.property_id,
+            p.status AS property_status,
+            p.code AS property_code,
+            p.title AS property_title,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
+            n.final_value,
+            n.proposal_validity_date,
+            capture_user.name AS capturing_broker_name,
+            seller_user.name AS selling_broker_name,
+            COALESCE(
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName'))
+            ) AS client_name,
+            COALESCE(
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf'))
+            ) AS client_cpf,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_dinheiro,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.permuta')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.trade_in')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.tradeIn')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_permuta,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financiamento')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financing')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_financiamento,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.outros')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.others')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_outros,
+            latest_history.created_at AS last_event_at,
+            approved_history.approved_at AS approved_at,
+            signed_doc.id AS signed_document_id
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
+          LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
+          LEFT JOIN (
+            SELECT ranked.negotiation_id, ranked.created_at
+            FROM (
+              SELECT
+                h.negotiation_id,
+                h.created_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY h.negotiation_id
+                  ORDER BY h.created_at DESC
+                ) AS rn
+              FROM negotiation_history h
+            ) ranked
+            WHERE ranked.rn = 1
+          ) latest_history ON latest_history.negotiation_id = n.id
+          LEFT JOIN (
+            SELECT
+              h.negotiation_id,
+              MAX(h.created_at) AS approved_at
+            FROM negotiation_history h
+            WHERE h.to_status = 'IN_NEGOTIATION'
+            GROUP BY h.negotiation_id
+          ) approved_history ON approved_history.negotiation_id = n.id
+          LEFT JOIN (
+            SELECT ranked.negotiation_id, ranked.id
+            FROM (
+              SELECT
+                d.negotiation_id,
+                d.id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY d.negotiation_id
+                  ORDER BY d.created_at DESC, d.id DESC
+                ) AS rn
+              FROM negotiation_documents d
+              WHERE d.type = 'other'
+            ) ranked
+            WHERE ranked.rn = 1
+          ) signed_doc ON signed_doc.negotiation_id = n.id
+          WHERE 1 = 1
+          ${clause}
+          ORDER BY COALESCE(latest_history.created_at, approved_history.approved_at) DESC, n.id DESC
+          LIMIT ? OFFSET ?
+        `, [...params, limit, offset]);
+            return res.status(200).json({
+                data: rows.map(mapAdminNegotiation),
+                page,
+                limit,
+                total,
+            });
+        }
+        catch (error) {
+            console.error('Erro ao listar negociações para admin:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async approveNegotiation(req, res) {
+        const negotiationId = String(req.params.id ?? '').trim();
+        const actorId = Number(req.userId);
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        if (!actorId) {
+            return res.status(401).json({ error: 'Administrador não autenticado.' });
+        }
+        const tx = await connection_1.default.getConnection();
+        try {
+            await tx.beginTransaction();
+            const [rows] = await tx.query(`
+          SELECT
+            n.id,
+            n.status,
+            n.property_id,
+            p.status AS property_status,
+            p.lifecycle_status
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          WHERE n.id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [negotiationId]);
+            if (!rows.length) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Negociação não encontrada.' });
+            }
+            const negotiation = rows[0];
+            const currentStatus = String(negotiation.status ?? '').toUpperCase();
+            if (currentStatus === 'CANCELLED' || currentStatus === 'SOLD' || currentStatus === 'RENTED') {
+                await tx.rollback();
+                return res.status(400).json({ error: 'Não é possível aprovar uma negociação encerrada.' });
+            }
+            await tx.query(`
+          UPDATE negotiations
+          SET status = 'IN_NEGOTIATION', version = version + 1
+          WHERE id = ?
+        `, [negotiationId]);
+            await tx.query(`
+          INSERT INTO negotiation_history (
+            id,
+            negotiation_id,
+            from_status,
+            to_status,
+            actor_id,
+            metadata_json,
+            created_at
+          ) VALUES (UUID(), ?, ?, 'IN_NEGOTIATION', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+        `, [
+                negotiationId,
+                currentStatus,
+                actorId,
+                JSON.stringify({
+                    action: 'admin_approved',
+                }),
+            ]);
+            await tx.query(`
+          UPDATE properties
+          SET status = 'negociacao', visibility = 'HIDDEN', lifecycle_status = 'AVAILABLE'
+          WHERE id = ?
+        `, [negotiation.property_id]);
+            await tx.commit();
+            return res.status(200).json({
+                message: 'Negociação aprovada com sucesso.',
+                id: negotiationId,
+                status: 'APPROVED',
+                internalStatus: 'IN_NEGOTIATION',
+            });
+        }
+        catch (error) {
+            await tx.rollback();
+            console.error('Erro ao aprovar negociação:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+        finally {
+            tx.release();
+        }
+    }
+    async rejectNegotiation(req, res) {
+        const negotiationId = String(req.params.id ?? '').trim();
+        const actorId = Number(req.userId);
+        const reason = String(req.body?.reason ?? '').trim();
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        if (!actorId) {
+            return res.status(401).json({ error: 'Administrador não autenticado.' });
+        }
+        if (!reason) {
+            return res.status(400).json({ error: 'Motivo da rejeição é obrigatório.' });
+        }
+        const tx = await connection_1.default.getConnection();
+        try {
+            await tx.beginTransaction();
+            const [rows] = await tx.query(`
+          SELECT
+            n.id,
+            n.status,
+            n.property_id,
+            p.status AS property_status,
+            p.lifecycle_status
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          WHERE n.id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [negotiationId]);
+            if (!rows.length) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Negociação não encontrada.' });
+            }
+            const negotiation = rows[0];
+            const currentStatus = String(negotiation.status ?? '').toUpperCase();
+            if (currentStatus === 'SOLD' || currentStatus === 'RENTED') {
+                await tx.rollback();
+                return res.status(400).json({ error: 'Negociação já finalizada, rejeição não permitida.' });
+            }
+            await tx.query(`
+          UPDATE negotiations
+          SET status = 'CANCELLED', version = version + 1
+          WHERE id = ?
+        `, [negotiationId]);
+            await tx.query(`
+          INSERT INTO negotiation_history (
+            id,
+            negotiation_id,
+            from_status,
+            to_status,
+            actor_id,
+            metadata_json,
+            created_at
+          ) VALUES (UUID(), ?, ?, 'CANCELLED', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+        `, [
+                negotiationId,
+                currentStatus,
+                actorId,
+                JSON.stringify({
+                    action: 'admin_rejected',
+                    reason,
+                }),
+            ]);
+            await tx.query(`
+          UPDATE properties
+          SET status = 'approved', visibility = 'PUBLIC', lifecycle_status = 'AVAILABLE'
+          WHERE id = ?
+            AND lifecycle_status NOT IN ('SOLD', 'RENTED')
+            AND status NOT IN ('sold', 'rented')
+        `, [negotiation.property_id]);
+            await tx.commit();
+            return res.status(200).json({
+                message: 'Negociação rejeitada e imóvel devolvido para disponível.',
+                id: negotiationId,
+                status: 'REJECTED',
+            });
+        }
+        catch (error) {
+            await tx.rollback();
+            console.error('Erro ao rejeitar negociação:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+        finally {
+            tx.release();
+        }
+    }
+    async cancelNegotiation(req, res) {
+        const negotiationId = String(req.params.id ?? '').trim();
+        const actorId = Number(req.userId);
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        if (!actorId) {
+            return res.status(401).json({ error: 'Administrador não autenticado.' });
+        }
+        const tx = await connection_1.default.getConnection();
+        try {
+            await tx.beginTransaction();
+            const [rows] = await tx.query(`
+          SELECT
+            n.id,
+            n.status,
+            n.property_id,
+            p.status AS property_status,
+            p.lifecycle_status
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          WHERE n.id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [negotiationId]);
+            if (!rows.length) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Negociação não encontrada.' });
+            }
+            const negotiation = rows[0];
+            const currentStatus = String(negotiation.status ?? '').toUpperCase();
+            const propertyStatus = String(negotiation.property_status ?? '').toLowerCase();
+            if (currentStatus === 'SOLD' || currentStatus === 'RENTED') {
+                await tx.rollback();
+                return res.status(400).json({ error: 'Negociação já finalizada, cancelamento não permitido.' });
+            }
+            if (currentStatus !== 'IN_NEGOTIATION' || propertyStatus !== 'negociacao') {
+                await tx.rollback();
+                return res.status(400).json({ error: 'Somente negociações em andamento podem ser canceladas.' });
+            }
+            await tx.query(`
+          UPDATE negotiations
+          SET status = 'CANCELLED', version = version + 1
+          WHERE id = ?
+        `, [negotiationId]);
+            await tx.query(`
+          INSERT INTO negotiation_history (
+            id,
+            negotiation_id,
+            from_status,
+            to_status,
+            actor_id,
+            metadata_json,
+            created_at
+          ) VALUES (UUID(), ?, ?, 'CANCELLED', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+        `, [
+                negotiationId,
+                currentStatus,
+                actorId,
+                JSON.stringify({
+                    action: 'admin_cancelled',
+                }),
+            ]);
+            await tx.query(`
+          UPDATE properties
+          SET status = 'approved', visibility = 'PUBLIC', lifecycle_status = 'AVAILABLE'
+          WHERE id = ?
+            AND lifecycle_status NOT IN ('SOLD', 'RENTED')
+            AND status NOT IN ('sold', 'rented')
+        `, [negotiation.property_id]);
+            await tx.commit();
+            return res.status(200).json({
+                message: 'Negociação cancelada e imóvel devolvido para disponível.',
+                id: negotiationId,
+                status: 'CANCELLED',
+            });
+        }
+        catch (error) {
+            await tx.rollback();
+            console.error('Erro ao cancelar negociação:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+        finally {
+            tx.release();
+        }
+    }
+    async downloadSignedProposal(req, res) {
+        const negotiationId = String(req.params.id ?? '').trim();
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        try {
+            const [rows] = await connection_1.default.query(`
+          SELECT id, file_content
+          FROM negotiation_documents
+          WHERE negotiation_id = ? AND type = 'other'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        `, [negotiationId]);
+            const document = rows[0];
+            if (!document?.file_content) {
+                return res.status(404).json({ error: 'Proposta assinada não encontrada.' });
+            }
+            const fileContent = Buffer.isBuffer(document.file_content)
+                ? document.file_content
+                : Buffer.from(document.file_content);
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `inline; filename="proposta_assinada_${negotiationId}.pdf"`);
+            res.setHeader('Content-Length', fileContent.length.toString());
+            return res.status(200).send(fileContent);
+        }
+        catch (error) {
+            console.error('Erro ao baixar proposta assinada:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }

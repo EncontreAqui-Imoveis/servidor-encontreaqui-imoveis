@@ -94,7 +94,7 @@ describe('POST /negotiations/:id/proposals/signed', () => {
     );
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE negotiations'),
-      ['IN_NEGOTIATION', 'neg-uuid-1']
+      ['DOCUMENTATION_PHASE', 'neg-uuid-1']
     );
     expect(createAdminNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({

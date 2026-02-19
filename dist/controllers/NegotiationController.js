@@ -454,8 +454,7 @@ class NegotiationController {
             n.status,
             n.capturing_broker_id,
             n.selling_broker_id,
-            p.code AS property_code,
-            p.address AS property_address,
+            p.title AS property_title,
             u.name AS broker_name
           FROM negotiations n
           JOIN properties p ON p.id = n.property_id
@@ -511,12 +510,12 @@ class NegotiationController {
                 }),
             ]);
             await tx.commit();
-            const propertyRef = String(negotiation.property_code ?? negotiation.property_address ?? negotiation.property_id);
+            const propertyTitle = String(negotiation.property_title ?? '').trim() || 'Imóvel sem título';
             const brokerName = String(negotiation.broker_name ?? `#${req.userId}`);
             await (0, notificationService_1.createAdminNotification)({
                 type: 'negotiation',
-                title: `Proposta Enviada: ${propertyRef}`,
-                message: `O corretor ${brokerName} enviou uma proposta assinada para o imóvel ${propertyRef}.`,
+                title: `Proposta Enviada: ${propertyTitle}`,
+                message: `O corretor ${brokerName} enviou uma proposta assinada para o imóvel ${propertyTitle}.`,
                 relatedEntityId: Number(negotiation.property_id),
                 metadata: {
                     negotiationId,

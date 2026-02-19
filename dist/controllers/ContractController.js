@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.contractController = void 0;
 const connection_1 = __importDefault(require("../database/connection"));
+const notificationService_1 = require("../services/notificationService");
 const contract_types_1 = require("../modules/contracts/domain/contract.types");
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
     'IN_NEGOTIATION',
@@ -92,6 +93,45 @@ function parseContractStatusFilter(value) {
     return CONTRACT_STATUS_SET.has(normalized)
         ? normalized
         : null;
+}
+function parseNonNegativeNumber(value, fieldName) {
+    const numericValue = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) {
+        throw new Error(`${fieldName} deve ser um número maior ou igual a zero.`);
+    }
+    return Number(numericValue.toFixed(2));
+}
+function normalizeCommissionData(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('commission_data inválido.');
+    }
+    const payload = value;
+    const valorVenda = parseNonNegativeNumber(payload.valorVenda, 'valorVenda');
+    if (valorVenda <= 0) {
+        throw new Error('valorVenda deve ser maior que zero.');
+    }
+    return {
+        valorVenda,
+        comissaoCaptador: parseNonNegativeNumber(payload.comissaoCaptador, 'comissaoCaptador'),
+        comissaoVendedor: parseNonNegativeNumber(payload.comissaoVendedor, 'comissaoVendedor'),
+        taxaPlataforma: parseNonNegativeNumber(payload.taxaPlataforma, 'taxaPlataforma'),
+    };
+}
+function resolveFinalDealStatuses(propertyPurpose) {
+    const normalizedPurpose = String(propertyPurpose ?? '').toLowerCase();
+    const isRentalOnly = normalizedPurpose.includes('alug') && !normalizedPurpose.includes('venda');
+    if (isRentalOnly) {
+        return {
+            propertyStatus: 'rented',
+            lifecycleStatus: 'RENTED',
+            negotiationStatus: 'RENTED',
+        };
+    }
+    return {
+        propertyStatus: 'sold',
+        lifecycleStatus: 'SOLD',
+        negotiationStatus: 'SOLD',
+    };
 }
 function mapContract(row) {
     return {
@@ -390,6 +430,48 @@ class ContractController {
             return res.status(500).json({ error: 'Falha ao listar contratos.' });
         }
     }
+    async listMyContracts(req, res) {
+        const userId = Number(req.userId);
+        if (!Number.isFinite(userId) || userId <= 0) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
+        const statusFilter = parseContractStatusFilter(req.query.status);
+        if (req.query.status != null && statusFilter == null) {
+            return res.status(400).json({ error: 'Status de contrato inválido.' });
+        }
+        const page = Math.max(Number(req.query.page ?? 1) || 1, 1);
+        const limit = Math.min(Math.max(Number(req.query.limit ?? 20) || 20, 1), 100);
+        const offset = (page - 1) * limit;
+        const statusClause = statusFilter ? 'AND c.status = ?' : '';
+        const statusParams = statusFilter ? [statusFilter] : [];
+        try {
+            const [countRows] = await connection_1.default.query(`
+          SELECT COUNT(*) AS total
+          FROM contracts c
+          JOIN negotiations n ON n.id = c.negotiation_id
+          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ?)
+          ${statusClause}
+        `, [userId, userId, ...statusParams]);
+            const total = Number(countRows[0]?.total ?? 0);
+            const [rows] = await connection_1.default.query(`
+          ${CONTRACT_SELECT_SQL}
+          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ?)
+          ${statusClause}
+          ORDER BY c.updated_at DESC, c.created_at DESC
+          LIMIT ? OFFSET ?
+        `, [userId, userId, ...statusParams, limit, offset]);
+            return res.status(200).json({
+                data: rows.map(mapContract),
+                total,
+                page,
+                limit,
+            });
+        }
+        catch (error) {
+            console.error('Erro ao listar contratos do corretor:', error);
+            return res.status(500).json({ error: 'Falha ao listar contratos.' });
+        }
+    }
     async transitionStatus(req, res) {
         const contractId = String(req.params.id ?? '').trim();
         if (!contractId) {
@@ -440,6 +522,149 @@ class ContractController {
             await tx.rollback();
             console.error('Erro ao transicionar etapa do contrato:', error);
             return res.status(500).json({ error: 'Falha ao atualizar etapa do contrato.' });
+        }
+        finally {
+            tx.release();
+        }
+    }
+    async uploadDraft(req, res) {
+        const contractId = String(req.params.id ?? '').trim();
+        if (!contractId) {
+            return res.status(400).json({ error: 'ID do contrato inválido.' });
+        }
+        const uploadedFile = req.file;
+        if (!uploadedFile?.buffer || uploadedFile.buffer.length === 0) {
+            return res.status(400).json({ error: 'Arquivo PDF da minuta é obrigatório.' });
+        }
+        const tx = await connection_1.default.getConnection();
+        try {
+            await tx.beginTransaction();
+            const contract = await fetchContractForUpdate(tx, contractId);
+            if (!contract) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Contrato não encontrado.' });
+            }
+            const currentStatus = resolveContractStatus(contract.status);
+            if (currentStatus !== 'IN_DRAFT') {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'Somente contratos em Em Confecção podem receber minuta.',
+                });
+            }
+            await tx.query(`
+          INSERT INTO negotiation_documents (
+            negotiation_id,
+            type,
+            document_type,
+            file_content,
+            created_at
+          ) VALUES (?, 'contract', 'contrato_minuta', ?, CURRENT_TIMESTAMP)
+        `, [contract.negotiation_id, uploadedFile.buffer]);
+            await tx.query(`
+          UPDATE contracts
+          SET status = 'AWAITING_SIGNATURES', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [contractId]);
+            const updatedContract = await fetchContractForUpdate(tx, contractId);
+            await tx.commit();
+            const propertyTitle = (contract.property_title ?? '').trim() || 'Imóvel sem título';
+            const brokerRecipientIds = Array.from(new Set([contract.capturing_broker_id, contract.selling_broker_id].filter((value) => value != null && Number.isFinite(Number(value)))));
+            for (const recipientId of brokerRecipientIds) {
+                try {
+                    await (0, notificationService_1.createUserNotification)({
+                        type: 'negotiation',
+                        title: 'Minuta pronta para assinatura',
+                        message: `A minuta do contrato do imóvel ${propertyTitle} está pronta para assinatura!`,
+                        recipientId,
+                        relatedEntityId: Number(contract.property_id),
+                        recipientRole: 'broker',
+                        metadata: {
+                            contractId,
+                            negotiationId: contract.negotiation_id,
+                            stage: 'AWAITING_SIGNATURES',
+                        },
+                    });
+                }
+                catch (notificationError) {
+                    console.error('Falha ao notificar corretor sobre minuta:', notificationError);
+                }
+            }
+            return res.status(200).json({
+                message: 'Minuta anexada e contrato avançado para AWAITING_SIGNATURES.',
+                contract: updatedContract ? mapContract(updatedContract) : null,
+            });
+        }
+        catch (error) {
+            await tx.rollback();
+            console.error('Erro ao anexar minuta do contrato:', error);
+            return res.status(500).json({ error: 'Falha ao anexar minuta do contrato.' });
+        }
+        finally {
+            tx.release();
+        }
+    }
+    async finalize(req, res) {
+        const contractId = String(req.params.id ?? '').trim();
+        if (!contractId) {
+            return res.status(400).json({ error: 'ID do contrato inválido.' });
+        }
+        const body = (req.body ?? {});
+        const rawCommissionData = body.commission_data ?? body.commissionData;
+        let commissionData;
+        try {
+            commissionData = normalizeCommissionData(rawCommissionData);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : 'commission_data inválido.';
+            return res.status(400).json({ error: message });
+        }
+        const tx = await connection_1.default.getConnection();
+        try {
+            await tx.beginTransaction();
+            const contract = await fetchContractForUpdate(tx, contractId);
+            if (!contract) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Contrato não encontrado.' });
+            }
+            const currentStatus = resolveContractStatus(contract.status);
+            if (currentStatus !== 'AWAITING_SIGNATURES') {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'Somente contratos em AWAITING_SIGNATURES podem ser finalizados.',
+                });
+            }
+            const finalStatuses = resolveFinalDealStatuses(contract.property_purpose);
+            await tx.query(`
+          UPDATE contracts
+          SET
+            commission_data = CAST(? AS JSON),
+            status = 'FINALIZED',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [JSON.stringify(commissionData), contractId]);
+            await tx.query(`
+          UPDATE negotiations
+          SET status = ?
+          WHERE id = ?
+        `, [finalStatuses.negotiationStatus, contract.negotiation_id]);
+            await tx.query(`
+          UPDATE properties
+          SET
+            status = ?,
+            lifecycle_status = ?
+          WHERE id = ?
+        `, [finalStatuses.propertyStatus, finalStatuses.lifecycleStatus, contract.property_id]);
+            const updatedContract = await fetchContractForUpdate(tx, contractId);
+            await tx.commit();
+            return res.status(200).json({
+                message: 'Contrato finalizado com sucesso.',
+                contract: updatedContract ? mapContract(updatedContract) : null,
+            });
+        }
+        catch (error) {
+            await tx.rollback();
+            console.error('Erro ao finalizar contrato:', error);
+            return res.status(500).json({ error: 'Falha ao finalizar contrato.' });
         }
         finally {
             tx.release();

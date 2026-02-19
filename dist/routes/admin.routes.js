@@ -6,6 +6,7 @@ const ContractController_1 = require("../controllers/ContractController");
 const auth_1 = require("../middlewares/auth");
 const uploadMiddleware_1 = require("../middlewares/uploadMiddleware");
 const uploadMiddleware_2 = require("../middlewares/uploadMiddleware");
+const uploadMiddleware_3 = require("../middlewares/uploadMiddleware");
 const adminRoutes = (0, express_1.Router)();
 adminRoutes.post('/login', AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
@@ -20,6 +21,8 @@ adminRoutes.put('/negotiations/:id/cancel', AdminController_1.adminController.ca
 adminRoutes.get('/negotiations/:id/signed-proposal/download', AdminController_1.adminController.downloadSignedProposal);
 adminRoutes.get('/contracts', (req, res) => ContractController_1.contractController.listForAdmin(req, res));
 adminRoutes.put('/contracts/:id/transition', (req, res) => ContractController_1.contractController.transitionStatus(req, res));
+adminRoutes.post('/contracts/:id/draft', uploadMiddleware_3.contractDraftUpload.single('file'), (req, res) => ContractController_1.contractController.uploadDraft(req, res));
+adminRoutes.post('/contracts/:id/finalize', (req, res) => ContractController_1.contractController.finalize(req, res));
 adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },

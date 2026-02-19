@@ -10,6 +10,10 @@ contractRoutes.post('/admin/negotiations/:id/contract', authMiddleware, isAdmin,
   contractController.createFromApprovedNegotiation(req, res)
 );
 
+contractRoutes.get('/contracts/me', authMiddleware, (req, res) =>
+  contractController.listMyContracts(req, res)
+);
+
 contractRoutes.get('/contracts/:id', authMiddleware, (req, res) =>
   contractController.getById(req, res)
 );

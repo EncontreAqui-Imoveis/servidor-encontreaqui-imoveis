@@ -6,6 +6,7 @@ const auth_1 = require("../middlewares/auth");
 const uploadMiddleware_1 = require("../middlewares/uploadMiddleware");
 const contractRoutes = (0, express_1.Router)();
 contractRoutes.post('/admin/negotiations/:id/contract', auth_1.authMiddleware, auth_1.isAdmin, (req, res) => ContractController_1.contractController.createFromApprovedNegotiation(req, res));
+contractRoutes.get('/contracts/me', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.listMyContracts(req, res));
 contractRoutes.get('/contracts/:id', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.getById(req, res));
 contractRoutes.get('/contracts/negotiation/:negotiationId', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.getByNegotiationId(req, res));
 contractRoutes.put('/contracts/:id/data', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.updateData(req, res));

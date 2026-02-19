@@ -327,6 +327,17 @@ class NegotiationController {
         return res.status(404).json({ error: 'Negociacao nao encontrada.' });
       }
 
+      await connection.execute(
+        `
+          UPDATE negotiations
+          SET
+            client_name = ?,
+            client_cpf = ?
+          WHERE id = ?
+        `,
+        [proposalData.clientName, proposalData.clientCpf, negotiationId]
+      );
+
       const pdfBuffer = await pdfService.generateProposal(proposalData);
       const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer);
 
@@ -474,6 +485,8 @@ class NegotiationController {
               capturing_broker_id = ?,
               selling_broker_id = ?,
               buyer_client_id = NULL,
+              client_name = ?,
+              client_cpf = ?,
               status = ?,
               final_value = ?,
               payment_details = CAST(? AS JSON),
@@ -484,6 +497,8 @@ class NegotiationController {
           [
             req.userId,
             sellerBrokerId,
+            payload.clientName,
+            payload.clientCpf,
             DEFAULT_WIZARD_STATUS,
             propertyValue,
             paymentDetails,
@@ -501,18 +516,22 @@ class NegotiationController {
               capturing_broker_id,
               selling_broker_id,
               buyer_client_id,
+              client_name,
+              client_cpf,
               status,
               final_value,
               payment_details,
               proposal_validity_date,
               version
-            ) VALUES (?, ?, ?, ?, NULL, ?, ?, CAST(? AS JSON), ?, 0)
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
           `,
           [
             negotiationId,
             payload.propertyId,
             req.userId,
             sellerBrokerId,
+            payload.clientName,
+            payload.clientCpf,
             DEFAULT_WIZARD_STATUS,
             propertyValue,
             paymentDetails,

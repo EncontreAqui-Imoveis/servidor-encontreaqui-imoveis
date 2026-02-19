@@ -130,6 +130,41 @@ async function ensureNotificationsType() {
         await connection_1.default.query('ALTER TABLE notifications ADD COLUMN metadata_json JSON NULL');
     }
 }
+async function ensureNegotiationsClientColumns() {
+    if (!(await tableExists('negotiations'))) {
+        return;
+    }
+    if (!(await columnExists('negotiations', 'client_name'))) {
+        await connection_1.default.query('ALTER TABLE negotiations ADD COLUMN client_name VARCHAR(255) NULL');
+    }
+    if (!(await columnExists('negotiations', 'client_cpf'))) {
+        await connection_1.default.query('ALTER TABLE negotiations ADD COLUMN client_cpf VARCHAR(20) NULL');
+    }
+    await connection_1.default.query(`
+    UPDATE negotiations
+    SET client_name = COALESCE(
+      NULLIF(client_name, ''),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.clientName')),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.client_name')),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.clientName')),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.client_name'))
+    )
+    WHERE (client_name IS NULL OR client_name = '')
+      AND payment_details IS NOT NULL
+  `);
+    await connection_1.default.query(`
+    UPDATE negotiations
+    SET client_cpf = COALESCE(
+      NULLIF(client_cpf, ''),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.clientCpf')),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.client_cpf')),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.clientCpf')),
+      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.client_cpf'))
+    )
+    WHERE (client_cpf IS NULL OR client_cpf = '')
+      AND payment_details IS NOT NULL
+  `);
+}
 async function ensureUserAddressColumns() {
     if (!(await tableExists('users'))) {
         return;
@@ -187,6 +222,7 @@ async function applyMigrations() {
         await ensurePropertiesColumns();
         await ensureFeaturedPropertiesTable();
         await ensureNotificationsType();
+        await ensureNegotiationsClientColumns();
         await ensureUserAddressColumns();
         await ensureSupportRequestsTable();
         await ensurePasswordResetTokensTable();

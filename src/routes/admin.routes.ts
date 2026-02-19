@@ -23,6 +23,9 @@ adminRoutes.put('/negotiations/:id/reject', adminController.rejectNegotiation);
 adminRoutes.put('/negotiations/:id/cancel', adminController.cancelNegotiation);
 adminRoutes.get('/negotiations/:id/signed-proposal/download', adminController.downloadSignedProposal);
 adminRoutes.get('/contracts', (req, res) => contractController.listForAdmin(req, res));
+adminRoutes.get('/commissions', (req, res) =>
+  contractController.listCommissions(req, res)
+);
 adminRoutes.put('/contracts/:id/transition', (req, res) =>
   contractController.transitionStatus(req, res)
 );

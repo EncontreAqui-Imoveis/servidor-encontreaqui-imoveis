@@ -21,6 +21,7 @@ adminRoutes.put('/negotiations/:id/reject', AdminController_1.adminController.re
 adminRoutes.put('/negotiations/:id/cancel', AdminController_1.adminController.cancelNegotiation);
 adminRoutes.get('/negotiations/:id/signed-proposal/download', AdminController_1.adminController.downloadSignedProposal);
 adminRoutes.get('/contracts', (req, res) => ContractController_1.contractController.listForAdmin(req, res));
+adminRoutes.get('/commissions', (req, res) => ContractController_1.contractController.listCommissions(req, res));
 adminRoutes.put('/contracts/:id/transition', (req, res) => ContractController_1.contractController.transitionStatus(req, res));
 adminRoutes.put('/contracts/:id/evaluate-side', (req, res) => ContractController_1.contractController.evaluateSide(req, res));
 adminRoutes.post('/contracts/:id/draft', uploadMiddleware_3.contractDraftUpload.single('file'), (req, res) => ContractController_1.contractController.uploadDraft(req, res));

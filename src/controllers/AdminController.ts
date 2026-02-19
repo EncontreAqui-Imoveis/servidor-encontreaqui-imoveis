@@ -299,6 +299,8 @@ interface PropertyDetailRow extends RowDataPacket {
   price?: number | string | null;
   price_sale?: number | string | null;
   price_rent?: number | string | null;
+  promotion_price?: number | string | null;
+  promotional_rent_price?: number | string | null;
   address?: string | null;
   quadra?: string | null;
   lote?: string | null;
@@ -384,6 +386,10 @@ function mapAdminProperty(row: PropertyDetailRow) {
     price: toNullableNumber(row.price) ?? 0,
     price_sale: toNullableNumber(row.price_sale),
     price_rent: toNullableNumber(row.price_rent),
+    promotion_price: toNullableNumber(row.promotion_price),
+    promotional_rent_price: toNullableNumber(row.promotional_rent_price),
+    promotionalPrice: toNullableNumber(row.promotion_price),
+    promotionalRentPrice: toNullableNumber(row.promotional_rent_price),
     address: row.address ?? null,
     cep: row.cep ?? null,
     quadra: row.quadra ?? null,
@@ -1297,6 +1303,8 @@ class AdminController {
             p.price,
             p.price_sale,
             p.price_rent,
+            p.promotion_price,
+            p.promotional_rent_price,
             p.city,
             p.bairro,
             p.cep,
@@ -1495,6 +1503,8 @@ class AdminController {
             p.price,
             p.price_sale,
             p.price_rent,
+            p.promotion_price,
+            p.promotional_rent_price,
             p.purpose
           FROM featured_properties fp
           JOIN properties p ON p.id = fp.property_id
@@ -1774,6 +1784,8 @@ class AdminController {
             price,
             price_sale,
             price_rent,
+            promotion_price,
+            promotional_rent_price,
             purpose,
             title,
             is_promoted,
@@ -1806,6 +1818,8 @@ class AdminController {
       let nextPromotionFlag = previousPromotionFlag;
       let nextPromotionPercentage =
         toNullableNumber(property.promotion_percentage);
+      let nextPromotionPrice = toNullableNumber(property.promotion_price);
+      let nextPromotionalRentPrice = toNullableNumber(property.promotional_rent_price);
 
       if (Object.prototype.hasOwnProperty.call(body, 'price_sale')) {
         nextSalePrice = parseDecimal(body.price_sale);
@@ -1842,6 +1856,9 @@ class AdminController {
         'price',
         'price_sale',
         'price_rent',
+        'promotion_price',
+        'promotional_price',
+        'promotional_rent_price',
         'is_promoted',
         'promotion_percentage',
         'promotion_start',
@@ -1963,11 +1980,17 @@ class AdminController {
             nextPromotionFlag = parsed;
             if (parsed === 0) {
               nextPromotionPercentage = null;
+              nextPromotionPrice = null;
+              nextPromotionalRentPrice = null;
               setParts.push('promotion_percentage = ?');
               params.push(null);
               setParts.push('promotion_start = ?');
               params.push(null);
               setParts.push('promotion_end = ?');
+              params.push(null);
+              setParts.push('promotion_price = ?');
+              params.push(null);
+              setParts.push('promotional_rent_price = ?');
               params.push(null);
             }
             setParts.push('is_promoted = ?');
@@ -1980,6 +2003,28 @@ class AdminController {
               nextPromotionPercentage = parsed;
               setParts.push('promotion_percentage = ?');
               params.push(parsed);
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'promotion_price':
+          case 'promotional_price':
+          case 'promotional_rent_price': {
+            try {
+              const parsed = parseDecimal(value);
+              if (key === 'promotional_rent_price') {
+                setParts.push('promotional_rent_price = ?');
+                params.push(parsed);
+                nextPromotionalRentPrice = parsed;
+              } else {
+                setParts.push('promotion_price = ?');
+                params.push(parsed);
+                nextPromotionPrice = parsed;
+              }
+              if (parsed != null) {
+                nextPromotionFlag = 1;
+              }
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
@@ -2018,6 +2063,50 @@ class AdminController {
             params.push(stringOrNull(value));
           }
         }
+      }
+
+      if (!supportsSale && Object.prototype.hasOwnProperty.call(body, 'promotion_price')) {
+        setParts.push('promotion_price = ?');
+        params.push(null);
+        nextPromotionPrice = null;
+      }
+      if (!supportsSale && Object.prototype.hasOwnProperty.call(body, 'promotional_price')) {
+        setParts.push('promotion_price = ?');
+        params.push(null);
+        nextPromotionPrice = null;
+      }
+      if (!supportsRent && Object.prototype.hasOwnProperty.call(body, 'promotional_rent_price')) {
+        setParts.push('promotional_rent_price = ?');
+        params.push(null);
+        nextPromotionalRentPrice = null;
+      }
+
+      if (
+        nextPromotionPrice != null &&
+        nextSalePrice != null &&
+        Number(nextPromotionPrice) >= Number(nextSalePrice)
+      ) {
+        return res.status(400).json({
+          error: 'Preço promocional de venda deve ser menor que o preço de venda.',
+        });
+      }
+
+      if (
+        nextPromotionalRentPrice != null &&
+        nextRentPrice != null &&
+        Number(nextPromotionalRentPrice) >= Number(nextRentPrice)
+      ) {
+        return res.status(400).json({
+          error: 'Preço promocional de aluguel deve ser menor que o preço de aluguel.',
+        });
+      }
+
+      const hasAbsolutePromotion =
+        nextPromotionPrice != null || nextPromotionalRentPrice != null;
+      if (hasAbsolutePromotion && !Object.prototype.hasOwnProperty.call(body, 'is_promoted')) {
+        nextPromotionFlag = 1;
+        setParts.push('is_promoted = ?');
+        params.push(1);
       }
 
       if (setParts.length === 0) {
@@ -2161,6 +2250,9 @@ class AdminController {
         price,
         price_sale,
         price_rent,
+        promotion_price,
+        promotional_price,
+        promotional_rent_price,
         code,
         owner_name,
         owner_phone,
@@ -2212,6 +2304,8 @@ class AdminController {
       let resolvedPrice: number | null = null;
       let resolvedPriceSale: number | null = null;
       let resolvedPriceRent: number | null = null;
+      let resolvedPromotionPrice: number | null = null;
+      let resolvedPromotionalRentPrice: number | null = null;
 
       if (normalizedPurpose === 'Venda') {
         resolvedPriceSale = numericPriceSale ?? numericPrice;
@@ -2234,6 +2328,36 @@ class AdminController {
           return res.status(400).json({ error: 'Informe os precos de venda e aluguel.' });
         }
       }
+
+      resolvedPromotionPrice = parseDecimal(promotion_price ?? promotional_price);
+      resolvedPromotionalRentPrice = parseDecimal(promotional_rent_price);
+
+      if (normalizedPurpose === 'Venda') {
+        resolvedPromotionalRentPrice = null;
+      } else if (normalizedPurpose === 'Aluguel') {
+        resolvedPromotionPrice = null;
+      }
+
+      if (
+        resolvedPromotionPrice != null &&
+        resolvedPriceSale != null &&
+        resolvedPromotionPrice >= resolvedPriceSale
+      ) {
+        return res.status(400).json({
+          error: 'Preço promocional de venda deve ser menor que o preço de venda.',
+        });
+      }
+
+      if (
+        resolvedPromotionalRentPrice != null &&
+        resolvedPriceRent != null &&
+        resolvedPromotionalRentPrice >= resolvedPriceRent
+      ) {
+        return res.status(400).json({
+          error: 'Preço promocional de aluguel deve ser menor que o preço de aluguel.',
+        });
+      }
+
       const numericBedrooms = parseInteger(bedrooms);
       const numericBathrooms = parseInteger(bathrooms);
       const numericGarageSpots = parseInteger(garage_spots);
@@ -2258,6 +2382,9 @@ class AdminController {
         promotionPercentage = parsePromotionPercentage(promotion_percentage);
         promotionStart = parsePromotionDateTime(promotion_start);
         promotionEnd = parsePromotionDateTime(promotion_end);
+        if (resolvedPromotionPrice != null || resolvedPromotionalRentPrice != null) {
+          promotionFlag = 1;
+        }
         if (promotionFlag === 0) {
           promotionPercentage = null;
           promotionStart = null;
@@ -2349,6 +2476,8 @@ class AdminController {
             price,
             price_sale,
             price_rent,
+            promotion_price,
+            promotional_rent_price,
             code,
             owner_name,
             owner_phone,
@@ -2376,7 +2505,7 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerIdValue,
@@ -2392,6 +2521,8 @@ class AdminController {
             resolvedPrice,
             resolvedPriceSale,
             resolvedPriceRent,
+            resolvedPromotionPrice,
+            resolvedPromotionalRentPrice,
             stringOrNull(code),
             stringOrNull(owner_name),
             owner_phone ? normalizePhone(owner_phone) : null,
@@ -3517,6 +3648,8 @@ class AdminController {
             p.price,
             p.price_sale,
             p.price_rent,
+            p.promotion_price,
+            p.promotional_rent_price,
             p.address,
             p.city,
             p.state,
@@ -3554,6 +3687,8 @@ class AdminController {
             p.price,
             p.price_sale,
             p.price_rent,
+            p.promotion_price,
+            p.promotional_rent_price,
             p.address,
             p.city,
             p.state,

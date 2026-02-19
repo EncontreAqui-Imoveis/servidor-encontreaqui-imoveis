@@ -79,6 +79,16 @@ interface ContractDocumentListRow extends ContractDocumentRow {
   negotiation_id: string;
 }
 
+interface CommissionContractRow extends RowDataPacket {
+  id: string;
+  negotiation_id: string;
+  property_id: number;
+  property_title: string | null;
+  property_code: string | null;
+  updated_at: Date | string | null;
+  commission_data: unknown;
+}
+
 interface ExistingContractRow extends RowDataPacket {
   id: string;
   status: string;
@@ -256,6 +266,32 @@ function parseNonNegativeNumber(value: unknown, fieldName: string): number {
     throw new Error(`${fieldName} deve ser um número maior ou igual a zero.`);
   }
   return Number(numericValue.toFixed(2));
+}
+
+function parseCurrencyLikeNumber(value: unknown): number {
+  if (value == null) {
+    return 0;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/\./g, '').replace(',', '.');
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readCommissionValue(
+  source: Record<string, unknown>,
+  key: string
+): number {
+  return Number(parseCurrencyLikeNumber(source[key]).toFixed(2));
 }
 
 function normalizeCommissionData(value: unknown): NormalizedCommissionData {
@@ -498,6 +534,102 @@ async function fetchContractForUpdate(
 }
 
 class ContractController {
+  async listCommissions(req: Request, res: Response): Promise<Response> {
+    const now = new Date();
+    const monthInput = String(req.query.month ?? '').trim();
+    const yearInput = String(req.query.year ?? '').trim();
+
+    const month = monthInput ? Number(monthInput) : now.getMonth() + 1;
+    const year = yearInput ? Number(yearInput) : now.getFullYear();
+
+    if (!Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({ error: 'Mês inválido. Use valores entre 1 e 12.' });
+    }
+
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'Ano inválido. Use um valor entre 2000 e 2100.' });
+    }
+
+    try {
+      const [rows] = await connection.query<CommissionContractRow[]>(
+        `
+          SELECT
+            c.id,
+            c.negotiation_id,
+            c.property_id,
+            c.commission_data,
+            c.updated_at,
+            p.title AS property_title,
+            p.code AS property_code
+          FROM contracts c
+          JOIN properties p ON p.id = c.property_id
+          WHERE c.status = 'FINALIZED'
+            AND YEAR(c.updated_at) = ?
+            AND MONTH(c.updated_at) = ?
+          ORDER BY c.updated_at DESC, c.id DESC
+        `,
+        [year, month]
+      );
+
+      let totalVGV = 0;
+      let totalCaptadores = 0;
+      let totalVendedores = 0;
+      let totalPlataforma = 0;
+
+      const transactions = rows.map((row) => {
+        const commissionData = parseStoredJsonObject(row.commission_data);
+        const valorVenda = readCommissionValue(commissionData, 'valorVenda');
+        const comissaoCaptador = readCommissionValue(
+          commissionData,
+          'comissaoCaptador'
+        );
+        const comissaoVendedor = readCommissionValue(
+          commissionData,
+          'comissaoVendedor'
+        );
+        const taxaPlataforma = readCommissionValue(
+          commissionData,
+          'taxaPlataforma'
+        );
+
+        totalVGV += valorVenda;
+        totalCaptadores += comissaoCaptador;
+        totalVendedores += comissaoVendedor;
+        totalPlataforma += taxaPlataforma;
+
+        return {
+          contractId: row.id,
+          negotiationId: row.negotiation_id,
+          propertyId: Number(row.property_id),
+          propertyTitle: row.property_title ?? null,
+          propertyCode: row.property_code ?? null,
+          finalizedAt: toIsoString(row.updated_at),
+          commissionData: {
+            valorVenda,
+            comissaoCaptador,
+            comissaoVendedor,
+            taxaPlataforma,
+          },
+        };
+      });
+
+      return res.status(200).json({
+        month,
+        year,
+        summary: {
+          totalVGV: Number(totalVGV.toFixed(2)),
+          totalCaptadores: Number(totalCaptadores.toFixed(2)),
+          totalVendedores: Number(totalVendedores.toFixed(2)),
+          totalPlataforma: Number(totalPlataforma.toFixed(2)),
+        },
+        transactions,
+      });
+    } catch (error) {
+      console.error('Erro ao listar comissões por período:', error);
+      return res.status(500).json({ error: 'Falha ao listar comissões.' });
+    }
+  }
+
   async createFromApprovedNegotiation(req: Request, res: Response): Promise<Response> {
     const negotiationId = String(req.params.id ?? '').trim();
     if (!negotiationId) {

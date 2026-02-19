@@ -474,6 +474,10 @@ interface AdminNegotiationDecisionRow extends RowDataPacket {
   lifecycle_status: string | null;
 }
 
+interface ExistingContractByNegotiationRow extends RowDataPacket {
+  id: string;
+}
+
 interface AdminNegotiationDocumentRow extends RowDataPacket {
   id: number;
   file_content: Buffer | Uint8Array | null;
@@ -860,6 +864,44 @@ class AdminController {
         `,
         [negotiation.property_id]
       );
+
+      const [existingContractRows] = await tx.query<ExistingContractByNegotiationRow[]>(
+        `
+          SELECT id
+          FROM contracts
+          WHERE negotiation_id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [negotiationId]
+      );
+
+      if (existingContractRows.length === 0) {
+        await tx.query(
+          `
+            INSERT INTO contracts (
+              id,
+              negotiation_id,
+              property_id,
+              status,
+              seller_approval_status,
+              buyer_approval_status,
+              created_at,
+              updated_at
+            ) VALUES (
+              UUID(),
+              ?,
+              ?,
+              'AWAITING_DOCS',
+              'PENDING',
+              'PENDING',
+              CURRENT_TIMESTAMP,
+              CURRENT_TIMESTAMP
+            )
+          `,
+          [negotiationId, negotiation.property_id]
+        );
+      }
 
       await tx.commit();
 

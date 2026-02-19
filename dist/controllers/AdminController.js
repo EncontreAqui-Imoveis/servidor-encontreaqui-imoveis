@@ -44,6 +44,7 @@ const connection_1 = __importDefault(require("../database/connection"));
 const cloudinary_1 = __importStar(require("../config/cloudinary"));
 const env_1 = require("../config/env");
 const notificationService_1 = require("../services/notificationService");
+const pushNotificationService_1 = require("../services/pushNotificationService");
 const priceDropNotificationService_1 = require("../services/priceDropNotificationService");
 const userNotificationService_1 = require("../services/userNotificationService");
 const address_1 = require("../utils/address");
@@ -513,11 +514,15 @@ class AdminController {
             seller_user.name AS selling_broker_name,
             COALESCE(
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName'))
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
             ) AS client_name,
             COALESCE(
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf'))
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
             ) AS client_cpf,
             COALESCE(
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
@@ -618,6 +623,9 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            n.capturing_broker_id,
+            p.code AS property_code,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
             p.lifecycle_status
           FROM negotiations n
@@ -665,6 +673,29 @@ class AdminController {
           WHERE id = ?
         `, [negotiation.property_id]);
             await tx.commit();
+            const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+            if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
+                const propertyRef = String(negotiation.property_code ??
+                    negotiation.property_address ??
+                    `#${negotiation.property_id}`);
+                try {
+                    await (0, notificationService_1.createUserNotification)({
+                        type: 'negotiation',
+                        title: 'Proposta Aprovada!',
+                        message: `Sua proposta para o imóvel ${propertyRef} foi aprovada pela administração. O imóvel agora está Em Negociação.`,
+                        recipientId: recipientBrokerId,
+                        relatedEntityId: Number(negotiation.property_id),
+                        metadata: {
+                            negotiationId,
+                            propertyId: Number(negotiation.property_id),
+                            status: 'APPROVED',
+                        },
+                    });
+                }
+                catch (notifyError) {
+                    console.error('Erro ao notificar corretor sobre aprovação da proposta:', notifyError);
+                }
+            }
             return res.status(200).json({
                 message: 'Negociação aprovada com sucesso.',
                 id: negotiationId,
@@ -702,6 +733,9 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            n.capturing_broker_id,
+            p.code AS property_code,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
             p.lifecycle_status
           FROM negotiations n
@@ -752,6 +786,30 @@ class AdminController {
             AND status NOT IN ('sold', 'rented')
         `, [negotiation.property_id]);
             await tx.commit();
+            const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+            if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
+                const propertyRef = String(negotiation.property_code ??
+                    negotiation.property_address ??
+                    `#${negotiation.property_id}`);
+                try {
+                    await (0, notificationService_1.createUserNotification)({
+                        type: 'negotiation',
+                        title: 'Proposta Rejeitada.',
+                        message: `Sua proposta para o imóvel ${propertyRef} foi rejeitada. Motivo: ${reason}.`,
+                        recipientId: recipientBrokerId,
+                        relatedEntityId: Number(negotiation.property_id),
+                        metadata: {
+                            negotiationId,
+                            propertyId: Number(negotiation.property_id),
+                            reason,
+                            status: 'REJECTED',
+                        },
+                    });
+                }
+                catch (notifyError) {
+                    console.error('Erro ao notificar corretor sobre rejeição da proposta:', notifyError);
+                }
+            }
             return res.status(200).json({
                 message: 'Negociação rejeitada e imóvel devolvido para disponível.',
                 id: negotiationId,
@@ -770,11 +828,15 @@ class AdminController {
     async cancelNegotiation(req, res) {
         const negotiationId = String(req.params.id ?? '').trim();
         const actorId = Number(req.userId);
+        const reason = String(req.body?.reason ?? '').trim();
         if (!negotiationId) {
             return res.status(400).json({ error: 'ID de negociação inválido.' });
         }
         if (!actorId) {
             return res.status(401).json({ error: 'Administrador não autenticado.' });
+        }
+        if (reason.length < 5) {
+            return res.status(400).json({ error: 'Motivo obrigatório com no mínimo 5 caracteres.' });
         }
         const tx = await connection_1.default.getConnection();
         try {
@@ -784,6 +846,9 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            n.capturing_broker_id,
+            p.code AS property_code,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
             p.lifecycle_status
           FROM negotiations n
@@ -828,6 +893,7 @@ class AdminController {
                 actorId,
                 JSON.stringify({
                     action: 'admin_cancelled',
+                    reason,
                 }),
             ]);
             await tx.query(`
@@ -838,6 +904,38 @@ class AdminController {
             AND status NOT IN ('sold', 'rented')
         `, [negotiation.property_id]);
             await tx.commit();
+            const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+            if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
+                const propertyRef = String(negotiation.property_code ??
+                    negotiation.property_address ??
+                    `#${negotiation.property_id}`);
+                const brokerMessage = `A negociação para o imóvel ${propertyRef} foi cancelada. O imóvel voltou para a vitrine. Motivo: ${reason}.`;
+                try {
+                    await (0, notificationService_1.createUserNotification)({
+                        type: 'negotiation',
+                        title: 'Negociação Cancelada ⚠️',
+                        message: brokerMessage,
+                        recipientId: recipientBrokerId,
+                        relatedEntityId: Number(negotiation.property_id),
+                        recipientRole: 'broker',
+                        metadata: {
+                            negotiationId,
+                            propertyId: Number(negotiation.property_id),
+                            reason,
+                            status: 'CANCELLED',
+                        },
+                    });
+                    await (0, pushNotificationService_1.sendPushNotifications)({
+                        message: brokerMessage,
+                        recipientIds: [recipientBrokerId],
+                        relatedEntityType: 'negotiation',
+                        relatedEntityId: Number(negotiation.property_id),
+                    });
+                }
+                catch (notifyError) {
+                    console.error('Erro ao notificar corretor sobre cancelamento da negociação:', notifyError);
+                }
+            }
             return res.status(200).json({
                 message: 'Negociação cancelada e imóvel devolvido para disponível.',
                 id: negotiationId,

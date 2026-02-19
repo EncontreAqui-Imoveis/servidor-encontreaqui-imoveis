@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.notifyAdmins = notifyAdmins;
 exports.createAdminNotification = createAdminNotification;
+exports.createUserNotification = createUserNotification;
 const connection_1 = __importDefault(require("../database/connection"));
 const RELATED_ENTITY_TYPES = new Set([
     'property',
@@ -67,6 +68,47 @@ async function createAdminNotification({ type, title, message, relatedEntityId =
         'admin',
         'admin',
     ]);
+    await insertNotifications(values);
+}
+async function resolveRecipientRole(recipientId) {
+    const [rows] = await connection_1.default.query("SELECT status FROM brokers WHERE id = ? LIMIT 1", [recipientId]);
+    if (!rows || rows.length === 0) {
+        return 'client';
+    }
+    const status = String(rows[0].status ?? '').trim();
+    if (status === 'pending_verification' || status === 'approved') {
+        return 'broker';
+    }
+    return 'client';
+}
+async function createUserNotification({ type, title, message, recipientId, relatedEntityId = null, metadata = null, recipientRole, }) {
+    if (!isValidRelatedEntityType(type)) {
+        throw new Error(`Invalid related entity type: ${type}`);
+    }
+    const trimmedTitle = title.trim();
+    const trimmedMessage = message.trim();
+    if (!trimmedTitle || !trimmedMessage) {
+        return;
+    }
+    const numericRecipientId = Number(recipientId);
+    if (!Number.isFinite(numericRecipientId)) {
+        return;
+    }
+    const normalizedEntityId = relatedEntityId != null && Number.isFinite(relatedEntityId)
+        ? Number(relatedEntityId)
+        : null;
+    const metadataJson = metadata ? JSON.stringify(metadata) : null;
+    const resolvedRole = recipientRole ?? (await resolveRecipientRole(numericRecipientId));
+    const values = [[
+            trimmedTitle,
+            trimmedMessage,
+            type,
+            normalizedEntityId,
+            metadataJson,
+            numericRecipientId,
+            'user',
+            resolvedRole,
+        ]];
     await insertNotifications(values);
 }
 async function insertNotifications(values) {

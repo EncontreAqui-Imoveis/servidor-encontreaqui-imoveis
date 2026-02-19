@@ -12,6 +12,11 @@ adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
 adminRoutes.delete('/notifications/:id', AdminController_1.adminController.deleteNotification);
 adminRoutes.delete('/notifications', AdminController_1.adminController.clearNotifications);
 adminRoutes.post('/uploads/sign', AdminController_1.adminController.signCloudinaryUpload);
+adminRoutes.get('/negotiations', AdminController_1.adminController.listNegotiations);
+adminRoutes.put('/negotiations/:id/approve', AdminController_1.adminController.approveNegotiation);
+adminRoutes.put('/negotiations/:id/reject', AdminController_1.adminController.rejectNegotiation);
+adminRoutes.put('/negotiations/:id/cancel', AdminController_1.adminController.cancelNegotiation);
+adminRoutes.get('/negotiations/:id/signed-proposal/download', AdminController_1.adminController.downloadSignedProposal);
 adminRoutes.post('/properties', uploadMiddleware_1.mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },

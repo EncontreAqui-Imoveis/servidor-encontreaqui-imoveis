@@ -236,8 +236,8 @@ async function ensureContractsTable() {
     }
     await connection_1.default.query(`
     CREATE TABLE IF NOT EXISTS contracts (
-      id CHAR(36) NOT NULL,
-      negotiation_id CHAR(36) NOT NULL,
+      id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      negotiation_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
       property_id INT NOT NULL,
       status ENUM('AWAITING_DOCS', 'IN_DRAFT', 'AWAITING_SIGNATURES', 'FINALIZED') NOT NULL DEFAULT 'AWAITING_DOCS',
       seller_info JSON NULL,
@@ -253,7 +253,7 @@ async function ensureContractsTable() {
         FOREIGN KEY (negotiation_id) REFERENCES negotiations(id) ON DELETE CASCADE,
       CONSTRAINT fk_contracts_property
         FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
-    )
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
 }
 async function ensureNegotiationDocumentTypeColumn() {

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.signedProposalUpload = exports.brokerDocsUpload = exports.mediaUpload = void 0;
+exports.contractDocumentUpload = exports.signedProposalUpload = exports.brokerDocsUpload = exports.mediaUpload = void 0;
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 // --- Storage in memory (you can switch to disk/S3 later)
@@ -58,6 +58,9 @@ function isAllowedPdf(mime, originalname) {
         return ext === 'pdf';
     }
     return ext === 'pdf';
+}
+function isAllowedContractDocument(mime, originalname) {
+    return isAllowedPdf(mime, originalname) || isAllowedImage(mime, originalname);
 }
 exports.mediaUpload = (0, multer_1.default)({
     storage,
@@ -129,5 +132,21 @@ exports.signedProposalUpload = (0, multer_1.default)({
             return;
         }
         cb(new Error('Arquivo inválido. Envie apenas PDF assinado.'));
+    },
+});
+exports.contractDocumentUpload = (0, multer_1.default)({
+    storage,
+    limits: {
+        fileSize: 15 * 1024 * 1024,
+        files: 1,
+    },
+    fileFilter: (_req, file, cb) => {
+        const mime = (file.mimetype || '').toLowerCase();
+        const name = file.originalname || '';
+        if (isAllowedContractDocument(mime, name)) {
+            cb(null, true);
+            return;
+        }
+        cb(new Error('Formato de arquivo não suportado. Use apenas PDF, JPG, JPEG, PNG ou WEBP.'));
     },
 });

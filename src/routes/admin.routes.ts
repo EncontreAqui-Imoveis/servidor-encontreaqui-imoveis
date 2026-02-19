@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { adminController, sendNotification, getDashboardStats } from '../controllers/AdminController';
+import { contractController } from '../controllers/ContractController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
@@ -19,6 +20,10 @@ adminRoutes.put('/negotiations/:id/approve', adminController.approveNegotiation)
 adminRoutes.put('/negotiations/:id/reject', adminController.rejectNegotiation);
 adminRoutes.put('/negotiations/:id/cancel', adminController.cancelNegotiation);
 adminRoutes.get('/negotiations/:id/signed-proposal/download', adminController.downloadSignedProposal);
+adminRoutes.get('/contracts', (req, res) => contractController.listForAdmin(req, res));
+adminRoutes.put('/contracts/:id/transition', (req, res) =>
+  contractController.transitionStatus(req, res)
+);
 
 adminRoutes.post(
   '/properties',

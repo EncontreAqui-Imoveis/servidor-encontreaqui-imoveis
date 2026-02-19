@@ -447,6 +447,10 @@ function mapAdminNegotiation(row) {
         signedDocumentId: row.signed_document_id != null ? Number(row.signed_document_id) : null,
     };
 }
+function resolveNegotiationPropertyTitle(value) {
+    const title = String(value ?? '').trim();
+    return title.length > 0 ? title : 'Imóvel sem título';
+}
 async function fetchPropertyOwner(propertyId) {
     const [rows] = await connection_1.default.query('SELECT broker_id, owner_id, title FROM properties WHERE id = ?', [propertyId]);
     if (!rows || rows.length === 0) {
@@ -626,6 +630,7 @@ class AdminController {
             n.status,
             n.property_id,
             n.capturing_broker_id,
+            p.title AS property_title,
             p.code AS property_code,
             CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
@@ -677,14 +682,12 @@ class AdminController {
             await tx.commit();
             const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
             if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
-                const propertyRef = String(negotiation.property_code ??
-                    negotiation.property_address ??
-                    `#${negotiation.property_id}`);
+                const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
                 try {
                     await (0, notificationService_1.createUserNotification)({
                         type: 'negotiation',
                         title: 'Proposta Aprovada!',
-                        message: `Sua proposta para o imóvel ${propertyRef} foi aprovada pela administração. O imóvel agora está Em Negociação.`,
+                        message: `Sua proposta para o imóvel ${propertyTitle} foi aprovada pela administração. O imóvel agora está Em Negociação.`,
                         recipientId: recipientBrokerId,
                         relatedEntityId: Number(negotiation.property_id),
                         metadata: {
@@ -736,6 +739,7 @@ class AdminController {
             n.status,
             n.property_id,
             n.capturing_broker_id,
+            p.title AS property_title,
             p.code AS property_code,
             CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
@@ -790,14 +794,12 @@ class AdminController {
             await tx.commit();
             const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
             if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
-                const propertyRef = String(negotiation.property_code ??
-                    negotiation.property_address ??
-                    `#${negotiation.property_id}`);
+                const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
                 try {
                     await (0, notificationService_1.createUserNotification)({
                         type: 'negotiation',
                         title: 'Proposta Rejeitada.',
-                        message: `Sua proposta para o imóvel ${propertyRef} foi rejeitada. Motivo: ${reason}.`,
+                        message: `Sua proposta para o imóvel ${propertyTitle} foi rejeitada. Motivo: ${reason}.`,
                         recipientId: recipientBrokerId,
                         relatedEntityId: Number(negotiation.property_id),
                         metadata: {
@@ -849,6 +851,7 @@ class AdminController {
             n.status,
             n.property_id,
             n.capturing_broker_id,
+            p.title AS property_title,
             p.code AS property_code,
             CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
@@ -908,10 +911,8 @@ class AdminController {
             await tx.commit();
             const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
             if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
-                const propertyRef = String(negotiation.property_code ??
-                    negotiation.property_address ??
-                    `#${negotiation.property_id}`);
-                const brokerMessage = `A negociação para o imóvel ${propertyRef} foi cancelada. O imóvel voltou para a vitrine. Motivo: ${reason}.`;
+                const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
+                const brokerMessage = `A negociação para o imóvel ${propertyTitle} foi cancelada. O imóvel voltou para a vitrine. Motivo: ${reason}.`;
                 try {
                     await (0, notificationService_1.createUserNotification)({
                         type: 'negotiation',

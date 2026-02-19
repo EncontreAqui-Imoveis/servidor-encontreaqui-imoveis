@@ -12,6 +12,7 @@ const dashboard_routes_1 = __importDefault(require("./dashboard.routes"));
 const auth_routes_1 = __importDefault(require("./auth.routes"));
 const negotiation_routes_1 = __importDefault(require("./negotiation.routes"));
 const location_routes_1 = __importDefault(require("./location.routes"));
+const contract_routes_1 = __importDefault(require("./contract.routes"));
 const mainRoutes = (0, express_1.Router)();
 mainRoutes.get('/', (req, res) => {
     return res.json({ message: 'API Imobiliária no ar!' });
@@ -24,4 +25,5 @@ mainRoutes.use('/negotiations', negotiation_routes_1.default);
 mainRoutes.use('/locations', location_routes_1.default);
 mainRoutes.use('/admin', admin_routes_1.default);
 mainRoutes.use('/admin/dashboard', dashboard_routes_1.default);
+mainRoutes.use(contract_routes_1.default);
 exports.default = mainRoutes;

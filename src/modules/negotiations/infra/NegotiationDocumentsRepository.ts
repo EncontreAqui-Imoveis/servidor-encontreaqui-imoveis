@@ -97,8 +97,8 @@ export class NegotiationDocumentsRepository
     const executor = trx ?? this.executor;
 
     const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, file_content)
-      VALUES (?, 'proposal', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
+      VALUES (?, 'proposal', 'contrato_minuta', ?)
     `;
 
     const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);
@@ -114,8 +114,8 @@ export class NegotiationDocumentsRepository
     const executor = trx ?? this.executor;
 
     const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, file_content)
-      VALUES (?, 'other', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
+      VALUES (?, 'other', 'contrato_assinado', ?)
     `;
 
     const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);

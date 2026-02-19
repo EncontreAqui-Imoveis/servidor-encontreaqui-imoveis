@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const ContractController_1 = require("../controllers/ContractController");
+const auth_1 = require("../middlewares/auth");
+const contractRoutes = (0, express_1.Router)();
+contractRoutes.post('/admin/negotiations/:id/contract', auth_1.authMiddleware, auth_1.isAdmin, (req, res) => ContractController_1.contractController.createFromApprovedNegotiation(req, res));
+contractRoutes.get('/contracts/:id', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.getById(req, res));
+contractRoutes.put('/contracts/:id/data', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.updateData(req, res));
+exports.default = contractRoutes;

@@ -52,8 +52,8 @@ class NegotiationDocumentsRepository {
     async saveProposal(negotiationId, pdfBuffer, trx) {
         const executor = trx ?? this.executor;
         const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, file_content)
-      VALUES (?, 'proposal', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
+      VALUES (?, 'proposal', 'contrato_minuta', ?)
     `;
         const result = await executor.execute(sql, [negotiationId, pdfBuffer]);
         const header = Array.isArray(result) ? result[0] : result;
@@ -62,8 +62,8 @@ class NegotiationDocumentsRepository {
     async saveSignedProposal(negotiationId, pdfBuffer, trx) {
         const executor = trx ?? this.executor;
         const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, file_content)
-      VALUES (?, 'other', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
+      VALUES (?, 'other', 'contrato_assinado', ?)
     `;
         const result = await executor.execute(sql, [negotiationId, pdfBuffer]);
         const header = Array.isArray(result) ? result[0] : result;

@@ -49,6 +49,23 @@ async function getColumnType(tableName: string, columnName: string): Promise<str
   return rows[0]?.column_type ?? null;
 }
 
+const CONTRACT_DOCUMENT_TYPE_VALUES = [
+  'doc_identidade',
+  'comprovante_endereco',
+  'certidao_casamento_nascimento',
+  'certidao_inteiro_teor',
+  'certidao_onus_acoes',
+  'comprovante_renda',
+  'contrato_minuta',
+  'contrato_assinado',
+  'comprovante_pagamento',
+  'boleto_vistoria',
+] as const;
+
+const CONTRACT_DOCUMENT_TYPE_ENUM_SQL = CONTRACT_DOCUMENT_TYPE_VALUES.map(
+  (value) => `'${value}'`
+).join(', ');
+
 async function ensurePropertiesColumns(): Promise<void> {
   if (!(await columnExists('properties', 'owner_id'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN owner_id INT NULL');
@@ -288,6 +305,64 @@ async function ensurePasswordResetTokensTable(): Promise<void> {
   `);
 }
 
+async function ensureContractsTable(): Promise<void> {
+  if (!(await tableExists('negotiations')) || !(await tableExists('properties'))) {
+    return;
+  }
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS contracts (
+      id CHAR(36) NOT NULL,
+      negotiation_id CHAR(36) NOT NULL,
+      property_id INT NOT NULL,
+      status ENUM('AWAITING_DOCS', 'IN_DRAFT', 'AWAITING_SIGNATURES', 'FINALIZED') NOT NULL DEFAULT 'AWAITING_DOCS',
+      seller_info JSON NULL,
+      buyer_info JSON NULL,
+      commission_data JSON NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_contracts_negotiation (negotiation_id),
+      KEY idx_contracts_property (property_id),
+      KEY idx_contracts_status (status),
+      CONSTRAINT fk_contracts_negotiation
+        FOREIGN KEY (negotiation_id) REFERENCES negotiations(id) ON DELETE CASCADE,
+      CONSTRAINT fk_contracts_property
+        FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+async function ensureNegotiationDocumentTypeColumn(): Promise<void> {
+  if (!(await tableExists('negotiation_documents'))) {
+    return;
+  }
+
+  if (!(await columnExists('negotiation_documents', 'document_type'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN document_type ENUM(${CONTRACT_DOCUMENT_TYPE_ENUM_SQL}) NULL AFTER type
+    `);
+    return;
+  }
+
+  const columnType = (await getColumnType('negotiation_documents', 'document_type'))?.toLowerCase();
+  if (!columnType) {
+    return;
+  }
+
+  const missingValue = CONTRACT_DOCUMENT_TYPE_VALUES.find(
+    (value) => !columnType.includes(`'${value.toLowerCase()}'`)
+  );
+
+  if (missingValue) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      MODIFY COLUMN document_type ENUM(${CONTRACT_DOCUMENT_TYPE_ENUM_SQL}) NULL
+    `);
+  }
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -297,6 +372,8 @@ export async function applyMigrations(): Promise<void> {
     await ensureUserAddressColumns();
     await ensureSupportRequestsTable();
     await ensurePasswordResetTokensTable();
+    await ensureContractsTable();
+    await ensureNegotiationDocumentTypeColumn();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

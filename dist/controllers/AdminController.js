@@ -685,6 +685,36 @@ class AdminController {
           SET status = 'negociacao', visibility = 'HIDDEN', lifecycle_status = 'AVAILABLE'
           WHERE id = ?
         `, [negotiation.property_id]);
+            const [existingContractRows] = await tx.query(`
+          SELECT id
+          FROM contracts
+          WHERE negotiation_id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [negotiationId]);
+            if (existingContractRows.length === 0) {
+                await tx.query(`
+            INSERT INTO contracts (
+              id,
+              negotiation_id,
+              property_id,
+              status,
+              seller_approval_status,
+              buyer_approval_status,
+              created_at,
+              updated_at
+            ) VALUES (
+              UUID(),
+              ?,
+              ?,
+              'AWAITING_DOCS',
+              'PENDING',
+              'PENDING',
+              CURRENT_TIMESTAMP,
+              CURRENT_TIMESTAMP
+            )
+          `, [negotiationId, negotiation.property_id]);
+            }
             await tx.commit();
             const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
             if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {

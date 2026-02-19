@@ -146,6 +146,25 @@ export const signedProposalUpload = multer({
   },
 });
 
+export const contractDraftUpload = multer({
+  storage,
+  limits: {
+    fileSize: 20 * 1024 * 1024,
+    files: 1,
+  },
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
+    const mime = (file.mimetype || '').toLowerCase();
+    const name = file.originalname || '';
+
+    if (isAllowedPdf(mime, name)) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new Error('Arquivo inválido. Envie apenas PDF da minuta.'));
+  },
+});
+
 export const contractDocumentUpload = multer({
   storage,
   limits: {

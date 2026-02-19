@@ -102,6 +102,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
         price_rent DECIMAL(12, 2) NULL,
         promotion_price DECIMAL(12, 2) NULL,
         promotional_rent_price DECIMAL(12, 2) NULL,
+        promotional_rent_percentage DECIMAL(5, 2) NULL,
         code VARCHAR(100) NULL UNIQUE,
         owner_name VARCHAR(255) NULL,
         owner_phone VARCHAR(50) NULL,

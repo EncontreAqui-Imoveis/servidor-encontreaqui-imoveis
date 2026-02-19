@@ -5,6 +5,7 @@ import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 import { contractDraftUpload } from '../middlewares/uploadMiddleware';
+import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 
 const adminRoutes = Router();
 
@@ -25,10 +26,18 @@ adminRoutes.get('/contracts', (req, res) => contractController.listForAdmin(req,
 adminRoutes.put('/contracts/:id/transition', (req, res) =>
   contractController.transitionStatus(req, res)
 );
+adminRoutes.put('/contracts/:id/evaluate-side', (req, res) =>
+  contractController.evaluateSide(req, res)
+);
 adminRoutes.post(
   '/contracts/:id/draft',
   contractDraftUpload.single('file'),
   (req, res) => contractController.uploadDraft(req, res)
+);
+adminRoutes.post(
+  '/contracts/:id/signed-docs',
+  contractDocumentUpload.single('file'),
+  (req, res) => contractController.uploadSignedDocs(req, res)
 );
 adminRoutes.post('/contracts/:id/finalize', (req, res) =>
   contractController.finalize(req, res)

@@ -6,8 +6,10 @@ import connection from '../database/connection';
 import type { AuthRequest } from '../middlewares/auth';
 import { createUserNotification } from '../services/notificationService';
 import {
+  isContractApprovalStatus,
   isContractDocumentType,
   isContractStatus,
+  type ContractApprovalStatus,
   type ContractStatus,
 } from '../modules/contracts/domain/contract.types';
 
@@ -29,6 +31,11 @@ const CONTRACT_STATUS_FLOW: ContractStatus[] = [
 
 const CONTRACT_STATUS_SET = new Set<ContractStatus>(CONTRACT_STATUS_FLOW);
 
+const APPROVAL_GRANTS_PROGRESS = new Set<ContractApprovalStatus>([
+  'APPROVED',
+  'APPROVED_WITH_RES',
+]);
+
 interface NegotiationForContractRow extends RowDataPacket {
   id: string;
   property_id: number;
@@ -46,6 +53,10 @@ interface ContractRow extends RowDataPacket {
   seller_info: unknown;
   buyer_info: unknown;
   commission_data: unknown;
+  seller_approval_status: string;
+  buyer_approval_status: string;
+  seller_approval_reason: unknown;
+  buyer_approval_reason: unknown;
   created_at: Date | string | null;
   updated_at: Date | string | null;
   capturing_broker_id: number | null;
@@ -87,6 +98,12 @@ interface UploadContractDocumentBody {
 
 interface TransitionBody {
   direction?: unknown;
+}
+
+interface EvaluateSideBody {
+  side?: unknown;
+  status?: unknown;
+  reason?: unknown;
 }
 
 interface FinalizeBody {
@@ -186,6 +203,52 @@ function parseContractStatusFilter(value: unknown): ContractStatus | null {
     : null;
 }
 
+function resolveContractApprovalStatus(value: unknown): ContractApprovalStatus {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (isContractApprovalStatus(normalized)) {
+    return normalized;
+  }
+  return 'PENDING';
+}
+
+function parseContractApprovalStatusInput(
+  value: unknown
+): ContractApprovalStatus | null {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (!normalized) {
+    return null;
+  }
+  return isContractApprovalStatus(normalized) ? normalized : null;
+}
+
+function normalizeApprovalReason(
+  reason: unknown,
+  evaluatedBy: number | null
+): Record<string, unknown> | null {
+  const message = String(reason ?? '').trim();
+  if (!message) {
+    return null;
+  }
+
+  return {
+    reason: message,
+    evaluatedAt: new Date().toISOString(),
+    evaluatedBy,
+  };
+}
+
+function approvalStatusAllowsProgress(status: ContractApprovalStatus): boolean {
+  return APPROVAL_GRANTS_PROGRESS.has(status);
+}
+
+function isSignedDocumentType(value: string): boolean {
+  return (
+    value === 'contrato_assinado' ||
+    value === 'comprovante_pagamento' ||
+    value === 'boleto_vistoria'
+  );
+}
+
 function parseNonNegativeNumber(value: unknown, fieldName: string): number {
   const numericValue =
     typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value);
@@ -256,6 +319,10 @@ function mapContract(row: ContractRow) {
     sellerInfo: parseStoredJsonObject(row.seller_info),
     buyerInfo: parseStoredJsonObject(row.buyer_info),
     commissionData: parseStoredJsonObject(row.commission_data),
+    sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
+    buyerApprovalStatus: resolveContractApprovalStatus(row.buyer_approval_status),
+    sellerApprovalReason: parseStoredJsonObject(row.seller_approval_reason),
+    buyerApprovalReason: parseStoredJsonObject(row.buyer_approval_reason),
     capturingBrokerId:
       row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
@@ -338,6 +405,26 @@ function isDoubleEndedDeal(contract: ContractRow): boolean {
   return Number(contract.capturing_broker_id) === Number(contract.selling_broker_id);
 }
 
+function shouldMoveToDraft(
+  contract: ContractRow,
+  sellerStatus: ContractApprovalStatus,
+  buyerStatus: ContractApprovalStatus
+): boolean {
+  const currentStatus = resolveContractStatus(contract.status);
+  if (currentStatus !== 'AWAITING_DOCS') {
+    return false;
+  }
+
+  if (isDoubleEndedDeal(contract)) {
+    return approvalStatusAllowsProgress(sellerStatus);
+  }
+
+  return (
+    approvalStatusAllowsProgress(sellerStatus) &&
+    approvalStatusAllowsProgress(buyerStatus)
+  );
+}
+
 const CONTRACT_SELECT_SQL = `
   SELECT
     c.id,
@@ -347,6 +434,10 @@ const CONTRACT_SELECT_SQL = `
     c.seller_info,
     c.buyer_info,
     c.commission_data,
+    c.seller_approval_status,
+    c.buyer_approval_status,
+    c.seller_approval_reason,
+    c.buyer_approval_reason,
     c.created_at,
     c.updated_at,
     n.capturing_broker_id,
@@ -483,6 +574,10 @@ class ContractController {
             seller_info,
             buyer_info,
             commission_data,
+            seller_approval_status,
+            buyer_approval_status,
+            seller_approval_reason,
+            buyer_approval_reason,
             created_at,
             updated_at
           ) VALUES (
@@ -491,6 +586,10 @@ class ContractController {
             ?,
             'AWAITING_DOCS',
             NULL,
+            NULL,
+            NULL,
+            'PENDING',
+            'PENDING',
             NULL,
             NULL,
             CURRENT_TIMESTAMP,
@@ -510,6 +609,10 @@ class ContractController {
             c.seller_info,
             c.buyer_info,
             c.commission_data,
+            c.seller_approval_status,
+            c.buyer_approval_status,
+            c.seller_approval_reason,
+            c.buyer_approval_reason,
             c.created_at,
             c.updated_at,
             n.capturing_broker_id,
@@ -704,6 +807,14 @@ class ContractController {
         return res.status(400).json({ error: 'Status atual do contrato inválido.' });
       }
 
+      if (currentStatus === 'AWAITING_DOCS' && direction === 'next') {
+        await tx.rollback();
+        return res.status(400).json({
+          error:
+            'Use a avaliação por lado para avançar de AWAITING_DOCS para IN_DRAFT.',
+        });
+      }
+
       const targetIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
       if (targetIndex < 0 || targetIndex >= CONTRACT_STATUS_FLOW.length) {
         await tx.rollback();
@@ -737,6 +848,212 @@ class ContractController {
       await tx.rollback();
       console.error('Erro ao transicionar etapa do contrato:', error);
       return res.status(500).json({ error: 'Falha ao atualizar etapa do contrato.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async evaluateSide(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const body = (req.body ?? {}) as EvaluateSideBody;
+    const side = String(body.side ?? '').trim().toLowerCase();
+    if (side !== 'seller' && side !== 'buyer') {
+      return res.status(400).json({ error: "Lado inválido. Use 'seller' ou 'buyer'." });
+    }
+
+    const nextSideStatus = parseContractApprovalStatusInput(body.status);
+    if (!nextSideStatus) {
+      return res.status(400).json({
+        error:
+          "Status inválido. Use PENDING, APPROVED, APPROVED_WITH_RES ou REJECTED.",
+      });
+    }
+
+    const reasonText = String(body.reason ?? '').trim();
+    if (
+      (nextSideStatus === 'APPROVED_WITH_RES' || nextSideStatus === 'REJECTED') &&
+      reasonText.length < 3
+    ) {
+      return res.status(400).json({
+        error: 'Motivo é obrigatório para aprovação com ressalvas e rejeição.',
+      });
+    }
+
+    const evaluatedBy = Number(req.userId);
+    const reasonPayload = normalizeApprovalReason(
+      reasonText,
+      Number.isFinite(evaluatedBy) ? evaluatedBy : null
+    );
+
+    const tx = await connection.getConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'AWAITING_DOCS') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'A avaliação granular só é permitida em AWAITING_DOCS.',
+        });
+      }
+
+      let nextSellerStatus = resolveContractApprovalStatus(
+        contract.seller_approval_status
+      );
+      let nextBuyerStatus = resolveContractApprovalStatus(
+        contract.buyer_approval_status
+      );
+      let nextSellerReason = parseStoredJsonObject(contract.seller_approval_reason);
+      let nextBuyerReason = parseStoredJsonObject(contract.buyer_approval_reason);
+
+      const sideReason = reasonPayload ?? {};
+      if (isDoubleEndedDeal(contract)) {
+        nextSellerStatus = nextSideStatus;
+        nextBuyerStatus = nextSideStatus;
+        nextSellerReason = sideReason;
+        nextBuyerReason = sideReason;
+      } else if (side === 'seller') {
+        nextSellerStatus = nextSideStatus;
+        nextSellerReason = sideReason;
+      } else {
+        nextBuyerStatus = nextSideStatus;
+        nextBuyerReason = sideReason;
+      }
+
+      const mustMoveToDraft = shouldMoveToDraft(
+        contract,
+        nextSellerStatus,
+        nextBuyerStatus
+      );
+      const nextContractStatus: ContractStatus = mustMoveToDraft
+        ? 'IN_DRAFT'
+        : 'AWAITING_DOCS';
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET
+            seller_approval_status = ?,
+            buyer_approval_status = ?,
+            seller_approval_reason = CAST(? AS JSON),
+            buyer_approval_reason = CAST(? AS JSON),
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [
+          nextSellerStatus,
+          nextBuyerStatus,
+          JSON.stringify(nextSellerReason),
+          JSON.stringify(nextBuyerReason),
+          nextContractStatus,
+          contractId,
+        ]
+      );
+
+      const updated = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+
+      return res.status(200).json({
+        message: 'Avaliação do lado atualizada com sucesso.',
+        contract: updated ? mapContract(updated) : null,
+        movedToDraft: mustMoveToDraft,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao avaliar lado do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao avaliar documentação.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async uploadSignedDocs(req: Request, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const body = (req.body ?? {}) as UploadContractDocumentBody;
+    const documentTypeRaw = String(
+      body.documentType ?? body.document_type ?? ''
+    ).trim();
+    if (!isContractDocumentType(documentTypeRaw) || !isSignedDocumentType(documentTypeRaw)) {
+      return res.status(400).json({
+        error:
+          "documentType inválido. Use contrato_assinado, comprovante_pagamento ou boleto_vistoria.",
+      });
+    }
+
+    const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
+    if (!uploadedFile?.buffer || uploadedFile.buffer.length === 0) {
+      return res.status(400).json({ error: 'Arquivo obrigatório para upload.' });
+    }
+
+    const tx = await connection.getConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'AWAITING_SIGNATURES') {
+        await tx.rollback();
+        return res.status(400).json({
+          error:
+            'Upload de contrato assinado/comprovantes só é permitido em AWAITING_SIGNATURES.',
+        });
+      }
+
+      const [insertResult] = await tx.query<ResultSetHeader>(
+        `
+          INSERT INTO negotiation_documents (
+            negotiation_id,
+            type,
+            document_type,
+            file_content,
+            created_at
+          ) VALUES (?, 'contract', ?, ?, CURRENT_TIMESTAMP)
+        `,
+        [contract.negotiation_id, documentTypeRaw, uploadedFile.buffer]
+      );
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [contractId]
+      );
+
+      await tx.commit();
+
+      return res.status(201).json({
+        message: 'Documento assinado/comprovante enviado com sucesso.',
+        readyForFinalization: true,
+        document: {
+          id: Number(insertResult.insertId ?? 0),
+          contractId,
+          documentType: documentTypeRaw,
+        },
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao enviar documentos assinados pelo admin:', error);
+      return res.status(500).json({ error: 'Falha ao enviar documento assinado.' });
     } finally {
       tx.release();
     }
@@ -872,6 +1189,24 @@ class ContractController {
         await tx.rollback();
         return res.status(400).json({
           error: 'Somente contratos em AWAITING_SIGNATURES podem ser finalizados.',
+        });
+      }
+
+      const [signedDocRows] = await tx.query<RowDataPacket[]>(
+        `
+          SELECT COUNT(*) AS total
+          FROM negotiation_documents
+          WHERE negotiation_id = ?
+            AND document_type IN ('contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria')
+        `,
+        [contract.negotiation_id]
+      );
+      const signedDocsCount = Number(signedDocRows[0]?.total ?? 0);
+      if (signedDocsCount <= 0) {
+        await tx.rollback();
+        return res.status(400).json({
+          error:
+            'Anexe ao menos um contrato assinado ou comprovante antes de finalizar.',
         });
       }
 
@@ -1031,6 +1366,17 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
+      const currentStatus = resolveContractStatus(contract.status);
+      if (isSignedDocumentType(documentTypeRaw)) {
+        if (currentStatus !== 'AWAITING_SIGNATURES') {
+          await tx.rollback();
+          return res.status(400).json({
+            error:
+              'Contratos assinados e comprovantes só podem ser enviados em AWAITING_SIGNATURES.',
+          });
+        }
+      }
+
       const [insertResult] = await tx.query<ResultSetHeader>(
         `
           INSERT INTO negotiation_documents (
@@ -1159,10 +1505,6 @@ class ContractController {
 
       const nextSellerInfo = sellerPatch ? { ...sellerInfo, ...sellerPatch } : sellerInfo;
       const nextBuyerInfo = buyerPatch ? { ...buyerInfo, ...buyerPatch } : buyerInfo;
-      const nextStatus: ContractStatus =
-        resolveContractStatus(contract.status) === 'AWAITING_DOCS'
-          ? 'IN_DRAFT'
-          : resolveContractStatus(contract.status);
 
       await tx.query(
         `
@@ -1170,14 +1512,12 @@ class ContractController {
           SET
             seller_info = CAST(? AS JSON),
             buyer_info = CAST(? AS JSON),
-            status = ?,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `,
         [
           JSON.stringify(nextSellerInfo),
           JSON.stringify(nextBuyerInfo),
-          nextStatus,
           contractId,
         ]
       );

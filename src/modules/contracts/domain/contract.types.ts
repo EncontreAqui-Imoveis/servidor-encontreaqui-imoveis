@@ -7,6 +7,15 @@ export const CONTRACT_STATUSES = [
 
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
+export const CONTRACT_APPROVAL_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'APPROVED_WITH_RES',
+  'REJECTED',
+] as const;
+
+export type ContractApprovalStatus = (typeof CONTRACT_APPROVAL_STATUSES)[number];
+
 export const CONTRACT_DOCUMENT_TYPES = [
   'doc_identidade',
   'comprovante_endereco',
@@ -26,6 +35,15 @@ export type ContractPartyInfo = Record<string, unknown>;
 
 export function isContractStatus(value: unknown): value is ContractStatus {
   return typeof value === 'string' && CONTRACT_STATUSES.includes(value as ContractStatus);
+}
+
+export function isContractApprovalStatus(
+  value: unknown
+): value is ContractApprovalStatus {
+  return (
+    typeof value === 'string' &&
+    CONTRACT_APPROVAL_STATUSES.includes(value as ContractApprovalStatus)
+  );
 }
 
 export function isContractDocumentType(value: unknown): value is ContractDocumentType {

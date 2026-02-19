@@ -513,12 +513,14 @@ class AdminController {
             capture_user.name AS capturing_broker_name,
             seller_user.name AS selling_broker_name,
             COALESCE(
+              NULLIF(n.client_name, ''),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
             ) AS client_name,
             COALESCE(
+              NULLIF(n.client_cpf, ''),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),

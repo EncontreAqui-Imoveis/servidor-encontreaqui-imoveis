@@ -5,8 +5,8 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import connection from '../database/connection';
 import cloudinary, { uploadToCloudinary } from '../config/cloudinary';
 import { requireEnv } from '../config/env';
-import { notifyAdmins } from '../services/notificationService';
-import { type PushNotificationResult } from '../services/pushNotificationService';
+import { createUserNotification, notifyAdmins } from '../services/notificationService';
+import { sendPushNotifications, type PushNotificationResult } from '../services/pushNotificationService';
 import {
   notifyPriceDropIfNeeded,
   notifyPromotionStarted,
@@ -448,6 +448,9 @@ interface AdminNegotiationDecisionRow extends RowDataPacket {
   id: string;
   status: string;
   property_id: number;
+  capturing_broker_id: number | null;
+  property_code: string | null;
+  property_address: string | null;
   property_status: string | null;
   lifecycle_status: string | null;
 }
@@ -647,11 +650,15 @@ class AdminController {
             seller_user.name AS selling_broker_name,
             COALESCE(
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName'))
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
             ) AS client_name,
             COALESCE(
               JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf'))
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
             ) AS client_cpf,
             COALESCE(
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
@@ -760,6 +767,9 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            n.capturing_broker_id,
+            p.code AS property_code,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
             p.lifecycle_status
           FROM negotiations n
@@ -826,6 +836,31 @@ class AdminController {
 
       await tx.commit();
 
+      const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+      if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
+        const propertyRef = String(
+          negotiation.property_code ??
+            negotiation.property_address ??
+            `#${negotiation.property_id}`
+        );
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Proposta Aprovada!',
+            message: `Sua proposta para o imóvel ${propertyRef} foi aprovada pela administração. O imóvel agora está Em Negociação.`,
+            recipientId: recipientBrokerId,
+            relatedEntityId: Number(negotiation.property_id),
+            metadata: {
+              negotiationId,
+              propertyId: Number(negotiation.property_id),
+              status: 'APPROVED',
+            },
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar corretor sobre aprovação da proposta:', notifyError);
+        }
+      }
+
       return res.status(200).json({
         message: 'Negociação aprovada com sucesso.',
         id: negotiationId,
@@ -868,6 +903,9 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            n.capturing_broker_id,
+            p.code AS property_code,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
             p.lifecycle_status
           FROM negotiations n
@@ -937,6 +975,32 @@ class AdminController {
 
       await tx.commit();
 
+      const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+      if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
+        const propertyRef = String(
+          negotiation.property_code ??
+            negotiation.property_address ??
+            `#${negotiation.property_id}`
+        );
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Proposta Rejeitada.',
+            message: `Sua proposta para o imóvel ${propertyRef} foi rejeitada. Motivo: ${reason}.`,
+            recipientId: recipientBrokerId,
+            relatedEntityId: Number(negotiation.property_id),
+            metadata: {
+              negotiationId,
+              propertyId: Number(negotiation.property_id),
+              reason,
+              status: 'REJECTED',
+            },
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar corretor sobre rejeição da proposta:', notifyError);
+        }
+      }
+
       return res.status(200).json({
         message: 'Negociação rejeitada e imóvel devolvido para disponível.',
         id: negotiationId,
@@ -954,6 +1018,7 @@ class AdminController {
   async cancelNegotiation(req: AuthRequest, res: Response) {
     const negotiationId = String(req.params.id ?? '').trim();
     const actorId = Number(req.userId);
+    const reason = String((req.body as { reason?: unknown })?.reason ?? '').trim();
 
     if (!negotiationId) {
       return res.status(400).json({ error: 'ID de negociação inválido.' });
@@ -961,6 +1026,10 @@ class AdminController {
 
     if (!actorId) {
       return res.status(401).json({ error: 'Administrador não autenticado.' });
+    }
+
+    if (reason.length < 5) {
+      return res.status(400).json({ error: 'Motivo obrigatório com no mínimo 5 caracteres.' });
     }
 
     const tx = await connection.getConnection();
@@ -973,6 +1042,9 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            n.capturing_broker_id,
+            p.code AS property_code,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
             p.status AS property_status,
             p.lifecycle_status
           FROM negotiations n
@@ -1030,6 +1102,7 @@ class AdminController {
           actorId,
           JSON.stringify({
             action: 'admin_cancelled',
+            reason,
           }),
         ]
       );
@@ -1046,6 +1119,42 @@ class AdminController {
       );
 
       await tx.commit();
+
+      const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+      if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
+        const propertyRef = String(
+          negotiation.property_code ??
+            negotiation.property_address ??
+            `#${negotiation.property_id}`
+        );
+        const brokerMessage = `A negociação para o imóvel ${propertyRef} foi cancelada. O imóvel voltou para a vitrine. Motivo: ${reason}.`;
+
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Negociação Cancelada ⚠️',
+            message: brokerMessage,
+            recipientId: recipientBrokerId,
+            relatedEntityId: Number(negotiation.property_id),
+            recipientRole: 'broker',
+            metadata: {
+              negotiationId,
+              propertyId: Number(negotiation.property_id),
+              reason,
+              status: 'CANCELLED',
+            },
+          });
+
+          await sendPushNotifications({
+            message: brokerMessage,
+            recipientIds: [recipientBrokerId],
+            relatedEntityType: 'negotiation',
+            relatedEntityId: Number(negotiation.property_id),
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar corretor sobre cancelamento da negociação:', notifyError);
+        }
+      }
 
       return res.status(200).json({
         message: 'Negociação cancelada e imóvel devolvido para disponível.',

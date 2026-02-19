@@ -1120,7 +1120,7 @@ class AdminController {
             GROUP BY property_id
           ) sl ON sl.property_id = p.id
           ${where}
-          ORDER BY COALESCE(sl.last_sale_date, p.updated_at, p.created_at) DESC, p.id DESC
+          ORDER BY COALESCE(sl.last_sale_date, p.created_at) DESC, p.id DESC
           LIMIT ? OFFSET ?
         `, [...params, limit, offset]);
             return res.status(200).json({

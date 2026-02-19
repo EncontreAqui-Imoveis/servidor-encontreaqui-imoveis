@@ -332,6 +332,15 @@ interface PropertyDetailRow extends RowDataPacket {
   broker_creci?: string | null;
 }
 
+interface ArchivePropertyRow extends RowDataPacket {
+  id: number;
+  code: string | null;
+  title: string;
+  status: 'sold' | 'rented';
+  broker_name: string | null;
+  transaction_date: Date | string | null;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') {
     return null;
@@ -1319,6 +1328,159 @@ class AdminController {
     } catch (error) {
       console.error('Erro ao listar imoveis com corretores:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async listArchivedProperties(req: Request, res: Response) {
+    try {
+      const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
+      const offset = (page - 1) * limit;
+      const search = String(req.query.search ?? '').trim();
+
+      const whereClauses = ["p.status IN ('sold', 'rented')"];
+      const params: Array<string | number> = [];
+
+      if (search) {
+        whereClauses.push('(p.code LIKE ? OR p.title LIKE ? OR COALESCE(u.name, u_owner.name) LIKE ?)');
+        const searchLike = `%${search}%`;
+        params.push(searchLike, searchLike, searchLike);
+      }
+
+      const where = `WHERE ${whereClauses.join(' AND ')}`;
+
+      const [countRows] = await connection.query<RowDataPacket[]>(
+        `
+          SELECT COUNT(*) AS total
+          FROM properties p
+          LEFT JOIN brokers b ON b.id = p.broker_id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+          ${where}
+        `,
+        params
+      );
+      const total = Number(countRows[0]?.total ?? 0);
+
+      const [rows] = await connection.query<ArchivePropertyRow[]>(
+        `
+          SELECT
+            p.id,
+            p.code,
+            p.title,
+            p.status,
+            COALESCE(u.name, u_owner.name) AS broker_name,
+            sl.last_sale_date AS transaction_date
+          FROM properties p
+          LEFT JOIN brokers b ON b.id = p.broker_id
+          LEFT JOIN users u ON u.id = b.id
+          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+          LEFT JOIN (
+            SELECT property_id, MAX(sale_date) AS last_sale_date
+            FROM sales
+            GROUP BY property_id
+          ) sl ON sl.property_id = p.id
+          ${where}
+          ORDER BY COALESCE(sl.last_sale_date, p.updated_at, p.created_at) DESC, p.id DESC
+          LIMIT ? OFFSET ?
+        `,
+        [...params, limit, offset]
+      );
+
+      return res.status(200).json({
+        data: rows.map((row) => ({
+          id: Number(row.id),
+          code: row.code ?? null,
+          title: row.title,
+          status: row.status,
+          brokerName: row.broker_name ?? null,
+          transactionDate: row.transaction_date ? String(row.transaction_date) : null,
+        })),
+        total,
+        page,
+        limit,
+      });
+    } catch (error) {
+      console.error('Erro ao listar imóveis vendidos/alugados:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async relistProperty(req: AuthRequest, res: Response) {
+    const propertyId = Number(req.params.id);
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
+    }
+
+    const db = await connection.getConnection();
+    try {
+      await db.beginTransaction();
+
+      const [rows] = await db.query<RowDataPacket[]>(
+        `
+          SELECT id, status, code, title
+          FROM properties
+          WHERE id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [propertyId]
+      );
+
+      if (!rows.length) {
+        await db.rollback();
+        return res.status(404).json({ error: 'Imóvel não encontrado.' });
+      }
+
+      const property = rows[0];
+      const currentStatus = String(property.status ?? '').toLowerCase();
+      if (currentStatus !== 'rented') {
+        await db.rollback();
+        return res.status(400).json({
+          error: 'Apenas imóveis alugados podem ser disponibilizados novamente.',
+        });
+      }
+
+      await db.query(
+        `
+          UPDATE properties
+          SET
+            status = 'approved',
+            sale_value = NULL,
+            commission_rate = NULL,
+            commission_value = NULL
+          WHERE id = ?
+        `,
+        [propertyId]
+      );
+
+      await db.query(
+        `
+          DELETE FROM sales
+          WHERE property_id = ?
+            AND deal_type = 'rent'
+        `,
+        [propertyId]
+      );
+
+      await db.commit();
+
+      return res.status(200).json({
+        message: 'Imóvel disponibilizado novamente com sucesso.',
+        data: {
+          id: Number(property.id),
+          code: property.code ?? null,
+          title: property.title ?? null,
+          status: 'approved',
+        },
+      });
+    } catch (error) {
+      await db.rollback();
+      console.error('Erro ao disponibilizar imóvel novamente:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      db.release();
     }
   }
 

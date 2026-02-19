@@ -101,6 +101,18 @@ async function ensurePropertiesColumns(): Promise<void> {
     await connection.query('ALTER TABLE properties ADD COLUMN price_rent DECIMAL(12, 2) NULL');
   }
 
+  if (!(await columnExists('properties', 'promotion_price'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promotion_price DECIMAL(12, 2) NULL'
+    );
+  }
+
+  if (!(await columnExists('properties', 'promotional_rent_price'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN promotional_rent_price DECIMAL(12, 2) NULL'
+    );
+  }
+
   if (!(await columnExists('properties', 'is_promoted'))) {
     await connection.query(
       'ALTER TABLE properties ADD COLUMN is_promoted TINYINT(1) NOT NULL DEFAULT 0'

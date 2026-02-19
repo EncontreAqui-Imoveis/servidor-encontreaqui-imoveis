@@ -293,6 +293,13 @@ function mapProperty(row, includeOwnerInfo = false) {
         price: Number(row.price),
         price_sale: row.price_sale != null ? Number(row.price_sale) : null,
         price_rent: row.price_rent != null ? Number(row.price_rent) : null,
+        promotion_price: row.promotion_price != null ? Number(row.promotion_price) : null,
+        promotional_rent_price: row.promotional_rent_price != null ? Number(row.promotional_rent_price) : null,
+        promotionalPrice: row.promotion_price != null ? Number(row.promotion_price) : null,
+        promotionPrice: row.promotion_price != null ? Number(row.promotion_price) : null,
+        promotionalRentPrice: row.promotional_rent_price != null
+            ? Number(row.promotional_rent_price)
+            : null,
         code: row.code ?? null,
         owner_name: includeOwnerInfo ? (row.owner_name ?? null) : null,
         owner_phone: includeOwnerInfo ? (row.owner_phone ?? null) : null,
@@ -460,7 +467,7 @@ class PropertyController {
         if (!brokerId) {
             return res.status(401).json({ error: "Corretor não autenticado." });
         }
-        const { title, description, type, purpose, is_promoted, promo_percentage, promo_start_date, promo_end_date, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, is_promoted, promo_percentage, promo_start_date, promo_end_date, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, promotion_price, promotional_price, promotional_rent_price, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         const semNumeroFlag = parseBoolean(sem_numero);
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: "Campos obrigatórios não informados." });
@@ -516,6 +523,8 @@ class PropertyController {
         let numericPrice;
         let numericPriceSale = null;
         let numericPriceRent = null;
+        let numericPromotionPrice = null;
+        let numericPromotionalRentPrice = null;
         try {
             if (normalizedPurpose === "Venda") {
                 numericPriceSale = parseOptionalPrice(price_sale) ?? parsePrice(price);
@@ -534,6 +543,33 @@ class PropertyController {
                     });
                 }
                 numericPrice = numericPriceSale;
+            }
+            numericPromotionPrice =
+                parseOptionalPrice(promotion_price ?? promotional_price) ?? null;
+            numericPromotionalRentPrice =
+                parseOptionalPrice(promotional_rent_price) ?? null;
+            if (normalizedPurpose === "Venda") {
+                numericPromotionalRentPrice = null;
+            }
+            else if (normalizedPurpose === "Aluguel") {
+                numericPromotionPrice = null;
+            }
+            if (numericPromotionPrice != null &&
+                numericPriceSale != null &&
+                numericPromotionPrice >= numericPriceSale) {
+                return res.status(400).json({
+                    error: "Preço promocional de venda deve ser menor que o preço de venda.",
+                });
+            }
+            if (numericPromotionalRentPrice != null &&
+                numericPriceRent != null &&
+                numericPromotionalRentPrice >= numericPriceRent) {
+                return res.status(400).json({
+                    error: "Preço promocional de aluguel deve ser menor que o preço de aluguel.",
+                });
+            }
+            if (numericPromotionPrice != null || numericPromotionalRentPrice != null) {
+                promotionFlag = 1;
             }
         }
         catch (parseError) {
@@ -618,6 +654,8 @@ class PropertyController {
             price,
             price_sale,
             price_rent,
+            promotion_price,
+            promotional_rent_price,
             code,
             owner_name,
             owner_phone,
@@ -645,7 +683,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 brokerId,
                 null,
@@ -664,6 +702,8 @@ class PropertyController {
                 numericPrice,
                 numericPriceSale,
                 numericPriceRent,
+                numericPromotionPrice,
+                numericPromotionalRentPrice,
                 stringOrNull(code),
                 stringOrNull(owner_name),
                 stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
@@ -739,7 +779,7 @@ class PropertyController {
         if (!userId) {
             return res.status(401).json({ error: 'Usuario nao autenticado.' });
         }
-        const { title, description, type, purpose, is_promoted, promo_percentage, promo_start_date, promo_end_date, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
+        const { title, description, type, purpose, is_promoted, promo_percentage, promo_start_date, promo_end_date, promotion_percentage, promotion_start, promotion_end, price, price_sale, price_rent, promotion_price, promotional_price, promotional_rent_price, code, owner_name, owner_phone, address, quadra, lote, numero, sem_numero, bairro, complemento, tipo_lote, city, state, cep, bedrooms, bathrooms, area_construida, area_terreno, area, garage_spots, has_wifi, tem_piscina, tem_energia_solar, tem_automacao, tem_ar_condicionado, eh_mobiliada, valor_condominio, valor_iptu, } = req.body ?? {};
         const semNumeroFlag = parseBoolean(sem_numero);
         if (!title || !description || !type || !purpose || !address || !city || !state) {
             return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
@@ -795,6 +835,8 @@ class PropertyController {
         let numericPrice;
         let numericPriceSale = null;
         let numericPriceRent = null;
+        let numericPromotionPrice = null;
+        let numericPromotionalRentPrice = null;
         try {
             if (normalizedPurpose === 'Venda') {
                 numericPriceSale = parseOptionalPrice(price_sale) ?? parsePrice(price);
@@ -813,6 +855,33 @@ class PropertyController {
                     });
                 }
                 numericPrice = numericPriceSale;
+            }
+            numericPromotionPrice =
+                parseOptionalPrice(promotion_price ?? promotional_price) ?? null;
+            numericPromotionalRentPrice =
+                parseOptionalPrice(promotional_rent_price) ?? null;
+            if (normalizedPurpose === 'Venda') {
+                numericPromotionalRentPrice = null;
+            }
+            else if (normalizedPurpose === 'Aluguel') {
+                numericPromotionPrice = null;
+            }
+            if (numericPromotionPrice != null &&
+                numericPriceSale != null &&
+                numericPromotionPrice >= numericPriceSale) {
+                return res.status(400).json({
+                    error: 'Preço promocional de venda deve ser menor que o preço de venda.',
+                });
+            }
+            if (numericPromotionalRentPrice != null &&
+                numericPriceRent != null &&
+                numericPromotionalRentPrice >= numericPriceRent) {
+                return res.status(400).json({
+                    error: 'Preço promocional de aluguel deve ser menor que o preço de aluguel.',
+                });
+            }
+            if (numericPromotionPrice != null || numericPromotionalRentPrice != null) {
+                promotionFlag = 1;
             }
         }
         catch (parseError) {
@@ -885,6 +954,8 @@ class PropertyController {
             price,
             price_sale,
             price_rent,
+            promotion_price,
+            promotional_rent_price,
             code,
             owner_name,
             owner_phone,
@@ -912,7 +983,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
                 null,
                 userId,
@@ -931,6 +1002,8 @@ class PropertyController {
                 numericPrice,
                 numericPriceSale,
                 numericPriceRent,
+                numericPromotionPrice,
+                numericPromotionalRentPrice,
                 stringOrNull(code),
                 stringOrNull(owner_name),
                 stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
@@ -1042,6 +1115,10 @@ class PropertyController {
                 : property.promotion_percentage != null
                     ? Number(property.promotion_percentage)
                     : null;
+            let nextPromotionPrice = property.promotion_price != null ? Number(property.promotion_price) : null;
+            let nextPromotionalRentPrice = property.promotional_rent_price != null
+                ? Number(property.promotional_rent_price)
+                : null;
             // Always allow editing all fields, even if approved
             const updatableFields = new Set([
                 'title',
@@ -1052,6 +1129,9 @@ class PropertyController {
                 'price',
                 'price_sale',
                 'price_rent',
+                'promotion_price',
+                'promotional_price',
+                'promotional_rent_price',
                 'is_promoted',
                 'promo_percentage',
                 'promo_start_date',
@@ -1207,6 +1287,8 @@ class PropertyController {
                         nextPromotionFlag = parsed;
                         if (parsed === 0) {
                             nextPromotionPercentage = null;
+                            nextPromotionPrice = null;
+                            nextPromotionalRentPrice = null;
                             fields.push('promo_percentage = ?');
                             values.push(null);
                             fields.push('promo_start_date = ?');
@@ -1218,6 +1300,10 @@ class PropertyController {
                             fields.push('promotion_start = ?');
                             values.push(null);
                             fields.push('promotion_end = ?');
+                            values.push(null);
+                            fields.push('promotion_price = ?');
+                            values.push(null);
+                            fields.push('promotional_rent_price = ?');
                             values.push(null);
                         }
                         fields.push('is_promoted = ?');
@@ -1233,6 +1319,30 @@ class PropertyController {
                             values.push(parsed);
                             fields.push('promotion_percentage = ?');
                             values.push(parsed);
+                        }
+                        catch (parseError) {
+                            return res.status(400).json({ error: parseError.message });
+                        }
+                        break;
+                    }
+                    case 'promotion_price':
+                    case 'promotional_price':
+                    case 'promotional_rent_price': {
+                        try {
+                            const parsed = parseOptionalPrice(body[key]);
+                            if (key === 'promotional_rent_price') {
+                                fields.push('promotional_rent_price = ?');
+                                values.push(parsed);
+                                nextPromotionalRentPrice = parsed;
+                            }
+                            else {
+                                fields.push('promotion_price = ?');
+                                values.push(parsed);
+                                nextPromotionPrice = parsed;
+                            }
+                            if (parsed != null) {
+                                nextPromotionFlag = 1;
+                            }
                         }
                         catch (parseError) {
                             return res.status(400).json({ error: parseError.message });
@@ -1308,6 +1418,38 @@ class PropertyController {
             if (semNumeroBody === 1 && !bodyKeys.includes('numero')) {
                 fields.push('numero = ?');
                 values.push(null);
+            }
+            if (!supportsSale && bodyKeys.some((key) => key === 'promotion_price' || key === 'promotional_price')) {
+                fields.push('promotion_price = ?');
+                values.push(null);
+                nextPromotionPrice = null;
+            }
+            if (!supportsRent && bodyKeys.includes('promotional_rent_price')) {
+                fields.push('promotional_rent_price = ?');
+                values.push(null);
+                nextPromotionalRentPrice = null;
+            }
+            if (nextPromotionPrice != null &&
+                nextSalePrice != null &&
+                Number(nextPromotionPrice) >= Number(nextSalePrice)) {
+                return res.status(400).json({
+                    error: 'Preço promocional de venda deve ser menor que o preço de venda.',
+                });
+            }
+            if (nextPromotionalRentPrice != null &&
+                nextRentPrice != null &&
+                Number(nextPromotionalRentPrice) >= Number(nextRentPrice)) {
+                return res.status(400).json({
+                    error: 'Preço promocional de aluguel deve ser menor que o preço de aluguel.',
+                });
+            }
+            if (nextPromotionPrice != null || nextPromotionalRentPrice != null) {
+                nextPromotionFlag = 1;
+            }
+            const previousPromotionNumericFlag = previousPromotionFlag ? 1 : 0;
+            if (!bodyKeys.includes('is_promoted') && nextPromotionFlag !== previousPromotionNumericFlag) {
+                fields.push('is_promoted = ?');
+                values.push(nextPromotionFlag);
             }
             if (fields.length === 0) {
                 return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });

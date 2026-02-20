@@ -462,6 +462,19 @@ async function ensureNegotiationDocumentTypeColumn(): Promise<void> {
   }
 }
 
+async function ensureNegotiationDocumentMetadataColumn(): Promise<void> {
+  if (!(await tableExists('negotiation_documents'))) {
+    return;
+  }
+
+  if (!(await columnExists('negotiation_documents', 'metadata_json'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN metadata_json JSON NULL AFTER document_type
+    `);
+  }
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -474,6 +487,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureContractsTable();
     await ensureContractApprovalColumns();
     await ensureNegotiationDocumentTypeColumn();
+    await ensureNegotiationDocumentMetadataColumn();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

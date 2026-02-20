@@ -354,6 +354,17 @@ async function ensureNegotiationDocumentTypeColumn() {
     `);
     }
 }
+async function ensureNegotiationDocumentMetadataColumn() {
+    if (!(await tableExists('negotiation_documents'))) {
+        return;
+    }
+    if (!(await columnExists('negotiation_documents', 'metadata_json'))) {
+        await connection_1.default.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN metadata_json JSON NULL AFTER document_type
+    `);
+    }
+}
 async function applyMigrations() {
     try {
         await ensurePropertiesColumns();
@@ -366,6 +377,7 @@ async function applyMigrations() {
         await ensureContractsTable();
         await ensureContractApprovalColumns();
         await ensureNegotiationDocumentTypeColumn();
+        await ensureNegotiationDocumentMetadataColumn();
         console.log('Migrations aplicadas com sucesso.');
     }
     catch (error) {

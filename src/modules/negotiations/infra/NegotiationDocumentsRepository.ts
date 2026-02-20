@@ -11,6 +11,8 @@ interface CountRow {
 interface DocumentRow {
   file_content: Buffer | Uint8Array | null;
   type: string;
+  document_type: string | null;
+  metadata_json: unknown;
 }
 
 interface NegotiationDocumentRow extends DocumentRow {
@@ -64,10 +66,15 @@ export class NegotiationDocumentsRepository
   async findById(
     documentId: number,
     trx?: SqlExecutor
-  ): Promise<{ fileContent: Buffer; type: string } | null> {
+  ): Promise<{
+    fileContent: Buffer;
+    type: string;
+    documentType: string | null;
+    metadataJson: Record<string, unknown>;
+  } | null> {
     const executor = trx ?? this.executor;
     const sql = `
-      SELECT file_content, type
+      SELECT file_content, type, document_type, metadata_json
       FROM negotiation_documents
       WHERE id = ?
       LIMIT 1
@@ -86,22 +93,49 @@ export class NegotiationDocumentsRepository
     return {
       fileContent,
       type: row.type,
+      documentType: row.document_type ?? null,
+      metadataJson:
+        row.metadata_json && typeof row.metadata_json === 'object'
+          ? (row.metadata_json as Record<string, unknown>)
+          : (() => {
+              if (typeof row.metadata_json !== 'string') {
+                return {};
+              }
+              try {
+                const parsed = JSON.parse(row.metadata_json) as unknown;
+                return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                  ? (parsed as Record<string, unknown>)
+                  : {};
+              } catch {
+                return {};
+              }
+            })(),
     };
   }
 
   async saveProposal(
     negotiationId: string,
     pdfBuffer: Buffer,
-    trx?: SqlExecutor
+    trx?: SqlExecutor,
+    metadataJson?: Record<string, unknown> | null
   ): Promise<number> {
     const executor = trx ?? this.executor;
 
     const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
-      VALUES (?, 'proposal', 'contrato_minuta', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, metadata_json, file_content)
+      VALUES (?, 'proposal', 'contrato_minuta', CAST(? AS JSON), ?)
     `;
 
-    const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);
+    const result = await executor.execute<InsertResult>(sql, [
+      negotiationId,
+      JSON.stringify(
+        metadataJson ?? {
+          originalFileName: 'proposta.pdf',
+          generated: true,
+        }
+      ),
+      pdfBuffer,
+    ]);
     const header = Array.isArray(result) ? result[0] : result;
     return Number(header?.insertId ?? 0);
   }
@@ -109,16 +143,25 @@ export class NegotiationDocumentsRepository
   async saveSignedProposal(
     negotiationId: string,
     pdfBuffer: Buffer,
-    trx?: SqlExecutor
+    trx?: SqlExecutor,
+    metadataJson?: Record<string, unknown> | null
   ): Promise<number> {
     const executor = trx ?? this.executor;
 
     const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
-      VALUES (?, 'other', 'contrato_assinado', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, metadata_json, file_content)
+      VALUES (?, 'other', 'contrato_assinado', CAST(? AS JSON), ?)
     `;
 
-    const result = await executor.execute<InsertResult>(sql, [negotiationId, pdfBuffer]);
+    const result = await executor.execute<InsertResult>(sql, [
+      negotiationId,
+      JSON.stringify(
+        metadataJson ?? {
+          originalFileName: 'proposta_assinada.pdf',
+        }
+      ),
+      pdfBuffer,
+    ]);
     const header = Array.isArray(result) ? result[0] : result;
     return Number(header?.insertId ?? 0);
   }

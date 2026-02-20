@@ -170,6 +170,40 @@ function buildProposalValidityDate(days) {
     const dd = String(now.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
 }
+function parseJsonObjectSafe(value) {
+    if (!value) {
+        return {};
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed;
+            }
+        }
+        catch {
+            return {};
+        }
+    }
+    return {};
+}
+function sanitizeDownloadFilename(value) {
+    const sanitized = value
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!sanitized) {
+        return 'documento.pdf';
+    }
+    return sanitized;
+}
+function buildAttachmentDisposition(filename) {
+    const safe = sanitizeDownloadFilename(filename);
+    return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
 class NegotiationController {
     async generateProposal(req, res) {
         if (!req.userId) {
@@ -199,7 +233,10 @@ class NegotiationController {
           WHERE id = ?
         `, [proposalData.clientName, proposalData.clientCpf, negotiationId]);
             const pdfBuffer = await pdfService.generateProposal(proposalData);
-            const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer);
+            const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer, undefined, {
+                originalFileName: 'proposta.pdf',
+                generated: true,
+            });
             return res.status(201).json({
                 id: documentId,
                 message: 'Proposta gerada e armazenada com sucesso.',
@@ -407,7 +444,10 @@ class NegotiationController {
                 validityDays: payload.validadeDias,
             };
             const pdfBuffer = await pdfService.generateProposal(proposalData);
-            const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer, tx);
+            const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer, tx, {
+                originalFileName: 'proposta.pdf',
+                generated: true,
+            });
             await tx.commit();
             res.setHeader('Content-Type', 'application/pdf');
             res.setHeader('Content-Disposition', `attachment; filename="proposal_${negotiationId}.pdf"`);
@@ -481,7 +521,11 @@ class NegotiationController {
                     error: 'A proposta assinada só pode ser enviada enquanto aguarda assinatura.',
                 });
             }
-            const documentId = await negotiationDocumentsRepository.saveSignedProposal(negotiationId, uploadedFile.buffer, tx);
+            const documentId = await negotiationDocumentsRepository.saveSignedProposal(negotiationId, uploadedFile.buffer, tx, {
+                originalFileName: uploadedFile.originalname ?? 'proposta_assinada.pdf',
+                uploadedBy: Number(req.userId ?? 0) || null,
+                uploadedAt: new Date().toISOString(),
+            });
             await tx.execute(`
           UPDATE negotiations
           SET status = ?, version = version + 1
@@ -555,8 +599,16 @@ class NegotiationController {
             const contentType = document.type === 'proposal' || document.type === 'contract'
                 ? 'application/pdf'
                 : 'application/octet-stream';
+            const metadata = parseJsonObjectSafe(document.metadataJson);
+            const originalFileName = String(metadata.originalFileName ?? '').trim();
+            const fallbackPrefix = String(document.documentType ?? document.type ?? 'documento')
+                .trim()
+                .toLowerCase();
+            const extension = contentType === 'application/pdf' ? '.pdf' : '';
+            const fallbackName = `${fallbackPrefix || 'documento'}_${documentId}${extension}`;
+            const filename = originalFileName || fallbackName;
             res.setHeader('Content-Type', contentType);
-            res.setHeader('Content-Disposition', `attachment; filename="document_${documentId}.pdf"`);
+            res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
             res.setHeader('Content-Length', document.fileContent.length.toString());
             return res.send(document.fileContent);
         }

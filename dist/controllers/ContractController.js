@@ -131,6 +131,16 @@ function isSignedDocumentType(value) {
         value === 'comprovante_pagamento' ||
         value === 'boleto_vistoria');
 }
+function parseDocumentSide(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (!normalized) {
+        return null;
+    }
+    if (normalized === 'seller' || normalized === 'buyer') {
+        return normalized;
+    }
+    return null;
+}
 function parseNonNegativeNumber(value, fieldName) {
     const numericValue = typeof value === 'string' ? Number(value.replace(',', '.')) : Number(value);
     if (!Number.isFinite(numericValue) || numericValue < 0) {
@@ -213,10 +223,19 @@ function mapContract(row) {
     };
 }
 function mapDocument(row) {
+    const metadata = parseStoredJsonObject(row.metadata_json);
+    const sideValue = String(metadata.side ?? '').trim().toLowerCase();
+    const side = sideValue === 'seller' || sideValue === 'buyer'
+        ? sideValue
+        : null;
+    const originalFileNameRaw = String(metadata.originalFileName ?? '').trim();
     return {
         id: Number(row.id),
         type: row.type,
         documentType: row.document_type,
+        side,
+        originalFileName: originalFileNameRaw || null,
+        metadata,
         createdAt: toIsoString(row.created_at),
     };
 }
@@ -561,9 +580,11 @@ class ContractController {
             const negotiationIds = rows.map((row) => row.negotiation_id);
             const placeholders = negotiationIds.map(() => '?').join(', ');
             const [documentRows] = await connection_1.default.query(`
-          SELECT id, negotiation_id, type, document_type, created_at
+          SELECT id, negotiation_id, type, document_type, metadata_json, created_at
           FROM negotiation_documents
           WHERE negotiation_id IN (${placeholders})
+            AND COALESCE(document_type, '') <> 'proposal'
+            AND COALESCE(type, '') <> 'proposal'
           ORDER BY created_at DESC, id DESC
         `, negotiationIds);
             const documentsByNegotiation = new Map();
@@ -798,6 +819,7 @@ class ContractController {
         }
         const body = (req.body ?? {});
         const documentTypeRaw = String(body.documentType ?? body.document_type ?? '').trim();
+        const side = parseDocumentSide(body.side);
         if (!(0, contract_types_1.isContractDocumentType)(documentTypeRaw) || !isSignedDocumentType(documentTypeRaw)) {
             return res.status(400).json({
                 error: "documentType inválido. Use contrato_assinado, comprovante_pagamento ou boleto_vistoria.",
@@ -826,10 +848,21 @@ class ContractController {
             negotiation_id,
             type,
             document_type,
+            metadata_json,
             file_content,
             created_at
-          ) VALUES (?, 'contract', ?, ?, CURRENT_TIMESTAMP)
-        `, [contract.negotiation_id, documentTypeRaw, uploadedFile.buffer]);
+          ) VALUES (?, 'contract', ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
+        `, [
+                contract.negotiation_id,
+                documentTypeRaw,
+                JSON.stringify({
+                    side,
+                    originalFileName: uploadedFile.originalname ?? null,
+                    uploadedAt: new Date().toISOString(),
+                    uploadedVia: 'admin',
+                }),
+                uploadedFile.buffer,
+            ]);
             await tx.query(`
           UPDATE contracts
           SET updated_at = CURRENT_TIMESTAMP
@@ -843,6 +876,8 @@ class ContractController {
                     id: Number(insertResult.insertId ?? 0),
                     contractId,
                     documentType: documentTypeRaw,
+                    side,
+                    originalFileName: uploadedFile.originalname ?? null,
                 },
             });
         }
@@ -1025,9 +1060,11 @@ class ContractController {
                 return res.status(403).json({ error: 'Acesso negado ao contrato.' });
             }
             const [documents] = await connection_1.default.query(`
-          SELECT id, type, document_type, created_at
+          SELECT id, type, document_type, metadata_json, created_at
           FROM negotiation_documents
           WHERE negotiation_id = ?
+            AND COALESCE(document_type, '') <> 'proposal'
+            AND COALESCE(type, '') <> 'proposal'
           ORDER BY created_at DESC, id DESC
         `, [contract.negotiation_id]);
             return res.status(200).json({
@@ -1054,9 +1091,11 @@ class ContractController {
                 return res.status(403).json({ error: 'Acesso negado ao contrato.' });
             }
             const [documents] = await connection_1.default.query(`
-          SELECT id, type, document_type, created_at
+          SELECT id, type, document_type, metadata_json, created_at
           FROM negotiation_documents
           WHERE negotiation_id = ?
+            AND COALESCE(document_type, '') <> 'proposal'
+            AND COALESCE(type, '') <> 'proposal'
           ORDER BY created_at DESC, id DESC
         `, [contract.negotiation_id]);
             return res.status(200).json({
@@ -1076,6 +1115,7 @@ class ContractController {
         }
         const body = (req.body ?? {});
         const documentTypeRaw = String(body.documentType ?? body.document_type ?? '').trim();
+        const requestedSide = parseDocumentSide(body.side);
         if (!(0, contract_types_1.isContractDocumentType)(documentTypeRaw)) {
             return res.status(400).json({ error: 'Tipo de documento inválido.' });
         }
@@ -1104,18 +1144,64 @@ class ContractController {
                     });
                 }
             }
+            const doubleEnded = isDoubleEndedDeal(contract);
+            const role = String(req.userRole ?? '').toLowerCase();
+            const canEditSeller = canEditSellerSide(req, contract);
+            const canEditBuyer = canEditBuyerSide(req, contract);
+            const resolvedSide = isSignedDocumentType(documentTypeRaw)
+                ? requestedSide
+                : (() => {
+                    if (requestedSide) {
+                        return requestedSide;
+                    }
+                    if (doubleEnded) {
+                        return 'seller';
+                    }
+                    if (canEditSeller && !canEditBuyer) {
+                        return 'seller';
+                    }
+                    if (canEditBuyer && !canEditSeller) {
+                        return 'buyer';
+                    }
+                    return null;
+                })();
+            if (!isSignedDocumentType(documentTypeRaw) && resolvedSide == null) {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'Informe o lado do documento (side: seller|buyer) para documentos de AWAITING_DOCS.',
+                });
+            }
+            if (resolvedSide === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
+                await tx.rollback();
+                return res.status(403).json({
+                    error: 'Somente o corretor captador pode anexar documentos do lado seller.',
+                });
+            }
+            if (resolvedSide === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
+                await tx.rollback();
+                return res.status(403).json({
+                    error: 'Somente o corretor vendedor pode anexar documentos do lado buyer.',
+                });
+            }
             const [insertResult] = await tx.query(`
           INSERT INTO negotiation_documents (
             negotiation_id,
             type,
             document_type,
+            metadata_json,
             file_content,
             created_at
-          ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ) VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
         `, [
                 contract.negotiation_id,
                 resolveDocumentStorageType(documentTypeRaw),
                 documentTypeRaw,
+                JSON.stringify({
+                    side: resolvedSide,
+                    originalFileName: uploadedFile.originalname ?? null,
+                    uploadedBy: Number(req.userId ?? 0) || null,
+                    uploadedAt: new Date().toISOString(),
+                }),
                 uploadedFile.buffer,
             ]);
             const documentId = Number(insertResult.insertId ?? 0);
@@ -1130,6 +1216,8 @@ class ContractController {
                 document: {
                     id: documentId > 0 ? documentId : null,
                     documentType: documentTypeRaw,
+                    side: resolvedSide,
+                    originalFileName: uploadedFile.originalname ?? null,
                     contractId,
                 },
             });

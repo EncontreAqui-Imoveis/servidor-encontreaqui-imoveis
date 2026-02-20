@@ -100,11 +100,17 @@ export interface NegotiationDocumentsRepository<Tx = OrmTransaction> {
   findById(
     documentId: number,
     trx?: Tx
-  ): Promise<{ fileContent: Buffer; type: string } | null>;
+  ): Promise<{
+    fileContent: Buffer;
+    type: string;
+    documentType?: string | null;
+    metadataJson?: Record<string, unknown>;
+  } | null>;
   saveProposal(
     negotiationId: string,
     pdfBuffer: Buffer,
-    trx?: Tx
+    trx?: Tx,
+    metadataJson?: Record<string, unknown> | null
   ): Promise<number>;
 }
 

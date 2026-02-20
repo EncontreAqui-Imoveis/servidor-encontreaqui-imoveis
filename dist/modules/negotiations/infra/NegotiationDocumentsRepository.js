@@ -31,7 +31,7 @@ class NegotiationDocumentsRepository {
     async findById(documentId, trx) {
         const executor = trx ?? this.executor;
         const sql = `
-      SELECT file_content, type
+      SELECT file_content, type, document_type, metadata_json
       FROM negotiation_documents
       WHERE id = ?
       LIMIT 1
@@ -47,25 +47,55 @@ class NegotiationDocumentsRepository {
         return {
             fileContent,
             type: row.type,
+            documentType: row.document_type ?? null,
+            metadataJson: row.metadata_json && typeof row.metadata_json === 'object'
+                ? row.metadata_json
+                : (() => {
+                    if (typeof row.metadata_json !== 'string') {
+                        return {};
+                    }
+                    try {
+                        const parsed = JSON.parse(row.metadata_json);
+                        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                            ? parsed
+                            : {};
+                    }
+                    catch {
+                        return {};
+                    }
+                })(),
         };
     }
-    async saveProposal(negotiationId, pdfBuffer, trx) {
+    async saveProposal(negotiationId, pdfBuffer, trx, metadataJson) {
         const executor = trx ?? this.executor;
         const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
-      VALUES (?, 'proposal', 'contrato_minuta', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, metadata_json, file_content)
+      VALUES (?, 'proposal', 'contrato_minuta', CAST(? AS JSON), ?)
     `;
-        const result = await executor.execute(sql, [negotiationId, pdfBuffer]);
+        const result = await executor.execute(sql, [
+            negotiationId,
+            JSON.stringify(metadataJson ?? {
+                originalFileName: 'proposta.pdf',
+                generated: true,
+            }),
+            pdfBuffer,
+        ]);
         const header = Array.isArray(result) ? result[0] : result;
         return Number(header?.insertId ?? 0);
     }
-    async saveSignedProposal(negotiationId, pdfBuffer, trx) {
+    async saveSignedProposal(negotiationId, pdfBuffer, trx, metadataJson) {
         const executor = trx ?? this.executor;
         const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, document_type, file_content)
-      VALUES (?, 'other', 'contrato_assinado', ?)
+      INSERT INTO negotiation_documents (negotiation_id, type, document_type, metadata_json, file_content)
+      VALUES (?, 'other', 'contrato_assinado', CAST(? AS JSON), ?)
     `;
-        const result = await executor.execute(sql, [negotiationId, pdfBuffer]);
+        const result = await executor.execute(sql, [
+            negotiationId,
+            JSON.stringify(metadataJson ?? {
+                originalFileName: 'proposta_assinada.pdf',
+            }),
+            pdfBuffer,
+        ]);
         const header = Array.isArray(result) ? result[0] : result;
         return Number(header?.insertId ?? 0);
     }

@@ -33,4 +33,8 @@ contractRoutes.post(
   (req, res) => contractController.uploadDocument(req, res)
 );
 
+contractRoutes.delete('/contracts/:id/documents/:documentId', authMiddleware, (req, res) =>
+  contractController.deleteDocument(req, res)
+);
+
 export default contractRoutes;

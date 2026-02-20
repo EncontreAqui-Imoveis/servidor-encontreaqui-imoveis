@@ -298,6 +298,42 @@ function buildProposalValidityDate(days: number): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function sanitizeDownloadFilename(value: string): string {
+  const sanitized = value
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!sanitized) {
+    return 'documento.pdf';
+  }
+  return sanitized;
+}
+
+function buildAttachmentDisposition(filename: string): string {
+  const safe = sanitizeDownloadFilename(filename);
+  return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
 class NegotiationController {
   async generateProposal(req: AuthRequest, res: Response): Promise<Response> {
     if (!req.userId) {
@@ -338,7 +374,15 @@ class NegotiationController {
       );
 
       const pdfBuffer = await pdfService.generateProposal(proposalData);
-      const documentId = await negotiationDocumentsRepository.saveProposal(negotiationId, pdfBuffer);
+      const documentId = await negotiationDocumentsRepository.saveProposal(
+        negotiationId,
+        pdfBuffer,
+        undefined,
+        {
+          originalFileName: 'proposta.pdf',
+          generated: true,
+        }
+      );
 
       return res.status(201).json({
         id: documentId,
@@ -586,7 +630,11 @@ class NegotiationController {
       const documentId = await negotiationDocumentsRepository.saveProposal(
         negotiationId,
         pdfBuffer,
-        tx as unknown as SqlExecutor
+        tx as unknown as SqlExecutor,
+        {
+          originalFileName: 'proposta.pdf',
+          generated: true,
+        }
       );
 
       await tx.commit();
@@ -678,7 +726,12 @@ class NegotiationController {
       const documentId = await negotiationDocumentsRepository.saveSignedProposal(
         negotiationId,
         uploadedFile.buffer,
-        tx as unknown as SqlExecutor
+        tx as unknown as SqlExecutor,
+        {
+          originalFileName: uploadedFile.originalname ?? 'proposta_assinada.pdf',
+          uploadedBy: Number(req.userId ?? 0) || null,
+          uploadedAt: new Date().toISOString(),
+        }
       );
 
       await tx.execute(
@@ -767,8 +820,17 @@ class NegotiationController {
           ? 'application/pdf'
           : 'application/octet-stream';
 
+      const metadata = parseJsonObjectSafe(document.metadataJson);
+      const originalFileName = String(metadata.originalFileName ?? '').trim();
+      const fallbackPrefix = String(document.documentType ?? document.type ?? 'documento')
+        .trim()
+        .toLowerCase();
+      const extension = contentType === 'application/pdf' ? '.pdf' : '';
+      const fallbackName = `${fallbackPrefix || 'documento'}_${documentId}${extension}`;
+      const filename = originalFileName || fallbackName;
+
       res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `attachment; filename="document_${documentId}.pdf"`);
+      res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
       res.setHeader('Content-Length', document.fileContent.length.toString());
 
       return res.send(document.fileContent);

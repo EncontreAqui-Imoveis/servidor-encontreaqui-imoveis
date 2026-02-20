@@ -480,7 +480,49 @@ interface ExistingContractByNegotiationRow extends RowDataPacket {
 
 interface AdminNegotiationDocumentRow extends RowDataPacket {
   id: number;
+  type: string | null;
+  document_type: string | null;
+  metadata_json: unknown;
   file_content: Buffer | Uint8Array | null;
+}
+
+function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function sanitizeDownloadFilename(value: string): string {
+  const sanitized = value
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!sanitized) {
+    return 'documento.pdf';
+  }
+  return sanitized;
+}
+
+function buildAttachmentDisposition(filename: string): string {
+  const safe = sanitizeDownloadFilename(filename);
+  return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
 }
 
 function parseNegotiationStatusFilter(value: unknown): string | null {
@@ -912,7 +954,8 @@ class AdminController {
           await createUserNotification({
             type: 'negotiation',
             title: 'Proposta Aprovada!',
-            message: `Sua proposta para o imóvel ${propertyTitle} foi aprovada pela administração. O imóvel agora está Em Negociação.`,
+            message:
+              'Sua proposta foi aprovada! Acesse a aba Contratos no aplicativo para enviar a documentação.',
             recipientId: recipientBrokerId,
             relatedEntityId: Number(negotiation.property_id),
             metadata: {
@@ -1238,7 +1281,7 @@ class AdminController {
     try {
       const [rows] = await connection.query<AdminNegotiationDocumentRow[]>(
         `
-          SELECT id, file_content
+          SELECT id, type, document_type, metadata_json, file_content
           FROM negotiation_documents
           WHERE negotiation_id = ? AND type = 'other'
           ORDER BY created_at DESC, id DESC
@@ -1256,8 +1299,17 @@ class AdminController {
         ? document.file_content
         : Buffer.from(document.file_content);
 
+      const metadata = parseJsonObjectSafe(document.metadata_json);
+      const originalFileName = String(metadata.originalFileName ?? '').trim();
+      const fallbackType = String(document.document_type ?? document.type ?? 'proposta_assinada')
+        .trim()
+        .toLowerCase();
+      const filename =
+        originalFileName ||
+        `${fallbackType || 'proposta_assinada'}_${negotiationId}.pdf`;
+
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="proposta_assinada_${negotiationId}.pdf"`);
+      res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
       res.setHeader('Content-Length', fileContent.length.toString());
 
       return res.status(200).send(fileContent);

@@ -239,6 +239,13 @@ function mapDocument(row) {
         createdAt: toIsoString(row.created_at),
     };
 }
+function isProposalDocument(document) {
+    const normalizedDocumentType = String(document.document_type ?? document.documentType ?? '')
+        .trim()
+        .toLowerCase();
+    const normalizedType = String(document.type ?? '').trim().toLowerCase();
+    return normalizedDocumentType === 'proposal' || normalizedType === 'proposal';
+}
 function resolveDocumentStorageType(documentType) {
     if (documentType === 'contrato_minuta' || documentType === 'contrato_assinado') {
         return 'contract';
@@ -589,6 +596,9 @@ class ContractController {
         `, negotiationIds);
             const documentsByNegotiation = new Map();
             for (const documentRow of documentRows) {
+                if (isProposalDocument(documentRow)) {
+                    continue;
+                }
                 const negotiationId = String(documentRow.negotiation_id);
                 const docs = documentsByNegotiation.get(negotiationId) ?? [];
                 docs.push({
@@ -1069,7 +1079,9 @@ class ContractController {
         `, [contract.negotiation_id]);
             return res.status(200).json({
                 contract: mapContract(contract),
-                documents: documents.map(mapDocument),
+                documents: documents
+                    .filter((document) => !isProposalDocument(document))
+                    .map(mapDocument),
             });
         }
         catch (error) {
@@ -1100,7 +1112,9 @@ class ContractController {
         `, [contract.negotiation_id]);
             return res.status(200).json({
                 contract: mapContract(contract),
-                documents: documents.map(mapDocument),
+                documents: documents
+                    .filter((document) => !isProposalDocument(document))
+                    .map(mapDocument),
             });
         }
         catch (error) {

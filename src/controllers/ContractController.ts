@@ -406,6 +406,20 @@ function mapDocument(row: ContractDocumentRow) {
   };
 }
 
+function isProposalDocument(document: {
+  document_type?: string | null;
+  type?: string | null;
+  documentType?: string | null;
+}): boolean {
+  const normalizedDocumentType = String(
+    document.document_type ?? document.documentType ?? ''
+  )
+    .trim()
+    .toLowerCase();
+  const normalizedType = String(document.type ?? '').trim().toLowerCase();
+  return normalizedDocumentType === 'proposal' || normalizedType === 'proposal';
+}
+
 type AdminContractDocument = ReturnType<typeof mapDocument> & {
   downloadUrl: string;
 };
@@ -858,6 +872,9 @@ class ContractController {
 
       const documentsByNegotiation = new Map<string, AdminContractDocument[]>();
       for (const documentRow of documentRows) {
+        if (isProposalDocument(documentRow)) {
+          continue;
+        }
         const negotiationId = String(documentRow.negotiation_id);
         const docs = documentsByNegotiation.get(negotiationId) ?? [];
         docs.push({
@@ -1462,7 +1479,9 @@ class ContractController {
 
       return res.status(200).json({
         contract: mapContract(contract),
-        documents: documents.map(mapDocument),
+        documents: documents
+          .filter((document) => !isProposalDocument(document))
+          .map(mapDocument),
       });
     } catch (error) {
       console.error('Erro ao buscar contrato:', error);
@@ -1500,7 +1519,9 @@ class ContractController {
 
       return res.status(200).json({
         contract: mapContract(contract),
-        documents: documents.map(mapDocument),
+        documents: documents
+          .filter((document) => !isProposalDocument(document))
+          .map(mapDocument),
       });
     } catch (error) {
       console.error('Erro ao buscar contrato por negociação:', error);

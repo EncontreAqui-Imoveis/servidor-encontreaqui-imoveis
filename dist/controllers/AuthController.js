@@ -148,6 +148,7 @@ class AuthController {
     }
     async requestPasswordReset(req, res) {
         const email = String(req.body?.email ?? '').trim().toLowerCase();
+        const genericMessage = 'Se o email informado existir, as instrucoes de recuperacao serao enviadas.';
         if (!email) {
             return res.status(400).json({ error: 'Email e obrigatorio.' });
         }
@@ -155,8 +156,7 @@ class AuthController {
             // 1. Check if user exists in SQL
             const [rows] = await connection_1.default.query('SELECT id, name, firebase_uid FROM users WHERE email = ? LIMIT 1', [email]);
             if (rows.length === 0) {
-                // Security: Don't reveal if user doesn't exist, but for now we follow existing pattern
-                return res.status(404).json({ error: 'Email nao encontrado.' });
+                return res.status(200).json({ message: genericMessage });
             }
             const user = rows[0];
             // 2. If user is Legacy (no firebase_uid), migrate them NOW.
@@ -190,7 +190,7 @@ class AuthController {
                 }
             }
             // 3. Respond OK so Frontend can trigger the Firebase SDK email
-            return res.status(200).json({ message: 'Usuario pronto para reset via Firebase.' });
+            return res.status(200).json({ message: genericMessage });
         }
         catch (error) {
             console.error('Erro ao solicitar reset de senha:', error);
@@ -503,12 +503,10 @@ class AuthController {
         }
         catch (error) {
             console.error('Google auth error:', error);
-            const details = error?.sqlMessage || error?.message || String(error);
-            const message = String(details).toLowerCase();
-            const status = message.includes('timeout') ? 504 : 500;
+            const details = String(error?.sqlMessage || error?.message || '').toLowerCase();
+            const status = details.includes('timeout') ? 504 : 500;
             return res.status(status).json({
                 error: 'Erro ao autenticar com Google.',
-                details,
             });
         }
     }

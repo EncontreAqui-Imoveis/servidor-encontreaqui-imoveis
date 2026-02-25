@@ -53,6 +53,23 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
 ]);
 
 const MAX_IMAGES_PER_PROPERTY = 20;
+const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
+  'title',
+  'description',
+  'address',
+  'city',
+  'state',
+  'bairro',
+  'code',
+  'quadra',
+  'lote',
+  'complemento',
+  'owner_name',
+  'cep',
+  'visibility',
+  'lifecycle_status',
+  'video_url',
+]);
 
 const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -1883,6 +1900,9 @@ class PropertyController {
             break;
           }
           default: {
+            if (!ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS.has(key)) {
+              continue;
+            }
             fields.push(`\`${key}\` = ?`);
             values.push(stringOrNull(body[key]));
           }

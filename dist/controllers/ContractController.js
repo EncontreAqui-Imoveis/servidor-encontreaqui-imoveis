@@ -1010,16 +1010,22 @@ class ContractController {
                 });
             }
             const [signedDocRows] = await tx.query(`
-          SELECT COUNT(*) AS total
+          SELECT
+            SUM(CASE WHEN document_type = 'contrato_assinado' THEN 1 ELSE 0 END) AS signed_contract_total,
+            SUM(CASE WHEN document_type = 'comprovante_pagamento' THEN 1 ELSE 0 END) AS payment_receipt_total,
+            SUM(CASE WHEN document_type = 'boleto_vistoria' THEN 1 ELSE 0 END) AS inspection_boleto_total
           FROM negotiation_documents
           WHERE negotiation_id = ?
-            AND document_type IN ('contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria')
         `, [contract.negotiation_id]);
-            const signedDocsCount = Number(signedDocRows[0]?.total ?? 0);
-            if (signedDocsCount <= 0) {
+            const signedContractCount = Number(signedDocRows[0]?.signed_contract_total ?? 0);
+            const paymentReceiptCount = Number(signedDocRows[0]?.payment_receipt_total ?? 0);
+            const inspectionBoletoCount = Number(signedDocRows[0]?.inspection_boleto_total ?? 0);
+            const hasSignedContract = signedContractCount > 0;
+            const hasPaymentProof = paymentReceiptCount > 0 || inspectionBoletoCount > 0;
+            if (!hasSignedContract || !hasPaymentProof) {
                 await tx.rollback();
                 return res.status(400).json({
-                    error: 'Anexe ao menos um contrato assinado ou comprovante antes de finalizar.',
+                    error: 'Anexe contrato assinado e comprovante de pagamento (ou boleto de vistoria) antes de finalizar.',
                 });
             }
             const finalStatuses = resolveFinalDealStatuses(contract.property_purpose);
@@ -1199,6 +1205,24 @@ class ContractController {
                 return res.status(403).json({
                     error: 'Somente o corretor vendedor pode anexar documentos do lado buyer.',
                 });
+            }
+            if (!isSignedDocumentType(documentTypeRaw) && role !== 'admin') {
+                const sellerStatus = resolveContractApprovalStatus(contract.seller_approval_status);
+                const buyerStatus = resolveContractApprovalStatus(contract.buyer_approval_status);
+                if (resolvedSide === 'seller' &&
+                    !approvalStatusAllowsEditing(sellerStatus)) {
+                    await tx.rollback();
+                    return res.status(403).json({
+                        error: 'Documentos do lado seller não podem ser enviados após aprovação.',
+                    });
+                }
+                if (resolvedSide === 'buyer' &&
+                    !approvalStatusAllowsEditing(buyerStatus)) {
+                    await tx.rollback();
+                    return res.status(403).json({
+                        error: 'Documentos do lado buyer não podem ser enviados após aprovação.',
+                    });
+                }
             }
             const [insertResult] = await tx.query(`
           INSERT INTO negotiation_documents (
@@ -1390,6 +1414,8 @@ class ContractController {
                 return res.status(403).json({ error: 'Acesso negado ao contrato.' });
             }
             const doubleEnded = isDoubleEndedDeal(contract);
+            const role = String(req.userRole ?? '').toLowerCase();
+            const isAdmin = role === 'admin';
             const canEditSeller = canEditSellerSide(req, contract);
             const canEditBuyer = canEditBuyerSide(req, contract);
             if (sellerPatch && !canEditSeller && !doubleEnded) {
@@ -1404,9 +1430,22 @@ class ContractController {
                     error: 'Somente o corretor vendedor pode editar buyerInfo.',
                 });
             }
+            const sellerStatus = resolveContractApprovalStatus(contract.seller_approval_status);
+            const buyerStatus = resolveContractApprovalStatus(contract.buyer_approval_status);
+            if (sellerPatch && !approvalStatusAllowsEditing(sellerStatus) && !isAdmin) {
+                await tx.rollback();
+                return res.status(403).json({
+                    error: 'Dados do lado seller não podem ser alterados após aprovação.',
+                });
+            }
+            if (buyerPatch && !approvalStatusAllowsEditing(buyerStatus) && !isAdmin) {
+                await tx.rollback();
+                return res.status(403).json({
+                    error: 'Dados do lado buyer não podem ser alterados após aprovação.',
+                });
+            }
             if (doubleEnded) {
                 const userId = Number(req.userId);
-                const isAdmin = String(req.userRole ?? '').toLowerCase() === 'admin';
                 const sameBrokerId = Number(contract.capturing_broker_id ?? 0);
                 if (!isAdmin && userId !== sameBrokerId) {
                     await tx.rollback();
@@ -1417,8 +1456,8 @@ class ContractController {
             }
             const sellerInfo = parseStoredJsonObject(contract.seller_info);
             const buyerInfo = parseStoredJsonObject(contract.buyer_info);
-            const nextSellerInfo = sellerPatch ? { ...sellerInfo, ...sellerPatch } : sellerInfo;
-            const nextBuyerInfo = buyerPatch ? { ...buyerInfo, ...buyerPatch } : buyerInfo;
+            const nextSellerInfo = sellerPatch ?? sellerInfo;
+            const nextBuyerInfo = buyerPatch ?? buyerInfo;
             await tx.query(`
           UPDATE contracts
           SET

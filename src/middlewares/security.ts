@@ -73,15 +73,36 @@ export function enforceHttps(
 }
 
 export function buildCorsOptions(): CorsOptions {
-  const allowedOrigins = (process.env.CORS_ORIGINS ?? '')
+  const nodeEnv = String(process.env.NODE_ENV ?? 'development').trim().toLowerCase();
+  const configuredOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((origin) => normalizeOrigin(origin))
     .filter((origin) => origin.length > 0);
-  const allowedOriginSet = new Set(allowedOrigins);
+  const defaultLocalOrigins = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:4173',
+    'http://127.0.0.1:4173',
+  ];
+  const allowedOrigins =
+    configuredOrigins.length > 0
+      ? configuredOrigins
+      : nodeEnv === 'production'
+        ? []
+        : defaultLocalOrigins;
+  const allowedOriginSet = new Set(allowedOrigins.map((origin) => normalizeOrigin(origin)));
 
   if (allowedOrigins.length === 0) {
     return {
-      origin: true,
+      origin: (origin, callback) => {
+        if (!origin) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
       credentials: true,
     };
   }

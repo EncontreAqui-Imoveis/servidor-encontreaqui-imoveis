@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import type { Server } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -7,12 +8,14 @@ import mainRoutes from './routes';
 import publicRoutes from './routes/public.routes';
 import { applyMigrations } from './database/migrations';
 import { runSqlMigrations } from './database/migrationRunner';
+import { globalErrorHandler, notFoundHandler } from './middlewares/errorHandler';
 import {
   buildCorsOptions,
   enforceHttps,
   securityHeaders,
 } from './middlewares/security';
 import { requestSanitizer } from './middlewares/requestSanitizer';
+import { tempUploadCleanup } from './middlewares/tempUploadCleanup';
 import { patchConsoleRedaction, redactValue } from './utils/logSanitizer';
 
 const app = express();
@@ -57,17 +60,18 @@ app.use(cors(buildCorsOptions()));
 app.use(apiRateLimiter);
 
 app.use(express.json({
-  limit: '10mb',
+  limit: '2mb',
   type: 'application/json'
 }));
 
 app.use(express.urlencoded({
   extended: true,
-  limit: '10mb',
-  parameterLimit: 10000,
+  limit: '2mb',
+  parameterLimit: 1000,
   type: 'application/x-www-form-urlencoded'
 }));
 app.use(requestSanitizer);
+app.use(tempUploadCleanup);
 
 app.use(mainRoutes);
 app.use(publicRoutes);
@@ -80,25 +84,60 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (err.type === 'request.aborted' || err.code === 'ECONNRESET') {
-    return res.status(400).json({ error: 'Request aborted' });
-  }
-  console.error('Unhandled error:', redactValue(err));
-  return res.status(500).json({ error: 'Internal Server Error' });
-});
+app.use(notFoundHandler);
+app.use(globalErrorHandler);
 
 async function startServer() {
   await applyMigrations();
   await runSqlMigrations('up');
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
   });
+
+  setupProcessHandlers(server);
 }
 
 export { app };
 
 if (require.main === module) {
-  void startServer();
+  void startServer().catch((error) => {
+    console.error('Falha ao iniciar servidor:', redactValue(error));
+    process.exit(1);
+  });
+}
+
+let isShuttingDown = false;
+
+function setupProcessHandlers(server: Server) {
+  const gracefulShutdown = (reason: string, error?: unknown) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    if (error) {
+      console.error(
+        `Encerrando servidor por ${reason}:`,
+        redactValue(error)
+      );
+    } else {
+      console.warn(`Encerrando servidor por ${reason}.`);
+    }
+
+    server.close(() => {
+      process.exit(error ? 1 : 0);
+    });
+
+    setTimeout(() => {
+      process.exit(error ? 1 : 0);
+    }, 10000).unref();
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('uncaughtException', (error) => {
+    gracefulShutdown('uncaughtException', error);
+  });
+  process.on('unhandledRejection', (reason) => {
+    gracefulShutdown('unhandledRejection', reason);
+  });
 }

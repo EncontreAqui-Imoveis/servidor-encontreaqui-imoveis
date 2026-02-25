@@ -126,6 +126,9 @@ function normalizeApprovalReason(reason, evaluatedBy) {
 function approvalStatusAllowsProgress(status) {
     return APPROVAL_GRANTS_PROGRESS.has(status);
 }
+function approvalStatusAllowsEditing(status) {
+    return status === 'PENDING' || status === 'REJECTED';
+}
 function isSignedDocumentType(value) {
     return (value === 'contrato_assinado' ||
         value === 'comprovante_pagamento' ||
@@ -1240,6 +1243,110 @@ class ContractController {
             await tx.rollback();
             console.error('Erro ao enviar documento do contrato:', error);
             return res.status(500).json({ error: 'Falha ao enviar documento.' });
+        }
+        finally {
+            tx.release();
+        }
+    }
+    async deleteDocument(req, res) {
+        const contractId = String(req.params.id ?? '').trim();
+        if (!contractId) {
+            return res.status(400).json({ error: 'ID do contrato inválido.' });
+        }
+        const documentId = Number(req.params.documentId);
+        if (!Number.isFinite(documentId) || documentId <= 0) {
+            return res.status(400).json({ error: 'ID do documento inválido.' });
+        }
+        const tx = await connection_1.default.getConnection();
+        try {
+            await tx.beginTransaction();
+            const contract = await fetchContractForUpdate(tx, contractId);
+            if (!contract) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Contrato não encontrado.' });
+            }
+            if (!canAccessContract(req, contract)) {
+                await tx.rollback();
+                return res.status(403).json({ error: 'Acesso negado ao contrato.' });
+            }
+            const [documentRows] = await tx.query(`
+          SELECT id, type, document_type, metadata_json
+          FROM negotiation_documents
+          WHERE id = ? AND negotiation_id = ?
+          LIMIT 1
+          FOR UPDATE
+        `, [documentId, contract.negotiation_id]);
+            const document = documentRows[0];
+            if (!document) {
+                await tx.rollback();
+                return res.status(404).json({ error: 'Documento não encontrado.' });
+            }
+            const metadata = parseStoredJsonObject(document.metadata_json);
+            const side = parseDocumentSide(metadata.side);
+            const documentType = String(document.document_type ?? '').trim().toLowerCase();
+            const signedDocument = isSignedDocumentType(documentType);
+            const role = String(req.userRole ?? '').toLowerCase();
+            const canEditSeller = canEditSellerSide(req, contract);
+            const canEditBuyer = canEditBuyerSide(req, contract);
+            const doubleEnded = isDoubleEndedDeal(contract);
+            if (side === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
+                await tx.rollback();
+                return res.status(403).json({
+                    error: 'Somente o corretor captador pode remover documentos do lado seller.',
+                });
+            }
+            if (side === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
+                await tx.rollback();
+                return res.status(403).json({
+                    error: 'Somente o corretor vendedor pode remover documentos do lado buyer.',
+                });
+            }
+            if (!signedDocument) {
+                const sellerStatus = resolveContractApprovalStatus(contract.seller_approval_status);
+                const buyerStatus = resolveContractApprovalStatus(contract.buyer_approval_status);
+                if (side === 'seller' && !approvalStatusAllowsEditing(sellerStatus)) {
+                    await tx.rollback();
+                    return res.status(403).json({
+                        error: 'Documentos do lado seller não podem ser removidos após aprovação.',
+                    });
+                }
+                if (side === 'buyer' && !approvalStatusAllowsEditing(buyerStatus)) {
+                    await tx.rollback();
+                    return res.status(403).json({
+                        error: 'Documentos do lado buyer não podem ser removidos após aprovação.',
+                    });
+                }
+                if (side == null) {
+                    const canEditAtLeastOneSide = approvalStatusAllowsEditing(sellerStatus) ||
+                        approvalStatusAllowsEditing(buyerStatus);
+                    if (!canEditAtLeastOneSide) {
+                        await tx.rollback();
+                        return res.status(403).json({
+                            error: 'Documento não pode ser removido após aprovação.',
+                        });
+                    }
+                }
+            }
+            await tx.query(`
+          DELETE FROM negotiation_documents
+          WHERE id = ? AND negotiation_id = ?
+          LIMIT 1
+        `, [documentId, contract.negotiation_id]);
+            await tx.query(`
+          UPDATE contracts
+          SET updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [contractId]);
+            await tx.commit();
+            return res.status(200).json({
+                message: 'Documento removido com sucesso.',
+                documentId,
+            });
+        }
+        catch (error) {
+            await tx.rollback();
+            console.error('Erro ao remover documento do contrato:', error);
+            return res.status(500).json({ error: 'Falha ao remover documento.' });
         }
         finally {
             tx.release();

@@ -37,6 +37,8 @@ describe('NegotiationController.downloadDocument', () => {
     vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue({
       fileContent,
       type: 'proposal',
+      documentType: 'proposal',
+      metadataJson: {},
     });
 
     const req = {
@@ -52,7 +54,7 @@ describe('NegotiationController.downloadDocument', () => {
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
     expect(res.setHeader).toHaveBeenCalledWith(
       'Content-Disposition',
-      'attachment; filename="document_123.pdf"'
+      'attachment; filename="proposal_123.pdf"; filename*=UTF-8\'\'proposal_123.pdf'
     );
     expect(res.setHeader).toHaveBeenCalledWith('Content-Length', fileContent.length.toString());
     expect(res.send).toHaveBeenCalledWith(fileContent);
@@ -79,4 +81,3 @@ describe('NegotiationController.downloadDocument', () => {
     );
   });
 });
-

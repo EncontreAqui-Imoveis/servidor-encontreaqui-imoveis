@@ -1631,6 +1631,35 @@ class ContractController {
         });
       }
 
+      if (!isSignedDocumentType(documentTypeRaw) && role !== 'admin') {
+        const sellerStatus = resolveContractApprovalStatus(
+          contract.seller_approval_status
+        );
+        const buyerStatus = resolveContractApprovalStatus(
+          contract.buyer_approval_status
+        );
+
+        if (
+          resolvedSide === 'seller' &&
+          !approvalStatusAllowsEditing(sellerStatus)
+        ) {
+          await tx.rollback();
+          return res.status(403).json({
+            error: 'Documentos do lado seller não podem ser enviados após aprovação.',
+          });
+        }
+
+        if (
+          resolvedSide === 'buyer' &&
+          !approvalStatusAllowsEditing(buyerStatus)
+        ) {
+          await tx.rollback();
+          return res.status(403).json({
+            error: 'Documentos do lado buyer não podem ser enviados após aprovação.',
+          });
+        }
+      }
+
       const [insertResult] = await tx.query<ResultSetHeader>(
         `
           INSERT INTO negotiation_documents (
@@ -1863,6 +1892,8 @@ class ContractController {
       }
 
       const doubleEnded = isDoubleEndedDeal(contract);
+      const role = String(req.userRole ?? '').toLowerCase();
+      const isAdmin = role === 'admin';
       const canEditSeller = canEditSellerSide(req, contract);
       const canEditBuyer = canEditBuyerSide(req, contract);
 
@@ -1880,9 +1911,29 @@ class ContractController {
         });
       }
 
+      const sellerStatus = resolveContractApprovalStatus(
+        contract.seller_approval_status
+      );
+      const buyerStatus = resolveContractApprovalStatus(
+        contract.buyer_approval_status
+      );
+
+      if (sellerPatch && !approvalStatusAllowsEditing(sellerStatus) && !isAdmin) {
+        await tx.rollback();
+        return res.status(403).json({
+          error: 'Dados do lado seller não podem ser alterados após aprovação.',
+        });
+      }
+
+      if (buyerPatch && !approvalStatusAllowsEditing(buyerStatus) && !isAdmin) {
+        await tx.rollback();
+        return res.status(403).json({
+          error: 'Dados do lado buyer não podem ser alterados após aprovação.',
+        });
+      }
+
       if (doubleEnded) {
         const userId = Number(req.userId);
-        const isAdmin = String(req.userRole ?? '').toLowerCase() === 'admin';
         const sameBrokerId = Number(contract.capturing_broker_id ?? 0);
         if (!isAdmin && userId !== sameBrokerId) {
           await tx.rollback();
@@ -1896,8 +1947,8 @@ class ContractController {
       const sellerInfo = parseStoredJsonObject(contract.seller_info);
       const buyerInfo = parseStoredJsonObject(contract.buyer_info);
 
-      const nextSellerInfo = sellerPatch ? { ...sellerInfo, ...sellerPatch } : sellerInfo;
-      const nextBuyerInfo = buyerPatch ? { ...buyerInfo, ...buyerPatch } : buyerInfo;
+      const nextSellerInfo = sellerPatch ?? sellerInfo;
+      const nextBuyerInfo = buyerPatch ?? buyerInfo;
 
       await tx.query(
         `

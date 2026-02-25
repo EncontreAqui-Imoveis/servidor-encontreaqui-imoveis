@@ -11,4 +11,5 @@ contractRoutes.get('/contracts/:id', auth_1.authMiddleware, (req, res) => Contra
 contractRoutes.get('/contracts/negotiation/:negotiationId', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.getByNegotiationId(req, res));
 contractRoutes.put('/contracts/:id/data', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.updateData(req, res));
 contractRoutes.post('/contracts/:id/documents', auth_1.authMiddleware, uploadMiddleware_1.contractDocumentUpload.single('file'), (req, res) => ContractController_1.contractController.uploadDocument(req, res));
+contractRoutes.delete('/contracts/:id/documents/:documentId', auth_1.authMiddleware, (req, res) => ContractController_1.contractController.deleteDocument(req, res));
 exports.default = contractRoutes;

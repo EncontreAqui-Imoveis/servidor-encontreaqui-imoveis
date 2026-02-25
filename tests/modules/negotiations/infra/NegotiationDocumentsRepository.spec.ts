@@ -11,6 +11,8 @@ describe('NegotiationDocumentsRepository.findById', () => {
         {
           file_content: expectedBuffer,
           type: 'proposal',
+          document_type: null,
+          metadata_json: null,
         },
       ],
       {},
@@ -28,6 +30,8 @@ describe('NegotiationDocumentsRepository.findById', () => {
     expect(result).toEqual({
       fileContent: expectedBuffer,
       type: 'proposal',
+      documentType: null,
+      metadataJson: {},
     });
     expect(Buffer.isBuffer(result?.fileContent)).toBe(true);
   });

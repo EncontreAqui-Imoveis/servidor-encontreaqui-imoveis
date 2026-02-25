@@ -1394,19 +1394,28 @@ class ContractController {
 
       const [signedDocRows] = await tx.query<RowDataPacket[]>(
         `
-          SELECT COUNT(*) AS total
+          SELECT
+            SUM(CASE WHEN document_type = 'contrato_assinado' THEN 1 ELSE 0 END) AS signed_contract_total,
+            SUM(CASE WHEN document_type = 'comprovante_pagamento' THEN 1 ELSE 0 END) AS payment_receipt_total,
+            SUM(CASE WHEN document_type = 'boleto_vistoria' THEN 1 ELSE 0 END) AS inspection_boleto_total
           FROM negotiation_documents
           WHERE negotiation_id = ?
-            AND document_type IN ('contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria')
         `,
         [contract.negotiation_id]
       );
-      const signedDocsCount = Number(signedDocRows[0]?.total ?? 0);
-      if (signedDocsCount <= 0) {
+      const signedContractCount = Number(signedDocRows[0]?.signed_contract_total ?? 0);
+      const paymentReceiptCount = Number(signedDocRows[0]?.payment_receipt_total ?? 0);
+      const inspectionBoletoCount = Number(
+        signedDocRows[0]?.inspection_boleto_total ?? 0
+      );
+      const hasSignedContract = signedContractCount > 0;
+      const hasPaymentProof = paymentReceiptCount > 0 || inspectionBoletoCount > 0;
+
+      if (!hasSignedContract || !hasPaymentProof) {
         await tx.rollback();
         return res.status(400).json({
           error:
-            'Anexe ao menos um contrato assinado ou comprovante antes de finalizar.',
+            'Anexe contrato assinado e comprovante de pagamento (ou boleto de vistoria) antes de finalizar.',
         });
       }
 

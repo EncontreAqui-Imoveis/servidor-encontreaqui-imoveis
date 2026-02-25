@@ -167,6 +167,11 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     expect(contractState?.sellerApprovalStatus).toBe('PENDING');
     expect(contractState?.buyerApprovalStatus).toBe('PENDING');
     expect(contractInsertCount).toBe(1);
+    const propertyMoveCalls = txMock.query.mock.calls.filter(([sql]) =>
+      String(sql).includes("UPDATE properties") &&
+      String(sql).includes("SET status = 'negociacao'")
+    );
+    expect(propertyMoveCalls).toHaveLength(1);
   });
 
   it('is idempotent and keeps only one contract when approve is called twice', async () => {

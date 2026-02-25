@@ -1,8 +1,56 @@
-﻿import multer, { FileFilterCallback } from 'multer';
+import { randomUUID } from 'crypto';
+import fs from 'fs';
+import multer, { FileFilterCallback } from 'multer';
+import os from 'os';
 import path from 'path';
 
-// --- Storage in memory (you can switch to disk/S3 later)
-const storage = multer.memoryStorage();
+const ONE_MB_IN_BYTES = 1024 * 1024;
+
+function parsePositiveEnvNumber(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+const MAX_MEDIA_FILE_MB = parsePositiveEnvNumber('UPLOAD_MAX_MEDIA_MB', 25);
+const MAX_BROKER_DOC_FILE_MB = parsePositiveEnvNumber(
+  'UPLOAD_MAX_BROKER_DOC_MB',
+  5
+);
+const MAX_SIGNED_PROPOSAL_FILE_MB = parsePositiveEnvNumber(
+  'UPLOAD_MAX_SIGNED_PROPOSAL_MB',
+  5
+);
+const MAX_CONTRACT_DRAFT_FILE_MB = parsePositiveEnvNumber(
+  'UPLOAD_MAX_CONTRACT_DRAFT_MB',
+  5
+);
+const MAX_CONTRACT_DOCUMENT_FILE_MB = parsePositiveEnvNumber(
+  'UPLOAD_MAX_CONTRACT_DOCUMENT_MB',
+  5
+);
+
+export const MEDIA_UPLOAD_DIR = path.join(
+  os.tmpdir(),
+  'conectimovel-media-upload'
+);
+fs.mkdirSync(MEDIA_UPLOAD_DIR, { recursive: true });
+
+// Large media uploads stay on disk to reduce memory pressure.
+const mediaStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, MEDIA_UPLOAD_DIR);
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    cb(null, `${Date.now()}-${randomUUID()}${ext}`);
+  },
+});
+
+// Small document uploads can stay in memory for BLOB/PDF flows.
+const documentStorage = multer.memoryStorage();
 
 // Accepted types
 const allowedImageSubtypes = new Set(['jpeg', 'jpg', 'png', 'webp']);
@@ -10,14 +58,12 @@ const blockedImageMimes = new Set(['image/svg+xml', 'image/gif']);
 const blockedImageExtensions = new Set(['svg', 'svgz', 'gif']);
 const allowedVideoMime = new Set([
   'video/mp4',
-  'video/quicktime',   // iOS .mov
-  'video/x-msvideo',   // .avi
+  'video/quicktime',
+  'video/x-msvideo',
   'video/webm',
-  'video/3gpp',        // Android
+  'video/3gpp',
 ]);
 
-
-// Helpers
 function getExtLower(filename: string): string {
   return path.extname(filename || '').toLowerCase().replace(/^\./, '');
 }
@@ -35,17 +81,17 @@ function isAllowedImage(mime: string, originalname: string): boolean {
     if (allowedImageSubtypes.has(subtype)) return true;
     return allowedImageSubtypes.has(ext);
   }
-  // When the device sends empty or octet-stream, fall back to extension
+
   if (!normalized || normalized === 'application/octet-stream') {
     return allowedImageSubtypes.has(ext);
   }
+
   return false;
 }
 
 function isAllowedVideo(mime: string, originalname: string): boolean {
   const normalized = (mime || '').toLowerCase();
   if (allowedVideoMime.has(normalized)) return true;
-  // Fallback by extension for inconsistent devices
   const ext = getExtLower(originalname);
   return ['mp4', 'mov', 'avi', 'webm', '3gp'].includes(ext);
 }
@@ -65,23 +111,24 @@ function isAllowedContractDocument(mime: string, originalname: string): boolean 
 }
 
 export const mediaUpload = multer({
-  storage,
+  storage: mediaStorage,
   limits: {
-    fileSize: 110 * 1024 * 1024, // aceita vídeos até 100MB com folga
-    files: 21,                   // 20 imagens + 1 vídeo
+    fileSize: MAX_MEDIA_FILE_MB * ONE_MB_IN_BYTES,
+    files: 21,
+    fields: 50,
+    fieldSize: ONE_MB_IN_BYTES,
+    parts: 80,
   },
-  fileFilter: (req, file, cb: FileFilterCallback) => {
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
     const field = file.fieldname;
     const mime = (file.mimetype || '').toLowerCase();
     const name = file.originalname || '';
-
-    console.log(`[upload] field=${field} mimetype=${mime} name=${name}`);
 
     if (field === 'images' || field === 'images[]' || field.startsWith('images')) {
       if (isAllowedImage(mime, name)) {
         cb(null, true);
       } else {
-        cb(new Error('Formato de arquivo não suportado. Use apenas JPG, PNG ou WEBP.'));
+        cb(new Error('Formato de arquivo nao suportado. Use apenas JPG, PNG ou WEBP.'));
       }
       return;
     }
@@ -90,48 +137,52 @@ export const mediaUpload = multer({
       if (isAllowedVideo(mime, name)) {
         cb(null, true);
       } else {
-        cb(new Error('Tipo de video nao suportado'));
+        cb(new Error('Tipo de video nao suportado.'));
       }
       return;
     }
 
-    cb(new Error('Campo de upload invalido'));
+    cb(new Error('Campo de upload invalido.'));
   },
 });
 
 export const brokerDocsUpload = multer({
-  storage,
+  storage: documentStorage,
   limits: {
-    fileSize: 10 * 1024 * 1024, 
-    files: 3, 
+    fileSize: MAX_BROKER_DOC_FILE_MB * ONE_MB_IN_BYTES,
+    files: 3,
+    fields: 20,
+    fieldSize: 256 * 1024,
+    parts: 30,
   },
-  fileFilter: (req, file, cb: FileFilterCallback) => {
+  fileFilter: (_req, file, cb: FileFilterCallback) => {
     const field = file.fieldname;
     const mime = (file.mimetype || '').toLowerCase();
     const name = file.originalname || '';
 
-    console.log(`[broker-docs] field=${field} mimetype=${mime} name=${name}`);
-
     const allowedFields = ['crecifront', 'creciback', 'selfie'];
-    
+
     if (allowedFields.includes(field.toLowerCase())) {
       if (isAllowedImage(mime, name)) {
         cb(null, true);
       } else {
-        cb(new Error('Formato de arquivo não suportado. Use apenas JPG, PNG ou WEBP.'));
+        cb(new Error('Formato de arquivo nao suportado. Use apenas JPG, PNG ou WEBP.'));
       }
       return;
     }
 
-    cb(new Error(`Campo de upload inválido para documentos: ${field}`));
+    cb(new Error(`Campo de upload invalido para documentos: ${field}`));
   },
 });
 
 export const signedProposalUpload = multer({
-  storage,
+  storage: documentStorage,
   limits: {
-    fileSize: 15 * 1024 * 1024,
+    fileSize: MAX_SIGNED_PROPOSAL_FILE_MB * ONE_MB_IN_BYTES,
     files: 1,
+    fields: 10,
+    fieldSize: 128 * 1024,
+    parts: 20,
   },
   fileFilter: (_req, file, cb: FileFilterCallback) => {
     const mime = (file.mimetype || '').toLowerCase();
@@ -142,15 +193,18 @@ export const signedProposalUpload = multer({
       return;
     }
 
-    cb(new Error('Arquivo inválido. Envie apenas PDF assinado.'));
+    cb(new Error('Arquivo invalido. Envie apenas PDF assinado.'));
   },
 });
 
 export const contractDraftUpload = multer({
-  storage,
+  storage: documentStorage,
   limits: {
-    fileSize: 20 * 1024 * 1024,
+    fileSize: MAX_CONTRACT_DRAFT_FILE_MB * ONE_MB_IN_BYTES,
     files: 1,
+    fields: 10,
+    fieldSize: 128 * 1024,
+    parts: 20,
   },
   fileFilter: (_req, file, cb: FileFilterCallback) => {
     const mime = (file.mimetype || '').toLowerCase();
@@ -161,15 +215,18 @@ export const contractDraftUpload = multer({
       return;
     }
 
-    cb(new Error('Arquivo inválido. Envie apenas PDF da minuta.'));
+    cb(new Error('Arquivo invalido. Envie apenas PDF da minuta.'));
   },
 });
 
 export const contractDocumentUpload = multer({
-  storage,
+  storage: documentStorage,
   limits: {
-    fileSize: 15 * 1024 * 1024,
+    fileSize: MAX_CONTRACT_DOCUMENT_FILE_MB * ONE_MB_IN_BYTES,
     files: 1,
+    fields: 10,
+    fieldSize: 128 * 1024,
+    parts: 20,
   },
   fileFilter: (_req, file, cb: FileFilterCallback) => {
     const mime = (file.mimetype || '').toLowerCase();
@@ -182,7 +239,7 @@ export const contractDocumentUpload = multer({
 
     cb(
       new Error(
-        'Formato de arquivo não suportado. Use apenas PDF, JPG, JPEG, PNG ou WEBP.'
+        'Formato de arquivo nao suportado. Use apenas PDF, JPG, JPEG, PNG ou WEBP.'
       )
     );
   },

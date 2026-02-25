@@ -23,6 +23,10 @@ export const uploadToCloudinary = (
     return uploadVideoChunked(file, targetFolder);
   }
 
+  if (file.path) {
+    return uploadByPath(file.path, targetFolder);
+  }
+
   return uploadByStream(file, targetFolder);
 };
 
@@ -42,6 +46,12 @@ function uploadByStream(
   file: Express.Multer.File,
   targetFolder: string
 ): Promise<{ url: string; public_id: string }> {
+  if (!file.buffer || file.buffer.length === 0) {
+    return Promise.reject(
+      new Error('Arquivo invalido para upload. Conteudo nao encontrado.')
+    );
+  }
+
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
@@ -65,15 +75,46 @@ function uploadByStream(
   });
 }
 
+async function uploadByPath(
+  filePath: string,
+  targetFolder: string
+): Promise<{ url: string; public_id: string }> {
+  try {
+    const result = (await cloudinary.uploader.upload(filePath, {
+      folder: targetFolder,
+      resource_type: 'auto',
+    })) as UploadApiResponse;
+
+    return {
+      url: result.secure_url,
+      public_id: result.public_id,
+    };
+  } catch (error) {
+    throw mapCloudinaryError(error);
+  } finally {
+    await fs.unlink(filePath).catch(() => undefined);
+  }
+}
+
 async function uploadVideoChunked(
   file: Express.Multer.File,
   targetFolder: string
 ): Promise<{ url: string; public_id: string }> {
+  const hasDiskPath = typeof file.path === 'string' && file.path.length > 0;
   const ext = path.extname(file.originalname || '') || '.mp4';
-  const tmpFile = path.join(os.tmpdir(), `cloudinary-video-${randomUUID()}${ext}`);
+  const tmpFile =
+    hasDiskPath
+      ? file.path
+      : path.join(os.tmpdir(), `cloudinary-video-${randomUUID()}${ext}`);
 
   try {
-    await fs.writeFile(tmpFile, file.buffer);
+    if (!hasDiskPath) {
+      if (!file.buffer || file.buffer.length === 0) {
+        throw new Error('Arquivo de video invalido para upload.');
+      }
+      await fs.writeFile(tmpFile, file.buffer);
+    }
+
     const result = (await cloudinary.uploader.upload_large(tmpFile, {
       folder: targetFolder,
       resource_type: 'video',

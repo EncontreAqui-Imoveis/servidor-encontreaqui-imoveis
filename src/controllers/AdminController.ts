@@ -63,6 +63,24 @@ const MAX_IMAGES_PER_PROPERTY = 20;
 const IMAGE_UPLOAD_CONCURRENCY = 4;
 const DIRECT_UPLOAD_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
 const DIRECT_UPLOAD_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
+  'title',
+  'description',
+  'address',
+  'city',
+  'state',
+  'bairro',
+  'code',
+  'quadra',
+  'lote',
+  'numero',
+  'complemento',
+  'owner_name',
+  'cep',
+  'visibility',
+  'lifecycle_status',
+  'video_url',
+]);
 const CLOUDINARY_IMAGE_ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'];
 const CLOUDINARY_VIDEO_ALLOWED_FORMATS = ['mp4', 'mov', 'avi', 'webm', '3gp'];
 
@@ -2179,11 +2197,25 @@ class AdminController {
             params.push(normalizePhone(text));
             break;
           }
+          case 'owner_id': {
+            if (value === undefined || value === null || value === '') {
+              setParts.push('owner_id = ?');
+              params.push(null);
+              break;
+            }
+            const parsedOwnerId = Number(value);
+            if (!Number.isInteger(parsedOwnerId) || parsedOwnerId <= 0) {
+              return res.status(400).json({ error: 'owner_id invalido.' });
+            }
+            setParts.push('owner_id = ?');
+            params.push(parsedOwnerId);
+            break;
+          }
           default: {
-            if (value === undefined) {
+            if (value === undefined || !ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS.has(key)) {
               continue;
             }
-            setParts.push(`${key} = ?`);
+            setParts.push(`\`${key}\` = ?`);
             params.push(stringOrNull(value));
           }
         }

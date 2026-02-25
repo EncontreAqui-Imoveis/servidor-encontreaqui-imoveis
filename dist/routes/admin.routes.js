@@ -1,6 +1,10 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const express_rate_limit_1 = __importDefault(require("express-rate-limit"));
 const AdminController_1 = require("../controllers/AdminController");
 const ContractController_1 = require("../controllers/ContractController");
 const auth_1 = require("../middlewares/auth");
@@ -9,7 +13,22 @@ const uploadMiddleware_2 = require("../middlewares/uploadMiddleware");
 const uploadMiddleware_3 = require("../middlewares/uploadMiddleware");
 const uploadMiddleware_4 = require("../middlewares/uploadMiddleware");
 const adminRoutes = (0, express_1.Router)();
-adminRoutes.post('/login', AdminController_1.adminController.login);
+const adminAuthWindowMs = Number(process.env.ADMIN_AUTH_RATE_LIMIT_WINDOW_MS);
+const adminAuthLimit = Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX);
+const adminAuthLimiter = (0, express_rate_limit_1.default)({
+    windowMs: Number.isFinite(adminAuthWindowMs) && adminAuthWindowMs > 0
+        ? adminAuthWindowMs
+        : 15 * 60 * 1000,
+    limit: Number.isFinite(adminAuthLimit) && adminAuthLimit > 0
+        ? adminAuthLimit
+        : 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: {
+        error: 'Muitas tentativas de login administrativo. Tente novamente em instantes.',
+    },
+});
+adminRoutes.post('/login', adminAuthLimiter, AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
 adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
 adminRoutes.delete('/notifications/:id', AdminController_1.adminController.deleteNotification);

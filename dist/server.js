@@ -13,8 +13,10 @@ const routes_1 = __importDefault(require("./routes"));
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
 const migrations_1 = require("./database/migrations");
 const migrationRunner_1 = require("./database/migrationRunner");
+const errorHandler_1 = require("./middlewares/errorHandler");
 const security_1 = require("./middlewares/security");
 const requestSanitizer_1 = require("./middlewares/requestSanitizer");
+const tempUploadCleanup_1 = require("./middlewares/tempUploadCleanup");
 const logSanitizer_1 = require("./utils/logSanitizer");
 const app = (0, express_1.default)();
 exports.app = app;
@@ -51,16 +53,17 @@ app.use(security_1.enforceHttps);
 app.use((0, cors_1.default)((0, security_1.buildCorsOptions)()));
 app.use(apiRateLimiter);
 app.use(express_1.default.json({
-    limit: '10mb',
+    limit: '2mb',
     type: 'application/json'
 }));
 app.use(express_1.default.urlencoded({
     extended: true,
-    limit: '10mb',
-    parameterLimit: 10000,
+    limit: '2mb',
+    parameterLimit: 1000,
     type: 'application/x-www-form-urlencoded'
 }));
 app.use(requestSanitizer_1.requestSanitizer);
+app.use(tempUploadCleanup_1.tempUploadCleanup);
 app.use(routes_1.default);
 app.use(public_routes_1.default);
 app.get('/health', (req, res) => {
@@ -70,20 +73,47 @@ app.get('/health', (req, res) => {
         charset: 'UTF-8'
     });
 });
-app.use((err, req, res, next) => {
-    if (err.type === 'request.aborted' || err.code === 'ECONNRESET') {
-        return res.status(400).json({ error: 'Request aborted' });
-    }
-    console.error('Unhandled error:', (0, logSanitizer_1.redactValue)(err));
-    return res.status(500).json({ error: 'Internal Server Error' });
-});
+app.use(errorHandler_1.notFoundHandler);
+app.use(errorHandler_1.globalErrorHandler);
 async function startServer() {
     await (0, migrations_1.applyMigrations)();
     await (0, migrationRunner_1.runSqlMigrations)('up');
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
         console.log(`Servidor rodando na porta ${PORT} com suporte a UTF-8`);
     });
+    setupProcessHandlers(server);
 }
 if (require.main === module) {
-    void startServer();
+    void startServer().catch((error) => {
+        console.error('Falha ao iniciar servidor:', (0, logSanitizer_1.redactValue)(error));
+        process.exit(1);
+    });
+}
+let isShuttingDown = false;
+function setupProcessHandlers(server) {
+    const gracefulShutdown = (reason, error) => {
+        if (isShuttingDown)
+            return;
+        isShuttingDown = true;
+        if (error) {
+            console.error(`Encerrando servidor por ${reason}:`, (0, logSanitizer_1.redactValue)(error));
+        }
+        else {
+            console.warn(`Encerrando servidor por ${reason}.`);
+        }
+        server.close(() => {
+            process.exit(error ? 1 : 0);
+        });
+        setTimeout(() => {
+            process.exit(error ? 1 : 0);
+        }, 10000).unref();
+    };
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('uncaughtException', (error) => {
+        gracefulShutdown('uncaughtException', error);
+    });
+    process.on('unhandledRejection', (reason) => {
+        gracefulShutdown('unhandledRejection', reason);
+    });
 }

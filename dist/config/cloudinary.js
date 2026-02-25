@@ -21,6 +21,9 @@ const uploadToCloudinary = (file, folder) => {
     if (isVideo) {
         return uploadVideoChunked(file, targetFolder);
     }
+    if (file.path) {
+        return uploadByPath(file.path, targetFolder);
+    }
     return uploadByStream(file, targetFolder);
 };
 exports.uploadToCloudinary = uploadToCloudinary;
@@ -34,6 +37,9 @@ function mapCloudinaryError(error) {
     return error ?? new Error('Falha no upload para o Cloudinary.');
 }
 function uploadByStream(file, targetFolder) {
+    if (!file.buffer || file.buffer.length === 0) {
+        return Promise.reject(new Error('Arquivo invalido para upload. Conteudo nao encontrado.'));
+    }
     return new Promise((resolve, reject) => {
         const uploadStream = cloudinary_1.v2.uploader.upload_stream({
             folder: targetFolder,
@@ -52,11 +58,37 @@ function uploadByStream(file, targetFolder) {
         stream.pipe(uploadStream);
     });
 }
-async function uploadVideoChunked(file, targetFolder) {
-    const ext = path_1.default.extname(file.originalname || '') || '.mp4';
-    const tmpFile = path_1.default.join(os_1.default.tmpdir(), `cloudinary-video-${(0, crypto_1.randomUUID)()}${ext}`);
+async function uploadByPath(filePath, targetFolder) {
     try {
-        await fs_1.promises.writeFile(tmpFile, file.buffer);
+        const result = (await cloudinary_1.v2.uploader.upload(filePath, {
+            folder: targetFolder,
+            resource_type: 'auto',
+        }));
+        return {
+            url: result.secure_url,
+            public_id: result.public_id,
+        };
+    }
+    catch (error) {
+        throw mapCloudinaryError(error);
+    }
+    finally {
+        await fs_1.promises.unlink(filePath).catch(() => undefined);
+    }
+}
+async function uploadVideoChunked(file, targetFolder) {
+    const hasDiskPath = typeof file.path === 'string' && file.path.length > 0;
+    const ext = path_1.default.extname(file.originalname || '') || '.mp4';
+    const tmpFile = hasDiskPath
+        ? file.path
+        : path_1.default.join(os_1.default.tmpdir(), `cloudinary-video-${(0, crypto_1.randomUUID)()}${ext}`);
+    try {
+        if (!hasDiskPath) {
+            if (!file.buffer || file.buffer.length === 0) {
+                throw new Error('Arquivo de video invalido para upload.');
+            }
+            await fs_1.promises.writeFile(tmpFile, file.buffer);
+        }
         const result = (await cloudinary_1.v2.uploader.upload_large(tmpFile, {
             folder: targetFolder,
             resource_type: 'video',

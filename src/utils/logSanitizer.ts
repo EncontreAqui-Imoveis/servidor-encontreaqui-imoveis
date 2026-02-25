@@ -2,6 +2,9 @@ const BEARER_REGEX = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi;
 const JWT_REGEX = /eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+/g;
 const EMAIL_REGEX = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const TOKEN_QUERY_REGEX = /(token=)([^&\s]+)/gi;
+const CPF_REGEX = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g;
+const PHONE_REGEX = /\b(?:\+?55)?\s?\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b/g;
+const PIX_REGEX = /(pix[:=]\s*)([a-zA-Z0-9._%+\-@]+)/gi;
 
 const SENSITIVE_KEYS = [
   'authorization',
@@ -12,6 +15,15 @@ const SENSITIVE_KEYS = [
   'email',
   'phone',
   'telefone',
+  'cpf',
+  'cnpj',
+  'rg',
+  'document',
+  'dados_bancarios',
+  'banco',
+  'agencia',
+  'conta',
+  'pix',
   'cep',
   'firebase_private_key',
   'cloudinary_api_secret',
@@ -27,7 +39,10 @@ export function redactString(value: string): string {
     .replace(BEARER_REGEX, 'Bearer ***')
     .replace(JWT_REGEX, '***.***.***')
     .replace(TOKEN_QUERY_REGEX, '$1***')
-    .replace(EMAIL_REGEX, '***@***');
+    .replace(EMAIL_REGEX, '***@***')
+    .replace(CPF_REGEX, '***.***.***-**')
+    .replace(PHONE_REGEX, '(**) *****-****')
+    .replace(PIX_REGEX, '$1***');
 }
 
 export function redactValue(value: unknown, depth = 0): unknown {
@@ -69,4 +84,3 @@ export function patchConsoleRedaction() {
     original.error(...sanitizeArgs(args));
   };
 }
-

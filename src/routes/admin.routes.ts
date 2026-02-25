@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { adminController, sendNotification, getDashboardStats } from '../controllers/AdminController';
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
@@ -9,7 +10,26 @@ import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 
 const adminRoutes = Router();
 
-adminRoutes.post('/login', adminController.login);
+const adminAuthWindowMs = Number(process.env.ADMIN_AUTH_RATE_LIMIT_WINDOW_MS);
+const adminAuthLimit = Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX);
+
+const adminAuthLimiter = rateLimit({
+  windowMs:
+    Number.isFinite(adminAuthWindowMs) && adminAuthWindowMs > 0
+      ? adminAuthWindowMs
+      : 15 * 60 * 1000,
+  limit:
+    Number.isFinite(adminAuthLimit) && adminAuthLimit > 0
+      ? adminAuthLimit
+      : 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas tentativas de login administrativo. Tente novamente em instantes.',
+  },
+});
+
+adminRoutes.post('/login', adminAuthLimiter, adminController.login);
 
 adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
 

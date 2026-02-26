@@ -475,6 +475,22 @@ async function ensureNegotiationDocumentMetadataColumn(): Promise<void> {
   }
 }
 
+async function ensureAdminsTokenVersionColumn(): Promise<void> {
+  if (!(await tableExists('admins'))) {
+    return;
+  }
+
+  if (!(await columnExists('admins', 'token_version'))) {
+    await connection.query(
+      'ALTER TABLE admins ADD COLUMN token_version INT NOT NULL DEFAULT 1'
+    );
+  }
+
+  await connection.query(
+    'UPDATE admins SET token_version = 1 WHERE token_version IS NULL OR token_version < 1'
+  );
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -488,6 +504,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureContractApprovalColumns();
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
+    await ensureAdminsTokenVersionColumn();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

@@ -33,6 +33,7 @@ vi.mock('../../src/modules/negotiations/infra/NegotiationDocumentsRepository', (
 }));
 
 import negotiationRoutes from '../../src/routes/negotiation.routes';
+import connection from '../../src/database/connection';
 
 describe('GET /negotiations/:id/documents/:documentId/download headers', () => {
   const app = express();
@@ -43,7 +44,20 @@ describe('GET /negotiations/:id/documents/:documentId/download headers', () => {
   });
 
   it('returns Content-Disposition with attachment and original filename', async () => {
+    vi.mocked(connection.query).mockResolvedValueOnce([
+      [
+        {
+          id: 'neg-1',
+          capturing_broker_id: 30003,
+          selling_broker_id: null,
+          buyer_client_id: null,
+        },
+      ],
+      {},
+    ] as any);
+
     findByIdMock.mockResolvedValue({
+      negotiationId: 'neg-1',
       fileContent: Buffer.from('%PDF-1.4 fake pdf'),
       type: 'contract',
       documentType: 'contrato_assinado',

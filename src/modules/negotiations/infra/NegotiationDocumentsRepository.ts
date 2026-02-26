@@ -9,6 +9,7 @@ interface CountRow {
 }
 
 interface DocumentRow {
+  negotiation_id: string;
   file_content: Buffer | Uint8Array | null;
   type: string;
   document_type: string | null;
@@ -67,6 +68,7 @@ export class NegotiationDocumentsRepository
     documentId: number,
     trx?: SqlExecutor
   ): Promise<{
+    negotiationId: string;
     fileContent: Buffer;
     type: string;
     documentType: string | null;
@@ -74,7 +76,7 @@ export class NegotiationDocumentsRepository
   } | null> {
     const executor = trx ?? this.executor;
     const sql = `
-      SELECT file_content, type, document_type, metadata_json
+      SELECT negotiation_id, file_content, type, document_type, metadata_json
       FROM negotiation_documents
       WHERE id = ?
       LIMIT 1
@@ -91,6 +93,7 @@ export class NegotiationDocumentsRepository
       : Buffer.from(row.file_content);
 
     return {
+      negotiationId: String(row.negotiation_id),
       fileContent,
       type: row.type,
       documentType: row.document_type ?? null,

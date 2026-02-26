@@ -32,6 +32,7 @@ const adminAuthLimiter = rateLimit({
 adminRoutes.post('/login', adminAuthLimiter, adminController.login);
 
 adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
+adminRoutes.post('/logout', adminController.logout);
 
 adminRoutes.post('/notifications/send', sendNotification);
 adminRoutes.delete('/notifications/:id', adminController.deleteNotification);

@@ -704,7 +704,6 @@ class UserController {
   async firebaseLogin(req: Request, res: Response) {
     const {
       idToken,
-      role,
       name: nameOverride,
       phone: phoneOverride,
       street,
@@ -716,7 +715,6 @@ class UserController {
       cep,
     } = req.body as {
       idToken?: string;
-      role?: string;
       name?: string;
       phone?: string;
       street?: string;
@@ -857,7 +855,8 @@ class UserController {
         };
       }
 
-      const effectiveRole = role ?? user.role ?? 'client';
+      // Never trust role from public payloads; effective role is derived from DB state only.
+      const effectiveRole = user.role === 'broker' ? 'broker' : 'client';
       let brokerStatus: string | null = user.broker_status ?? null;
 
       if (effectiveRole === 'broker') {
@@ -866,14 +865,11 @@ class UserController {
           [user.id]
         );
 
-        if (brokerRows.length === 0) {
-          await connection.query(
-            'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-            [user.id, null, 'pending_verification']
-          );
-          brokerStatus = 'pending_verification';
-        } else {
+        if (brokerRows.length > 0) {
           brokerStatus = String(brokerRows[0].status ?? '').trim() || null;
+        } else {
+          // Defense-in-depth for inconsistent legacy records.
+          brokerStatus = null;
         }
       }
 

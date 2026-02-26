@@ -9,6 +9,7 @@ describe('NegotiationDocumentsRepository.findById', () => {
     const execute = vi.fn().mockResolvedValue([
       [
         {
+          negotiation_id: 'neg-1',
           file_content: expectedBuffer,
           type: 'proposal',
           document_type: null,
@@ -24,10 +25,14 @@ describe('NegotiationDocumentsRepository.findById', () => {
 
     const result = await repository.findById(123);
 
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining('SELECT file_content, type'), [
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining('SELECT negotiation_id, file_content, type'),
+      [
       123,
-    ]);
+      ]
+    );
     expect(result).toEqual({
+      negotiationId: 'neg-1',
       fileContent: expectedBuffer,
       type: 'proposal',
       documentType: null,
@@ -45,9 +50,12 @@ describe('NegotiationDocumentsRepository.findById', () => {
 
     const result = await repository.findById(999);
 
-    expect(execute).toHaveBeenCalledWith(expect.stringContaining('SELECT file_content, type'), [
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringContaining('SELECT negotiation_id, file_content, type'),
+      [
       999,
-    ]);
+      ]
+    );
     expect(result).toBeNull();
   });
 });

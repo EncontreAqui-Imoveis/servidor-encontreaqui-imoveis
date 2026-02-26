@@ -10,6 +10,7 @@ vi.mock('../../../../src/database/connection', () => ({
 }));
 
 import { negotiationController } from '../../../../src/controllers/NegotiationController';
+import connection from '../../../../src/database/connection';
 import { NegotiationDocumentsRepository } from '../../../../src/modules/negotiations/infra/NegotiationDocumentsRepository';
 
 type FnMock = ReturnType<typeof vi.fn>;
@@ -33,8 +34,21 @@ function createMockResponse(): MockResponse {
 
 describe('NegotiationController.downloadDocument', () => {
   it('should set PDF headers and send buffer when document exists', async () => {
+    vi.mocked(connection.query).mockResolvedValueOnce([
+      [
+        {
+          id: 'neg-1',
+          capturing_broker_id: 55,
+          selling_broker_id: null,
+          buyer_client_id: null,
+        },
+      ],
+      {},
+    ] as any);
+
     const fileContent = Buffer.from('fake-pdf');
     vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue({
+      negotiationId: 'neg-1',
       fileContent,
       type: 'proposal',
       documentType: 'proposal',
@@ -46,6 +60,8 @@ describe('NegotiationController.downloadDocument', () => {
         id: 'neg-1',
         documentId: '123',
       },
+      userId: 55,
+      userRole: 'broker',
     } as unknown as Request;
     const res = createMockResponse();
 
@@ -61,6 +77,18 @@ describe('NegotiationController.downloadDocument', () => {
   });
 
   it('should return 404 when document is not found', async () => {
+    vi.mocked(connection.query).mockResolvedValueOnce([
+      [
+        {
+          id: 'neg-1',
+          capturing_broker_id: 55,
+          selling_broker_id: null,
+          buyer_client_id: null,
+        },
+      ],
+      {},
+    ] as any);
+
     vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue(null);
 
     const req = {
@@ -68,6 +96,8 @@ describe('NegotiationController.downloadDocument', () => {
         id: 'neg-1',
         documentId: '123',
       },
+      userId: 55,
+      userRole: 'broker',
     } as unknown as Request;
     const res = createMockResponse();
 

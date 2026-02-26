@@ -41,8 +41,8 @@ describe('isClient middleware', () => {
 });
 
 describe('isAdmin middleware', () => {
-  it('permite quando role e admin', () => {
-    const req = { userRole: 'admin' } as AuthRequest;
+  it('permite quando role e admin validado no banco', () => {
+    const req = { userRole: 'admin', adminValidated: true } as AuthRequest;
     const res = createResponseMock();
     const next = vi.fn();
 
@@ -53,6 +53,17 @@ describe('isAdmin middleware', () => {
 
   it('bloqueia quando role nao e admin', () => {
     const req = { userRole: 'client' } as AuthRequest;
+    const res = createResponseMock();
+    const next = vi.fn();
+
+    isAdmin(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect((res as any).status).toHaveBeenCalledWith(403);
+  });
+
+  it('bloqueia quando role admin nao foi validado', () => {
+    const req = { userRole: 'admin', adminValidated: false } as AuthRequest;
     const res = createResponseMock();
     const next = vi.fn();
 

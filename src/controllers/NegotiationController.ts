@@ -25,6 +25,13 @@ interface NegotiationUploadRow extends RowDataPacket {
   broker_name: string | null;
 }
 
+interface NegotiationAccessRow extends RowDataPacket {
+  id: string;
+  capturing_broker_id: number | null;
+  selling_broker_id: number | null;
+  buyer_client_id: number | null;
+}
+
 interface BrokerRow extends RowDataPacket {
   name: string;
 }
@@ -332,6 +339,17 @@ function sanitizeDownloadFilename(value: string): string {
 function buildAttachmentDisposition(filename: string): string {
   const safe = sanitizeDownloadFilename(filename);
   return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
+function canAccessNegotiationByOwnership(
+  userId: number,
+  negotiation: NegotiationAccessRow
+): boolean {
+  return (
+    userId === Number(negotiation.capturing_broker_id ?? 0) ||
+    userId === Number(negotiation.selling_broker_id ?? 0) ||
+    userId === Number(negotiation.buyer_client_id ?? 0)
+  );
 }
 
 class NegotiationController {
@@ -803,15 +821,51 @@ class NegotiationController {
     }
   }
 
-  async downloadDocument(req: Request, res: Response): Promise<Response> {
+  async downloadDocument(req: AuthRequest, res: Response): Promise<Response> {
+    const negotiationId = String(req.params.id ?? '').trim();
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID de negociação inválido.' });
+    }
+
+    const userId = Number(req.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const role = String(req.userRole ?? '').trim().toLowerCase();
     const documentId = Number(req.params.documentId);
     if (!Number.isInteger(documentId) || documentId <= 0) {
       return res.status(400).json({ error: 'ID de documento invalido.' });
     }
 
     try {
+      const [negotiationRows] = await connection.query<NegotiationAccessRow[]>(
+        `
+          SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
+          FROM negotiations
+          WHERE id = ?
+          LIMIT 1
+        `,
+        [negotiationId]
+      );
+      const negotiation = negotiationRows[0];
+      if (!negotiation) {
+        return res.status(404).json({ error: 'Negociação não encontrada.' });
+      }
+
+      if (
+        role !== 'admin' &&
+        !canAccessNegotiationByOwnership(userId, negotiation)
+      ) {
+        return res.status(403).json({ error: 'Acesso negado ao documento.' });
+      }
+
       const document = await negotiationDocumentsRepository.findById(documentId);
       if (!document) {
+        return res.status(404).json({ error: 'Documento nao encontrado.' });
+      }
+
+      if (String(document.negotiationId) !== negotiationId) {
         return res.status(404).json({ error: 'Documento nao encontrado.' });
       }
 
@@ -840,13 +894,41 @@ class NegotiationController {
     }
   }
 
-  async downloadLatestProposal(req: Request, res: Response): Promise<Response> {
+  async downloadLatestProposal(req: AuthRequest, res: Response): Promise<Response> {
     const negotiationId = String(req.params.id ?? '').trim();
     if (!negotiationId) {
       return res.status(400).json({ error: 'ID de negociação inválido.' });
     }
 
+    const userId = Number(req.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const role = String(req.userRole ?? '').trim().toLowerCase();
+
     try {
+      const [negotiationRows] = await connection.query<NegotiationAccessRow[]>(
+        `
+          SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
+          FROM negotiations
+          WHERE id = ?
+          LIMIT 1
+        `,
+        [negotiationId]
+      );
+      const negotiation = negotiationRows[0];
+      if (!negotiation) {
+        return res.status(404).json({ error: 'Negociação não encontrada.' });
+      }
+
+      if (
+        role !== 'admin' &&
+        !canAccessNegotiationByOwnership(userId, negotiation)
+      ) {
+        return res.status(403).json({ error: 'Acesso negado à proposta.' });
+      }
+
       const document = await negotiationDocumentsRepository.findLatestByNegotiationAndType(
         negotiationId,
         'proposal'

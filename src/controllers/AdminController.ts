@@ -673,7 +673,7 @@ class AdminController {
 
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
-        'SELECT id, name, email, password_hash FROM admins WHERE email = ?',
+        'SELECT id, name, email, password_hash, token_version FROM admins WHERE email = ?',
         [email]
       );
 
@@ -688,8 +688,12 @@ class AdminController {
         return res.status(401).json({ error: 'Credenciais invalidas.' });
       }
 
+      const tokenVersion = Number(admin.token_version);
+      const normalizedTokenVersion =
+        Number.isFinite(tokenVersion) && tokenVersion > 0 ? tokenVersion : 1;
+
       const token = jwt.sign(
-        { id: admin.id, role: 'admin' },
+        { id: admin.id, role: 'admin', token_version: normalizedTokenVersion },
         jwtSecret,
         { expiresIn: '1d' }
       );
@@ -698,6 +702,30 @@ class AdminController {
       return res.status(200).json({ admin, token });
     } catch (error) {
       console.error('Erro no login do admin:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async logout(req: AuthRequest, res: Response) {
+    const adminId = Number(req.userId);
+
+    if (!Number.isFinite(adminId) || adminId <= 0) {
+      return res.status(401).json({ error: 'Administrador nao autenticado.' });
+    }
+
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        'UPDATE admins SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
+        [adminId]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Administrador nao encontrado.' });
+      }
+
+      return res.status(200).json({ message: 'Logout realizado com sucesso.' });
+    } catch (error) {
+      console.error('Erro no logout do admin:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

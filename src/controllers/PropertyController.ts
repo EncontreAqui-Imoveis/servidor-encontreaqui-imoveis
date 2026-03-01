@@ -598,6 +598,73 @@ async function upsertSaleRecord(
   );
 }
 
+async function fetchPropertyAggregateById(
+  propertyId: number,
+  options?: { publicOnly?: boolean }
+): Promise<PropertyAggregateRow | null> {
+  const publicOnly = options?.publicOnly === true;
+  const [rows] = await connection.query<PropertyAggregateRow[]>(
+    `
+      SELECT
+        p.*,
+        COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
+        COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
+        COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
+        ANY_VALUE(a.id) AS agency_id,
+        ANY_VALUE(a.name) AS agency_name,
+        ANY_VALUE(a.logo_url) AS agency_logo_url,
+        ANY_VALUE(a.address) AS agency_address,
+        ANY_VALUE(a.city) AS agency_city,
+        ANY_VALUE(a.state) AS agency_state,
+        ANY_VALUE(a.phone) AS agency_phone,
+        ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
+        ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
+        ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
+        ANY_VALUE(an.id) AS active_negotiation_id,
+        ANY_VALUE(an.status) AS active_negotiation_status,
+        ANY_VALUE(an.final_value) AS active_negotiation_value,
+        ANY_VALUE(nbu.name) AS active_negotiation_client_name,
+        GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
+      FROM properties p
+      LEFT JOIN brokers b ON p.broker_id = b.id
+      LEFT JOIN users u ON u.id = b.id
+      LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+      LEFT JOIN agencies a ON b.agency_id = a.id
+      LEFT JOIN (
+        SELECT
+          ranked.property_id,
+          ranked.id,
+          ranked.status,
+          ranked.final_value,
+          ranked.buyer_client_id
+        FROM (
+          SELECT
+            n.property_id,
+            n.id,
+            n.status,
+            n.final_value,
+            n.buyer_client_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY n.property_id
+              ORDER BY n.version DESC, n.id DESC
+            ) AS rn
+          FROM negotiations n
+          WHERE n.status NOT IN (?, ?, ?, ?, ?)
+        ) ranked
+        WHERE ranked.rn = 1
+      ) an ON an.property_id = p.id
+      LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN property_images pi ON pi.property_id = p.id
+      WHERE p.id = ?
+        ${publicOnly ? "AND p.status = 'approved' AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'" : ''}
+      GROUP BY p.id
+    `,
+    [...NEGOTIATION_TERMINAL_STATUSES, propertyId]
+  );
+
+  return rows?.[0] ?? null;
+}
+
 class PropertyController {
   async show(req: Request, res: Response) {
     const propertyId = Number(req.params.id);
@@ -607,69 +674,11 @@ class PropertyController {
     }
 
     try {
-      const [rows] = await connection.query<PropertyAggregateRow[]>(
-        `
-          SELECT
-            p.*,
-            COALESCE(p.promo_percentage, p.promotion_percentage) AS promo_percentage_resolved,
-            COALESCE(p.promo_start_date, DATE(p.promotion_start)) AS promo_start_date_resolved,
-            COALESCE(p.promo_end_date, DATE(p.promotion_end)) AS promo_end_date_resolved,
-            ANY_VALUE(a.id) AS agency_id,
-            ANY_VALUE(a.name) AS agency_name,
-            ANY_VALUE(a.logo_url) AS agency_logo_url,
-            ANY_VALUE(a.address) AS agency_address,
-            ANY_VALUE(a.city) AS agency_city,
-            ANY_VALUE(a.state) AS agency_state,
-            ANY_VALUE(a.phone) AS agency_phone,
-            ANY_VALUE(COALESCE(u.name, u_owner.name)) AS broker_name,
-            ANY_VALUE(COALESCE(u.phone, u_owner.phone)) AS broker_phone,
-            ANY_VALUE(COALESCE(u.email, u_owner.email)) AS broker_email,
-            ANY_VALUE(an.id) AS active_negotiation_id,
-            ANY_VALUE(an.status) AS active_negotiation_status,
-            ANY_VALUE(an.final_value) AS active_negotiation_value,
-            ANY_VALUE(nbu.name) AS active_negotiation_client_name,
-            GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
-          FROM properties p
-          LEFT JOIN brokers b ON p.broker_id = b.id
-          LEFT JOIN users u ON u.id = b.id
-          LEFT JOIN users u_owner ON u_owner.id = p.owner_id
-          LEFT JOIN agencies a ON b.agency_id = a.id
-          LEFT JOIN (
-            SELECT
-              ranked.property_id,
-              ranked.id,
-              ranked.status,
-              ranked.final_value,
-              ranked.buyer_client_id
-            FROM (
-              SELECT
-                n.property_id,
-                n.id,
-                n.status,
-                n.final_value,
-                n.buyer_client_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY n.property_id
-                  ORDER BY n.version DESC, n.id DESC
-                ) AS rn
-              FROM negotiations n
-              WHERE n.status NOT IN (?, ?, ?, ?, ?)
-            ) ranked
-            WHERE ranked.rn = 1
-          ) an ON an.property_id = p.id
-          LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
-          LEFT JOIN property_images pi ON pi.property_id = p.id
-          WHERE p.id = ?
-          GROUP BY p.id
-        `,
-        [...NEGOTIATION_TERMINAL_STATUSES, propertyId]
-      );
+      const property = await fetchPropertyAggregateById(propertyId);
 
-      if (!rows || rows.length === 0) {
+      if (!property) {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }
-
-      const property = rows[0];
       const isOwner =
         (property.broker_id != null && property.broker_id === (req as AuthRequest).userId) ||
         (property.owner_id != null && property.owner_id === (req as AuthRequest).userId);
@@ -679,6 +688,29 @@ class PropertyController {
       return res.status(200).json(mapProperty(property, showOwnerInfo));
     } catch (error) {
       console.error("Erro ao buscar imóvel:", error);
+      return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });
+    }
+  }
+
+  async showPublic(req: Request, res: Response) {
+    const propertyId = Number(req.params.id);
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: "Identificador de imóvel inválido." });
+    }
+
+    try {
+      const property = await fetchPropertyAggregateById(propertyId, {
+        publicOnly: true,
+      });
+
+      if (!property) {
+        return res.status(404).json({ error: "Imóvel não encontrado." });
+      }
+
+      return res.status(200).json(mapProperty(property, false));
+    } catch (error) {
+      console.error("Erro ao buscar imóvel público:", error);
       return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });
     }
   }

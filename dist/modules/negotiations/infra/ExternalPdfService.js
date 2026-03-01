@@ -5,11 +5,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ExternalPdfService = void 0;
 const axios_1 = __importDefault(require("axios"));
-const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 class ExternalPdfService {
     baseUrl;
     endpointUrl;
-    jwtSecret;
+    internalApiKey;
+    timeoutMs;
     constructor(params) {
         const rawBaseUrl = (params?.baseUrl ??
             process.env.PDF_SERVICE_URL ??
@@ -21,16 +21,18 @@ class ExternalPdfService {
         this.endpointUrl = this.baseUrl.endsWith('/generate-proposal')
             ? this.baseUrl
             : `${this.baseUrl}/generate-proposal`;
-        this.jwtSecret = params?.jwtSecret ?? process.env.JWT_SECRET ?? '';
+        this.internalApiKey =
+            params?.internalApiKey ?? process.env.PDF_INTERNAL_API_KEY ?? '';
+        const configuredTimeout = Number(params?.timeoutMs ?? process.env.PDF_SERVICE_TIMEOUT_MS);
+        this.timeoutMs =
+            Number.isFinite(configuredTimeout) && configuredTimeout > 0
+                ? Math.trunc(configuredTimeout)
+                : 10000;
     }
     async generateProposal(data) {
-        if (!this.jwtSecret) {
-            throw new Error('JWT_SECRET não está configurado para serviço de autenticação do PDF');
+        if (!this.internalApiKey) {
+            throw new Error('PDF_INTERNAL_API_KEY não está configurado para autenticação interna do serviço de PDF');
         }
-        const token = jsonwebtoken_1.default.sign({ scope: 'pdf-service' }, this.jwtSecret, {
-            algorithm: 'HS256',
-            expiresIn: '1m',
-        });
         const payload = {
             client_name: data.clientName,
             client_cpf: data.clientCpf,
@@ -49,8 +51,9 @@ class ExternalPdfService {
         try {
             const response = await axios_1.default.post(this.endpointUrl, payload, {
                 responseType: 'arraybuffer',
+                timeout: this.timeoutMs,
                 headers: {
-                    Authorization: `Bearer ${token}`,
+                    'X-Internal-API-Key': this.internalApiKey,
                 },
             });
             return Buffer.from(response.data);

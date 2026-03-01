@@ -83,6 +83,9 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
   app.put('/admin/negotiations/:id/approve', (req, res) =>
     adminController.approveNegotiation(req as any, res)
   );
+  app.put('/admin/negotiations/:id/reject', (req, res) =>
+    adminController.rejectNegotiation(req as any, res)
+  );
 
   let negotiationStatus: string;
   let contractState: ContractState;
@@ -182,5 +185,15 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     expect(second.status).toBe(200);
     expect(contractInsertCount).toBe(1);
     expect(contractState?.negotiationId).toBe('neg-1');
+  });
+
+  it('rejects proposal rejection when reason/observation is missing', async () => {
+    const response = await request(app)
+      .put('/admin/negotiations/neg-1/reject')
+      .send({});
+
+    expect(response.status).toBe(400);
+    expect(String(response.body.error ?? '').toLowerCase()).toContain('motivo');
+    expect(getConnectionMock).not.toHaveBeenCalled();
   });
 });

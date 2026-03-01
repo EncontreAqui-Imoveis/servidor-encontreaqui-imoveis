@@ -17,6 +17,16 @@ const jwtSecret = (0, env_1.requireEnv)('JWT_SECRET');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ADDRESS_FIELDS = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep'];
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
+function normalizeTokenVersion(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 1;
+    }
+    return Math.trunc(parsed);
+}
+function signUserToken(userId, role, tokenVersion, expiresIn) {
+    return jsonwebtoken_1.default.sign({ id: userId, role, token_version: normalizeTokenVersion(tokenVersion) }, jwtSecret, { expiresIn });
+}
 function toBoolean(value) {
     return value === 1 || value === '1' || value === true;
 }
@@ -145,7 +155,7 @@ class UserController {
             return res.status(400).json({ error: 'Email e senha são obrigatórios.' });
         }
         try {
-            const [rows] = await connection_1.default.query('SELECT id, name, email, password_hash FROM users WHERE email = ?', [email]);
+            const [rows] = await connection_1.default.query('SELECT id, name, email, password_hash, token_version FROM users WHERE email = ?', [email]);
             if (rows.length === 0) {
                 return res.status(401).json({ error: 'Credenciais inválidas.' });
             }
@@ -154,7 +164,7 @@ class UserController {
             if (!isPasswordCorrect) {
                 return res.status(401).json({ error: 'Credenciais inválidas.' });
             }
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: 'user' }, jwtSecret, { expiresIn: '1d' });
+            const token = signUserToken(user.id, 'client', user.token_version, '1d');
             delete user.password_hash;
             return res.status(200).json({ user, token });
         }
@@ -520,7 +530,7 @@ class UserController {
         }
     }
     async firebaseLogin(req, res) {
-        const { idToken, role, name: nameOverride, phone: phoneOverride, street, number, complement, bairro, city, state, cep, } = req.body;
+        const { idToken, name: nameOverride, phone: phoneOverride, street, number, complement, bairro, city, state, cep, } = req.body;
         if (!idToken) {
             return res.status(400).json({ error: 'Token do Firebase ? obrigat?rio.' });
         }
@@ -531,7 +541,7 @@ class UserController {
             const displayName = name || `User-${uid.substring(0, 8)}`;
             const [userRows] = await connection_1.default.query(`
           SELECT u.id, u.name, u.email, u.firebase_uid,
-                 u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
+                 u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
                  CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
                  b.status AS broker_status
           FROM users u
@@ -636,19 +646,20 @@ class UserController {
                     role: 'client',
                 };
             }
-            const effectiveRole = role ?? user.role ?? 'client';
+            // Never trust role from public payloads; effective role is derived from DB state only.
+            const effectiveRole = user.role === 'broker' ? 'broker' : 'client';
             let brokerStatus = user.broker_status ?? null;
             if (effectiveRole === 'broker') {
                 const [brokerRows] = await connection_1.default.query('SELECT status FROM brokers WHERE id = ? LIMIT 1', [user.id]);
-                if (brokerRows.length === 0) {
-                    await connection_1.default.query('INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)', [user.id, null, 'pending_verification']);
-                    brokerStatus = 'pending_verification';
-                }
-                else {
+                if (brokerRows.length > 0) {
                     brokerStatus = String(brokerRows[0].status ?? '').trim() || null;
                 }
+                else {
+                    // Defense-in-depth for inconsistent legacy records.
+                    brokerStatus = null;
+                }
             }
-            const token = jsonwebtoken_1.default.sign({ id: user.id, role: effectiveRole }, jwtSecret, { expiresIn: '7d' });
+            const token = signUserToken(user.id, effectiveRole === 'broker' ? 'broker' : 'client', user.token_version, '7d');
             return res.json({
                 user: {
                     id: user.id,
@@ -1076,9 +1087,8 @@ class UserController {
         if (!userId) {
             return res.status(401).json({ error: 'Usuário não autenticado.' });
         }
-        const tokenFromQuery = typeof req.query.token === 'string' ? req.query.token : null;
         const tokenFromBody = typeof req.body?.token === 'string' ? req.body.token : null;
-        const trimmedToken = (tokenFromBody ?? tokenFromQuery ?? '').trim();
+        const trimmedToken = (tokenFromBody ?? '').trim();
         if (!trimmedToken) {
             return res.status(400).json({ error: 'Token do dispositivo e obrigatorio.' });
         }

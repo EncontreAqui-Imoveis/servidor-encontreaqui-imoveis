@@ -8,6 +8,7 @@ interface UserFromDB extends RowDataPacket {
   id: number;
   role: string;
   broker_status?: string;
+  token_version?: number | string | null;
 }
 
 interface AdminFromDB extends RowDataPacket {
@@ -24,6 +25,14 @@ export interface AuthRequest extends Request {
 }
 
 const jwtSecret = requireEnv('JWT_SECRET');
+
+function normalizeTokenVersion(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return Math.trunc(parsed);
+}
 
 function isAdminRoute(req: Request): boolean {
   const baseUrl = String(req.baseUrl ?? '');
@@ -82,6 +91,41 @@ async function validateAdminAccount(
   }
 }
 
+async function validateUserSession(
+  userId: number
+): Promise<{ exists: boolean; tokenVersion: number }> {
+  try {
+    const [userRows] = await connection.query<UserFromDB[]>(
+      'SELECT id, token_version FROM users WHERE id = ? LIMIT 1',
+      [userId]
+    );
+
+    if (userRows.length === 0) {
+      return { exists: false, tokenVersion: 0 };
+    }
+
+    return {
+      exists: true,
+      tokenVersion: normalizeTokenVersion(userRows[0].token_version),
+    };
+  } catch (error: any) {
+    if (error?.code !== 'ER_BAD_FIELD_ERROR') {
+      throw error;
+    }
+
+    const [userRows] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM users WHERE id = ? LIMIT 1',
+      [userId]
+    );
+
+    if (userRows.length === 0) {
+      return { exists: false, tokenVersion: 0 };
+    }
+
+    return { exists: true, tokenVersion: 1 };
+  }
+}
+
 export async function authMiddleware(
   req: AuthRequest,
   res: Response,
@@ -106,7 +150,8 @@ export async function authMiddleware(
     };
 
     const decodedId = Number(decoded.id);
-    const decodedRole = String(decoded.role ?? '').trim().toLowerCase();
+    const rawDecodedRole = String(decoded.role ?? '').trim().toLowerCase();
+    const decodedRole = rawDecodedRole === 'user' ? 'client' : rawDecodedRole;
 
     if (!Number.isFinite(decodedId) || decodedId <= 0 || !decodedRole) {
       return res.status(401).json({ error: 'Token inválido.' });
@@ -155,13 +200,26 @@ export async function authMiddleware(
       });
     }
 
-    const [userRows] = await connection.query<RowDataPacket[]>(
-      'SELECT id FROM users WHERE id = ? LIMIT 1',
-      [decodedId]
-    );
-    if (userRows.length === 0) {
+    const decodedTokenVersion = Number(decoded.token_version);
+    const normalizedTokenVersion =
+      Number.isFinite(decodedTokenVersion) && decodedTokenVersion > 0
+        ? Math.trunc(decodedTokenVersion)
+        : 0;
+    if (normalizedTokenVersion <= 0) {
+      return res.status(401).json({
+        error: 'Token invalido. Faca login novamente.',
+      });
+    }
+
+    const userSession = await validateUserSession(decodedId);
+    if (!userSession.exists) {
       return res.status(401).json({
         error: 'Sessao invalida. Faca login novamente.',
+      });
+    }
+    if (normalizedTokenVersion !== userSession.tokenVersion) {
+      return res.status(401).json({
+        error: 'Sessao revogada. Faca login novamente.',
       });
     }
 

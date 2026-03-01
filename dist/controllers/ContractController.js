@@ -178,11 +178,18 @@ function normalizeCommissionData(value) {
     if (valorVenda <= 0) {
         throw new Error('valorVenda deve ser maior que zero.');
     }
+    const comissaoCaptador = parseNonNegativeNumber(payload.comissaoCaptador, 'comissaoCaptador');
+    const comissaoVendedor = parseNonNegativeNumber(payload.comissaoVendedor, 'comissaoVendedor');
+    const taxaPlataforma = parseNonNegativeNumber(payload.taxaPlataforma, 'taxaPlataforma');
+    const totalSplits = Number((comissaoCaptador + comissaoVendedor + taxaPlataforma).toFixed(2));
+    if (totalSplits > valorVenda) {
+        throw new Error('Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorVenda.');
+    }
     return {
         valorVenda,
-        comissaoCaptador: parseNonNegativeNumber(payload.comissaoCaptador, 'comissaoCaptador'),
-        comissaoVendedor: parseNonNegativeNumber(payload.comissaoVendedor, 'comissaoVendedor'),
-        taxaPlataforma: parseNonNegativeNumber(payload.taxaPlataforma, 'taxaPlataforma'),
+        comissaoCaptador,
+        comissaoVendedor,
+        taxaPlataforma,
     };
 }
 function resolveFinalDealStatuses(propertyPurpose) {
@@ -199,6 +206,90 @@ function resolveFinalDealStatuses(propertyPurpose) {
         propertyStatus: 'sold',
         lifecycleStatus: 'SOLD',
         negotiationStatus: 'SOLD',
+    };
+}
+function toDocumentCount(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+async function fetchContractDocumentGateCounts(tx, contract) {
+    const [rows] = await tx.query(`
+      SELECT
+        SUM(
+          CASE
+            WHEN document_type = 'contrato_minuta'
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+              AND UPPER(
+                COALESCE(
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+                  'APPROVED'
+                )
+              ) <> 'REJECTED'
+            THEN 1 ELSE 0
+          END
+        ) AS draft_total,
+        SUM(
+          CASE
+            WHEN document_type = 'contrato_assinado'
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+              AND UPPER(
+                COALESCE(
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+                  'APPROVED'
+                )
+              ) <> 'REJECTED'
+            THEN 1 ELSE 0
+          END
+        ) AS signed_contract_total,
+        SUM(
+          CASE
+            WHEN document_type = 'comprovante_pagamento'
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+              AND UPPER(
+                COALESCE(
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+                  'APPROVED'
+                )
+              ) <> 'REJECTED'
+            THEN 1 ELSE 0
+          END
+        ) AS payment_receipt_total,
+        SUM(
+          CASE
+            WHEN document_type = 'boleto_vistoria'
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+              AND UPPER(
+                COALESCE(
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+                  JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+                  'APPROVED'
+                )
+              ) <> 'REJECTED'
+            THEN 1 ELSE 0
+          END
+        ) AS inspection_boleto_total
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+    `, [
+        contract.id,
+        contract.id,
+        contract.id,
+        contract.id,
+        contract.negotiation_id,
+    ]);
+    const row = rows[0] ?? {};
+    return {
+        draftTotal: toDocumentCount(row.draft_total),
+        signedContractTotal: toDocumentCount(row.signed_contract_total),
+        paymentReceiptTotal: toDocumentCount(row.payment_receipt_total),
+        inspectionBoletoTotal: toDocumentCount(row.inspection_boleto_total),
     };
 }
 function mapContract(row) {
@@ -691,6 +782,12 @@ class ContractController {
                 await tx.rollback();
                 return res.status(400).json({ error: 'Status atual do contrato inválido.' });
             }
+            if (currentStatus === 'FINALIZED' && direction === 'previous') {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'Retrocesso de contratos finalizados está bloqueado por segurança financeira.',
+                });
+            }
             if (currentStatus === 'AWAITING_DOCS' && direction === 'next') {
                 await tx.rollback();
                 return res.status(400).json({
@@ -707,6 +804,21 @@ class ContractController {
                 });
             }
             const nextStatus = CONTRACT_STATUS_FLOW[targetIndex];
+            if (nextStatus === 'FINALIZED') {
+                await tx.rollback();
+                return res.status(400).json({
+                    error: 'Use o endpoint de finalização para concluir o contrato com validações obrigatórias.',
+                });
+            }
+            if (nextStatus === 'AWAITING_SIGNATURES') {
+                const documentCounts = await fetchContractDocumentGateCounts(tx, contract);
+                if (documentCounts.draftTotal <= 0) {
+                    await tx.rollback();
+                    return res.status(400).json({
+                        error: 'Transição bloqueada: anexe uma minuta válida (contrato_minuta) vinculada a este contrato antes de avançar.',
+                    });
+                }
+            }
             await tx.query(`
           UPDATE contracts
           SET status = ?, updated_at = CURRENT_TIMESTAMP
@@ -869,6 +981,7 @@ class ContractController {
                 contract.negotiation_id,
                 documentTypeRaw,
                 JSON.stringify({
+                    contractId,
                     side,
                     originalFileName: uploadedFile.originalname ?? null,
                     uploadedAt: new Date().toISOString(),
@@ -932,10 +1045,20 @@ class ContractController {
             negotiation_id,
             type,
             document_type,
+            metadata_json,
             file_content,
             created_at
-          ) VALUES (?, 'contract', 'contrato_minuta', ?, CURRENT_TIMESTAMP)
-        `, [contract.negotiation_id, uploadedFile.buffer]);
+          ) VALUES (?, 'contract', 'contrato_minuta', CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
+        `, [
+                contract.negotiation_id,
+                JSON.stringify({
+                    contractId,
+                    originalFileName: uploadedFile.originalname ?? null,
+                    uploadedAt: new Date().toISOString(),
+                    uploadedVia: 'admin',
+                }),
+                uploadedFile.buffer,
+            ]);
             await tx.query(`
           UPDATE contracts
           SET status = 'AWAITING_SIGNATURES', updated_at = CURRENT_TIMESTAMP
@@ -1009,23 +1132,13 @@ class ContractController {
                     error: 'Somente contratos em AWAITING_SIGNATURES podem ser finalizados.',
                 });
             }
-            const [signedDocRows] = await tx.query(`
-          SELECT
-            SUM(CASE WHEN document_type = 'contrato_assinado' THEN 1 ELSE 0 END) AS signed_contract_total,
-            SUM(CASE WHEN document_type = 'comprovante_pagamento' THEN 1 ELSE 0 END) AS payment_receipt_total,
-            SUM(CASE WHEN document_type = 'boleto_vistoria' THEN 1 ELSE 0 END) AS inspection_boleto_total
-          FROM negotiation_documents
-          WHERE negotiation_id = ?
-        `, [contract.negotiation_id]);
-            const signedContractCount = Number(signedDocRows[0]?.signed_contract_total ?? 0);
-            const paymentReceiptCount = Number(signedDocRows[0]?.payment_receipt_total ?? 0);
-            const inspectionBoletoCount = Number(signedDocRows[0]?.inspection_boleto_total ?? 0);
-            const hasSignedContract = signedContractCount > 0;
-            const hasPaymentProof = paymentReceiptCount > 0 || inspectionBoletoCount > 0;
+            const documentCounts = await fetchContractDocumentGateCounts(tx, contract);
+            const hasSignedContract = documentCounts.signedContractTotal > 0;
+            const hasPaymentProof = documentCounts.paymentReceiptTotal > 0;
             if (!hasSignedContract || !hasPaymentProof) {
                 await tx.rollback();
                 return res.status(400).json({
-                    error: 'Anexe contrato assinado e comprovante de pagamento (ou boleto de vistoria) antes de finalizar.',
+                    error: 'Anexe contrato assinado e comprovante de pagamento válidos, vinculados a este contrato e não rejeitados, antes de finalizar.',
                 });
             }
             const finalStatuses = resolveFinalDealStatuses(contract.property_purpose);
@@ -1238,6 +1351,7 @@ class ContractController {
                 resolveDocumentStorageType(documentTypeRaw),
                 documentTypeRaw,
                 JSON.stringify({
+                    contractId,
                     side: resolvedSide,
                     originalFileName: uploadedFile.originalname ?? null,
                     uploadedBy: Number(req.userId ?? 0) || null,

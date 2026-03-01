@@ -1,12 +1,30 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { brokerController } from '../controllers/BrokerController';
+import { authController } from '../controllers/AuthController';
 import { authMiddleware, isBroker } from '../middlewares/auth';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware'
 
 const router = Router();
 
+const legacyAuthWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS);
+const legacyAuthLimit = Number(process.env.AUTH_RATE_LIMIT_MAX);
+
+const legacyAuthLimiter = rateLimit({
+  windowMs:
+    Number.isFinite(legacyAuthWindowMs) && legacyAuthWindowMs > 0
+      ? legacyAuthWindowMs
+      : 15 * 60 * 1000,
+  limit: Number.isFinite(legacyAuthLimit) && legacyAuthLimit > 0 ? legacyAuthLimit : 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas tentativas em rotas legadas de autenticacao. Use /auth/*.',
+  },
+});
+
 router.post('/register', brokerController.register);
-router.post('/login', brokerController.login);
+router.post('/login', legacyAuthLimiter, (req, res) => authController.login(req, res));
 
 
 router.post(

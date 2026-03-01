@@ -204,6 +204,11 @@ function buildAttachmentDisposition(filename) {
     const safe = sanitizeDownloadFilename(filename);
     return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
 }
+function canAccessNegotiationByOwnership(userId, negotiation) {
+    return (userId === Number(negotiation.capturing_broker_id ?? 0) ||
+        userId === Number(negotiation.selling_broker_id ?? 0) ||
+        userId === Number(negotiation.buyer_client_id ?? 0));
+}
 class NegotiationController {
     async generateProposal(req, res) {
         if (!req.userId) {
@@ -587,13 +592,39 @@ class NegotiationController {
         }
     }
     async downloadDocument(req, res) {
+        const negotiationId = String(req.params.id ?? '').trim();
+        if (!negotiationId) {
+            return res.status(400).json({ error: 'ID de negociação inválido.' });
+        }
+        const userId = Number(req.userId);
+        if (!Number.isFinite(userId) || userId <= 0) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
+        const role = String(req.userRole ?? '').trim().toLowerCase();
         const documentId = Number(req.params.documentId);
         if (!Number.isInteger(documentId) || documentId <= 0) {
             return res.status(400).json({ error: 'ID de documento invalido.' });
         }
         try {
+            const [negotiationRows] = await connection_1.default.query(`
+          SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
+          FROM negotiations
+          WHERE id = ?
+          LIMIT 1
+        `, [negotiationId]);
+            const negotiation = negotiationRows[0];
+            if (!negotiation) {
+                return res.status(404).json({ error: 'Negociação não encontrada.' });
+            }
+            if (role !== 'admin' &&
+                !canAccessNegotiationByOwnership(userId, negotiation)) {
+                return res.status(403).json({ error: 'Acesso negado ao documento.' });
+            }
             const document = await negotiationDocumentsRepository.findById(documentId);
             if (!document) {
+                return res.status(404).json({ error: 'Documento nao encontrado.' });
+            }
+            if (String(document.negotiationId) !== negotiationId) {
                 return res.status(404).json({ error: 'Documento nao encontrado.' });
             }
             const contentType = document.type === 'proposal' || document.type === 'contract'
@@ -622,7 +653,26 @@ class NegotiationController {
         if (!negotiationId) {
             return res.status(400).json({ error: 'ID de negociação inválido.' });
         }
+        const userId = Number(req.userId);
+        if (!Number.isFinite(userId) || userId <= 0) {
+            return res.status(401).json({ error: 'Usuário não autenticado.' });
+        }
+        const role = String(req.userRole ?? '').trim().toLowerCase();
         try {
+            const [negotiationRows] = await connection_1.default.query(`
+          SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
+          FROM negotiations
+          WHERE id = ?
+          LIMIT 1
+        `, [negotiationId]);
+            const negotiation = negotiationRows[0];
+            if (!negotiation) {
+                return res.status(404).json({ error: 'Negociação não encontrada.' });
+            }
+            if (role !== 'admin' &&
+                !canAccessNegotiationByOwnership(userId, negotiation)) {
+                return res.status(403).json({ error: 'Acesso negado à proposta.' });
+            }
             const document = await negotiationDocumentsRepository.findLatestByNegotiationAndType(negotiationId, 'proposal');
             if (!document) {
                 return res.status(404).json({ error: 'Nenhuma proposta encontrada para esta negociação.' });

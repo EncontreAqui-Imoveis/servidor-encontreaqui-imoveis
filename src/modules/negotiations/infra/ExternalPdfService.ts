@@ -1,14 +1,18 @@
 import axios from 'axios';
-import jwt from 'jsonwebtoken';
 
 import type { ProposalData, ProposalPdfService } from '../domain/states/NegotiationState';
 
 export class ExternalPdfService implements ProposalPdfService {
   private readonly baseUrl: string;
   private readonly endpointUrl: string;
-  private readonly jwtSecret: string;
+  private readonly internalApiKey: string;
+  private readonly timeoutMs: number;
 
-  constructor(params?: { baseUrl?: string; jwtSecret?: string }) {
+  constructor(params?: {
+    baseUrl?: string;
+    internalApiKey?: string;
+    timeoutMs?: number;
+  }) {
     const rawBaseUrl = (
       params?.baseUrl ??
       process.env.PDF_SERVICE_URL ??
@@ -21,18 +25,24 @@ export class ExternalPdfService implements ProposalPdfService {
     this.endpointUrl = this.baseUrl.endsWith('/generate-proposal')
       ? this.baseUrl
       : `${this.baseUrl}/generate-proposal`;
-    this.jwtSecret = params?.jwtSecret ?? process.env.JWT_SECRET ?? '';
+    this.internalApiKey =
+      params?.internalApiKey ?? process.env.PDF_INTERNAL_API_KEY ?? '';
+
+    const configuredTimeout = Number(
+      params?.timeoutMs ?? process.env.PDF_SERVICE_TIMEOUT_MS
+    );
+    this.timeoutMs =
+      Number.isFinite(configuredTimeout) && configuredTimeout > 0
+        ? Math.trunc(configuredTimeout)
+        : 10000;
   }
 
   async generateProposal(data: ProposalData): Promise<Buffer> {
-    if (!this.jwtSecret) {
-      throw new Error('JWT_SECRET não está configurado para serviço de autenticação do PDF');
+    if (!this.internalApiKey) {
+      throw new Error(
+        'PDF_INTERNAL_API_KEY não está configurado para autenticação interna do serviço de PDF'
+      );
     }
-
-    const token = jwt.sign({ scope: 'pdf-service' }, this.jwtSecret, {
-      algorithm: 'HS256',
-      expiresIn: '1m',
-    });
 
     const payload = {
       client_name: data.clientName,
@@ -53,8 +63,9 @@ export class ExternalPdfService implements ProposalPdfService {
     try {
       const response = await axios.post(this.endpointUrl, payload, {
         responseType: 'arraybuffer',
+        timeout: this.timeoutMs,
         headers: {
-          Authorization: `Bearer ${token}`,
+          'X-Internal-API-Key': this.internalApiKey,
         },
       });
 

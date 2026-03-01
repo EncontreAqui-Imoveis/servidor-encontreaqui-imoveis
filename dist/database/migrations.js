@@ -365,6 +365,24 @@ async function ensureNegotiationDocumentMetadataColumn() {
     `);
     }
 }
+async function ensureAdminsTokenVersionColumn() {
+    if (!(await tableExists('admins'))) {
+        return;
+    }
+    if (!(await columnExists('admins', 'token_version'))) {
+        await connection_1.default.query('ALTER TABLE admins ADD COLUMN token_version INT NOT NULL DEFAULT 1');
+    }
+    await connection_1.default.query('UPDATE admins SET token_version = 1 WHERE token_version IS NULL OR token_version < 1');
+}
+async function ensureUsersTokenVersionColumn() {
+    if (!(await tableExists('users'))) {
+        return;
+    }
+    if (!(await columnExists('users', 'token_version'))) {
+        await connection_1.default.query('ALTER TABLE users ADD COLUMN token_version INT NOT NULL DEFAULT 1');
+    }
+    await connection_1.default.query('UPDATE users SET token_version = 1 WHERE token_version IS NULL OR token_version < 1');
+}
 async function applyMigrations() {
     try {
         await ensurePropertiesColumns();
@@ -378,6 +396,8 @@ async function applyMigrations() {
         await ensureContractApprovalColumns();
         await ensureNegotiationDocumentTypeColumn();
         await ensureNegotiationDocumentMetadataColumn();
+        await ensureAdminsTokenVersionColumn();
+        await ensureUsersTokenVersionColumn();
         console.log('Migrations aplicadas com sucesso.');
     }
     catch (error) {

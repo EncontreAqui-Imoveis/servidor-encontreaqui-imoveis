@@ -491,6 +491,22 @@ async function ensureAdminsTokenVersionColumn(): Promise<void> {
   );
 }
 
+async function ensureUsersTokenVersionColumn(): Promise<void> {
+  if (!(await tableExists('users'))) {
+    return;
+  }
+
+  if (!(await columnExists('users', 'token_version'))) {
+    await connection.query(
+      'ALTER TABLE users ADD COLUMN token_version INT NOT NULL DEFAULT 1'
+    );
+  }
+
+  await connection.query(
+    'UPDATE users SET token_version = 1 WHERE token_version IS NULL OR token_version < 1'
+  );
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -505,6 +521,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
     await ensureAdminsTokenVersionColumn();
+    await ensureUsersTokenVersionColumn();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

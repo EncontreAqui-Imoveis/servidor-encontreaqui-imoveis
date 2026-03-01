@@ -42,6 +42,9 @@ authRoutes.get('/check-email', authSensitiveLimiter, (req, res) =>
 authRoutes.post('/password-reset/request', authSensitiveLimiter, (req, res) =>
   authController.requestPasswordReset(req, res)
 );
+authRoutes.post('/logout', authMiddleware, (req, res) =>
+  authController.logout(req as any, res)
+);
 
 
 // Perfil

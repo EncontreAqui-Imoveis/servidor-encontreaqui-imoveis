@@ -528,7 +528,7 @@ class AdminController {
             return res.status(400).json({ error: 'Email e senha sao obrigatorios.' });
         }
         try {
-            const [rows] = await connection_1.default.query('SELECT id, name, email, password_hash FROM admins WHERE email = ?', [email]);
+            const [rows] = await connection_1.default.query('SELECT id, name, email, password_hash, token_version FROM admins WHERE email = ?', [email]);
             if (rows.length === 0) {
                 return res.status(401).json({ error: 'Credenciais invalidas.' });
             }
@@ -537,12 +537,31 @@ class AdminController {
             if (!isPasswordCorrect) {
                 return res.status(401).json({ error: 'Credenciais invalidas.' });
             }
-            const token = jsonwebtoken_1.default.sign({ id: admin.id, role: 'admin' }, jwtSecret, { expiresIn: '1d' });
+            const tokenVersion = Number(admin.token_version);
+            const normalizedTokenVersion = Number.isFinite(tokenVersion) && tokenVersion > 0 ? tokenVersion : 1;
+            const token = jsonwebtoken_1.default.sign({ id: admin.id, role: 'admin', token_version: normalizedTokenVersion }, jwtSecret, { expiresIn: '1d' });
             delete admin.password_hash;
             return res.status(200).json({ admin, token });
         }
         catch (error) {
             console.error('Erro no login do admin:', error);
+            return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+        }
+    }
+    async logout(req, res) {
+        const adminId = Number(req.userId);
+        if (!Number.isFinite(adminId) || adminId <= 0) {
+            return res.status(401).json({ error: 'Administrador nao autenticado.' });
+        }
+        try {
+            const [result] = await connection_1.default.query('UPDATE admins SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?', [adminId]);
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ error: 'Administrador nao encontrado.' });
+            }
+            return res.status(200).json({ message: 'Logout realizado com sucesso.' });
+        }
+        catch (error) {
+            console.error('Erro no logout do admin:', error);
             return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
         }
     }

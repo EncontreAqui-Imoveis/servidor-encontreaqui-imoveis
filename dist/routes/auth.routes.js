@@ -30,6 +30,7 @@ authRoutes.post('/otp/verify', (req, res) => AuthController_1.authController.ver
 authRoutes.post('/verify-phone', (req, res) => AuthController_1.authController.verifyPhone(req, res));
 authRoutes.get('/check-email', authSensitiveLimiter, (req, res) => AuthController_1.authController.checkEmail(req, res));
 authRoutes.post('/password-reset/request', authSensitiveLimiter, (req, res) => AuthController_1.authController.requestPasswordReset(req, res));
+authRoutes.post('/logout', auth_1.authMiddleware, (req, res) => AuthController_1.authController.logout(req, res));
 // Perfil
 authRoutes.get('/me', auth_1.authMiddleware, (req, res) => {
     // delegar para user.routes GET /users/me, mas mantendo compatibilidade

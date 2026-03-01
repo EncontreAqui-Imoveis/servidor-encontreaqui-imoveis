@@ -1,12 +1,33 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { userController } from '../controllers/UserController';
 import { authController } from '../controllers/AuthController';
 import { authMiddleware } from '../middlewares/auth';
 
 const userRoutes = Router();
 
-userRoutes.post('/register', userController.register);
-userRoutes.post('/login', userController.login);
+const legacyAuthWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS);
+const legacyAuthLimit = Number(process.env.AUTH_RATE_LIMIT_MAX);
+
+const legacyAuthLimiter = rateLimit({
+  windowMs:
+    Number.isFinite(legacyAuthWindowMs) && legacyAuthWindowMs > 0
+      ? legacyAuthWindowMs
+      : 15 * 60 * 1000,
+  limit: Number.isFinite(legacyAuthLimit) && legacyAuthLimit > 0 ? legacyAuthLimit : 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas tentativas em rotas legadas de autenticacao. Use /auth/*.',
+  },
+});
+
+userRoutes.post('/register', legacyAuthLimiter, (req, res) =>
+  authController.register(req, res)
+);
+userRoutes.post('/login', legacyAuthLimiter, (req, res) =>
+  authController.login(req, res)
+);
 userRoutes.post('/sync', userController.syncUser);
 userRoutes.post('/auth/google', (req, res) => authController.google(req, res));
 userRoutes.post('/auth/firebase', userController.firebaseLogin);

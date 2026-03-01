@@ -30,6 +30,7 @@ const adminAuthLimiter = (0, express_rate_limit_1.default)({
 });
 adminRoutes.post('/login', adminAuthLimiter, AdminController_1.adminController.login);
 adminRoutes.use(auth_1.authMiddleware, auth_1.isAdmin);
+adminRoutes.post('/logout', AdminController_1.adminController.logout);
 adminRoutes.post('/notifications/send', AdminController_1.sendNotification);
 adminRoutes.delete('/notifications/:id', AdminController_1.adminController.deleteNotification);
 adminRoutes.delete('/notifications', AdminController_1.adminController.clearNotifications);

@@ -22,6 +22,7 @@ services:
       - DB_DATABASE=${DB_DATABASE}
       - API_PORT=3333
       - JWT_SECRET=${JWT_SECRET}
+      - PDF_INTERNAL_API_KEY=${PDF_INTERNAL_API_KEY}
     ports:
       - "3333:3333"
     volumes:

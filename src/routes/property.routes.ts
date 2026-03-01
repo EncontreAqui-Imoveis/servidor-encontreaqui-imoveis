@@ -97,6 +97,8 @@ propertyRoutes.get('/public', (req, res) => propertyController.listPublicPropert
 propertyRoutes.get('/public/list', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/cities', (req, res) => propertyController.getAvailableCities(req, res));
 propertyRoutes.get('/public/cities', (req, res) => propertyController.getAvailableCities(req, res));
-propertyRoutes.get('/:id', (req, res) => propertyController.show(req, res));
+propertyRoutes.get('/:id', authMiddleware, (req, res) =>
+  propertyController.show(req as any, res)
+);
 
 export default propertyRoutes;

@@ -10,3 +10,11 @@ artifacts/
 docs/sql/
 scripts/
 .sql
+.env
+.env.*
+*.pem
+*.key
+*.p12
+serviceAccount*.json
+gitleaks-backend.json
+.log

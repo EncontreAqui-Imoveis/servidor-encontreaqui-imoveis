@@ -77,4 +77,28 @@ describe('GET /negotiations/:id/documents/:documentId/download headers', () => {
       'filename="contrato_final_assinado.pdf"'
     );
   });
+
+  it('returns 403 when authenticated user does not own the negotiation (BOLA/IDOR guard)', async () => {
+    vi.mocked(connection.query).mockResolvedValueOnce([
+      [
+        {
+          id: 'neg-1',
+          capturing_broker_id: 99901,
+          selling_broker_id: 99902,
+          buyer_client_id: 99903,
+        },
+      ],
+      {},
+    ] as any);
+
+    const response = await request(app).get(
+      '/negotiations/neg-1/documents/987/download'
+    );
+
+    expect(response.status).toBe(403);
+    expect(String(response.body.error ?? '').toLowerCase()).toContain(
+      'acesso negado'
+    );
+    expect(findByIdMock).not.toHaveBeenCalled();
+  });
 });

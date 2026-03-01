@@ -63,8 +63,8 @@ function createResponseMock() {
     });
 });
 (0, vitest_1.describe)('isAdmin middleware', () => {
-    (0, vitest_1.it)('permite quando role e admin', () => {
-        const req = { userRole: 'admin' };
+    (0, vitest_1.it)('permite quando role e admin validado no banco', () => {
+        const req = { userRole: 'admin', adminValidated: true };
         const res = createResponseMock();
         const next = vitest_1.vi.fn();
         isAdmin(req, res, next);
@@ -72,6 +72,14 @@ function createResponseMock() {
     });
     (0, vitest_1.it)('bloqueia quando role nao e admin', () => {
         const req = { userRole: 'client' };
+        const res = createResponseMock();
+        const next = vitest_1.vi.fn();
+        isAdmin(req, res, next);
+        (0, vitest_1.expect)(next).not.toHaveBeenCalled();
+        (0, vitest_1.expect)(res.status).toHaveBeenCalledWith(403);
+    });
+    (0, vitest_1.it)('bloqueia quando role admin nao foi validado', () => {
+        const req = { userRole: 'admin', adminValidated: false };
         const res = createResponseMock();
         const next = vitest_1.vi.fn();
         isAdmin(req, res, next);

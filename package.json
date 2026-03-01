@@ -9,6 +9,8 @@
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "ci:verify": "npm run build && npm run test",
+    "security:audit": "npm audit --audit-level=high",
     "migrate:up": "ts-node src/database/migrationRunner.ts up",
     "migrate:down": "ts-node src/database/migrationRunner.ts down",
     "migrate:status": "ts-node src/database/migrationRunner.ts status",

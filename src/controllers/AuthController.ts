@@ -6,6 +6,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
 import { requireEnv } from '../config/env';
 import connection from '../database/connection';
+import type { AuthRequest } from '../middlewares/auth';
 import { sendPasswordResetEmail } from '../services/emailService';
 import { phoneOtpService } from '../services/phoneOtpService';
 import { sanitizeAddressInput } from '../utils/address';
@@ -64,9 +65,17 @@ function hasCompleteProfile(row: any) {
   );
 }
 
-function signToken(id: number, role: ProfileType) {
+function normalizeTokenVersion(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return Math.trunc(parsed);
+}
+
+function signToken(id: number, role: ProfileType, tokenVersion: unknown) {
   return jwt.sign(
-    { id, role },
+    { id, role, token_version: normalizeTokenVersion(tokenVersion) },
     jwtSecret,
     { expiresIn: '7d' },
   );
@@ -442,7 +451,7 @@ class AuthController {
         );
       }
 
-      const token = signToken(userId, normalizedProfile);
+      const token = signToken(userId, normalizedProfile, 1);
       const userPayload = buildUserPayload(
         {
           id: userId,
@@ -499,6 +508,7 @@ class AuthController {
       const [rows] = await connection.query<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
+                 u.token_version,
                  CASE
                    WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
                    ELSE 'client'
@@ -530,7 +540,7 @@ class AuthController {
       const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
       const requiresDocuments =
         profile === 'broker' && (brokerDocsStatus.length === 0 || brokerDocsStatus == 'rejected');
-      const token = signToken(user.id, profile);
+      const token = signToken(user.id, profile, user.token_version);
 
       return res.json({
         user: buildUserPayload(user, profile),
@@ -578,7 +588,7 @@ class AuthController {
       }
 
       const [existingRows] = await connection.query<RowDataPacket[]>(
-        `SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid,
+        `SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
                 b.id AS broker_id, b.status AS broker_status, b.creci AS creci,
                 bd.status AS broker_documents_status
            FROM users u
@@ -622,7 +632,7 @@ class AuthController {
       const requiresDocuments =
         effectiveProfile === 'broker' &&
         (brokerDocsStatus.length === 0 || brokerDocsStatus === 'rejected');
-      const token = signToken(row.id, effectiveProfile);
+      const token = signToken(row.id, effectiveProfile, row.token_version);
 
       return res.status(200).json({
         user: buildUserPayload(row, effectiveProfile),
@@ -641,6 +651,34 @@ class AuthController {
       return res.status(status).json({
         error: 'Erro ao autenticar com Google.',
       });
+    }
+  }
+
+  async logout(req: AuthRequest, res: Response) {
+    const userId = Number(req.userId);
+
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    try {
+      const [result] = await connection.query<ResultSetHeader>(
+        'UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
+        [userId]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({ error: 'Usuario nao encontrado.' });
+      }
+
+      return res.status(200).json({ message: 'Logout realizado com sucesso.' });
+    } catch (error: any) {
+      if (error?.code === 'ER_BAD_FIELD_ERROR') {
+        return res.status(200).json({ message: 'Logout realizado com sucesso.' });
+      }
+
+      console.error('Erro no logout:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
 }

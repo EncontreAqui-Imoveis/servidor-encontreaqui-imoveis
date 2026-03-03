@@ -144,4 +144,47 @@ describe('buildCorsOptions', () => {
     });
     expect(allowed).toBe(false);
   });
+
+  it('usa fallback seguro em producao quando CORS_ORIGINS nao estiver configurado', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousCorsOrigins = process.env.CORS_ORIGINS;
+    process.env.NODE_ENV = 'production';
+    process.env.CORS_ORIGINS = '';
+    const previousPanelUrl = process.env.PAINELWEB_URL;
+    delete process.env.PAINELWEB_URL;
+
+    const options = buildCorsOptions();
+    const originFn = options.origin as (
+      origin: string | undefined,
+      cb: (err: Error | null, allow?: boolean) => void
+    ) => void;
+
+    let allowed: boolean | undefined;
+    originFn('https://painel-adm-encontreaquiimoveis.vercel.app', (_err, isAllowed) => {
+      allowed = isAllowed;
+    });
+    expect(allowed).toBe(true);
+
+    originFn('https://malicioso.exemplo.com', (_err, isAllowed) => {
+      allowed = isAllowed;
+    });
+    expect(allowed).toBe(false);
+    expect(options.exposedHeaders).toContain('X-Request-Id');
+
+    if (typeof previousNodeEnv === 'string') {
+      process.env.NODE_ENV = previousNodeEnv;
+    } else {
+      delete process.env.NODE_ENV;
+    }
+    if (typeof previousCorsOrigins === 'string') {
+      process.env.CORS_ORIGINS = previousCorsOrigins;
+    } else {
+      delete process.env.CORS_ORIGINS;
+    }
+    if (typeof previousPanelUrl === 'string') {
+      process.env.PAINELWEB_URL = previousPanelUrl;
+    } else {
+      delete process.env.PAINELWEB_URL;
+    }
+  });
 });

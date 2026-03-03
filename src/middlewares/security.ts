@@ -2,6 +2,18 @@ import type { NextFunction, Request, Response } from 'express';
 import type { CorsOptions } from 'cors';
 
 const ONE_YEAR_IN_SECONDS = 31536000;
+const PRODUCTION_FALLBACK_ORIGINS = [
+  'https://painel-adm-encontreaquiimoveis.vercel.app',
+  'https://site-imobiliario-encoreaqui-7b52iuxz7-ctrshift-pms-projects.vercel.app',
+];
+const SUPPLEMENTAL_CORS_ENV_KEYS = [
+  'PAINELWEB_URL',
+  'PANEL_APP_URL',
+  'SITE_IMOBILIARIO_URL',
+  'SITE_URL',
+  'FRONTEND_URL',
+  'WEB_APP_URL',
+];
 
 function normalizeOrigin(value: string): string {
   const trimmed = value.trim();
@@ -78,6 +90,9 @@ export function buildCorsOptions(): CorsOptions {
     .split(',')
     .map((origin) => normalizeOrigin(origin))
     .filter((origin) => origin.length > 0);
+  const supplementalOrigins = SUPPLEMENTAL_CORS_ENV_KEYS
+    .map((key) => normalizeOrigin(String(process.env[key] ?? '')))
+    .filter((origin) => origin.length > 0);
   const defaultLocalOrigins = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
@@ -86,11 +101,14 @@ export function buildCorsOptions(): CorsOptions {
     'http://localhost:4173',
     'http://127.0.0.1:4173',
   ];
+  const mergedConfiguredOrigins = Array.from(
+    new Set([...configuredOrigins, ...supplementalOrigins]),
+  );
   const allowedOrigins =
-    configuredOrigins.length > 0
-      ? configuredOrigins
+    mergedConfiguredOrigins.length > 0
+      ? mergedConfiguredOrigins
       : nodeEnv === 'production'
-        ? []
+        ? PRODUCTION_FALLBACK_ORIGINS
         : defaultLocalOrigins;
   const allowedOriginSet = new Set(allowedOrigins.map((origin) => normalizeOrigin(origin)));
 
@@ -104,6 +122,10 @@ export function buildCorsOptions(): CorsOptions {
         callback(null, false);
       },
       credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'X-Request-Id'],
+      exposedHeaders: ['X-Request-Id'],
+      optionsSuccessStatus: 204,
     };
   }
 
@@ -122,5 +144,9 @@ export function buildCorsOptions(): CorsOptions {
       callback(null, false);
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'X-Request-Id'],
+    exposedHeaders: ['X-Request-Id'],
+    optionsSuccessStatus: 204,
   };
 }

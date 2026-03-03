@@ -6,7 +6,7 @@ import { setupProcessHandlers } from './serverLifecycle';
 import { redactValue } from './utils/logSanitizer';
 
 const app = createHttpApp();
-const PORT = process.env.API_PORT || 3333;
+const PORT = process.env.PORT || process.env.API_PORT || 3333;
 
 async function startServer() {
   await applyMigrations();

@@ -1,41 +1,21 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import connection from '../database/connection';
 import AuthRequest from '../middlewares/auth';
 import admin from '../config/firebaseAdmin';
-import { requireEnv } from '../config/env';
 import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
+import { runUserQuery } from '../services/userPersistenceService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
-import { sanitizeAddressInput, sanitizePartialAddressInput } from '../utils/address';
+import {
+  sanitizeAddressInput,
+  sanitizePartialAddressInput,
+  signUserToken,
+} from '../services/userSessionService';
 
-const jwtSecret = requireEnv('JWT_SECRET');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ADDRESS_FIELDS = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep'] as const;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
-
-function normalizeTokenVersion(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 1;
-  }
-  return Math.trunc(parsed);
-}
-
-function signUserToken(
-  userId: number,
-  role: 'client' | 'broker',
-  tokenVersion: unknown,
-  expiresIn: '1d' | '7d'
-): string {
-  return jwt.sign(
-    { id: userId, role, token_version: normalizeTokenVersion(tokenVersion) },
-    jwtSecret,
-    { expiresIn }
-  );
-}
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -199,7 +179,7 @@ class UserController {
     }
 
     try {
-      const [existingUserRows] = await connection.query<RowDataPacket[]>(
+      const existingUserRows = await runUserQuery<RowDataPacket[]>(
         'SELECT id FROM users WHERE email = ?',
         [email]
       );
@@ -210,7 +190,7 @@ class UserController {
 
       const passwordHash = await bcrypt.hash(password, 8);
 
-      await connection.query(
+      await runUserQuery(
         `
           INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -245,7 +225,7 @@ class UserController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const rows = await runUserQuery<RowDataPacket[]>(
         'SELECT id, name, email, password_hash, token_version FROM users WHERE email = ?',
         [email]
       );
@@ -279,7 +259,7 @@ class UserController {
     }
 
     try {
-      const [userRows] = await connection.query<RowDataPacket[]>(
+      const userRows = await runUserQuery<RowDataPacket[]>(
         'SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
         [userId]
       );
@@ -290,7 +270,7 @@ class UserController {
 
       const user = userRows[0];
 
-      const [brokerRows] = await connection.query<RowDataPacket[]>(
+      const brokerRows = await runUserQuery<RowDataPacket[]>(
         `
           SELECT b.status, bd.status AS broker_documents_status
           FROM brokers b
@@ -388,7 +368,7 @@ class UserController {
           });
         }
 
-        const [existingEmailRows] = await connection.query<RowDataPacket[]>(
+        const existingEmailRows = await runUserQuery<RowDataPacket[]>(
           'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
           [email, userId]
         );
@@ -442,19 +422,19 @@ class UserController {
       const values: unknown[] = fieldsToUpdate.map((field) => updates[field]);
       values.push(userId);
 
-      await connection.query(
+      await runUserQuery(
         `UPDATE users SET ${setClause} WHERE id = ?`,
         values
       );
 
-      const [userRows] = await connection.query<RowDataPacket[]>(
+      const userRows = await runUserQuery<RowDataPacket[]>(
         'SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
         [userId]
       );
 
       const user = userRows[0];
 
-      const [brokerRows] = await connection.query<RowDataPacket[]>(
+      const brokerRows = await runUserQuery<RowDataPacket[]>(
         `
           SELECT b.status, bd.status AS broker_documents_status
           FROM brokers b
@@ -520,7 +500,7 @@ class UserController {
         return res.status(400).json({ error: 'UID e email são obrigatórios.' });
       }
 
-      const [existingUserRows] = await connection.query<RowDataPacket[]>(
+      const existingUserRows = await runUserQuery<RowDataPacket[]>(
         'SELECT id FROM users WHERE firebase_uid = ? OR email = ?',
         [uid, email]
       );
@@ -529,7 +509,7 @@ class UserController {
         return res.status(409).json({ error: 'Usuário já existe.' });
       }
 
-      await connection.query(
+      await runUserQuery(
         'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
         [uid, email, `User-${uid.substring(0, 8)}`]
       );
@@ -555,7 +535,7 @@ class UserController {
         profileType === 'broker' ? 'broker' : profileType === 'client' ? 'client' : 'auto';
       const autoMode = requestedRole === 'auto';
 
-      const [userRows] = await connection.query<RowDataPacket[]>(
+      const userRows = await runUserQuery<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
@@ -576,7 +556,7 @@ class UserController {
       if (userRows.length > 0) {
         user = userRows[0];
         if (!user.firebase_uid) {
-          await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
+          await runUserQuery('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
         }
 
         const empty = (v: any) => v === null || v === undefined || String(v).trim() === '';
@@ -602,7 +582,7 @@ class UserController {
         }
 
         const chosenRole = requestedRole === 'broker' ? 'broker' : 'client';
-        const [result] = await connection.query<ResultSetHeader>(
+        const result = await runUserQuery<ResultSetHeader>(
           'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
           [uid, email, name || `User-${uid.substring(0, 8)}`]
         );
@@ -616,7 +596,7 @@ class UserController {
         user.broker_status = null;
 
         if (chosenRole === 'broker') {
-          await connection.query(
+          await runUserQuery(
             'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
             [user.id, null, 'pending_verification']
           );
@@ -634,12 +614,12 @@ class UserController {
       if (!autoMode && requestedRole === 'broker') {
         effectiveRole = 'broker';
         roleLocked = false;
-        const [brokerRows] = await connection.query<RowDataPacket[]>(
+        const brokerRows = await runUserQuery<RowDataPacket[]>(
           'SELECT status FROM brokers WHERE id = ?',
           [user.id]
         );
         if (brokerRows.length === 0) {
-          await connection.query(
+          await runUserQuery(
             'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
             [user.id, null, 'pending_verification']
           );
@@ -654,7 +634,7 @@ class UserController {
 
       // Se papel final é corretor, garanta status carregado
       if (effectiveRole === 'broker') {
-        const [brokerRows] = await connection.query<RowDataPacket[]>(
+        const brokerRows = await runUserQuery<RowDataPacket[]>(
           'SELECT status FROM brokers WHERE id = ?',
           [user.id]
         );
@@ -684,10 +664,11 @@ class UserController {
         });
       }
 
-      const token = jwt.sign(
-        { id: user.id, role: effectiveRole },
-        jwtSecret,
-        { expiresIn: '7d' }
+      const token = signUserToken(
+        user.id,
+        effectiveRole === 'broker' ? 'broker' : 'client',
+        user.token_version,
+        '7d',
       );
 
       return res.json({
@@ -754,7 +735,7 @@ class UserController {
       const fallbackEmail = email ?? `${uid}@noemail.firebase`;
       const displayName = name || `User-${uid.substring(0, 8)}`;
 
-      const [userRows] = await connection.query<RowDataPacket[]>(
+      const userRows = await runUserQuery<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
@@ -816,7 +797,7 @@ class UserController {
         if (updates.length > 0) {
           const set = updates.map(([field]) => `${field} = ?`).join(', ');
           const values = updates.map(([, value]) => value);
-          await connection.query(`UPDATE users SET ${set} WHERE id = ?`, [...values, user.id]);
+          await runUserQuery(`UPDATE users SET ${set} WHERE id = ?`, [...values, user.id]);
         }
       } else {
         let addressPayload = {
@@ -848,7 +829,7 @@ class UserController {
           addressPayload = addressResult.value;
         }
 
-        const [result] = await connection.query<ResultSetHeader>(
+        const result = await runUserQuery<ResultSetHeader>(
           'INSERT INTO users (firebase_uid, email, name, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             uid,
@@ -877,7 +858,7 @@ class UserController {
       let brokerStatus: string | null = user.broker_status ?? null;
 
       if (effectiveRole === 'broker') {
-        const [brokerRows] = await connection.query<RowDataPacket[]>(
+        const brokerRows = await runUserQuery<RowDataPacket[]>(
           'SELECT status FROM brokers WHERE id = ? LIMIT 1',
           [user.id]
         );
@@ -934,7 +915,7 @@ class UserController {
     }
 
     try {
-      const [propertyRows] = await connection.query<RowDataPacket[]>(
+      const propertyRows = await runUserQuery<RowDataPacket[]>(
         'SELECT id FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -943,7 +924,7 @@ class UserController {
         return res.status(404).json({ error: 'Imóvel não encontrado.' });
       }
 
-      const [favoriteRows] = await connection.query<RowDataPacket[]>(
+      const favoriteRows = await runUserQuery<RowDataPacket[]>(
         'SELECT 1 FROM favoritos WHERE usuario_id = ? AND imovel_id = ?',
         [userId, propertyId]
       );
@@ -952,7 +933,7 @@ class UserController {
         return res.status(409).json({ error: 'Este imóvel ja esta nos seus favoritos.' });
       }
 
-      await connection.query('INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)', [userId, propertyId]);
+      await runUserQuery('INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)', [userId, propertyId]);
 
       return res.status(201).json({ message: 'Imóvel adicionado aos favoritos.' });
     } catch (error) {
@@ -974,7 +955,7 @@ class UserController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const result = await runUserQuery<ResultSetHeader>(
         'DELETE FROM favoritos WHERE usuario_id = ? AND imovel_id = ?',
         [userId, propertyId]
       );
@@ -998,7 +979,7 @@ class UserController {
     }
 
     try {
-      const [rows] = await connection.query<FavoriteRow[]>(
+      const rows = await runUserQuery<FavoriteRow[]>(
         `
           SELECT
             p.*,
@@ -1048,8 +1029,8 @@ class UserController {
       const offset = (page - 1) * limit;
 
       const countQuery = 'SELECT COUNT(*) as total FROM properties WHERE owner_id = ?';
-      const [totalResult] = await connection.query(countQuery, [userId]);
-      const total = (totalResult as any[])[0]?.total ?? 0;
+      const totalResult = await runUserQuery<RowDataPacket[]>(countQuery, [userId]);
+      const total = totalResult[0]?.total ?? 0;
 
       const dataQuery = `
         SELECT
@@ -1136,7 +1117,7 @@ class UserController {
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
       `;
-      const [dataRows] = await connection.query(dataQuery, [
+      const dataRows = await runUserQuery<RowDataPacket[]>(dataQuery, [
         ...NEGOTIATION_TERMINAL_STATUSES,
         userId,
         limit,
@@ -1201,7 +1182,7 @@ class UserController {
     }
 
     try {
-      const [lastRows] = await connection.query<RowDataPacket[]>(
+      const lastRows = await runUserQuery<RowDataPacket[]>(
         `
           SELECT created_at
           FROM support_requests
@@ -1222,12 +1203,12 @@ class UserController {
         });
       }
 
-      await connection.query(
+      await runUserQuery(
         'INSERT INTO support_requests (user_id) VALUES (?)',
         [userId],
       );
 
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const rows = await runUserQuery<RowDataPacket[]>(
         'SELECT name, email FROM users WHERE id = ?',
         [userId]
       );
@@ -1281,7 +1262,7 @@ class UserController {
         ORDER BY n.created_at DESC
       `;
 
-      const [rows] = await connection.query<RowDataPacket[]>(sql, [userId, role]);
+      const rows = await runUserQuery<RowDataPacket[]>(sql, [userId, role]);
       return res.status(200).json(rows);
     } catch (error) {
       console.error('Erro ao buscar notificacoes:', error);
@@ -1303,7 +1284,7 @@ class UserController {
 
     try {
       const role = await resolveUserNotificationRole(Number(userId));
-      const [result] = await connection.query<ResultSetHeader>(
+      const result = await runUserQuery<ResultSetHeader>(
         `
           DELETE FROM notifications
           WHERE id = ?
@@ -1335,7 +1316,7 @@ class UserController {
 
     try {
       const role = await resolveUserNotificationRole(Number(userId));
-      await connection.query(
+      await runUserQuery(
         `
           DELETE FROM notifications
           WHERE recipient_id = ?
@@ -1368,7 +1349,7 @@ class UserController {
     }
 
     try {
-      const [userRows] = await connection.query<RowDataPacket[]>(
+      const userRows = await runUserQuery<RowDataPacket[]>(
         'SELECT id FROM users WHERE id = ? LIMIT 1',
         [userId],
       );
@@ -1380,7 +1361,7 @@ class UserController {
         return res.status(204).send();
       }
 
-      await connection.query(
+      await runUserQuery(
         `
           INSERT INTO user_device_tokens (user_id, fcm_token, platform)
           VALUES (?, ?, ?)
@@ -1419,7 +1400,7 @@ class UserController {
     }
 
     try {
-      await connection.query(
+      await runUserQuery(
         'DELETE FROM user_device_tokens WHERE user_id = ? AND fcm_token = ?',
         [userId, trimmedToken],
       );
@@ -1433,3 +1414,4 @@ class UserController {
 }
 
 export const userController = new UserController();
+

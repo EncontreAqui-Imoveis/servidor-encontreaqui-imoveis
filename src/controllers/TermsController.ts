@@ -1,14 +1,15 @@
 import { Request, Response } from 'express';
-import connection from '../database/connection';
 import AuthRequest from '../middlewares/auth';
+import {
+  getCurrentBrokerTerms,
+  recordBrokerTermsAcceptance,
+} from '../services/termsService';
 
 class TermsController {
   async getCurrentTerms(req: Request, res: Response) {
     try {
-      const [terms] = await connection.query(
-        'SELECT * FROM broker_terms WHERE active = TRUE ORDER BY created_at DESC LIMIT 1'
-      ) as any[];
-      
+      const terms = await getCurrentBrokerTerms();
+
       res.json(terms);
     } catch (error) {
       res.status(500).json({ error: 'Erro ao buscar termos.' });
@@ -19,12 +20,13 @@ class TermsController {
     const brokerId = req.userId;
     const { termsId } = req.body;
 
+    if (!brokerId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
     try {
-      await connection.query(
-        'INSERT INTO broker_acceptances (broker_id, terms_id) VALUES (?, ?)',
-        [brokerId, termsId]
-      );
-      
+      await recordBrokerTermsAcceptance(brokerId, termsId);
+
       res.json({ message: 'Termos aceitos com sucesso.' });
     } catch (error) {
       res.status(500).json({ error: 'Erro ao registrar aceitação.' });

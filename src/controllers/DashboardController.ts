@@ -1,18 +1,10 @@
 import { Request, Response } from 'express';
-import connection from '../database/connection';
+import { loadDashboardStats } from '../services/dashboardStatsService';
 
 class DashboardController {
   async getStats(req: Request, res: Response) {
     try {
-      const [propertiesResult] = await connection.query('SELECT COUNT(*) as total FROM properties');
-      const [brokersResult] = await connection.query('SELECT COUNT(*) as total FROM brokers');
-      const [usersResult] = await connection.query('SELECT COUNT(*) as total FROM users');
-
-      const stats = {
-        totalProperties: (propertiesResult as any[])[0].total,
-        totalBrokers: (brokersResult as any[])[0].total,
-        totalUsers: (usersResult as any[])[0].total,
-      };
+      const stats = await loadDashboardStats();
 
       return res.json(stats);
     } catch (error) {

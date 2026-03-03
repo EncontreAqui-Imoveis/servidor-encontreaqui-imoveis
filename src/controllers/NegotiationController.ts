@@ -2,13 +2,19 @@ import { randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
-import connection from '../database/connection';
 import type { AuthRequest } from '../middlewares/auth';
 import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
-import { ExternalPdfService } from '../modules/negotiations/infra/ExternalPdfService';
-import { NegotiationDocumentsRepository } from '../modules/negotiations/infra/NegotiationDocumentsRepository';
-import type { SqlExecutor } from '../modules/negotiations/infra/NegotiationRepository';
 import { createAdminNotification } from '../services/notificationService';
+import {
+  executeNegotiationStatement,
+  findLatestNegotiationDocumentByType,
+  findNegotiationDocumentById,
+  generateNegotiationProposalPdf,
+  getNegotiationDbConnection,
+  queryNegotiationRows,
+  saveNegotiationProposalDocument,
+  saveNegotiationSignedProposalDocument,
+} from '../services/negotiationPersistenceService';
 
 interface NegotiationRow extends RowDataPacket {
   id: string;
@@ -107,12 +113,6 @@ interface ParsedProposalWizard {
   };
 }
 
-const executor: SqlExecutor = {
-  execute<T = unknown>(sql: string, params?: unknown[]): Promise<T | [T, unknown]> {
-    return connection.execute(sql, params as unknown[]) as unknown as Promise<T | [T, unknown]>;
-  },
-};
-
 const ACTIVE_NEGOTIATION_STATUSES = [
   'PROPOSAL_DRAFT',
   'PROPOSAL_SENT',
@@ -128,8 +128,6 @@ const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
   'PROPOSAL_SENT',
   'AWAITING_SIGNATURES',
 ]);
-const pdfService = new ExternalPdfService();
-const negotiationDocumentsRepository = new NegotiationDocumentsRepository(executor);
 
 function toCents(value: number): number {
   return Math.round(value * 100);
@@ -371,7 +369,7 @@ class NegotiationController {
     }
 
     try {
-      const [negotiationRows] = await connection.query<NegotiationRow[]>(
+      const negotiationRows = await queryNegotiationRows<NegotiationRow>(
         'SELECT id FROM negotiations WHERE id = ? LIMIT 1',
         [negotiationId]
       );
@@ -380,7 +378,7 @@ class NegotiationController {
         return res.status(404).json({ error: 'Negociacao nao encontrada.' });
       }
 
-      await connection.execute(
+      await executeNegotiationStatement(
         `
           UPDATE negotiations
           SET
@@ -391,8 +389,8 @@ class NegotiationController {
         [proposalData.clientName, proposalData.clientCpf, negotiationId]
       );
 
-      const pdfBuffer = await pdfService.generateProposal(proposalData);
-      const documentId = await negotiationDocumentsRepository.saveProposal(
+      const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
+      const documentId = await saveNegotiationProposalDocument(
         negotiationId,
         pdfBuffer,
         undefined,
@@ -428,7 +426,7 @@ class NegotiationController {
 
     let tx: PoolConnection | null = null;
     try {
-      tx = await connection.getConnection();
+      tx = await getNegotiationDbConnection();
       await tx.beginTransaction();
 
       const [propertyRows] = await tx.query<PropertyRow[]>(
@@ -644,11 +642,11 @@ class NegotiationController {
         validityDays: payload.validadeDias,
       };
 
-      const pdfBuffer = await pdfService.generateProposal(proposalData);
-      const documentId = await negotiationDocumentsRepository.saveProposal(
+      const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
+      const documentId = await saveNegotiationProposalDocument(
         negotiationId,
         pdfBuffer,
-        tx as unknown as SqlExecutor,
+        tx,
         {
           originalFileName: 'proposta.pdf',
           generated: true,
@@ -696,7 +694,7 @@ class NegotiationController {
 
     let tx: PoolConnection | null = null;
     try {
-      tx = await connection.getConnection();
+      tx = await getNegotiationDbConnection();
       await tx.beginTransaction();
 
       const [negotiationRows] = await tx.query<NegotiationUploadRow[]>(
@@ -741,10 +739,10 @@ class NegotiationController {
         });
       }
 
-      const documentId = await negotiationDocumentsRepository.saveSignedProposal(
+      const documentId = await saveNegotiationSignedProposalDocument(
         negotiationId,
         uploadedFile.buffer,
-        tx as unknown as SqlExecutor,
+        tx,
         {
           originalFileName: uploadedFile.originalname ?? 'proposta_assinada.pdf',
           uploadedBy: Number(req.userId ?? 0) || null,
@@ -839,7 +837,7 @@ class NegotiationController {
     }
 
     try {
-      const [negotiationRows] = await connection.query<NegotiationAccessRow[]>(
+      const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
         `
           SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
           FROM negotiations
@@ -860,7 +858,7 @@ class NegotiationController {
         return res.status(403).json({ error: 'Acesso negado ao documento.' });
       }
 
-      const document = await negotiationDocumentsRepository.findById(documentId);
+      const document = await findNegotiationDocumentById(documentId);
       if (!document) {
         return res.status(404).json({ error: 'Documento nao encontrado.' });
       }
@@ -908,7 +906,7 @@ class NegotiationController {
     const role = String(req.userRole ?? '').trim().toLowerCase();
 
     try {
-      const [negotiationRows] = await connection.query<NegotiationAccessRow[]>(
+      const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
         `
           SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
           FROM negotiations
@@ -929,7 +927,7 @@ class NegotiationController {
         return res.status(403).json({ error: 'Acesso negado à proposta.' });
       }
 
-      const document = await negotiationDocumentsRepository.findLatestByNegotiationAndType(
+      const document = await findLatestNegotiationDocumentByType(
         negotiationId,
         'proposal'
       );

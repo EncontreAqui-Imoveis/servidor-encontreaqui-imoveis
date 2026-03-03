@@ -34,6 +34,29 @@ import { contractDocumentUpload } from '../../src/middlewares/uploadMiddleware';
 describe('POST /contracts/:id/documents stores side metadata', () => {
   const app = express();
   app.use(express.json());
+  let activeContract = {
+    id: 'contract-1',
+    negotiation_id: 'neg-1',
+    property_id: 101,
+    status: 'AWAITING_DOCS',
+    seller_info: {},
+    buyer_info: {},
+    commission_data: {},
+    workflow_metadata: null as Record<string, unknown> | null,
+    seller_approval_status: 'PENDING',
+    buyer_approval_status: 'PENDING',
+    seller_approval_reason: null,
+    buyer_approval_reason: null,
+    created_at: '2026-02-20 10:00:00',
+    updated_at: '2026-02-20 10:00:00',
+    capturing_broker_id: 30003,
+    selling_broker_id: 30004,
+    property_title: 'Casa Teste',
+    property_purpose: 'Venda',
+    property_code: 'RV-101',
+    capturing_broker_name: 'Captador',
+    selling_broker_name: 'Vendedor',
+  };
   app.use((req, _res, next) => {
     (req as any).userId = 30003;
     (req as any).userRole = 'broker';
@@ -47,6 +70,29 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    activeContract = {
+      id: 'contract-1',
+      negotiation_id: 'neg-1',
+      property_id: 101,
+      status: 'AWAITING_DOCS',
+      seller_info: {},
+      buyer_info: {},
+      commission_data: {},
+      workflow_metadata: null,
+      seller_approval_status: 'PENDING',
+      buyer_approval_status: 'PENDING',
+      seller_approval_reason: null,
+      buyer_approval_reason: null,
+      created_at: '2026-02-20 10:00:00',
+      updated_at: '2026-02-20 10:00:00',
+      capturing_broker_id: 30003,
+      selling_broker_id: 30004,
+      property_title: 'Casa Teste',
+      property_purpose: 'Venda',
+      property_code: 'RV-101',
+      capturing_broker_name: 'Captador',
+      selling_broker_name: 'Vendedor',
+    };
     getConnectionMock.mockResolvedValue(txMock);
     queryMock.mockResolvedValue([]);
     txMock.beginTransaction.mockResolvedValue(undefined);
@@ -56,38 +102,25 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
 
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
-        return [[
-          {
-            id: 'contract-1',
-            negotiation_id: 'neg-1',
-            property_id: 101,
-            status: 'AWAITING_DOCS',
-            seller_info: {},
-            buyer_info: {},
-            commission_data: {},
-            seller_approval_status: 'PENDING',
-            buyer_approval_status: 'PENDING',
-            seller_approval_reason: null,
-            buyer_approval_reason: null,
-            created_at: '2026-02-20 10:00:00',
-            updated_at: '2026-02-20 10:00:00',
-            capturing_broker_id: 30003,
-            selling_broker_id: 30004,
-            property_title: 'Casa Teste',
-            property_purpose: 'Venda',
-            property_code: 'RV-101',
-            capturing_broker_name: 'Captador',
-            selling_broker_name: 'Vendedor',
-          },
-        ]];
+        return [[{ ...activeContract }]];
       }
 
       if (sql.includes('INSERT INTO negotiation_documents')) {
         const metadataJson = String(params[3] ?? '{}');
         const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
-        expect(metadata.side).toBe('seller');
-        expect(String(metadata.originalFileName ?? '')).toBe('identidade.pdf');
+        if (String(params[2] ?? '') === 'doc_identidade') {
+          expect(metadata.side).toBe('seller');
+          expect(String(metadata.originalFileName ?? '')).toBe('identidade.pdf');
+        }
         return [{ insertId: 999 }];
+      }
+
+      if (
+        sql.includes('UPDATE contracts') &&
+        sql.includes('workflow_metadata = CAST(? AS JSON)')
+      ) {
+        activeContract.workflow_metadata = JSON.parse(String(params[0] ?? '{}'));
+        return [{ affectedRows: 1 }];
       }
 
       if (sql.includes('UPDATE contracts')) {
@@ -110,6 +143,30 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       documentType: 'doc_identidade',
       side: 'seller',
       originalFileName: 'identidade.pdf',
+    });
+  });
+
+  it('marks workflow metadata as online when broker uploads signed contract', async () => {
+    activeContract = {
+      ...activeContract,
+      status: 'AWAITING_SIGNATURES',
+    };
+
+    const response = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'contrato_assinado')
+      .attach('file', Buffer.from('%PDF-1.4 signed'), 'contrato_assinado.pdf');
+
+    expect(response.status).toBe(201);
+    expect(activeContract.workflow_metadata).toEqual(
+      expect.objectContaining({
+        signatureMethod: 'online',
+        signedContractUploadedOnlineBy: 30003,
+      })
+    );
+    expect(response.body.document).toMatchObject({
+      documentType: 'contrato_assinado',
+      originalFileName: 'contrato_assinado.pdf',
     });
   });
 });

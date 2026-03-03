@@ -61,6 +61,7 @@ jobs:
           ## Blocking checks executed
           - Gitleaks
           - Build (`npm run build`)
+          - Architectural discipline (`npm run test:architecture`)
           - Tests (`npm run test`)
           - Semgrep (`--error`)
           - `npm audit --audit-level=high`

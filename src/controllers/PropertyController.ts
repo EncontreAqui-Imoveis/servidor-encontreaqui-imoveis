@@ -1,9 +1,14 @@
-﻿import { Request, Response } from "express";
+import { Request, Response } from "express";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import connection from "../database/connection";
 import { uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
 import { notifyAdmins } from "../services/notificationService";
+import {
+  getPropertyDbConnection,
+  propertyQueryExecutor,
+  runPropertyQuery,
+  type PropertyQueryExecutor,
+} from "../services/propertyPersistenceService";
 import {
   notifyPriceDropIfNeeded,
   notifyPromotionStarted,
@@ -511,10 +516,8 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
   };
 }
 
-type QueryExecutor = Pick<typeof connection, "query">;
-
 async function upsertSaleRecord(
-  db: QueryExecutor,
+  db: PropertyQueryExecutor,
   payload: {
     propertyId: number;
     brokerId: number;
@@ -603,7 +606,7 @@ async function fetchPropertyAggregateById(
   options?: { publicOnly?: boolean }
 ): Promise<PropertyAggregateRow | null> {
   const publicOnly = options?.publicOnly === true;
-  const [rows] = await connection.query<PropertyAggregateRow[]>(
+  const rows = await runPropertyQuery<PropertyAggregateRow[]>(
     `
       SELECT
         p.*,
@@ -920,7 +923,7 @@ class PropertyController {
     }
 
     try {
-      const [brokerRows] = await connection.query<RowDataPacket[]>(
+      const brokerRows = await runPropertyQuery<RowDataPacket[]>(
         'SELECT status FROM brokers WHERE id = ?',
         [brokerId]
       );
@@ -939,7 +942,7 @@ class PropertyController {
           .json({ error: 'Apenas corretores aprovados podem criar imóveis.' });
       }
 
-      const [duplicateRows] = await connection.query<RowDataPacket[]>(
+      const duplicateRows = await runPropertyQuery<RowDataPacket[]>(
         `
           SELECT id FROM properties
           WHERE address = ?
@@ -996,7 +999,7 @@ class PropertyController {
         videoUrl = uploadedVideo.url;
       }
 
-      const [result] = await connection.query<ResultSetHeader>(
+      const result = await runPropertyQuery<ResultSetHeader>(
         `
           INSERT INTO properties (
             broker_id,
@@ -1103,7 +1106,7 @@ class PropertyController {
 
       if (imageUrls.length > 0) {
         const values = imageUrls.map((url) => [propertyId, url]);
-        await connection.query(
+        await runPropertyQuery(
           'INSERT INTO property_images (property_id, image_url) VALUES ?',
           [values]
         );
@@ -1354,7 +1357,7 @@ class PropertyController {
     }
 
     try {
-      const [duplicateRows] = await connection.query<RowDataPacket[]>(
+      const duplicateRows = await runPropertyQuery<RowDataPacket[]>(
         `
           SELECT id FROM properties
           WHERE address = ?
@@ -1411,7 +1414,7 @@ class PropertyController {
         videoUrl = uploadedVideo.url;
       }
 
-      const [result] = await connection.query<ResultSetHeader>(
+      const result = await runPropertyQuery<ResultSetHeader>(
         `
           INSERT INTO properties (
             broker_id,
@@ -1518,7 +1521,7 @@ class PropertyController {
 
       if (imageUrls.length > 0) {
         const values = imageUrls.map((url) => [propertyId, url]);
-        await connection.query(
+        await runPropertyQuery(
           'INSERT INTO property_images (property_id, image_url) VALUES ?',
           [values]
         );
@@ -1578,7 +1581,7 @@ class PropertyController {
     }
 
     try {
-      const [propertyRows] = await connection.query<PropertyRow[]>(
+      const propertyRows = await runPropertyQuery<PropertyRow[]>(
         'SELECT * FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -2005,7 +2008,7 @@ class PropertyController {
 
       values.push(propertyId);
 
-      await connection.query(
+      await runPropertyQuery(
         `UPDATE properties SET ${fields.join(', ')} WHERE id = ?`,
         values
       );
@@ -2015,11 +2018,11 @@ class PropertyController {
           .filter((url: unknown) => typeof url === 'string' && url.trim().length > 0)
           .map((url: string) => url.trim());
 
-        await connection.query('DELETE FROM property_images WHERE property_id = ?', [propertyId]);
+        await runPropertyQuery('DELETE FROM property_images WHERE property_id = ?', [propertyId]);
 
         if (images.length > 0) {
           const imageValues = images.map((url) => [propertyId, url]);
-          await connection.query(
+          await runPropertyQuery(
             'INSERT INTO property_images (property_id, image_url) VALUES ?',
             [imageValues]
           );
@@ -2123,7 +2126,7 @@ class PropertyController {
             property.valor_condominio != null ? Number(property.valor_condominio) : null;
           const isRecurring = recurrenceInterval !== 'none' ? 1 : 0;
 
-          await upsertSaleRecord(connection, {
+          await upsertSaleRecord(propertyQueryExecutor, {
             propertyId,
             brokerId,
             dealType,
@@ -2137,7 +2140,7 @@ class PropertyController {
             recurrenceInterval,
           });
 
-          await connection.query(
+          await runPropertyQuery(
             'UPDATE properties SET sale_value = ?, commission_rate = ?, commission_value = ? WHERE id = ?',
             [dealAmount, commissionRate, commissionAmount, propertyId]
           );
@@ -2189,7 +2192,7 @@ class PropertyController {
     }
 
     try {
-      const [propertyRows] = await connection.query<PropertyRow[]>(
+      const propertyRows = await runPropertyQuery<PropertyRow[]>(
         'SELECT * FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -2263,7 +2266,7 @@ class PropertyController {
       const newStatus: PropertyStatus = dealType === 'sale' ? 'sold' : 'rented';
       const isRecurring = recurrenceInterval !== "none" ? 1 : 0;
 
-      const db = await connection.getConnection();
+      const db = await getPropertyDbConnection();
       try {
         await db.beginTransaction();
         await db.query(
@@ -2328,7 +2331,7 @@ class PropertyController {
     }
 
     try {
-      const [propertyRows] = await connection.query<PropertyRow[]>(
+      const propertyRows = await runPropertyQuery<PropertyRow[]>(
         'SELECT id, broker_id, status FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -2346,7 +2349,7 @@ class PropertyController {
         return res.status(400).json({ error: 'Este imóvel nao possui negocio fechado.' });
       }
 
-      const db = await connection.getConnection();
+      const db = await getPropertyDbConnection();
       try {
         await db.beginTransaction();
         await db.query(
@@ -2385,7 +2388,7 @@ class PropertyController {
     }
 
     try {
-      const [propertyRows] = await connection.query<RowDataPacket[]>(
+      const propertyRows = await runPropertyQuery<RowDataPacket[]>(
         'SELECT broker_id, owner_id FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -2402,7 +2405,7 @@ class PropertyController {
         return res.status(403).json({ error: 'Voce nao tem permissao para deletar este imovel.' });
       }
 
-      await connection.query('DELETE FROM properties WHERE id = ?', [propertyId]);
+      await runPropertyQuery('DELETE FROM properties WHERE id = ?', [propertyId]);
 
       return res.status(200).json({ message: 'Imóvel deletado com sucesso!' });
     } catch (error) {
@@ -2413,7 +2416,7 @@ class PropertyController {
 
   async getAvailableCities(req: Request, res: Response) {
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const rows = await runPropertyQuery<RowDataPacket[]>(
         `
           SELECT DISTINCT city
           FROM properties
@@ -2423,6 +2426,8 @@ class PropertyController {
             AND COALESCE(visibility, 'PUBLIC') = 'PUBLIC'
           ORDER BY city ASC
         `
+        ,
+        []
       );
       return res.status(200).json(rows.map((row) => row.city));
     } catch (error) {
@@ -2439,7 +2444,7 @@ class PropertyController {
     }
 
     try {
-      const [rows] = await connection.query<PropertyAggregateRow[]>(
+      const rows = await runPropertyQuery<PropertyAggregateRow[]>(
         `
           SELECT
             p.*,
@@ -2676,7 +2681,7 @@ class PropertyController {
     const sortDirection = String(order ?? 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     try {
-      const [rows] = await connection.query<PropertyAggregateRow[]>(
+      const rows = await runPropertyQuery<PropertyAggregateRow[]>(
         `
           SELECT
             p.*,
@@ -2736,7 +2741,7 @@ class PropertyController {
         [...NEGOTIATION_TERMINAL_STATUSES, ...params, numericLimit, offset]
       );
 
-      const [totalRows] = await connection.query<RowDataPacket[]>(
+      const totalRows = await runPropertyQuery<RowDataPacket[]>(
         `SELECT COUNT(DISTINCT p.id) AS total FROM properties p ${where}`,
         params
       );
@@ -2766,7 +2771,7 @@ class PropertyController {
     const offset = (page - 1) * limit;
 
     try {
-      const [rows] = await connection.query<PropertyAggregateRow[]>(
+      const rows = await runPropertyQuery<PropertyAggregateRow[]>(
         `
           SELECT
             p.*,
@@ -2828,7 +2833,7 @@ class PropertyController {
         [...NEGOTIATION_TERMINAL_STATUSES, limit, offset]
       );
 
-      const [countRows] = await connection.query<RowDataPacket[]>(
+      const countRows = await runPropertyQuery<RowDataPacket[]>(
         `
           SELECT COUNT(*) AS total
           FROM featured_properties fp
@@ -2836,6 +2841,8 @@ class PropertyController {
           WHERE p.status = 'approved'
             AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
         `
+        ,
+        []
       );
 
       const total = countRows[0]?.total ?? 0;
@@ -2855,4 +2862,5 @@ class PropertyController {
 }
 
 export const propertyController = new PropertyController();
+
 

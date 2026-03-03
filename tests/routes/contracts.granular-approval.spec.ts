@@ -39,6 +39,7 @@ type MutableContractState = {
   seller_info: Record<string, unknown>;
   buyer_info: Record<string, unknown>;
   commission_data: Record<string, unknown>;
+  workflow_metadata: Record<string, unknown> | null;
   seller_approval_status: string;
   buyer_approval_status: string;
   seller_approval_reason: Record<string, unknown> | null;
@@ -65,6 +66,7 @@ function createInitialContractState(
     seller_info: { estado_civil: 'Casado' },
     buyer_info: { estado_civil: 'Solteiro' },
     commission_data: {},
+    workflow_metadata: null,
     seller_approval_status: 'PENDING',
     buyer_approval_status: 'PENDING',
     seller_approval_reason: null,
@@ -129,6 +131,14 @@ describe('Contract granular approval and signed docs endpoints', () => {
             String(params[3] ?? 'null')
           );
           contractState.status = String(params[4]);
+          return [{ affectedRows: 1 }];
+        }
+
+        if (
+          sql.includes('UPDATE contracts') &&
+          sql.includes('workflow_metadata = CAST(? AS JSON)')
+        ) {
+          contractState.workflow_metadata = JSON.parse(String(params[0] ?? '{}'));
           return [{ affectedRows: 1 }];
         }
 
@@ -210,6 +220,17 @@ describe('Contract granular approval and signed docs endpoints', () => {
       expect.stringContaining('INSERT INTO negotiation_documents'),
       expect.arrayContaining(['neg-1', 'contrato_assinado', expect.any(Buffer)])
     );
+    expect(txMock.query).toHaveBeenCalledWith(
+      expect.stringContaining('workflow_metadata = CAST(? AS JSON)'),
+      [
+        expect.stringContaining('"agencySignedContractReceivedBy":"admin"'),
+        'contract-1',
+      ]
+    );
+    expect(contractState.workflow_metadata).toEqual(
+      expect.objectContaining({
+        agencySignedContractReceivedBy: 'admin',
+      })
+    );
   });
 });
-

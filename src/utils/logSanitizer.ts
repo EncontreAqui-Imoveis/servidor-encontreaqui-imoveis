@@ -70,12 +70,16 @@ function sanitizeArgs(args: unknown[]): unknown[] {
 export function patchConsoleRedaction() {
   const original = {
     log: console.log.bind(console),
+    info: console.info.bind(console),
     warn: console.warn.bind(console),
     error: console.error.bind(console),
   };
 
   console.log = (...args: unknown[]) => {
     original.log(...sanitizeArgs(args));
+  };
+  console.info = (...args: unknown[]) => {
+    original.info(...sanitizeArgs(args));
   };
   console.warn = (...args: unknown[]) => {
     original.warn(...sanitizeArgs(args));

@@ -1,111 +1,19 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
-import { requireEnv } from '../config/env';
-import connection from '../database/connection';
+import { authDb } from '../services/authPersistenceService';
+import {
+  buildUserPayload,
+  hasCompleteProfile,
+  signUserToken,
+  type ProfileType,
+  withTimeout,
+} from '../services/authSessionService';
 import type { AuthRequest } from '../middlewares/auth';
-import { sendPasswordResetEmail } from '../services/emailService';
 import { phoneOtpService } from '../services/phoneOtpService';
 import { sanitizeAddressInput } from '../utils/address';
 import { hasValidCreci, normalizeCreci } from '../utils/creci';
-
-const jwtSecret = requireEnv('JWT_SECRET');
-
-type ProfileType = 'client' | 'broker';
-
-function buildBrokerPayload(row: any) {
-  const hasBrokerData =
-    row?.broker_id != null ||
-    row?.broker_status != null ||
-    row?.creci != null;
-
-  if (!hasBrokerData) {
-    return null;
-  }
-
-  return {
-    id: Number(row.broker_id ?? row.id),
-    status: row.broker_status != null ? String(row.broker_status) : null,
-    creci: row.creci != null ? String(row.creci) : null,
-  };
-}
-
-function buildUserPayload(row: any, profileType: ProfileType) {
-  const broker = buildBrokerPayload(row);
-  return {
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    phone: row.phone ?? null,
-    street: row.street ?? null,
-    number: row.number ?? null,
-    complement: row.complement ?? null,
-    bairro: row.bairro ?? null,
-    city: row.city ?? null,
-    state: row.state ?? null,
-    cep: row.cep ?? null,
-    role: profileType,
-    broker_status: row.broker_status ?? null,
-    broker,
-  };
-}
-
-function hasCompleteProfile(row: any) {
-  return !!(
-    row.phone &&
-    row.street &&
-    row.number &&
-    row.bairro &&
-    row.city &&
-    row.state &&
-    row.cep
-  );
-}
-
-function normalizeTokenVersion(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 1;
-  }
-  return Math.trunc(parsed);
-}
-
-function signToken(id: number, role: ProfileType, tokenVersion: unknown) {
-  return jwt.sign(
-    { id, role, token_version: normalizeTokenVersion(tokenVersion) },
-    jwtSecret,
-    { expiresIn: '7d' },
-  );
-}
-
-function hashResetCode(code: string): string {
-  return crypto.createHash('sha256').update(code).digest('hex');
-}
-
-function generateResetCode(): string {
-  const number = crypto.randomInt(100000, 1000000);
-  return String(number);
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Timeout while waiting for ${label}`));
-    }, ms);
-    promise
-      .then((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
 
 class AuthController {
   private normalizePhoneOtpInput(value: unknown): string {
@@ -179,7 +87,7 @@ class AuthController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await authDb.query<RowDataPacket[]>(
         'SELECT id, firebase_uid, password_hash FROM users WHERE email = ? LIMIT 1',
         [email],
       );
@@ -203,7 +111,7 @@ class AuthController {
 
     try {
       // 1. Check if user exists in SQL
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await authDb.query<RowDataPacket[]>(
         'SELECT id, name, firebase_uid FROM users WHERE email = ? LIMIT 1',
         [email],
       );
@@ -235,7 +143,7 @@ class AuthController {
           }
 
           // Update SQL with new UID
-          await connection.query(
+          await authDb.query(
             'UPDATE users SET firebase_uid = ? WHERE id = ?',
             [firebaseUser.uid, user.id],
           );
@@ -264,7 +172,7 @@ class AuthController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await authDb.query<RowDataPacket[]>(
         `
           SELECT
             u.id,
@@ -386,12 +294,12 @@ class AuthController {
 
       let existingUserRows: RowDataPacket[];
       if (firebaseUid) {
-        [existingUserRows] = await connection.query<RowDataPacket[]>(
+        [existingUserRows] = await authDb.query<RowDataPacket[]>(
           'SELECT id FROM users WHERE email = ? OR firebase_uid = ? LIMIT 1',
           [email, firebaseUid],
         );
       } else {
-        [existingUserRows] = await connection.query<RowDataPacket[]>(
+        [existingUserRows] = await authDb.query<RowDataPacket[]>(
           'SELECT id FROM users WHERE email = ? LIMIT 1',
           [email],
         );
@@ -421,7 +329,7 @@ class AuthController {
         ? null
         : await bcrypt.hash(password, 8);
 
-      const [userResult] = await connection.query<ResultSetHeader>(
+      const [userResult] = await authDb.query<ResultSetHeader>(
         `
           INSERT INTO users (firebase_uid, name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -445,13 +353,13 @@ class AuthController {
       const userId = userResult.insertId;
 
       if (normalizedProfile === 'broker') {
-        await connection.query(
+        await authDb.query(
           'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
           [userId, brokerCreci, 'pending_verification'],
         );
       }
 
-      const token = signToken(userId, normalizedProfile, 1);
+      const token = signUserToken(userId, normalizedProfile, 1);
       const userPayload = buildUserPayload(
         {
           id: userId,
@@ -505,7 +413,7 @@ class AuthController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await authDb.query<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  u.token_version,
@@ -540,7 +448,7 @@ class AuthController {
       const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
       const requiresDocuments =
         profile === 'broker' && (brokerDocsStatus.length === 0 || brokerDocsStatus == 'rejected');
-      const token = signToken(user.id, profile, user.token_version);
+      const token = signUserToken(user.id, profile, user.token_version);
 
       return res.json({
         user: buildUserPayload(user, profile),
@@ -587,7 +495,7 @@ class AuthController {
         });
       }
 
-      const [existingRows] = await connection.query<RowDataPacket[]>(
+      const [existingRows] = await authDb.query<RowDataPacket[]>(
         `SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
                 b.id AS broker_id, b.status AS broker_status, b.creci AS creci,
                 bd.status AS broker_documents_status
@@ -616,7 +524,7 @@ class AuthController {
 
       const row = existingRows[0];
       if (!row.firebase_uid) {
-        await connection.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
+        await authDb.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
       }
 
       const brokerStatus = String(row.broker_status ?? '').trim();
@@ -632,7 +540,7 @@ class AuthController {
       const requiresDocuments =
         effectiveProfile === 'broker' &&
         (brokerDocsStatus.length === 0 || brokerDocsStatus === 'rejected');
-      const token = signToken(row.id, effectiveProfile, row.token_version);
+      const token = signUserToken(row.id, effectiveProfile, row.token_version);
 
       return res.status(200).json({
         user: buildUserPayload(row, effectiveProfile),
@@ -662,7 +570,7 @@ class AuthController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await authDb.query<ResultSetHeader>(
         'UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
         [userId]
       );
@@ -684,3 +592,4 @@ class AuthController {
 }
 
 export const authController = new AuthController();
+

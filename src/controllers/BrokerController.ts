@@ -1,7 +1,7 @@
-﻿import { Request, Response } from "express";
+import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import connection from "../database/connection";
+import { brokerDb } from "../services/brokerPersistenceService";
 import { RowDataPacket } from "mysql2";
 import AuthRequest from "../middlewares/auth";
 import { uploadToCloudinary } from "../config/cloudinary";
@@ -87,7 +87,7 @@ class BrokerController {
         params.push(limit);
 
         try {
-            const [rows] = await connection.query<RowDataPacket[]>(
+            const [rows] = await brokerDb.query<RowDataPacket[]>(
                 `
                     SELECT
                         b.id,
@@ -147,7 +147,7 @@ class BrokerController {
         }
 
         try {
-            const [existingUserRows] = await connection.query(
+            const [existingUserRows] = await brokerDb.query(
                 "SELECT id FROM users WHERE email = ?",
                 [email]
             );
@@ -157,7 +157,7 @@ class BrokerController {
                 return res.status(409).json({ error: "Este email já está em uso." });
             }
 
-            const [existingCreciRows] = await connection.query(
+            const [existingCreciRows] = await brokerDb.query(
                 "SELECT id FROM brokers WHERE creci = ?",
                 [normalizedCreci]
             );
@@ -184,7 +184,7 @@ class BrokerController {
             }
 
             const passwordHash = await bcrypt.hash(password, 8);
-            const [userResult] = await connection.query(
+            const [userResult] = await brokerDb.query(
                 "INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     name,
@@ -203,7 +203,7 @@ class BrokerController {
 
             const userId = (userResult as any).insertId;
 
-            await connection.query(
+            await brokerDb.query(
                 "INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, ?, ?)",
                 [userId, normalizedCreci, "pending_verification", resolvedAgencyId ? Number(resolvedAgencyId) : null]
             );
@@ -275,7 +275,7 @@ class BrokerController {
         const creciBackFile = files.creciBack[0];
         const selfieFile = files.selfie[0];
 
-        const db = await connection.getConnection();
+        const db = await brokerDb.getConnection();
         try {
             await db.beginTransaction();
 
@@ -391,7 +391,7 @@ class BrokerController {
         }
 
         try {
-            const [creciRows] = await connection.query<RowDataPacket[]>(
+            const [creciRows] = await brokerDb.query<RowDataPacket[]>(
                 'SELECT id FROM brokers WHERE creci = ? AND id <> ?',
                 [creci, brokerId]
             );
@@ -399,13 +399,13 @@ class BrokerController {
                 return res.status(409).json({ error: "Este CRECI ja esta em uso." });
             }
 
-            const [brokerRows] = await connection.query<RowDataPacket[]>(
+            const [brokerRows] = await brokerDb.query<RowDataPacket[]>(
                 'SELECT status FROM brokers WHERE id = ?',
                 [brokerId]
             );
 
             if (brokerRows.length === 0) {
-                await connection.query(
+                await brokerDb.query(
                     'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
                     [brokerId, creci, 'pending_verification']
                 );
@@ -419,7 +419,7 @@ class BrokerController {
                 });
             }
 
-            await connection.query('UPDATE brokers SET creci = ? WHERE id = ?', [creci, brokerId]);
+            await brokerDb.query('UPDATE brokers SET creci = ? WHERE id = ?', [creci, brokerId]);
             return res.status(200).json({ status: currentStatus, role: 'broker' });
         } catch (error) {
             console.error("Erro ao solicitar upgrade de corretor:", error);
@@ -431,7 +431,7 @@ class BrokerController {
         const { email, password } = req.body;
 
         try {
-            const [userRows] = await connection.query(
+            const [userRows] = await brokerDb.query(
                 `SELECT
                    u.id,
                    u.name,
@@ -495,7 +495,7 @@ class BrokerController {
             const offset = (page - 1) * limit;
 
             const countQuery = "SELECT COUNT(*) as total FROM properties WHERE broker_id = ?";
-            const [totalResult] = await connection.query(countQuery, [brokerId]);
+            const [totalResult] = await brokerDb.query(countQuery, [brokerId]);
             const total = (totalResult as any[])[0]?.total ?? 0;
 
             const dataQuery = `
@@ -589,7 +589,7 @@ class BrokerController {
                 ORDER BY p.created_at DESC
                 LIMIT ? OFFSET ?
             `;
-            const [dataRows] = await connection.query(dataQuery, [
+            const [dataRows] = await brokerDb.query(dataQuery, [
                 ...NEGOTIATION_TERMINAL_STATUSES,
                 brokerId,
                 limit,
@@ -688,7 +688,7 @@ class BrokerController {
                 WHERE s.broker_id = ?
                 ORDER BY s.sale_date DESC
             `;
-            const [commissions] = await connection.query(query, [brokerId]);
+            const [commissions] = await brokerDb.query(query, [brokerId]);
 
             return res.json({
                 success: true,
@@ -719,7 +719,7 @@ class BrokerController {
     async getMyPerformanceReport(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
         try {
-            const [salesRows] = await connection.query<any[]>(
+            const [salesRows] = await brokerDb.query<any[]>(
                 `
                 SELECT
                     deal_type,
@@ -763,7 +763,7 @@ class BrokerController {
             }
 
             const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;
-            const [propertiesResult] = await connection.query<any[]>(propertiesQuery, [brokerId]);
+            const [propertiesResult] = await brokerDb.query<any[]>(propertiesQuery, [brokerId]);
             
             const statusQuery = `
                 SELECT 
@@ -773,7 +773,7 @@ class BrokerController {
                 WHERE broker_id = ? 
                 GROUP BY status
             `;
-            const [statusRows] = await connection.query<any[]>(statusQuery, [brokerId]);
+            const [statusRows] = await brokerDb.query<any[]>(statusQuery, [brokerId]);
 
             const statusBreakdown: { [key: string]: number } = {};
             for (const row of statusRows) {
@@ -839,7 +839,7 @@ class BrokerController {
         const selfieUrl = selfieResult.url;
 
         try {
-            const [brokerStatusRows] = await connection.query<RowDataPacket[]>(
+            const [brokerStatusRows] = await brokerDb.query<RowDataPacket[]>(
                 'SELECT status FROM brokers WHERE id = ?',
                 [brokerId]
             );
@@ -854,17 +854,17 @@ class BrokerController {
             }
             // Garante que a linha em brokers existe; se não existir, cria com status pending_verification.
             if (brokerStatusRows.length === 0) {
-                await connection.query(
+                await brokerDb.query(
                     'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
                     [brokerId, creci, 'pending_verification']
                 );
             } else if (currentStatus !== 'approved') {
-                await connection.query(
+                await brokerDb.query(
                     'UPDATE brokers SET creci = ?, status = ? WHERE id = ?',
                     [creci, 'pending_verification', brokerId]
                 );
             } else {
-                await connection.query(
+                await brokerDb.query(
                     'UPDATE brokers SET creci = ? WHERE id = ?',
                     [creci, brokerId]
                 );
@@ -880,7 +880,7 @@ class BrokerController {
                   status = 'pending';
             `;
 
-            await connection.query(query, [brokerId, creciFrontUrl, creciBackUrl, selfieUrl]);
+            await brokerDb.query(query, [brokerId, creciFrontUrl, creciBackUrl, selfieUrl]);
 
             return res.status(201).json({
                 success: true,
@@ -897,6 +897,7 @@ class BrokerController {
 }
 
 export const brokerController = new BrokerController();
+
 
 
 

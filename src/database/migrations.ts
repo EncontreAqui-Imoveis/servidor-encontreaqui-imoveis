@@ -348,6 +348,7 @@ async function ensureContractsTable(): Promise<void> {
       seller_info JSON NULL,
       buyer_info JSON NULL,
       commission_data JSON NULL,
+      workflow_metadata JSON NULL,
       seller_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING',
       buyer_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING',
       seller_approval_reason JSON NULL,
@@ -429,6 +430,20 @@ async function ensureContractApprovalColumns(): Promise<void> {
         MODIFY COLUMN buyer_approval_status ENUM(${CONTRACT_APPROVAL_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'PENDING'
       `);
     }
+  }
+}
+
+async function ensureContractWorkflowMetadataColumn(): Promise<void> {
+  if (!(await tableExists('contracts'))) {
+    return;
+  }
+
+  if (!(await columnExists('contracts', 'workflow_metadata'))) {
+    await connection.query(`
+      ALTER TABLE contracts
+      ADD COLUMN workflow_metadata JSON NULL
+      AFTER commission_data
+    `);
   }
 }
 
@@ -518,6 +533,7 @@ export async function applyMigrations(): Promise<void> {
     await ensurePasswordResetTokensTable();
     await ensureContractsTable();
     await ensureContractApprovalColumns();
+    await ensureContractWorkflowMetadataColumn();
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
     await ensureAdminsTokenVersionColumn();

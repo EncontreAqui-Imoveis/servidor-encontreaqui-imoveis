@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import multer from 'multer';
 
+import { getRequestId } from './requestContext';
 import { redactValue } from '../utils/logSanitizer';
 
 type ErrorWithStatus = Error & {
@@ -11,9 +12,11 @@ type ErrorWithStatus = Error & {
 };
 
 export const notFoundHandler: RequestHandler = (req, res) => {
+  const requestId = getRequestId(req);
   return res.status(404).json({
     error: 'Recurso nao encontrado.',
     path: req.originalUrl,
+    requestId,
   });
 };
 
@@ -31,16 +34,26 @@ export const globalErrorHandler: ErrorRequestHandler = (
   const normalized = (err ?? new Error('Erro desconhecido')) as ErrorWithStatus;
   const method = req.method;
   const path = req.originalUrl;
+  const requestId = getRequestId(req);
 
   if (normalized.type === 'entity.too.large' || normalized.status === 413) {
-    console.error('Payload too large:', redactValue({ method, path, message: normalized.message }));
-    res.status(413).json({ error: 'Payload muito grande. Reduza o tamanho da requisicao.' });
+    console.error(
+      'Payload too large:',
+      redactValue({ requestId, method, path, message: normalized.message })
+    );
+    res.status(413).json({
+      error: 'Payload muito grande. Reduza o tamanho da requisicao.',
+      requestId,
+    });
     return;
   }
 
   if (normalized instanceof SyntaxError && 'body' in normalized) {
-    console.error('Invalid JSON payload:', redactValue({ method, path, message: normalized.message }));
-    res.status(400).json({ error: 'JSON invalido na requisicao.' });
+    console.error(
+      'Invalid JSON payload:',
+      redactValue({ requestId, method, path, message: normalized.message })
+    );
+    res.status(400).json({ error: 'JSON invalido na requisicao.', requestId });
     return;
   }
 
@@ -61,13 +74,14 @@ export const globalErrorHandler: ErrorRequestHandler = (
     console.error(
       'Multer validation error:',
       redactValue({
+        requestId,
         method,
         path,
         code: normalized.code,
         message: normalized.message,
       })
     );
-    res.status(status).json({ error: message });
+    res.status(status).json({ error: message, requestId });
     return;
   }
 
@@ -81,6 +95,7 @@ export const globalErrorHandler: ErrorRequestHandler = (
   console.error(
     'Unhandled application error:',
     redactValue({
+      requestId,
       method,
       path,
       statusCode,
@@ -91,10 +106,12 @@ export const globalErrorHandler: ErrorRequestHandler = (
   );
 
   if (statusCode >= 500) {
-    res.status(500).json({ error: 'Erro interno do servidor.' });
+    res.status(500).json({ error: 'Erro interno do servidor.', requestId });
     return;
   }
 
-  res.status(statusCode).json({ error: normalized.message || 'Erro na requisicao.' });
+  res.status(statusCode).json({
+    error: normalized.message || 'Erro na requisicao.',
+    requestId,
+  });
 };
-

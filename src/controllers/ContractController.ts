@@ -2,9 +2,15 @@ import { Request, Response } from 'express';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
-import connection from '../database/connection';
 import type { AuthRequest } from '../middlewares/auth';
-import { createUserNotification } from '../services/notificationService';
+import {
+  createAdminNotification,
+  createUserNotification,
+} from '../services/notificationService';
+import {
+  getContractDbConnection,
+  queryContractRows,
+} from '../services/contractPersistenceService';
 import {
   isContractApprovalStatus,
   isContractDocumentType,
@@ -53,6 +59,7 @@ interface ContractRow extends RowDataPacket {
   seller_info: unknown;
   buyer_info: unknown;
   commission_data: unknown;
+  workflow_metadata: unknown;
   seller_approval_status: string;
   buyer_approval_status: string;
   seller_approval_reason: unknown;
@@ -66,6 +73,8 @@ interface ContractRow extends RowDataPacket {
   property_code: string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
+  capturing_agency_name: string | null;
+  capturing_agency_address: string | null;
 }
 
 interface ContractDocumentRow extends RowDataPacket {
@@ -128,6 +137,10 @@ interface EvaluateSideBody {
 interface FinalizeBody {
   commission_data?: unknown;
   commissionData?: unknown;
+}
+
+interface SignatureMethodBody {
+  method?: unknown;
 }
 
 interface NormalizedCommissionData {
@@ -203,6 +216,16 @@ function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
+function mergeStoredJsonObject(
+  originalValue: unknown,
+  patch: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...parseStoredJsonObject(originalValue),
+    ...patch,
+  };
+}
+
 function toIsoString(value: Date | string | null): string | null {
   if (!value) {
     return null;
@@ -217,6 +240,11 @@ function resolveContractStatus(value: unknown): ContractStatus {
     return normalized;
   }
   return 'AWAITING_DOCS';
+}
+
+function parseSignatureMethodInput(value: unknown): 'in_person' | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'in_person' ? 'in_person' : null;
 }
 
 function parseContractStatusFilter(value: unknown): ContractStatus | null {
@@ -390,6 +418,19 @@ function resolveFinalDealStatuses(propertyPurpose: string | null): {
   };
 }
 
+function resolveActingBrokerName(req: AuthRequest, contract: ContractRow): string {
+  const userId = Number(req.userId ?? 0);
+  if (userId > 0 && userId === Number(contract.capturing_broker_id ?? 0)) {
+    const name = String(contract.capturing_broker_name ?? '').trim();
+    if (name) return name;
+  }
+  if (userId > 0 && userId === Number(contract.selling_broker_id ?? 0)) {
+    const name = String(contract.selling_broker_name ?? '').trim();
+    if (name) return name;
+  }
+  return userId > 0 ? `Corretor #${userId}` : 'Corretor';
+}
+
 function toDocumentCount(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -492,6 +533,7 @@ function mapContract(row: ContractRow) {
     sellerInfo: parseStoredJsonObject(row.seller_info),
     buyerInfo: parseStoredJsonObject(row.buyer_info),
     commissionData: parseStoredJsonObject(row.commission_data),
+    workflowMetadata: parseStoredJsonObject(row.workflow_metadata),
     sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
     buyerApprovalStatus: resolveContractApprovalStatus(row.buyer_approval_status),
     sellerApprovalReason: parseStoredJsonObject(row.seller_approval_reason),
@@ -505,6 +547,8 @@ function mapContract(row: ContractRow) {
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
     propertyPurpose: row.property_purpose ?? null,
+    agencyName: row.capturing_agency_name ?? null,
+    agencyAddress: row.capturing_agency_address ?? null,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
@@ -632,6 +676,7 @@ const CONTRACT_SELECT_SQL = `
     c.seller_info,
     c.buyer_info,
     c.commission_data,
+    c.workflow_metadata,
     c.seller_approval_status,
     c.buyer_approval_status,
     c.seller_approval_reason,
@@ -644,16 +689,20 @@ const CONTRACT_SELECT_SQL = `
     p.purpose AS property_purpose,
     p.code AS property_code,
     capture_user.name AS capturing_broker_name,
-    seller_user.name AS selling_broker_name
+    seller_user.name AS selling_broker_name,
+    capture_agency.name AS capturing_agency_name,
+    NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address
   FROM contracts c
   JOIN negotiations n ON n.id = c.negotiation_id
   JOIN properties p ON p.id = c.property_id
+  LEFT JOIN brokers capture_broker ON capture_broker.id = n.capturing_broker_id
+  LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;
 
 async function fetchContractById(contractId: string): Promise<ContractRow | null> {
-  const [rows] = await connection.query<ContractRow[]>(
+  const rows = await queryContractRows<ContractRow>(
     `
       ${CONTRACT_SELECT_SQL}
       WHERE c.id = ?
@@ -666,7 +715,7 @@ async function fetchContractById(contractId: string): Promise<ContractRow | null
 }
 
 async function fetchContractByNegotiationId(negotiationId: string): Promise<ContractRow | null> {
-  const [rows] = await connection.query<ContractRow[]>(
+  const rows = await queryContractRows<ContractRow>(
     `
       ${CONTRACT_SELECT_SQL}
       WHERE c.negotiation_id = ?
@@ -713,7 +762,7 @@ class ContractController {
     }
 
     try {
-      const [rows] = await connection.query<CommissionContractRow[]>(
+      const rows = await queryContractRows<CommissionContractRow>(
         `
           SELECT
             c.id,
@@ -798,7 +847,7 @@ class ContractController {
       return res.status(400).json({ error: 'ID da negociação inválido.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -951,7 +1000,7 @@ class ContractController {
     const whereParams = statusFilter ? [statusFilter] : [];
 
     try {
-      const [countRows] = await connection.query<RowDataPacket[]>(
+      const countRows = await queryContractRows<RowDataPacket>(
         `
           SELECT COUNT(*) AS total
           FROM contracts c
@@ -961,7 +1010,7 @@ class ContractController {
       );
       const total = Number(countRows[0]?.total ?? 0);
 
-      const [rows] = await connection.query<ContractRow[]>(
+      const rows = await queryContractRows<ContractRow>(
         `
           ${CONTRACT_SELECT_SQL}
           ${whereClause}
@@ -982,7 +1031,7 @@ class ContractController {
 
       const negotiationIds = rows.map((row) => row.negotiation_id);
       const placeholders = negotiationIds.map(() => '?').join(', ');
-      const [documentRows] = await connection.query<ContractDocumentListRow[]>(
+      const documentRows = await queryContractRows<ContractDocumentListRow>(
         `
           SELECT id, negotiation_id, type, document_type, metadata_json, created_at
           FROM negotiation_documents
@@ -1042,7 +1091,7 @@ class ContractController {
     const statusParams = statusFilter ? [statusFilter] : [];
 
     try {
-      const [countRows] = await connection.query<RowDataPacket[]>(
+      const countRows = await queryContractRows<RowDataPacket>(
         `
           SELECT COUNT(*) AS total
           FROM contracts c
@@ -1054,7 +1103,7 @@ class ContractController {
       );
       const total = Number(countRows[0]?.total ?? 0);
 
-      const [rows] = await connection.query<ContractRow[]>(
+      const rows = await queryContractRows<ContractRow>(
         `
           ${CONTRACT_SELECT_SQL}
           WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ?)
@@ -1089,7 +1138,7 @@ class ContractController {
       return res.status(400).json({ error: 'Direção inválida. Use next ou previous.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -1215,7 +1264,7 @@ class ContractController {
       Number.isFinite(evaluatedBy) ? evaluatedBy : null
     );
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -1326,7 +1375,7 @@ class ContractController {
       return res.status(400).json({ error: 'Arquivo obrigatório para upload.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -1369,14 +1418,32 @@ class ContractController {
         ]
       );
 
-      await tx.query(
-        `
-          UPDATE contracts
-          SET updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
-      );
+      if (documentTypeRaw.toLowerCase() === 'contrato_assinado') {
+        const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
+          agencySignedContractReceivedAt: new Date().toISOString(),
+          agencySignedContractReceivedBy: 'admin',
+        });
+
+        await tx.query(
+          `
+            UPDATE contracts
+            SET
+              workflow_metadata = CAST(? AS JSON),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [JSON.stringify(nextWorkflowMetadata), contractId]
+        );
+      } else {
+        await tx.query(
+          `
+            UPDATE contracts
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [contractId]
+        );
+      }
 
       await tx.commit();
 
@@ -1411,7 +1478,7 @@ class ContractController {
       return res.status(400).json({ error: 'Arquivo PDF da minuta é obrigatório.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -1525,7 +1592,7 @@ class ContractController {
       return res.status(400).json({ error: message });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -1621,7 +1688,7 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const [documents] = await connection.query<ContractDocumentRow[]>(
+      const documents = await queryContractRows<ContractDocumentRow>(
         `
           SELECT id, type, document_type, metadata_json, created_at
           FROM negotiation_documents
@@ -1661,7 +1728,7 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const [documents] = await connection.query<ContractDocumentRow[]>(
+      const documents = await queryContractRows<ContractDocumentRow>(
         `
           SELECT id, type, document_type, metadata_json, created_at
           FROM negotiation_documents
@@ -1685,6 +1752,108 @@ class ContractController {
     }
   }
 
+  async setSignatureMethod(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const role = String(req.userRole ?? '').trim().toLowerCase();
+    if (role === 'admin') {
+      return res.status(403).json({
+        error: 'Este endpoint é exclusivo para o corretor responsável pelo contrato.',
+      });
+    }
+
+    const body = (req.body ?? {}) as SignatureMethodBody;
+    const method = parseSignatureMethodInput(body.method);
+    if (method == null) {
+      return res.status(400).json({
+        error: 'Método de assinatura inválido. Use method: "in_person".',
+      });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (!canAccessContract(req, contract)) {
+        await tx.rollback();
+        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'AWAITING_SIGNATURES') {
+        await tx.rollback();
+        return res.status(400).json({
+          error:
+            'A escolha do método de assinatura só pode ser feita em AWAITING_SIGNATURES.',
+        });
+      }
+
+      const brokerName = resolveActingBrokerName(req, contract);
+      const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
+        signatureMethod: method,
+        signatureMethodDeclaredAt: new Date().toISOString(),
+        signatureMethodDeclaredBy: Number(req.userId ?? 0) || null,
+        signatureMethodDeclaredByName: brokerName,
+      });
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET
+            workflow_metadata = CAST(? AS JSON),
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [JSON.stringify(nextWorkflowMetadata), contractId]
+      );
+
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+
+      try {
+        await createAdminNotification({
+          type: 'negotiation',
+          title: 'Assinatura presencial informada',
+          message: `O corretor ${brokerName} informou que o contrato ${contractId} será assinado presencialmente.`,
+          relatedEntityId: Number(contract.property_id),
+          metadata: {
+            contractId,
+            negotiationId: contract.negotiation_id,
+            brokerId: Number(req.userId ?? 0) || null,
+            method,
+          },
+        });
+      } catch (notificationError) {
+        console.error(
+          'Erro ao notificar admins sobre assinatura presencial:',
+          notificationError
+        );
+      }
+
+      return res.status(200).json({
+        message:
+          'Assinatura presencial informada com sucesso. A administração foi notificada.',
+        contract: updatedContract ? mapContract(updatedContract) : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao registrar método de assinatura do contrato:', error);
+      return res
+        .status(500)
+        .json({ error: 'Falha ao registrar o método de assinatura.' });
+    } finally {
+      tx.release();
+    }
+  }
+
   async uploadDocument(req: AuthRequest, res: Response): Promise<Response> {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
@@ -1705,7 +1874,7 @@ class ContractController {
       return res.status(400).json({ error: 'Arquivo obrigatório para upload.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -1833,14 +2002,36 @@ class ContractController {
 
       const documentId = Number(insertResult.insertId ?? 0);
 
-      await tx.query(
-        `
-          UPDATE contracts
-          SET updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
-      );
+      const shouldMarkOnlineSignatureMethod =
+        role !== 'admin' && documentTypeRaw.toLowerCase() === 'contrato_assinado';
+
+      if (shouldMarkOnlineSignatureMethod) {
+        const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
+          signatureMethod: 'online',
+          signedContractUploadedOnlineAt: new Date().toISOString(),
+          signedContractUploadedOnlineBy: Number(req.userId ?? 0) || null,
+        });
+
+        await tx.query(
+          `
+            UPDATE contracts
+            SET
+              workflow_metadata = CAST(? AS JSON),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [JSON.stringify(nextWorkflowMetadata), contractId]
+        );
+      } else {
+        await tx.query(
+          `
+            UPDATE contracts
+            SET updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [contractId]
+        );
+      }
 
       await tx.commit();
 
@@ -1874,7 +2065,7 @@ class ContractController {
       return res.status(400).json({ error: 'ID do documento inválido.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 
@@ -2022,7 +2213,7 @@ class ContractController {
       });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
 

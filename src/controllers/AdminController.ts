@@ -1,10 +1,15 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import connection from '../database/connection';
+import { adminDb } from '../services/adminPersistenceService';
+import {
+  hasValidCreci,
+  normalizeCreci,
+  normalizePropertyType,
+  sanitizeAddressInput,
+  signAdminToken,
+} from '../services/adminControllerSupport';
 import cloudinary, { uploadToCloudinary } from '../config/cloudinary';
-import { requireEnv } from '../config/env';
 import { createUserNotification, notifyAdmins } from '../services/notificationService';
 import { sendPushNotifications, type PushNotificationResult } from '../services/pushNotificationService';
 import {
@@ -13,15 +18,10 @@ import {
 } from '../services/priceDropNotificationService';
 import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
-import { sanitizeAddressInput } from '../utils/address';
-import { hasValidCreci, normalizeCreci } from '../utils/creci';
-import { normalizePropertyType } from '../utils/propertyTypes';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
 type Nullable<T> = T | null;
-
-const jwtSecret = requireEnv('JWT_SECRET');
 
 const STATUS_MAP: Record<string, PropertyStatus> = {
   pendingapproval: 'pending_approval',
@@ -648,7 +648,7 @@ function resolveNegotiationPropertyTitle(value: unknown): string {
 }
 
 async function fetchPropertyOwner(propertyId: number): Promise<{ ownerId: number | null; title: string }> {
-  const [rows] = await connection.query<RowDataPacket[]>(
+  const [rows] = await adminDb.query<RowDataPacket[]>(
     'SELECT broker_id, owner_id, title FROM properties WHERE id = ?',
     [propertyId],
   );
@@ -672,7 +672,7 @@ class AdminController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         'SELECT id, name, email, password_hash, token_version FROM admins WHERE email = ?',
         [email]
       );
@@ -688,15 +688,7 @@ class AdminController {
         return res.status(401).json({ error: 'Credenciais invalidas.' });
       }
 
-      const tokenVersion = Number(admin.token_version);
-      const normalizedTokenVersion =
-        Number.isFinite(tokenVersion) && tokenVersion > 0 ? tokenVersion : 1;
-
-      const token = jwt.sign(
-        { id: admin.id, role: 'admin', token_version: normalizedTokenVersion },
-        jwtSecret,
-        { expiresIn: '1d' }
-      );
+      const token = signAdminToken(admin.id, admin.token_version);
 
       delete (admin as any).password_hash;
       return res.status(200).json({ admin, token });
@@ -714,7 +706,7 @@ class AdminController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         'UPDATE admins SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
         [adminId]
       );
@@ -738,7 +730,7 @@ class AdminController {
       const statusFilter = parseNegotiationStatusFilter(req.query.status);
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
 
-      const [countRows] = await connection.query<RowDataPacket[]>(
+      const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT COUNT(*) AS total
           FROM negotiations n
@@ -750,7 +742,7 @@ class AdminController {
       );
       const total = Number(countRows[0]?.total ?? 0);
 
-      const [rows] = await connection.query<AdminNegotiationListRow[]>(
+      const [rows] = await adminDb.query<AdminNegotiationListRow[]>(
         `
           SELECT
             n.id,
@@ -875,7 +867,7 @@ class AdminController {
       return res.status(401).json({ error: 'Administrador não autenticado.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await adminDb.getConnection();
     try {
       await tx.beginTransaction();
 
@@ -1047,7 +1039,7 @@ class AdminController {
       return res.status(400).json({ error: 'Motivo da rejeição é obrigatório.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await adminDb.getConnection();
     try {
       await tx.beginTransaction();
 
@@ -1183,7 +1175,7 @@ class AdminController {
       return res.status(400).json({ error: 'Motivo obrigatório com no mínimo 5 caracteres.' });
     }
 
-    const tx = await connection.getConnection();
+    const tx = await adminDb.getConnection();
     try {
       await tx.beginTransaction();
 
@@ -1325,7 +1317,7 @@ class AdminController {
     }
 
     try {
-      const [rows] = await connection.query<AdminNegotiationDocumentRow[]>(
+      const [rows] = await adminDb.query<AdminNegotiationDocumentRow[]>(
         `
           SELECT id, type, document_type, metadata_json, file_content
           FROM negotiation_documents
@@ -1422,7 +1414,7 @@ class AdminController {
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-      const [totalRows] = await connection.query<RowDataPacket[]>(
+      const [totalRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT COUNT(*) AS total
           FROM properties p
@@ -1435,7 +1427,7 @@ class AdminController {
       );
       const total = totalRows[0]?.total ?? 0;
 
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             p.id,
@@ -1499,7 +1491,7 @@ class AdminController {
 
       const where = `WHERE ${whereClauses.join(' AND ')}`;
 
-      const [countRows] = await connection.query<RowDataPacket[]>(
+      const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT COUNT(*) AS total
           FROM properties p
@@ -1512,7 +1504,7 @@ class AdminController {
       );
       const total = Number(countRows[0]?.total ?? 0);
 
-      const [rows] = await connection.query<ArchivePropertyRow[]>(
+      const [rows] = await adminDb.query<ArchivePropertyRow[]>(
         `
           SELECT
             p.id,
@@ -1563,7 +1555,7 @@ class AdminController {
       return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
     }
 
-    const db = await connection.getConnection();
+    const db = await adminDb.getConnection();
     try {
       await db.beginTransaction();
 
@@ -1636,7 +1628,7 @@ class AdminController {
 
   async listFeaturedProperties(req: Request, res: Response) {
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             fp.property_id AS id,
@@ -1684,7 +1676,7 @@ class AdminController {
 
     try {
       if (ids.length > 0) {
-        const [approvedRows] = await connection.query<RowDataPacket[]>(
+        const [approvedRows] = await adminDb.query<RowDataPacket[]>(
           'SELECT id FROM properties WHERE status = ? AND id IN (?)',
           ['approved', ids]
         );
@@ -1700,7 +1692,7 @@ class AdminController {
         }
       }
 
-      const db = await connection.getConnection();
+      const db = await adminDb.getConnection();
       try {
         await db.beginTransaction();
         await db.query('DELETE FROM featured_properties');
@@ -1732,7 +1724,7 @@ class AdminController {
     const resolvedAgencyId = agencyId ?? agency_id;
 
     try {
-      await connection.query(
+      await adminDb.query(
         'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
         [stringOrNull(name), stringOrNull(email), stringOrNull(phone), id]
       );
@@ -1761,7 +1753,7 @@ class AdminController {
 
       if (updates.length > 0) {
         params.push(id);
-        await connection.query(`UPDATE brokers SET ${updates.join(', ')} WHERE id = ?`, params);
+        await adminDb.query(`UPDATE brokers SET ${updates.join(', ')} WHERE id = ?`, params);
       }
 
       return res.status(200).json({ message: 'Corretor atualizado com sucesso.' });
@@ -1792,7 +1784,7 @@ class AdminController {
     }
 
     try {
-      await connection.query(
+      await adminDb.query(
         'UPDATE users SET name = ?, email = ?, phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?',
         [
           stringOrNull(name),
@@ -1847,13 +1839,13 @@ class AdminController {
 
       const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-      const [totalRows] = await connection.query<RowDataPacket[]>(
+      const [totalRows] = await adminDb.query<RowDataPacket[]>(
         `SELECT COUNT(*) AS total FROM users u LEFT JOIN brokers b ON u.id = b.id ${whereSql}`,
         params,
       );
       const total = totalRows[0]?.total ?? 0;
 
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             u.id,
@@ -1885,7 +1877,7 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('DELETE FROM users WHERE id = ?', [id]);
+      await adminDb.query('DELETE FROM users WHERE id = ?', [id]);
       return res.status(200).json({ message: 'Usuario deletado com sucesso.' });
     } catch (error) {
       console.error('Erro ao deletar usuario:', error);
@@ -1897,7 +1889,7 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('DELETE FROM brokers WHERE id = ?', [id]);
+      await adminDb.query('DELETE FROM brokers WHERE id = ?', [id]);
       return res.status(200).json({ message: 'Corretor deletado com sucesso.' });
     } catch (error) {
       console.error('Erro ao deletar corretor:', error);
@@ -1909,7 +1901,7 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('DELETE FROM properties WHERE id = ?', [id]);
+      await adminDb.query('DELETE FROM properties WHERE id = ?', [id]);
       return res.status(200).json({ message: 'Imovel deletado com sucesso.' });
     } catch (error) {
       console.error('Erro ao deletar imovel:', error);
@@ -1922,7 +1914,7 @@ class AdminController {
     const body = req.body ?? {};
 
     try {
-      const [propertyRows] = await connection.query<RowDataPacket[]>(
+      const [propertyRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             id,
@@ -2308,7 +2300,7 @@ class AdminController {
 
       params.push(id);
 
-      await connection.query(
+      await adminDb.query(
         `UPDATE properties SET ${setParts.join(', ')} WHERE id = ?`,
         params
       );
@@ -2645,7 +2637,7 @@ class AdminController {
         return res.status(400).json({ error: 'Campos numéricos obrigatórios inválidos.' });
       }
 
-      const [duplicateRows] = await connection.query<RowDataPacket[]>(
+      const [duplicateRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT id FROM properties
           WHERE address = ?
@@ -2688,7 +2680,7 @@ class AdminController {
         finalVideoUrl = String(video_url);
       }
 
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         `
           INSERT INTO properties (
             broker_id,
@@ -2787,7 +2779,7 @@ class AdminController {
 
       if (imageUrls.length > 0) {
         const values = imageUrls.map((url) => [propertyId, url]);
-        await connection.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
+        await adminDb.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
       }
 
       if (promotionFlag === 1) {
@@ -2893,7 +2885,7 @@ class AdminController {
       });
     }
 
-    const db = await connection.getConnection();
+    const db = await adminDb.getConnection();
     try {
       await db.beginTransaction();
 
@@ -3018,7 +3010,7 @@ class AdminController {
     }
 
     try {
-      const [existing] = await connection.query<RowDataPacket[]>(
+      const [existing] = await adminDb.query<RowDataPacket[]>(
         'SELECT id FROM users WHERE email = ? LIMIT 1',
         [email]
       );
@@ -3032,7 +3024,7 @@ class AdminController {
         passwordHash = await bcrypt.hash(String(password), salt);
       }
 
-      const [userResult] = await connection.query<ResultSetHeader>(
+      const [userResult] = await adminDb.query<ResultSetHeader>(
         'INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           name,
@@ -3059,7 +3051,7 @@ class AdminController {
 
   async listPendingBrokers(req: Request, res: Response) {
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             b.id,
@@ -3090,7 +3082,7 @@ class AdminController {
 
   async getAllClients(req: Request, res: Response) {
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT u.id, u.name, u.email, u.phone, u.created_at
           FROM users u
@@ -3114,7 +3106,7 @@ class AdminController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             u.id,
@@ -3152,8 +3144,8 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('UPDATE brokers SET status = ?, creci = IFNULL(creci, NULL) WHERE id = ?', ['approved', id]);
-      await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
+      await adminDb.query('UPDATE brokers SET status = ?, creci = IFNULL(creci, NULL) WHERE id = ?', ['approved', id]);
+      await adminDb.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
 
       try {
         await notifyAdmins(`Corretor #${id} aprovado pelo admin.`, 'broker', Number(id));
@@ -3188,8 +3180,8 @@ class AdminController {
     const { id } = req.params;
 
     try {
-      await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [id]);
-      await connection.query('DELETE FROM brokers WHERE id = ?', [id]);
+      await adminDb.query('DELETE FROM broker_documents WHERE broker_id = ?', [id]);
+      await adminDb.query('DELETE FROM brokers WHERE id = ?', [id]);
 
       try {
         await notifyAdmins(`Corretor #${id} rejeitado pelo admin.`, 'broker', Number(id));
@@ -3211,9 +3203,9 @@ class AdminController {
     }
 
     try {
-      await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
-      await connection.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
-      await connection.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
+      await adminDb.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
+      await adminDb.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
+      await adminDb.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
       try {
         await notifyUsers({
           message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
@@ -3253,7 +3245,7 @@ class AdminController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         'UPDATE brokers SET status = ? WHERE id = ?',
         [normalizedStatus, brokerId],
       );
@@ -3263,15 +3255,15 @@ class AdminController {
       }
 
       if (normalizedStatus === 'approved') {
-        await connection.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
+        await adminDb.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
           normalizedStatus,
           brokerId,
         ]);
       }
 
       if (normalizedStatus === 'rejected') {
-        await connection.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
-        await connection.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
+        await adminDb.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
+        await adminDb.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
         return res.status(200).json({
           message: 'Status do corretor atualizado com sucesso.',
           status: normalizedStatus,
@@ -3350,7 +3342,7 @@ class AdminController {
       const sortBy = sortMap[sortByParam] ?? 'b.created_at';
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-      const [totalRows] = await connection.query<RowDataPacket[]>(
+      const [totalRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT COUNT(DISTINCT b.id) AS total
           FROM brokers b
@@ -3361,7 +3353,7 @@ class AdminController {
       );
       const total = totalRows[0]?.total ?? 0;
 
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             b.id,
@@ -3438,7 +3430,7 @@ class AdminController {
     }
 
     try {
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             b.id,
@@ -3483,7 +3475,7 @@ class AdminController {
     }
 
     try {
-      const [rows] = await connection.query<PropertyDetailRow[]>(
+      const [rows] = await adminDb.query<PropertyDetailRow[]>(
         `
           SELECT
             p.*,
@@ -3506,7 +3498,7 @@ class AdminController {
       }
 
       const property = rows[0];
-      const [imageRows] = await connection.query<RowDataPacket[]>(
+      const [imageRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT id, image_url
           FROM property_images
@@ -3541,7 +3533,7 @@ class AdminController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>('UPDATE properties SET status = ? WHERE id = ?', [
+      const [result] = await adminDb.query<ResultSetHeader>('UPDATE properties SET status = ? WHERE id = ?', [
         'approved',
         propertyId,
       ]);
@@ -3593,7 +3585,7 @@ class AdminController {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         'DELETE FROM properties WHERE id = ?',
         [propertyId],
       );
@@ -3660,7 +3652,7 @@ class AdminController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         'UPDATE properties SET status = ? WHERE id = ?',
         [normalizedStatus, propertyId],
       );
@@ -3721,7 +3713,7 @@ class AdminController {
     }
 
     try {
-      const [propertyRows] = await connection.query<RowDataPacket[]>(
+      const [propertyRows] = await adminDb.query<RowDataPacket[]>(
         'SELECT id FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -3730,7 +3722,7 @@ class AdminController {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
-      const [imageCountRows] = await connection.query<RowDataPacket[]>(
+      const [imageCountRows] = await adminDb.query<RowDataPacket[]>(
         'SELECT COUNT(*) AS total FROM property_images WHERE property_id = ?',
         [propertyId]
       );
@@ -3753,7 +3745,7 @@ class AdminController {
 
       if (uploadedUrls.length > 0) {
         const values = uploadedUrls.map((url) => [propertyId, url]);
-        await connection.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
+        await adminDb.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
       }
 
       return res.status(201).json({ message: 'Imagens adicionadas com sucesso.', images: uploadedUrls });
@@ -3778,7 +3770,7 @@ class AdminController {
     }
 
     try {
-      const [imageCountRows] = await connection.query<RowDataPacket[]>(
+      const [imageCountRows] = await adminDb.query<RowDataPacket[]>(
         'SELECT COUNT(*) AS total FROM property_images WHERE property_id = ?',
         [propertyId]
       );
@@ -3787,7 +3779,7 @@ class AdminController {
         return res.status(400).json({ error: 'O imóvel precisa manter ao menos 1 imagem.' });
       }
 
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         'DELETE FROM property_images WHERE id = ? AND property_id = ?',
         [imageId, propertyId]
       );
@@ -3816,7 +3808,7 @@ class AdminController {
     }
 
     try {
-      const [propertyRows] = await connection.query<RowDataPacket[]>(
+      const [propertyRows] = await adminDb.query<RowDataPacket[]>(
         'SELECT id FROM properties WHERE id = ?',
         [propertyId]
       );
@@ -3826,7 +3818,7 @@ class AdminController {
       }
 
       const uploaded = await uploadToCloudinary(file, 'videos');
-      await connection.query('UPDATE properties SET video_url = ? WHERE id = ?', [uploaded.url, propertyId]);
+      await adminDb.query('UPDATE properties SET video_url = ? WHERE id = ?', [uploaded.url, propertyId]);
 
       return res.status(201).json({ message: 'Video adicionado com sucesso.', video: uploaded.url });
     } catch (error) {
@@ -3843,7 +3835,7 @@ class AdminController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         'UPDATE properties SET video_url = NULL WHERE id = ?',
         [propertyId]
       );
@@ -3867,7 +3859,7 @@ class AdminController {
     }
 
     try {
-      const [properties] = await connection.query<RowDataPacket[]>(
+      const [properties] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             p.id,
@@ -3907,7 +3899,7 @@ class AdminController {
     }
 
     try {
-      const [properties] = await connection.query<RowDataPacket[]>(
+      const [properties] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             p.id,
@@ -3967,7 +3959,7 @@ class AdminController {
         typeClause = ' AND related_entity_type = ?';
         baseParams.push(typeFilter);
       }
-      const [rows] = await connection.query<RowDataPacket[]>(
+      const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
             id,
@@ -3988,7 +3980,7 @@ class AdminController {
         ,
         [...baseParams, limit, offset]
       );
-      const [countRows] = await connection.query<RowDataPacket[]>(
+      const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT COUNT(*) as total
           FROM notifications
@@ -4020,7 +4012,7 @@ class AdminController {
     }
 
     try {
-      const [result] = await connection.query<ResultSetHeader>(
+      const [result] = await adminDb.query<ResultSetHeader>(
         "DELETE FROM notifications WHERE id = ? AND recipient_id = ? AND recipient_type = 'admin'",
         [notificationId, adminId],
       );
@@ -4044,7 +4036,7 @@ class AdminController {
     }
 
     try {
-      await connection.query("DELETE FROM notifications WHERE recipient_id = ? AND recipient_type = 'admin'", [adminId]);
+      await adminDb.query("DELETE FROM notifications WHERE recipient_id = ? AND recipient_type = 'admin'", [adminId]);
       return res.status(204).send();
     } catch (error) {
       console.error('Erro ao limpar notificacoes:', error);
@@ -4085,9 +4077,9 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     `;
 
     const [propertiesByStatusResult, newPropertiesResult, totalsResult] = await Promise.all([
-      connection.query<RowDataPacket[]>(propertiesByStatusQuery),
-      connection.query<RowDataPacket[]>(newPropertiesQuery),
-      connection.query<RowDataPacket[]>(totalsQuery),
+      adminDb.query<RowDataPacket[]>(propertiesByStatusQuery),
+      adminDb.query<RowDataPacket[]>(newPropertiesQuery),
+      adminDb.query<RowDataPacket[]>(totalsQuery),
     ]);
 
     const [propertiesByStatusRows] = propertiesByStatusResult;
@@ -4165,14 +4157,14 @@ export async function sendNotification(req: Request, res: Response) {
 
     if (sendToAll) {
       if (normalizedAudience === 'broker') {
-        const [userRows] = await connection.query<RowDataPacket[]>(
+        const [userRows] = await adminDb.query<RowDataPacket[]>(
           "SELECT id FROM brokers WHERE status IN ('pending_verification','approved')",
         );
         notificationRecipients = (userRows ?? [])
           .map((row) => Number(row.id))
           .filter((id) => Number.isFinite(id));
       } else if (normalizedAudience === 'client') {
-        const [userRows] = await connection.query<RowDataPacket[]>(
+        const [userRows] = await adminDb.query<RowDataPacket[]>(
           `
             SELECT u.id
             FROM users u
@@ -4184,7 +4176,7 @@ export async function sendNotification(req: Request, res: Response) {
           .map((row) => Number(row.id))
           .filter((id) => Number.isFinite(id));
       } else {
-        const [userRows] = await connection.query<RowDataPacket[]>(
+        const [userRows] = await adminDb.query<RowDataPacket[]>(
           'SELECT id FROM users'
         );
         notificationRecipients = (userRows ?? [])
@@ -4273,3 +4265,4 @@ export async function sendNotification(req: Request, res: Response) {
 
 
 export const adminController = new AdminController();
+

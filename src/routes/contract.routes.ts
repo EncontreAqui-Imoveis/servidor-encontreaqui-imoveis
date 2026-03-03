@@ -26,6 +26,10 @@ contractRoutes.put('/contracts/:id/data', authMiddleware, (req, res) =>
   contractController.updateData(req, res)
 );
 
+contractRoutes.post('/contracts/:id/signature-method', authMiddleware, (req, res) =>
+  contractController.setSignatureMethod(req, res)
+);
+
 contractRoutes.post(
   '/contracts/:id/documents',
   authMiddleware,

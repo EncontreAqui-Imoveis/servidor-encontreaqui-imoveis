@@ -1,17 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Request, Response } from 'express';
 
-vi.mock('../../../../src/database/connection', () => ({
-  __esModule: true,
-  default: {
-    execute: vi.fn(),
-    query: vi.fn(),
-  },
+vi.mock('../../../../src/services/negotiationPersistenceService', () => ({
+  queryNegotiationRows: vi.fn(),
+  findNegotiationDocumentById: vi.fn(),
 }));
 
 import { negotiationController } from '../../../../src/controllers/NegotiationController';
-import connection from '../../../../src/database/connection';
-import { NegotiationDocumentsRepository } from '../../../../src/modules/negotiations/infra/NegotiationDocumentsRepository';
+import {
+  findNegotiationDocumentById,
+  queryNegotiationRows,
+} from '../../../../src/services/negotiationPersistenceService';
 
 type FnMock = ReturnType<typeof vi.fn>;
 type MockResponse = Response & {
@@ -33,21 +32,22 @@ function createMockResponse(): MockResponse {
 }
 
 describe('NegotiationController.downloadDocument', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('should set PDF headers and send buffer when document exists', async () => {
-    vi.mocked(connection.query).mockResolvedValueOnce([
-      [
-        {
-          id: 'neg-1',
-          capturing_broker_id: 55,
-          selling_broker_id: null,
-          buyer_client_id: null,
-        },
-      ],
-      {},
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        capturing_broker_id: 55,
+        selling_broker_id: null,
+        buyer_client_id: null,
+      },
     ] as any);
 
     const fileContent = Buffer.from('fake-pdf');
-    vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue({
+    vi.mocked(findNegotiationDocumentById).mockResolvedValue({
       negotiationId: 'neg-1',
       fileContent,
       type: 'proposal',
@@ -77,19 +77,16 @@ describe('NegotiationController.downloadDocument', () => {
   });
 
   it('should return 404 when document is not found', async () => {
-    vi.mocked(connection.query).mockResolvedValueOnce([
-      [
-        {
-          id: 'neg-1',
-          capturing_broker_id: 55,
-          selling_broker_id: null,
-          buyer_client_id: null,
-        },
-      ],
-      {},
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        capturing_broker_id: 55,
+        selling_broker_id: null,
+        buyer_client_id: null,
+      },
     ] as any);
 
-    vi.spyOn(NegotiationDocumentsRepository.prototype, 'findById').mockResolvedValue(null);
+    vi.mocked(findNegotiationDocumentById).mockResolvedValue(null);
 
     const req = {
       params: {
@@ -109,5 +106,31 @@ describe('NegotiationController.downloadDocument', () => {
         error: expect.any(String),
       })
     );
+  });
+
+  it('should return 403 when broker does not own negotiation', async () => {
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        capturing_broker_id: 10,
+        selling_broker_id: null,
+        buyer_client_id: null,
+      },
+    ] as any);
+
+    const req = {
+      params: {
+        id: 'neg-1',
+        documentId: '123',
+      },
+      userId: 55,
+      userRole: 'broker',
+    } as unknown as Request;
+    const res = createMockResponse();
+
+    await negotiationController.downloadDocument(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(findNegotiationDocumentById).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,7 @@ COPY . .
 RUN npm run build
 RUN npm prune --omit=dev
 
-EXPOSE 3333
+ENV PORT=8080
+EXPOSE 8080
 CMD ["npm", "run", "start"]
 

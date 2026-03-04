@@ -66,6 +66,11 @@ export function enforceHttps(
   res: Response,
   next: NextFunction
 ) {
+  if (req.method === 'OPTIONS') {
+    next();
+    return;
+  }
+
   const enforceHttpsInProxy =
     (process.env.ENFORCE_HTTPS ?? '').trim().toLowerCase() === 'true';
   if (!enforceHttpsInProxy) {

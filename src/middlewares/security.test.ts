@@ -116,6 +116,27 @@ describe('enforceHttps', () => {
 
     expect(nextCalled).toBe(true);
   });
+
+  it('nao redireciona preflight OPTIONS mesmo com HTTPS forcado', () => {
+    process.env.ENFORCE_HTTPS = 'true';
+    const { res } = createResponseMock();
+    let nextCalled = false;
+
+    enforceHttps(
+      {
+        method: 'OPTIONS',
+        secure: false,
+        headers: { host: 'example.com', 'x-forwarded-proto': 'http' },
+        originalUrl: '/admin/brokers',
+      } as unknown as Request,
+      res,
+      () => {
+        nextCalled = true;
+      }
+    );
+
+    expect(nextCalled).toBe(true);
+  });
 });
 
 describe('buildCorsOptions', () => {

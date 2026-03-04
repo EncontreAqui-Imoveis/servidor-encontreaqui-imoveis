@@ -22,5 +22,16 @@ describe('logSanitizer', () => {
     expect((redacted.nested as Record<string, unknown>).password).toBe('***');
     expect((redacted.nested as Record<string, unknown>).city).toBe('Rio Verde');
   });
-});
 
+  it('preserva mensagem de Error de forma redigida', () => {
+    const redacted = redactValue(
+      new Error('Falha ao conectar com token=abc123 para usuario@dominio.com')
+    ) as Record<string, unknown>;
+
+    expect(redacted.name).toBe('Error');
+    expect(redacted.message).toBe(
+      'Falha ao conectar com token=*** para ***@***'
+    );
+    expect(typeof redacted.stack).toBe('string');
+  });
+});

@@ -14,6 +14,18 @@ const SUPPLEMENTAL_CORS_ENV_KEYS = [
   'FRONTEND_URL',
   'WEB_APP_URL',
 ];
+const DEFAULT_ALLOWED_CORS_HEADERS = [
+  'Authorization',
+  'Content-Type',
+  'X-Requested-With',
+  'X-Request-Id',
+  'Accept',
+  'Origin',
+  'Cache-Control',
+  'Pragma',
+  'Baggage',
+  'Sentry-Trace',
+] as const;
 
 function normalizeOrigin(value: string): string {
   const trimmed = value.trim();
@@ -123,7 +135,7 @@ export function buildCorsOptions(): CorsOptions {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'X-Request-Id'],
+      allowedHeaders: [...DEFAULT_ALLOWED_CORS_HEADERS],
       exposedHeaders: ['X-Request-Id'],
       optionsSuccessStatus: 204,
     };
@@ -145,7 +157,7 @@ export function buildCorsOptions(): CorsOptions {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'X-Request-Id'],
+    allowedHeaders: [...DEFAULT_ALLOWED_CORS_HEADERS],
     exposedHeaders: ['X-Request-Id'],
     optionsSuccessStatus: 204,
   };

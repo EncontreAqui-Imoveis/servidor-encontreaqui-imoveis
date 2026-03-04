@@ -50,6 +50,7 @@ function createApiRateLimiter() {
 
 export function createHttpApp() {
   const app = express();
+  const corsOptions = buildCorsOptions();
 
   patchConsoleRedaction();
 
@@ -83,7 +84,14 @@ export function createHttpApp() {
   app.use(requestContextMiddleware);
   app.use(securityHeaders);
   app.use(enforceHttps);
-  app.use(cors(buildCorsOptions()));
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
+  app.use((req, res, next) => {
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    next();
+  });
   app.use(createApiRateLimiter());
 
   app.use(

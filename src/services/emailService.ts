@@ -2,9 +2,9 @@ import nodemailer from 'nodemailer';
 import SMTPTransport from 'nodemailer/lib/smtp-transport';
 
 let cachedTransporter: nodemailer.Transporter | null = null;
-let cachedProvider: 'resend' | 'smtp' | null = null;
+let cachedProvider: 'brevo' | 'resend' | 'smtp' | null = null;
 
-type EmailProvider = 'resend' | 'smtp';
+type EmailProvider = 'brevo' | 'resend' | 'smtp';
 type EmailMessage = {
   to: string;
   subject: string;
@@ -21,18 +21,27 @@ function resolveEmailProvider(): EmailProvider {
   const explicitProvider = String(process.env.EMAIL_PROVIDER ?? '')
     .trim()
     .toLowerCase();
-  if (explicitProvider === 'resend' || explicitProvider === 'smtp') {
+  if (
+    explicitProvider === 'brevo' ||
+    explicitProvider === 'resend' ||
+    explicitProvider === 'smtp'
+  ) {
     cachedProvider = explicitProvider;
     return cachedProvider;
   }
 
-  cachedProvider = process.env.RESEND_API_KEY?.trim() ? 'resend' : 'smtp';
+  cachedProvider = process.env.BREVO_API_KEY?.trim()
+    ? 'brevo'
+    : process.env.RESEND_API_KEY?.trim()
+      ? 'resend'
+      : 'smtp';
   return cachedProvider;
 }
 
 function resolveFromAddress() {
   const from =
     process.env.EMAIL_FROM ??
+    process.env.BREVO_FROM ??
     process.env.RESEND_FROM ??
     process.env.SMTP_FROM ??
     process.env.SMTP_USER ??
@@ -43,6 +52,81 @@ function resolveFromAddress() {
   }
 
   return from.trim();
+}
+
+function resolveFromName() {
+  const fromName =
+    process.env.EMAIL_FROM_NAME ??
+    process.env.BREVO_FROM_NAME ??
+    process.env.RESEND_FROM_NAME ??
+    '';
+
+  return fromName.trim() || null;
+}
+
+async function sendViaBrevo(message: EmailMessage) {
+  const apiKey = String(process.env.BREVO_API_KEY ?? '').trim();
+  if (!apiKey) {
+    throw new Error('BREVO_API_KEY nao configurada.');
+  }
+
+  const apiBaseUrl = String(process.env.BREVO_API_BASE_URL ?? 'https://api.brevo.com').trim();
+  const timeoutMs = Number(process.env.EMAIL_HTTP_TIMEOUT_MS ?? 10000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const senderEmail = resolveFromAddress();
+    const senderName = resolveFromName();
+    const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}/v3/smtp/email`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json',
+        'api-key': apiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        sender: {
+          email: senderEmail,
+          ...(senderName ? { name: senderName } : {}),
+        },
+        to: [{ email: message.to }],
+        subject: message.subject,
+        textContent: message.text,
+        ...(message.html ? { htmlContent: message.html } : {}),
+        ...(message.idempotencyKey
+          ? {
+              headers: {
+                idempotencyKey: message.idempotencyKey,
+              },
+            }
+          : {}),
+      }),
+      signal: controller.signal,
+    });
+
+    const rawBody = await response.text();
+    let parsedBody: Record<string, unknown> | null = null;
+    try {
+      parsedBody = rawBody ? (JSON.parse(rawBody) as Record<string, unknown>) : null;
+    } catch {
+      parsedBody = null;
+    }
+
+    if (!response.ok) {
+      const providerMessage =
+        String(
+          parsedBody?.message ??
+            parsedBody?.code ??
+            parsedBody?.error ??
+            rawBody ??
+            `HTTP ${response.status}`
+        ).trim() || `HTTP ${response.status}`;
+      throw new Error(`Brevo send failed (${response.status}): ${providerMessage}`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function sendViaResend(message: EmailMessage) {
@@ -187,6 +271,11 @@ async function sendViaSmtp(message: EmailMessage) {
 
 async function deliverEmail(message: EmailMessage) {
   const provider = resolveEmailProvider();
+  if (provider === 'brevo') {
+    await sendViaBrevo(message);
+    return;
+  }
+
   if (provider === 'resend') {
     await sendViaResend(message);
     return;

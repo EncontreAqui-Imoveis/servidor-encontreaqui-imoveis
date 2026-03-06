@@ -26,10 +26,16 @@ describe('emailService', () => {
     resetEmailServiceForTests();
 
     delete process.env.EMAIL_PROVIDER;
+    delete process.env.BREVO_API_KEY;
+    delete process.env.BREVO_API_BASE_URL;
+    delete process.env.BREVO_FROM;
+    delete process.env.BREVO_FROM_NAME;
     delete process.env.RESEND_API_KEY;
     delete process.env.RESEND_API_BASE_URL;
     delete process.env.RESEND_FROM;
+    delete process.env.RESEND_FROM_NAME;
     delete process.env.EMAIL_FROM;
+    delete process.env.EMAIL_FROM_NAME;
     delete process.env.SMTP_HOST;
     delete process.env.SMTP_PORT;
     delete process.env.SMTP_SECURE;
@@ -43,6 +49,45 @@ describe('emailService', () => {
     createTransportMock.mockReturnValue({
       sendMail: sendMailMock,
     });
+  });
+
+  it('sends verification email through Brevo HTTP API with idempotency key', async () => {
+    process.env.EMAIL_PROVIDER = 'brevo';
+    process.env.BREVO_API_KEY = 'brevo-key';
+    process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
+    process.env.EMAIL_FROM_NAME = 'EncontreAqui Imoveis';
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-123' })),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendEmailVerificationEmail({
+      to: 'user@test.com',
+      name: 'Usuario',
+      actionUrl: 'https://site.exemplo.com/auth/verificar-email?oobCode=123',
+      expiresAt: new Date('2026-03-06T15:00:00.000Z'),
+      idempotencyKey: 'email-verification-42',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.brevo.com/v3/smtp/email');
+    expect(options.method).toBe('POST');
+    expect(options.headers['api-key']).toBe('brevo-key');
+
+    const payload = JSON.parse(String(options.body));
+    expect(payload.sender).toEqual({
+      email: 'no-reply@encontreaquiimoveis.com',
+      name: 'EncontreAqui Imoveis',
+    });
+    expect(payload.to).toEqual([{ email: 'user@test.com' }]);
+    expect(payload.subject).toBe('Verifique seu email do app EncontreAqui Imoveis');
+    expect(payload.headers).toEqual({
+      idempotencyKey: 'email-verification-42',
+    });
+    expect(createTransportMock).not.toHaveBeenCalled();
   });
 
   it('sends verification email through Resend HTTP API with idempotency key', async () => {
@@ -111,6 +156,27 @@ describe('emailService', () => {
       to: 'user@test.com',
       subject: 'Recuperacao de senha',
     });
+  });
+
+  it('surfaces brevo provider errors with status code context', async () => {
+    process.env.EMAIL_PROVIDER = 'brevo';
+    process.env.BREVO_API_KEY = 'brevo-key';
+    process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
+
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ message: 'invalid api key' })),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      sendEmailVerificationEmail({
+        to: 'user@test.com',
+        actionUrl: 'https://site.exemplo.com/auth/verificar-email?oobCode=123',
+        expiresAt: new Date('2026-03-06T15:00:00.000Z'),
+      }),
+    ).rejects.toThrow('Brevo send failed (401): invalid api key');
   });
 
   it('surfaces resend provider errors with status code context', async () => {

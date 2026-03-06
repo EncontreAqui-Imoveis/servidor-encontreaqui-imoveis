@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import AuthRequest from '../middlewares/auth';
+import { getRequestId } from '../middlewares/requestContext';
 import admin from '../config/firebaseAdmin';
 import { notifyAdmins } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
@@ -483,6 +484,75 @@ class UserController {
       return res.status(500).json({
         message: 'Ocorreu um erro inesperado no servidor.',
         error: 'Ocorreu um erro inesperado no servidor.',
+      });
+    }
+  }
+
+  async updateAddress(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({
+        status: 'error',
+        code: 'SESSION_EXPIRED',
+        error: 'Usuario nao autenticado.',
+        correlation_id: getRequestId(req),
+      });
+    }
+
+    try {
+      const payload = (req.body ?? {}) as Record<string, unknown>;
+      const addressResult = sanitizeAddressInput({
+        street: payload.street,
+        number: payload.number,
+        complement: payload.complement,
+        bairro: payload.bairro,
+        city: payload.city,
+        state: payload.state,
+        cep: payload.cep,
+        withoutNumber: payload.withoutNumber ?? payload.without_number,
+      });
+
+      if (!addressResult.ok) {
+        return res.status(400).json({
+          status: 'error',
+          code: 'ADDRESS_VALIDATION_FAILED',
+          error: 'Endereco incompleto ou invalido.',
+          fields: addressResult.errors,
+          correlation_id: getRequestId(req),
+        });
+      }
+
+      await runUserQuery(
+        `
+          UPDATE users
+          SET street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ?
+          WHERE id = ?
+        `,
+        [
+          addressResult.value.street,
+          addressResult.value.number,
+          addressResult.value.complement,
+          addressResult.value.bairro,
+          addressResult.value.city,
+          addressResult.value.state,
+          addressResult.value.cep,
+          userId,
+        ]
+      );
+
+      return res.status(200).json({
+        status: 'ok',
+        message: 'Endereco atualizado com sucesso.',
+        address: addressResult.value,
+        correlation_id: getRequestId(req),
+      });
+    } catch (error) {
+      console.error('Erro ao atualizar endereco do usuario:', error);
+      return res.status(500).json({
+        status: 'error',
+        code: 'INTERNAL_SERVER_ERROR',
+        error: 'Ocorreu um erro inesperado no servidor.',
+        correlation_id: getRequestId(req),
       });
     }
   }

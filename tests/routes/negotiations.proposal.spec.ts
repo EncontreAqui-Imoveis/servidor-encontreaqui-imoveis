@@ -66,6 +66,7 @@ describe('POST /negotiations/proposal', () => {
 
   it('persists negotiation as proposal sent and returns generated PDF', async () => {
     txMock.query
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
         [
           {
@@ -87,6 +88,7 @@ describe('POST /negotiations/proposal', () => {
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-001',
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '111.222.333-44',
@@ -111,25 +113,28 @@ describe('POST /negotiations/proposal', () => {
   });
 
   it('rejects proposal when payment math does not match property value', async () => {
-    txMock.query.mockResolvedValueOnce([
-      [
-        {
-          id: 101,
-          address: 'Av. Paulista, 1000',
-          numero: '1000',
-          quadra: null,
-          lote: null,
-          bairro: 'Bela Vista',
-          city: 'Sao Paulo',
-          state: 'SP',
-          price: 500000,
-          price_sale: 500000,
-          price_rent: null,
-        },
-      ],
-    ]);
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: null,
+            lote: null,
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ]);
 
     const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-002',
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '111.222.333-44',
@@ -145,12 +150,18 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('A soma dos pagamentos');
     expect(txMock.rollback).toHaveBeenCalledTimes(1);
-    expect(txMock.execute).not.toHaveBeenCalled();
+    expect(txMock.execute).toHaveBeenCalledTimes(1);
+    expect(
+      txMock.execute.mock.calls.some(([sql]) =>
+        String(sql).includes('INSERT INTO negotiations')
+      )
+    ).toBe(false);
     expect(generateProposalMock).not.toHaveBeenCalled();
   });
 
   it('uses sellerBrokerId when partnership broker is informed', async () => {
     txMock.query
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
         [
           {
@@ -173,6 +184,7 @@ describe('POST /negotiations/proposal', () => {
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-003',
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '111.222.333-44',
@@ -197,5 +209,70 @@ describe('POST /negotiations/proposal', () => {
         sellingBrokerName: 'Broker Vendedor',
       })
     );
+  });
+
+  it('requires idempotency key for proposal creation', async () => {
+    const response = await request(app).post('/negotiations/proposal').send({
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '111.222.333-44',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('PROPOSAL_VALIDATION_FAILED');
+    expect(response.body.error).toContain('idempotency_key');
+  });
+
+  it('maps PDF dependency failures to DEPENDENCY_UNAVAILABLE', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: 'Q1',
+            lote: 'L2',
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ name: 'Broker Teste' }]])
+      .mockResolvedValueOnce([[]]);
+
+    generateProposalMock.mockRejectedValueOnce(
+      new Error('PDF_INTERNAL_API_KEY nao configurado')
+    );
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-004',
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '111.222.333-44',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe('DEPENDENCY_UNAVAILABLE');
+    expect(response.body.retryable).toBe(true);
   });
 });

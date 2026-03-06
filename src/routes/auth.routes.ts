@@ -36,6 +36,12 @@ authRoutes.post('/otp/resend', authSensitiveLimiter, (req, res) =>
 );
 authRoutes.post('/otp/verify', (req, res) => authController.verifyOtp(req, res));
 authRoutes.post('/verify-phone', (req, res) => authController.verifyPhone(req, res));
+authRoutes.post('/email-verification/send', authSensitiveLimiter, (req, res) =>
+  authController.sendEmailVerification(req, res)
+);
+authRoutes.post('/email-verification/check', authSensitiveLimiter, (req, res) =>
+  authController.checkEmailVerification(req, res)
+);
 authRoutes.get('/check-email', authSensitiveLimiter, (req, res) =>
   authController.checkEmail(req, res)
 );

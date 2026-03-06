@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sanitizeAddressInput } from './address';
+import { sanitizeAddressInput, sanitizePartialAddressInput } from './address';
 
 describe('sanitizeAddressInput', () => {
   it('sanitizes and validates required fields', () => {
@@ -88,6 +88,64 @@ describe('sanitizeAddressInput', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.errors).toContain('state');
+    }
+  });
+
+  it('accepts address without number when without_number is true', () => {
+    const result = sanitizeAddressInput({
+      street: 'Rua A',
+      number: '',
+      without_number: true,
+      bairro: 'Centro',
+      city: 'Goiania',
+      state: 'GO',
+      cep: '74000000',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.number).toBe('S/N');
+    }
+  });
+
+  it('fails when without_number is false and number is missing', () => {
+    const result = sanitizeAddressInput({
+      street: 'Rua A',
+      number: '',
+      without_number: false,
+      bairro: 'Centro',
+      city: 'Goiania',
+      state: 'GO',
+      cep: '74000000',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toContain('number');
+    }
+  });
+});
+
+describe('sanitizePartialAddressInput', () => {
+  it('sets number to S/N when without_number is true', () => {
+    const result = sanitizePartialAddressInput({
+      without_number: true,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.number).toBe('S/N');
+    }
+  });
+
+  it('requires number when without_number is false', () => {
+    const result = sanitizePartialAddressInput({
+      without_number: false,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toContain('number');
     }
   });
 });

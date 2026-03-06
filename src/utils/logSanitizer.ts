@@ -16,6 +16,7 @@ const SENSITIVE_KEYS = [
   'phone',
   'telefone',
   'cpf',
+  'creci',
   'cnpj',
   'rg',
   'document',

@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
+import { getRequestId } from '../middlewares/requestContext';
 import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
 import { createAdminNotification } from '../services/notificationService';
 import {
@@ -40,6 +41,12 @@ interface NegotiationAccessRow extends RowDataPacket {
 
 interface BrokerRow extends RowDataPacket {
   name: string;
+}
+
+interface ProposalIdempotencyRow extends RowDataPacket {
+  id: number;
+  negotiation_id: string | null;
+  document_id: number | null;
 }
 
 interface PropertyRow extends RowDataPacket {
@@ -350,7 +357,62 @@ function canAccessNegotiationByOwnership(
   );
 }
 
+function resolveIdempotencyKey(req: AuthRequest): string {
+  const fromHeader = String(req.get('Idempotency-Key') ?? '').trim();
+  if (fromHeader.length > 0) {
+    return fromHeader.slice(0, 128);
+  }
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const fromBody = String(body.idempotency_key ?? body.idempotencyKey ?? '').trim();
+  return fromBody.slice(0, 128);
+}
+
+function isDependencyUnavailableError(error: unknown): boolean {
+  const anyError = error as {
+    isAxiosError?: boolean;
+    code?: string | null;
+    message?: string | null;
+  };
+
+  const code = String(anyError?.code ?? '').toUpperCase();
+  const message = String(anyError?.message ?? '').toUpperCase();
+
+  if (message.includes('PDF_INTERNAL_API_KEY')) {
+    return true;
+  }
+
+  if (anyError?.isAxiosError) {
+    return true;
+  }
+
+  return ['ECONNREFUSED', 'ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND'].includes(code);
+}
+
 class NegotiationController {
+  private correlationId(req: Request): string | null {
+    return getRequestId(req);
+  }
+
+  private respondWithCode(
+    req: Request,
+    res: Response,
+    statusCode: number,
+    code: string,
+    error: string,
+    retryable: boolean,
+    extras?: Record<string, unknown>
+  ): Response {
+    return res.status(statusCode).json({
+      status: 'error',
+      code,
+      error,
+      retryable,
+      correlation_id: this.correlationId(req),
+      ...(extras ?? {}),
+    });
+  }
+
   async generateProposal(req: AuthRequest, res: Response): Promise<Response> {
     if (!req.userId) {
       return res.status(401).json({ error: 'Usuario nao autenticado.' });
@@ -408,26 +470,133 @@ class NegotiationController {
       });
     } catch (error) {
       console.error('Erro ao gerar/salvar proposta em BLOB:', error);
-      return res.status(500).json({ error: 'Falha ao gerar e salvar proposta.' });
+      if (isDependencyUnavailableError(error)) {
+        return this.respondWithCode(
+          req,
+          res,
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          'Servico temporariamente indisponivel. Tente novamente em instantes.',
+          true
+        );
+      }
+      return this.respondWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Falha ao gerar e salvar proposta.',
+        false
+      );
     }
   }
 
   async generateProposalFromProperty(req: AuthRequest, res: Response): Promise<Response> {
     if (!req.userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return this.respondWithCode(
+        req,
+        res,
+        401,
+        'SESSION_EXPIRED',
+        'Usuario nao autenticado.',
+        false
+      );
+    }
+
+    const idempotencyKey = resolveIdempotencyKey(req);
+    if (!idempotencyKey) {
+      return this.respondWithCode(
+        req,
+        res,
+        400,
+        'PROPOSAL_VALIDATION_FAILED',
+        'idempotency_key e obrigatoria para envio da proposta.',
+        false
+      );
     }
 
     let payload: ParsedProposalWizard;
     try {
       payload = parseProposalWizardBody((req.body ?? {}) as ProposalWizardBody);
     } catch (error) {
-      return res.status(400).json({ error: (error as Error).message });
+      return this.respondWithCode(
+        req,
+        res,
+        400,
+        'PROPOSAL_VALIDATION_FAILED',
+        (error as Error).message,
+        false
+      );
     }
 
     let tx: PoolConnection | null = null;
     try {
       tx = await getNegotiationDbConnection();
       await tx.beginTransaction();
+
+      const [idempotencyRows] = await tx.query<ProposalIdempotencyRow[]>(
+        `
+          SELECT id, negotiation_id, document_id
+          FROM negotiation_proposal_idempotency
+          WHERE user_id = ? AND idempotency_key = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [req.userId, idempotencyKey]
+      );
+
+      const existingIdempotency = idempotencyRows[0];
+      if (
+        existingIdempotency &&
+        existingIdempotency.negotiation_id &&
+        existingIdempotency.document_id
+      ) {
+        const existingDocument = await findNegotiationDocumentById(
+          Number(existingIdempotency.document_id),
+          tx
+        );
+        if (
+          existingDocument &&
+          String(existingDocument.negotiationId) ===
+            String(existingIdempotency.negotiation_id)
+        ) {
+          await tx.commit();
+
+          res.setHeader('Content-Type', 'application/pdf');
+          res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="proposal_${existingIdempotency.negotiation_id}.pdf"`
+          );
+          res.setHeader(
+            'Content-Length',
+            existingDocument.fileContent.length.toString()
+          );
+          res.setHeader('X-Negotiation-Id', String(existingIdempotency.negotiation_id));
+          res.setHeader('X-Document-Id', String(existingIdempotency.document_id));
+          res.setHeader('X-Idempotent-Replay', 'true');
+          return res.status(200).send(existingDocument.fileContent);
+        }
+
+        await tx.rollback();
+        return this.respondWithCode(
+          req,
+          res,
+          409,
+          'PROPOSAL_IN_PROGRESS',
+          'Uma proposta com essa chave de idempotencia ainda esta em processamento.',
+          true
+        );
+      }
+
+      if (!existingIdempotency) {
+        await tx.execute(
+          `
+            INSERT INTO negotiation_proposal_idempotency (user_id, idempotency_key)
+            VALUES (?, ?)
+          `,
+          [req.userId, idempotencyKey]
+        );
+      }
 
       const [propertyRows] = await tx.query<PropertyRow[]>(
         `
@@ -653,6 +822,15 @@ class NegotiationController {
         }
       );
 
+      await tx.execute(
+        `
+          UPDATE negotiation_proposal_idempotency
+          SET negotiation_id = ?, document_id = ?
+          WHERE user_id = ? AND idempotency_key = ?
+        `,
+        [negotiationId, documentId, req.userId, idempotencyKey]
+      );
+
       await tx.commit();
 
       res.setHeader('Content-Type', 'application/pdf');
@@ -661,12 +839,39 @@ class NegotiationController {
       res.setHeader('X-Negotiation-Id', negotiationId);
       res.setHeader('X-Document-Id', String(documentId));
       return res.status(201).send(pdfBuffer);
-    } catch (error) {
+    } catch (error: any) {
       if (tx) {
         await tx.rollback();
       }
       console.error('Erro ao gerar proposta por imovel:', error);
-      return res.status(500).json({ error: 'Falha ao gerar proposta.' });
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return this.respondWithCode(
+          req,
+          res,
+          409,
+          'PROPOSAL_IN_PROGRESS',
+          'Uma proposta com essa chave de idempotencia ja esta em processamento.',
+          true
+        );
+      }
+      if (isDependencyUnavailableError(error)) {
+        return this.respondWithCode(
+          req,
+          res,
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          'Servico temporariamente indisponivel. Tente novamente em instantes.',
+          true
+        );
+      }
+      return this.respondWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Falha ao gerar proposta.',
+        false
+      );
     } finally {
       tx?.release();
     }

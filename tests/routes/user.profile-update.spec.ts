@@ -92,5 +92,43 @@ describe('PUT /users/me profile update', () => {
     });
     expect(queryMock).not.toHaveBeenCalled();
   });
-});
 
+  it('updates address with semantic S/N when without_number is true', async () => {
+    queryMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const response = await request(app).put('/users/me/address').send({
+      street: 'Rua Sem Numero',
+      number: '',
+      without_number: true,
+      complement: 'Apto 1',
+      bairro: 'Centro',
+      city: 'Rio Verde',
+      state: 'GO',
+      cep: '75900000',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('ok');
+    expect(response.body.address.number).toBe('S/N');
+    expect(queryMock).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE users'),
+      ['Rua Sem Numero', 'S/N', 'Apto 1', 'Centro', 'Rio Verde', 'GO', '75900000', 123]
+    );
+  });
+
+  it('rejects /users/me/address when cep is invalid', async () => {
+    const response = await request(app).put('/users/me/address').send({
+      street: 'Rua A',
+      number: '10',
+      bairro: 'Centro',
+      city: 'Rio Verde',
+      state: 'GO',
+      cep: '12345',
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('ADDRESS_VALIDATION_FAILED');
+    expect(response.body.fields).toContain('cep');
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+});

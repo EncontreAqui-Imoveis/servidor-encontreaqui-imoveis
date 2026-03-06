@@ -4,6 +4,10 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
 import { authDb } from '../services/authPersistenceService';
 import {
+  checkEmailVerificationStatus,
+  issueEmailVerificationRequest,
+} from '../services/emailVerificationService';
+import {
   buildUserPayload,
   hasCompleteProfile,
   signUserToken,
@@ -11,6 +15,7 @@ import {
   withTimeout,
 } from '../services/authSessionService';
 import type { AuthRequest } from '../middlewares/auth';
+import { getRequestId } from '../middlewares/requestContext';
 import { phoneOtpService } from '../services/phoneOtpService';
 import { sanitizeAddressInput } from '../utils/address';
 import { hasValidCreci, normalizeCreci } from '../utils/creci';
@@ -38,6 +43,29 @@ class AuthController {
     }
 
     return base;
+  }
+
+  private correlationId(req: Request): string | null {
+    return getRequestId(req);
+  }
+
+  private errorWithCode(
+    req: Request,
+    res: Response,
+    statusCode: number,
+    code: string,
+    error: string,
+    retryable: boolean,
+    extras?: Record<string, unknown>
+  ) {
+    return res.status(statusCode).json({
+      status: 'error',
+      code,
+      error,
+      retryable,
+      correlation_id: this.correlationId(req),
+      ...(extras ?? {}),
+    });
   }
 
   async requestOtp(req: Request, res: Response) {
@@ -159,6 +187,179 @@ class AuthController {
     } catch (error) {
       console.error('Erro ao solicitar reset de senha:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  async sendEmailVerification(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    if (!email) {
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'EMAIL_REQUIRED',
+        'Email e obrigatorio.',
+        false
+      );
+    }
+
+    try {
+      const [userRows] = await authDb.query<RowDataPacket[]>(
+        'SELECT id FROM users WHERE email = ? LIMIT 1',
+        [email]
+      );
+      const userId =
+        userRows.length > 0 ? Number(userRows[0].id) || null : null;
+
+      const issue = await issueEmailVerificationRequest({ email, userId });
+      if (!issue.allowed) {
+        return this.errorWithCode(
+          req,
+          res,
+          429,
+          issue.code,
+          `Aguarde ${issue.retryAfterSeconds}s para reenviar.`,
+          true,
+          {
+            retry_after_seconds: issue.retryAfterSeconds,
+            daily_remaining: issue.dailyRemaining,
+          }
+        );
+      }
+
+      try {
+        await withTimeout(
+          admin.auth().generateEmailVerificationLink(email),
+          8000,
+          'firebase email verification link'
+        );
+      } catch (providerError) {
+        console.error('Falha ao acionar envio de verificacao de email:', providerError);
+        return this.errorWithCode(
+          req,
+          res,
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          'Servico temporariamente indisponivel. Tente novamente em instantes.',
+          true
+        );
+      }
+
+      return res.status(200).json({
+        status: 'ok',
+        delivery: 'sent',
+        resend_type: issue.resendType,
+        expires_at: issue.expiresAt.toISOString(),
+        cooldown_sec: issue.cooldownSec,
+        daily_remaining: issue.dailyRemaining,
+        correlation_id: this.correlationId(req),
+      });
+    } catch (error) {
+      console.error('Erro ao enviar verificacao de email:', error);
+      return this.errorWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Erro interno do servidor.',
+        false
+      );
+    }
+  }
+
+  async checkEmailVerification(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    if (!email) {
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'EMAIL_REQUIRED',
+        'Email e obrigatorio.',
+        false
+      );
+    }
+
+    try {
+      let firebaseVerified = false;
+      try {
+        const firebaseUser = await withTimeout(
+          admin.auth().getUserByEmail(email),
+          8000,
+          'firebase getUserByEmail'
+        );
+        firebaseVerified = !!firebaseUser.emailVerified;
+      } catch (providerError: any) {
+        if (providerError?.code === 'auth/user-not-found') {
+          return this.errorWithCode(
+            req,
+            res,
+            404,
+            'EMAIL_NOT_FOUND',
+            'Email nao encontrado.',
+            false
+          );
+        }
+        console.error('Falha ao verificar status no provedor de email:', providerError);
+        return this.errorWithCode(
+          req,
+          res,
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          'Servico temporariamente indisponivel. Tente novamente em instantes.',
+          true
+        );
+      }
+
+      const status = await checkEmailVerificationStatus({
+        email,
+        isVerified: firebaseVerified,
+      });
+
+      if (status.status === 'verified') {
+        return res.status(200).json({
+          status: 'ok',
+          verified: true,
+          verified_at: status.verifiedAt?.toISOString() ?? null,
+          correlation_id: this.correlationId(req),
+        });
+      }
+
+      if (status.status === 'expired') {
+        return this.errorWithCode(
+          req,
+          res,
+          410,
+          'EMAIL_LINK_EXPIRED',
+          'Esse link expirou. Solicite um novo.',
+          true,
+          {
+            expires_at: status.expiresAt?.toISOString() ?? null,
+          }
+        );
+      }
+
+      return this.errorWithCode(
+        req,
+        res,
+        409,
+        'EMAIL_VERIFICATION_PENDING',
+        'Ainda nao identificamos a verificacao. Tente novamente em instantes.',
+        true,
+        {
+          expires_at: status.expiresAt?.toISOString() ?? null,
+        }
+      );
+    } catch (error) {
+      console.error('Erro ao validar status de verificacao de email:', error);
+      return this.errorWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Erro interno do servidor.',
+        false
+      );
     }
   }
 

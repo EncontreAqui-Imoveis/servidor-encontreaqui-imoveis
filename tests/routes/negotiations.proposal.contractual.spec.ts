@@ -72,6 +72,7 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
 
   it('persists proposal_validity_date (+10d) and ignores tampered property value from payload', async () => {
     txMock.query
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
         [
           {
@@ -93,6 +94,7 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-contractual-001',
       propertyId: 101,
       clientName: 'Cliente Contratual',
       clientCpf: '111.222.333-44',
@@ -134,4 +136,3 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
     );
   });
 });
-

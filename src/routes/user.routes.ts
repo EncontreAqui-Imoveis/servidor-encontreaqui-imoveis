@@ -33,6 +33,9 @@ userRoutes.post('/auth/google', (req, res) => authController.google(req, res));
 userRoutes.post('/auth/firebase', userController.firebaseLogin);
 userRoutes.get('/me', authMiddleware, (req, res) => userController.getProfile(req as any, res));
 userRoutes.put('/me', authMiddleware, (req, res) => userController.updateProfile(req as any, res));
+userRoutes.put('/me/address', authMiddleware, (req, res) =>
+  userController.updateAddress(req as any, res),
+);
 userRoutes.get('/me/properties', authMiddleware, (req, res) =>
   userController.getMyProperties(req as any, res),
 );

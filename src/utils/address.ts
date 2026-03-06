@@ -8,7 +8,10 @@ export type AddressFields = {
   cep: string;
 };
 
-export type AddressInput = Partial<Record<keyof AddressFields, unknown>>;
+export type AddressInput = Partial<Record<keyof AddressFields, unknown>> & {
+  withoutNumber?: unknown;
+  without_number?: unknown;
+};
 
 type AddressResult =
   | { ok: true; value: AddressFields }
@@ -25,6 +28,7 @@ const MAX_BAIRRO = 255;
 const MAX_CITY = 100;
 const CEP_LENGTH = 8;
 const STATE_LENGTH = 2;
+const WITHOUT_NUMBER_VALUE = 'S/N';
 
 function normalizeText(value: unknown): string | null {
   if (value === undefined || value === null) {
@@ -48,6 +52,29 @@ function normalizeNumber(value: unknown): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
+function normalizeBoolean(value: unknown): boolean | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'sim', 'yes', 'y'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'nao', 'não', 'no', 'n'].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
 function normalizeCep(value: unknown): string | null {
   const text = normalizeText(value);
   if (!text) return null;
@@ -61,10 +88,20 @@ function withinLimit(value: string, limit: number): boolean {
 
 export function sanitizeAddressInput(input: AddressInput): AddressResult {
   const errors: string[] = [];
+  const hasWithoutNumberField =
+    'withoutNumber' in input || 'without_number' in input;
+  const withoutNumber = normalizeBoolean(
+    input.withoutNumber ?? input.without_number
+  );
+
+  if (hasWithoutNumberField && withoutNumber === null) {
+    errors.push('without_number');
+  }
 
   const street = normalizeText(input.street);
   if (!street) errors.push('street');
-  const number = normalizeNumber(input.number);
+  const number =
+    withoutNumber === true ? WITHOUT_NUMBER_VALUE : normalizeNumber(input.number);
   if (!number) errors.push('number');
   const bairro = normalizeText(input.bairro);
   if (!bairro) errors.push('bairro');
@@ -103,6 +140,19 @@ export function sanitizeAddressInput(input: AddressInput): AddressResult {
 export function sanitizePartialAddressInput(input: AddressInput): PartialAddressResult {
   const errors: string[] = [];
   const value: Partial<AddressFields> = {};
+  const hasWithoutNumberField =
+    'withoutNumber' in input || 'without_number' in input;
+  const withoutNumber = normalizeBoolean(
+    input.withoutNumber ?? input.without_number
+  );
+
+  if (hasWithoutNumberField && withoutNumber === null) {
+    errors.push('without_number');
+  }
+
+  if (hasWithoutNumberField && withoutNumber === true) {
+    value.number = WITHOUT_NUMBER_VALUE;
+  }
 
   if ('street' in input) {
     const street = normalizeText(input.street);
@@ -114,12 +164,22 @@ export function sanitizePartialAddressInput(input: AddressInput): PartialAddress
   }
 
   if ('number' in input) {
-    const number = normalizeNumber(input.number);
-    if (!number || !withinLimit(number, MAX_NUMBER)) {
-      errors.push('number');
-    } else {
-      value.number = number;
+    if (!(hasWithoutNumberField && withoutNumber === true)) {
+      const number = normalizeNumber(input.number);
+      if (!number || !withinLimit(number, MAX_NUMBER)) {
+        errors.push('number');
+      } else {
+        value.number = number;
+      }
     }
+  }
+
+  if (
+    hasWithoutNumberField &&
+    withoutNumber === false &&
+    !('number' in input)
+  ) {
+    errors.push('number');
   }
 
   if ('bairro' in input) {

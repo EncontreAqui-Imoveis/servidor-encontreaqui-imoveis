@@ -15,11 +15,12 @@ describe('logSanitizer', () => {
   it('mascara chaves sensíveis em objetos', () => {
     const redacted = redactValue({
       authorization: 'Bearer token',
-      nested: { password: '123456', city: 'Rio Verde' },
+      nested: { password: '123456', city: 'Rio Verde', creci: '12345-F' },
     }) as Record<string, unknown>;
 
     expect(redacted.authorization).toBe('***');
     expect((redacted.nested as Record<string, unknown>).password).toBe('***');
+    expect((redacted.nested as Record<string, unknown>).creci).toBe('***');
     expect((redacted.nested as Record<string, unknown>).city).toBe('Rio Verde');
   });
 

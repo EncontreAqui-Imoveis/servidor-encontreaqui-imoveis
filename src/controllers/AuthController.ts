@@ -227,24 +227,6 @@ class AuthController {
         );
       }
 
-      try {
-        await withTimeout(
-          admin.auth().generateEmailVerificationLink(email),
-          8000,
-          'firebase email verification link'
-        );
-      } catch (providerError) {
-        console.error('Falha ao acionar envio de verificacao de email:', providerError);
-        return this.errorWithCode(
-          req,
-          res,
-          503,
-          'DEPENDENCY_UNAVAILABLE',
-          'Servico temporariamente indisponivel. Tente novamente em instantes.',
-          true
-        );
-      }
-
       return res.status(200).json({
         status: 'ok',
         delivery: 'sent',

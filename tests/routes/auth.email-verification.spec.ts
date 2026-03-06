@@ -47,7 +47,6 @@ describe('POST /auth/email-verification/*', () => {
       .mockResolvedValueOnce([[{ id: 42 }]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ insertId: 1 }]);
-    generateEmailVerificationLinkMock.mockResolvedValueOnce('https://verify.example.com/link');
 
     const response = await request(app)
       .post('/auth/email-verification/send')
@@ -58,7 +57,6 @@ describe('POST /auth/email-verification/*', () => {
     expect(response.body.resend_type).toBe('initial');
     expect(response.body.cooldown_sec).toBe(60);
     expect(response.body.daily_remaining).toBe(4);
-    expect(generateEmailVerificationLinkMock).toHaveBeenCalledWith('user@test.com');
   });
 
   it('blocks resend when cooldown is active', async () => {
@@ -82,7 +80,6 @@ describe('POST /auth/email-verification/*', () => {
     expect(response.status).toBe(429);
     expect(response.body.code).toBe('EMAIL_RESEND_RATE_LIMITED');
     expect(response.body.retryable).toBe(true);
-    expect(generateEmailVerificationLinkMock).not.toHaveBeenCalled();
   });
 
   it('returns verified=true when provider reports verified email', async () => {

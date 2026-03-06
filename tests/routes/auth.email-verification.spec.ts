@@ -2,9 +2,16 @@ import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock, verifyIdTokenMock } = vi.hoisted(() => ({
+const {
+  queryMock,
+  verifyIdTokenMock,
+  generateEmailVerificationLinkMock,
+  sendEmailVerificationEmailMock,
+} = vi.hoisted(() => ({
   queryMock: vi.fn(),
   verifyIdTokenMock: vi.fn(),
+  generateEmailVerificationLinkMock: vi.fn(),
+  sendEmailVerificationEmailMock: vi.fn(),
 }));
 
 vi.mock('../../src/database/connection', () => ({
@@ -19,10 +26,21 @@ vi.mock('../../src/config/firebaseAdmin', () => ({
   default: {
     auth: () => ({
       verifyIdToken: verifyIdTokenMock,
+      generateEmailVerificationLink: generateEmailVerificationLinkMock,
       createUser: vi.fn(),
     }),
   },
 }));
+
+vi.mock('../../src/services/emailService', async () => {
+  const actual = await vi.importActual<typeof import('../../src/services/emailService')>(
+    '../../src/services/emailService'
+  );
+  return {
+    ...actual,
+    sendEmailVerificationEmail: sendEmailVerificationEmailMock,
+  };
+});
 
 describe('POST /auth/email-verification/*', () => {
   let app: express.Express;
@@ -37,13 +55,18 @@ describe('POST /auth/email-verification/*', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.EMAIL_VERIFICATION_HANDLER_URL =
+      'https://imoveis.exemplo.com/auth/verificar-email';
   });
 
   it('sends first verification attempt with initial state and cooldown 60s', async () => {
     queryMock
-      .mockResolvedValueOnce([[{ id: 42 }]])
+      .mockResolvedValueOnce([[{ id: 42, name: 'Usuario Teste' }]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ insertId: 1 }]);
+    generateEmailVerificationLinkMock.mockResolvedValueOnce(
+      'https://encontreaqui-imoveis.firebaseapp.com/__/auth/action?mode=verifyEmail&oobCode=code-123&apiKey=legacy'
+    );
 
     const response = await request(app)
       .post('/auth/email-verification/send')
@@ -54,6 +77,18 @@ describe('POST /auth/email-verification/*', () => {
     expect(response.body.resend_type).toBe('initial');
     expect(response.body.cooldown_sec).toBe(60);
     expect(response.body.daily_remaining).toBe(4);
+    expect(generateEmailVerificationLinkMock).toHaveBeenCalledWith('user@test.com');
+    expect(sendEmailVerificationEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendEmailVerificationEmailMock.mock.calls[0][0]).toMatchObject({
+      to: 'user@test.com',
+      name: 'Usuario Teste',
+    });
+    expect(sendEmailVerificationEmailMock.mock.calls[0][0].actionUrl).toContain(
+      'https://imoveis.exemplo.com/auth/verificar-email?'
+    );
+    expect(sendEmailVerificationEmailMock.mock.calls[0][0].actionUrl).toContain(
+      'oobCode=code-123'
+    );
   });
 
   it('blocks resend when cooldown is active', async () => {
@@ -77,6 +112,7 @@ describe('POST /auth/email-verification/*', () => {
     expect(response.status).toBe(429);
     expect(response.body.code).toBe('EMAIL_RESEND_RATE_LIMITED');
     expect(response.body.retryable).toBe(true);
+    expect(sendEmailVerificationEmailMock).not.toHaveBeenCalled();
   });
 
   it('returns verified=true when provider reports verified email', async () => {

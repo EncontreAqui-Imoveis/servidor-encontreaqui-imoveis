@@ -5,8 +5,13 @@ import admin from '../config/firebaseAdmin';
 import { authDb } from '../services/authPersistenceService';
 import {
   checkEmailVerificationStatus,
+  deleteEmailVerificationRequest,
   issueEmailVerificationRequest,
 } from '../services/emailVerificationService';
+import {
+  buildEmailVerificationHandlerUrl,
+  sendEmailVerificationEmail,
+} from '../services/emailService';
 import {
   buildUserPayload,
   hasCompleteProfile,
@@ -192,6 +197,9 @@ class AuthController {
 
   async sendEmailVerification(req: Request, res: Response) {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const handlerUrl = String(
+      process.env.EMAIL_VERIFICATION_HANDLER_URL ?? ''
+    ).trim();
     if (!email) {
       return this.errorWithCode(
         req,
@@ -202,14 +210,26 @@ class AuthController {
         false
       );
     }
+    if (!handlerUrl) {
+      return this.errorWithCode(
+        req,
+        res,
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        'Servico temporariamente indisponivel. Tente novamente em instantes.',
+        true
+      );
+    }
 
     try {
       const [userRows] = await authDb.query<RowDataPacket[]>(
-        'SELECT id FROM users WHERE email = ? LIMIT 1',
+        'SELECT id, name FROM users WHERE email = ? LIMIT 1',
         [email]
       );
       const userId =
         userRows.length > 0 ? Number(userRows[0].id) || null : null;
+      const userName =
+        userRows.length > 0 ? String(userRows[0].name ?? '').trim() || null : null;
 
       const issue = await issueEmailVerificationRequest({ email, userId });
       if (!issue.allowed) {
@@ -224,6 +244,39 @@ class AuthController {
             retry_after_seconds: issue.retryAfterSeconds,
             daily_remaining: issue.dailyRemaining,
           }
+        );
+      }
+
+      try {
+        const firebaseLink = await withTimeout(
+          admin.auth().generateEmailVerificationLink(email),
+          8000,
+          'firebase generateEmailVerificationLink'
+        );
+        const continueUrl = new URL('/auth/login', handlerUrl).toString();
+        const actionUrl = buildEmailVerificationHandlerUrl({
+          handlerUrl,
+          firebaseActionLink: firebaseLink,
+          email,
+          continueUrl,
+        });
+
+        await sendEmailVerificationEmail({
+          to: email,
+          name: userName,
+          actionUrl,
+          expiresAt: issue.expiresAt,
+        });
+      } catch (deliveryError) {
+        await deleteEmailVerificationRequest(issue.requestId);
+        console.error('Falha ao montar ou enviar email de verificacao:', deliveryError);
+        return this.errorWithCode(
+          req,
+          res,
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          'Servico temporariamente indisponivel. Tente novamente em instantes.',
+          true
         );
       }
 

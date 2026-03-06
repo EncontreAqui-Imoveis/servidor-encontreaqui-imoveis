@@ -1,4 +1,4 @@
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 import { authDb } from './authPersistenceService';
 
@@ -36,6 +36,7 @@ function resolveNextCooldownAfterSend(newAttemptCount: number): number {
 export type EmailVerificationSendResult =
   | {
       allowed: true;
+      requestId: number;
       attemptNumber: number;
       expiresAt: Date;
       cooldownSec: number;
@@ -103,7 +104,7 @@ export async function issueEmailVerificationRequest(params: {
   const expiresAt = new Date(now.getTime() + VERIFICATION_EXPIRATION_MINUTES * 60 * 1000);
   const cooldownSecondsApplied = resolveCooldownForExistingAttempts(attemptsInLast24h);
 
-  await authDb.query(
+  const [insertResult] = await authDb.query<ResultSetHeader>(
     `
       INSERT INTO email_verification_requests
         (user_id, email, attempt_number, cooldown_seconds, expires_at, sent_at, status)
@@ -114,12 +115,23 @@ export async function issueEmailVerificationRequest(params: {
 
   return {
     allowed: true,
+    requestId: Number(insertResult.insertId),
     attemptNumber,
     expiresAt,
     cooldownSec: resolveNextCooldownAfterSend(attemptNumber),
     dailyRemaining: Math.max(0, DAILY_RESEND_LIMIT - attemptNumber),
     resendType: attemptNumber == 1 ? 'initial' : 'resend',
   };
+}
+
+export async function deleteEmailVerificationRequest(requestId: number) {
+  await authDb.query(
+    `
+      DELETE FROM email_verification_requests
+      WHERE id = ?
+    `,
+    [requestId]
+  );
 }
 
 export type EmailVerificationCheckResult =

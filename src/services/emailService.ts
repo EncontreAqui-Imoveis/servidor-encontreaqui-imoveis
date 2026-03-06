@@ -68,3 +68,70 @@ export async function sendPasswordResetEmail(params: {
     text,
   });
 }
+
+export function buildEmailVerificationHandlerUrl(params: {
+  handlerUrl: string;
+  firebaseActionLink: string;
+  email: string;
+  continueUrl?: string | null;
+}) {
+  const firebaseUrl = new URL(params.firebaseActionLink);
+  const mode = firebaseUrl.searchParams.get('mode') ?? 'verifyEmail';
+  const oobCode = firebaseUrl.searchParams.get('oobCode');
+
+  if (!oobCode) {
+    throw new Error('Firebase action link missing oobCode.');
+  }
+
+  const handlerUrl = new URL(params.handlerUrl);
+  handlerUrl.searchParams.set('mode', mode);
+  handlerUrl.searchParams.set('oobCode', oobCode);
+  handlerUrl.searchParams.set('email', params.email);
+
+  if (params.continueUrl && params.continueUrl.trim().length > 0) {
+    handlerUrl.searchParams.set('continueUrl', params.continueUrl.trim());
+  }
+
+  return handlerUrl.toString();
+}
+
+export async function sendEmailVerificationEmail(params: {
+  to: string;
+  name?: string | null;
+  actionUrl: string;
+  expiresAt: Date;
+}) {
+  const transporter = getTransporter();
+  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? '';
+  if (!from) {
+    throw new Error('SMTP_FROM nao configurado.');
+  }
+
+  const greeting = params.name ? `Ola, ${params.name}` : 'Ola';
+  const subject = 'Verifique seu email do app EncontreAqui Imoveis';
+  const expiresAtText = params.expiresAt.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+  });
+
+  const text =
+    `${greeting}.\n\n` +
+    'Clique no link abaixo para confirmar seu email.\n\n' +
+    `${params.actionUrl}\n\n` +
+    `Esse link expira em ${expiresAtText}.\n\n` +
+    'Se nao foi voce, ignore este email.\n';
+
+  const html =
+    `<p>${greeting}.</p>` +
+    '<p>Clique no botao abaixo para confirmar seu email.</p>' +
+    `<p><a href="${params.actionUrl}" style="display:inline-block;padding:12px 20px;background:#0D5D50;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">Clique aqui para confirmar seu e-mail</a></p>` +
+    `<p>Esse link expira em <strong>${expiresAtText}</strong>.</p>` +
+    '<p>Se nao foi voce, ignore este email.</p>';
+
+  await transporter.sendMail({
+    from,
+    to: params.to,
+    subject,
+    text,
+    html,
+  });
+}

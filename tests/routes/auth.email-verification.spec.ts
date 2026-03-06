@@ -2,10 +2,9 @@ import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock, getUserByEmailMock, generateEmailVerificationLinkMock } = vi.hoisted(() => ({
+const { queryMock, verifyIdTokenMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
-  getUserByEmailMock: vi.fn(),
-  generateEmailVerificationLinkMock: vi.fn(),
+  verifyIdTokenMock: vi.fn(),
 }));
 
 vi.mock('../../src/database/connection', () => ({
@@ -19,9 +18,7 @@ vi.mock('../../src/config/firebaseAdmin', () => ({
   __esModule: true,
   default: {
     auth: () => ({
-      verifyIdToken: vi.fn(),
-      getUserByEmail: getUserByEmailMock,
-      generateEmailVerificationLink: generateEmailVerificationLinkMock,
+      verifyIdToken: verifyIdTokenMock,
       createUser: vi.fn(),
     }),
   },
@@ -83,20 +80,40 @@ describe('POST /auth/email-verification/*', () => {
   });
 
   it('returns verified=true when provider reports verified email', async () => {
-    getUserByEmailMock.mockResolvedValueOnce({ emailVerified: true });
+    verifyIdTokenMock.mockResolvedValueOnce({
+      email: 'verified@test.com',
+      email_verified: true,
+    });
     queryMock.mockResolvedValueOnce([[]]);
 
     const response = await request(app)
       .post('/auth/email-verification/check')
-      .send({ email: 'verified@test.com' });
+      .send({ email: 'verified@test.com', idToken: 'token-ok' });
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('ok');
     expect(response.body.verified).toBe(true);
   });
 
+  it('rejects mismatched email token', async () => {
+    verifyIdTokenMock.mockResolvedValueOnce({
+      email: 'other@test.com',
+      email_verified: true,
+    });
+
+    const response = await request(app)
+      .post('/auth/email-verification/check')
+      .send({ email: 'verified@test.com', idToken: 'token-mismatch' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('EMAIL_TOKEN_MISMATCH');
+  });
+
   it('returns EMAIL_LINK_EXPIRED when latest link is expired', async () => {
-    getUserByEmailMock.mockResolvedValueOnce({ emailVerified: false });
+    verifyIdTokenMock.mockResolvedValueOnce({
+      email: 'expired@test.com',
+      email_verified: false,
+    });
     queryMock
       .mockResolvedValueOnce([
         [
@@ -112,7 +129,7 @@ describe('POST /auth/email-verification/*', () => {
 
     const response = await request(app)
       .post('/auth/email-verification/check')
-      .send({ email: 'expired@test.com' });
+      .send({ email: 'expired@test.com', idToken: 'token-expired-check' });
 
     expect(response.status).toBe(410);
     expect(response.body.code).toBe('EMAIL_LINK_EXPIRED');

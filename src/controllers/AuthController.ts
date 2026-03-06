@@ -251,6 +251,7 @@ class AuthController {
 
   async checkEmailVerification(req: Request, res: Response) {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const idToken = String(req.body?.idToken ?? '').trim();
     if (!email) {
       return this.errorWithCode(
         req,
@@ -264,32 +265,69 @@ class AuthController {
 
     try {
       let firebaseVerified = false;
-      try {
-        const firebaseUser = await withTimeout(
-          admin.auth().getUserByEmail(email),
-          8000,
-          'firebase getUserByEmail'
-        );
-        firebaseVerified = !!firebaseUser.emailVerified;
-      } catch (providerError: any) {
-        if (providerError?.code === 'auth/user-not-found') {
+      if (idToken) {
+        try {
+          const decoded = await withTimeout(
+            admin.auth().verifyIdToken(idToken),
+            8000,
+            'firebase verifyIdToken email verification check'
+          );
+          const tokenEmail = String(decoded.email ?? '').trim().toLowerCase();
+          if (!tokenEmail) {
+            return this.errorWithCode(
+              req,
+              res,
+              400,
+              'EMAIL_TOKEN_MISSING_EMAIL',
+              'Token de email invalido.',
+              false
+            );
+          }
+
+          if (tokenEmail !== email) {
+            return this.errorWithCode(
+              req,
+              res,
+              403,
+              'EMAIL_TOKEN_MISMATCH',
+              'Token de email nao corresponde ao usuario informado.',
+              false
+            );
+          }
+
+          firebaseVerified = decoded.email_verified === true;
+        } catch (providerError: any) {
+          if (
+            providerError?.code === 'auth/id-token-expired' ||
+            providerError?.code === 'auth/argument-error'
+          ) {
+            return this.errorWithCode(
+              req,
+              res,
+              401,
+              'EMAIL_TOKEN_INVALID',
+              'Sessao de verificacao expirada. Reenvie o email e tente novamente.',
+              false
+            );
+          }
+          console.error('Falha ao verificar status no provedor de email:', providerError);
           return this.errorWithCode(
             req,
             res,
-            404,
-            'EMAIL_NOT_FOUND',
-            'Email nao encontrado.',
-            false
+            503,
+            'DEPENDENCY_UNAVAILABLE',
+            'Servico temporariamente indisponivel. Tente novamente em instantes.',
+            true
           );
         }
-        console.error('Falha ao verificar status no provedor de email:', providerError);
+      } else {
         return this.errorWithCode(
           req,
           res,
-          503,
-          'DEPENDENCY_UNAVAILABLE',
-          'Servico temporariamente indisponivel. Tente novamente em instantes.',
-          true
+          400,
+          'EMAIL_TOKEN_REQUIRED',
+          'Token de verificacao e obrigatorio.',
+          false
         );
       }
 

@@ -82,6 +82,7 @@ describe('POST /auth/email-verification/*', () => {
     expect(sendEmailVerificationEmailMock.mock.calls[0][0]).toMatchObject({
       to: 'user@test.com',
       name: 'Usuario Teste',
+      idempotencyKey: 'email-verification-1',
     });
     expect(sendEmailVerificationEmailMock.mock.calls[0][0].actionUrl).toContain(
       'https://imoveis.exemplo.com/auth/verificar-email?'

@@ -266,6 +266,7 @@ class AuthController {
           name: userName,
           actionUrl,
           expiresAt: issue.expiresAt,
+          idempotencyKey: `email-verification-${issue.requestId}`,
         });
       } catch (deliveryError) {
         await deleteEmailVerificationRequest(issue.requestId);

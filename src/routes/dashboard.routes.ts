@@ -8,6 +8,7 @@ const router = Router();
 router.get('/stats', authMiddleware, isAdmin, dashboardController.getStats);
 router.get('/sre', authMiddleware, isAdmin, sreController.getStats);
 router.put('/sre/external-services/:name', authMiddleware, isAdmin, sreController.updateService);
-router.post('/webhook/deploy', sreController.handleWebhook);
+router.post('/webhook/github', sreController.handleGithubWebhook);
+router.post('/webhook/vercel', sreController.handleVercelWebhook);
 
 export default router;

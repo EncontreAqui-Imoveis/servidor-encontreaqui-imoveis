@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { loadSreStats, updateExternalService } from '../services/sreStatsService';
+import { loadSreStats, updateExternalService, updateRelease } from '../services/sreStatsService';
 
 class SreController {
     public async getStats(req: Request, res: Response): Promise<void> {
@@ -28,13 +28,36 @@ class SreController {
         }
     }
 
-    public async handleWebhook(req: Request, res: Response): Promise<void> {
-        // Logica simplificada de webhook - em produção validaria assinaturas
+    public async handleGithubWebhook(req: Request, res: Response): Promise<void> {
         const payload = req.body;
-        console.log('Webhook SRE recebido:', payload);
+        const repo = payload.repository?.name || 'backend';
+        const version = payload.head_commit?.id?.substring(0, 7) || 'commiting';
 
-        // Mock de processamento de deploy
-        res.json({ status: 'received' });
+        console.log(`Github Webhook: Deploy detectado no repo ${repo} (SHA: ${version})`);
+
+        updateRelease('github', repo, {
+            version,
+            status: 'success',
+            impact: payload.head_commit?.message || 'Push to main'
+        });
+
+        res.json({ status: 'processed' });
+    }
+
+    public async handleVercelWebhook(req: Request, res: Response): Promise<void> {
+        const payload = req.body;
+        const repo = payload.payload?.name || 'frontend';
+        const version = payload.payload?.deployment?.id?.substring(0, 7) || 'deploy';
+
+        console.log(`Vercel Webhook: Deploy detectado para ${repo}`);
+
+        updateRelease('vercel', repo, {
+            version,
+            status: payload.type === 'deployment.succeeded' ? 'success' : 'stable',
+            impact: 'Vercel Preview/Prod'
+        });
+
+        res.json({ status: 'processed' });
     }
 }
 

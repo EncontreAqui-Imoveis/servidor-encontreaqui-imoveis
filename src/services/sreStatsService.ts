@@ -1,5 +1,7 @@
 import os from 'os';
 import connection from '../database/connection';
+import { getRegistry } from '../middlewares/metrics';
+import client from 'prom-client';
 
 export interface SreStats {
     latency: {
@@ -107,40 +109,85 @@ export class SreStatsService {
             "Hora": { uptimeCurrent: 99.99, downtimeMinutes: 0.1, history: generateHistory(100, 10, 0.01) },
             "Dia": { uptimeCurrent: 99.98, downtimeMinutes: 0.5, history: generateHistory(99.99, 10, 0.02) },
             "Semana": { uptimeCurrent: 99.88, downtimeMinutes: 12.0, history: generateHistory(99.88, 7, 0.05) },
-            "Mês": { uptimeCurrent: 99.92, downtimeMinutes: 34.5, history: generateHistory(99.92, 12, 0.1) },
+            "Mês": { uptimeCurrent: 99.92, downtimeMinutes: 34.5, history: generateHistory(99.92, 30, 0.1) },
             "Ano": { uptimeCurrent: 99.50, downtimeMinutes: 438, history: generateHistory(99.5, 12, 0.5) }
         };
     }
+
+    private async getRealMetrics() {
+        const registry = getRegistry();
+        const metrics = await registry.getMetricsAsJSON();
+
+        // Find our histogram
+        const durationMetric: any = metrics.find((m: any) => m.name === 'http_request_duration_seconds');
+
+        let p99 = 0;
+        let avgLatency = 0;
+        let totalReqs = 0;
+        let errorReqs = 0;
+
+        if (durationMetric && durationMetric.values) {
+            // Very simplified calculation for p99 from Histogram buckets
+            // In a real SRE tool we'd use Prometheus queries, here we aggregate the current registry state
+            totalReqs = durationMetric.values.filter((v: any) => v.metricName === 'http_request_duration_seconds_count').reduce((a: any, b: any) => a + b.value, 0);
+
+            errorReqs = durationMetric.values.filter((v: any) => v.metricName === 'http_request_duration_seconds_count' && v.labels.code >= 400).reduce((a: any, b: any) => a + b.value, 0);
+
+            const sum = durationMetric.values.find((v: any) => v.metricName === 'http_request_duration_seconds_sum')?.value || 0;
+            avgLatency = totalReqs > 0 ? (sum / totalReqs) * 1000 : 45; // ms
+            p99 = avgLatency * 1.5; // Heuristic p99 based on avg for mock-real transition
+        }
+
+        return {
+            latency: p99 || 45,
+            errorRate: totalReqs > 0 ? (errorReqs / totalReqs) * 100 : 0,
+            rps: totalReqs / 60 // Assuming we are looking at a window, simplified
+        };
+    }
+
+    private releases: Record<string, any[]> = {
+        "github:backend": [
+            { version: "1.4.9", date: "Hoje", time: "18:10", status: "success", impact: "Nenhum" },
+            { version: "1.4.8", date: "Hoje", time: "14:20", status: "stable", impact: "Nenhum" }
+        ],
+        "github:frontend": [
+            { version: "2.1.0", date: "Ontem", time: "09:30", status: "success", impact: "UX Melhorada" }
+        ],
+        "vercel:frontend": [
+            { version: "2.1.0", date: "Ontem", time: "09:45", status: "success", impact: "Prod Deployed" }
+        ]
+    };
 
     public async getSreStats(): Promise<SreStats> {
         const loadFactor = await this.getSystemLoadFactor();
         const cpuUtil = os.loadavg()[0] * 10;
         const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
+        const real = await this.getRealMetrics();
 
         return {
             latency: {
-                p99: `${(250 * loadFactor + Math.random() * 50).toFixed(0)}`,
+                p99: `${real.latency.toFixed(0)}`,
                 unit: 'ms',
-                status: loadFactor > 0.8 ? 'warning' : 'healthy',
-                trend: loadFactor > 0.6 ? 'up' : 'down',
-                trendValue: `${(Math.random() * 5).toFixed(1)}%`,
-                history: generateHistory(250 * loadFactor, 24)
+                status: real.latency > 500 ? 'warning' : 'healthy',
+                trend: real.latency > 100 ? 'up' : 'down',
+                trendValue: `2.4%`,
+                history: generateHistory(real.latency, 24)
             },
             traffic: {
-                rps: `${(45 * loadFactor + Math.random() * 10).toFixed(1)}`,
+                rps: `${real.rps.toFixed(1)}`,
                 unit: 'req/s',
                 status: 'healthy',
-                trend: 'up',
-                trendValue: '12%',
-                history: generateHistory(45 * loadFactor, 24)
+                trend: 'neutral',
+                trendValue: '0%',
+                history: generateHistory(real.rps || 0.5, 24)
             },
             errors: {
-                rate: `${(0.05 * loadFactor + Math.random() * 0.02).toFixed(3)}`,
+                rate: `${real.errorRate.toFixed(3)}`,
                 unit: '%',
-                status: 'healthy',
-                trend: 'down',
-                trendValue: '0.4%',
-                history: generateHistory(0.05, 24, 0.5)
+                status: real.errorRate > 1 ? 'critical' : real.errorRate > 0.1 ? 'warning' : 'healthy',
+                trend: 'neutral',
+                trendValue: '0%',
+                history: generateHistory(real.errorRate, 24, 0.5)
             },
             saturation: {
                 cpu: `${cpuUtil.toFixed(1)}`,
@@ -157,29 +204,31 @@ export class SreStatsService {
                     id: '1',
                     severity: 'info',
                     service: 'Sistema de Monitoramento',
-                    message: 'Sistema operando dentro dos parâmetros de SLO.',
-                    duration: '1h',
+                    message: 'Coleta de métricas reais via prom-client ativa.',
+                    duration: '1m',
                     time: 'Agora'
                 }
             ],
             externalServices: this.externalServices,
-            releases: {
-                "github:backend": [
-                    { version: "1.4.9", date: "Hoje", time: "18:10", status: "success", impact: "Nenhum" },
-                    { version: "1.4.8", date: "Hoje", time: "14:20", status: "stable", impact: "Nenhum" },
-                    { version: "1.4.7", date: "Hoje", time: "11:05", status: "stable", impact: "Nenhum" }
-                ],
-                "github:frontend": [
-                    { version: "2.1.0", date: "Ontem", time: "09:30", status: "success", impact: "UX Melhorada" }
-                ],
-                "vercel:frontend": [
-                    { version: "2.1.0", date: "Ontem", time: "09:45", status: "success", impact: "Prod Deployed" }
-                ],
-                "github:site-im": [
-                    { version: "1.0.2", date: "2 dias atrás", time: "16:00", status: "stable", impact: "SEO Fix" }
-                ]
-            }
+            releases: this.releases
         };
+    }
+
+    public updateRelease(platform: string, repo: string, data: any) {
+        const key = `${platform}:${repo}`;
+        if (!this.releases[key]) this.releases[key] = [];
+
+        this.releases[key].unshift({
+            version: data.version || 'unknown',
+            date: 'Hoje',
+            time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            status: data.status || 'success',
+            impact: data.impact || 'Webhook Deploy'
+        });
+
+        // Keep last 10
+        if (this.releases[key].length > 10) this.releases[key].pop();
+        return true;
     }
 
     public updateExternalService(name: string, data: { cost?: number; status?: 'operational' | 'degraded' | 'outage' }) {
@@ -200,4 +249,8 @@ export async function loadSreStats() {
 
 export function updateExternalService(name: string, data: any) {
     return sreStatsService.updateExternalService(name, data);
+}
+
+export function updateRelease(platform: string, repo: string, data: any) {
+    return sreStatsService.updateRelease(platform, repo, data);
 }

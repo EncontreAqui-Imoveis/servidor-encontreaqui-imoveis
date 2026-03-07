@@ -14,6 +14,7 @@ import {
 import { requestSanitizer } from './middlewares/requestSanitizer';
 import { tempUploadCleanup } from './middlewares/tempUploadCleanup';
 import { patchConsoleRedaction } from './utils/logSanitizer';
+import { metricsMiddleware, getMetrics } from './middlewares/metrics';
 
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 300;
@@ -56,6 +57,10 @@ export function createHttpApp() {
 
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
+
+  // Initializing metrics collection
+  app.use(metricsMiddleware);
+
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -121,6 +126,15 @@ export function createHttpApp() {
       timestamp: new Date().toISOString(),
       charset: 'UTF-8',
     });
+  });
+
+  app.get('/metrics', async (req, res) => {
+    try {
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      res.end(await getMetrics());
+    } catch (err) {
+      res.status(500).end(err);
+    }
   });
 
   app.use(notFoundHandler);

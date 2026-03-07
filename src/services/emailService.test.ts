@@ -101,7 +101,7 @@ describe('emailService', () => {
     expect(payload.htmlContent).toContain('Código de segurança');
     expect(payload.htmlContent).toContain('194492');
     expect(payload.htmlContent).toContain(
-      'Agora é só digitá-lo na tela de confirmação do nosso app.',
+      'Agora é só digitá-lo na tela de confirmação do nosso app para concluir a verificação.',
     );
     expect(payload.htmlContent).not.toContain('Abrir tela de verificação');
     expect(payload.htmlContent).not.toContain('/verificacao');
@@ -110,8 +110,9 @@ describe('emailService', () => {
     expect(payload.textContent).toContain('Seu código');
     expect(payload.textContent).toContain('Se não foi você');
     expect(payload.textContent).toContain(
-      'Agora é só digitá-lo na tela de confirmação do nosso app.',
+      'Agora é só digitá-lo na tela de confirmação do nosso app para concluir a verificação.',
     );
+    expect(payload.textContent).toContain('Importante: nunca vamos pedir esse código');
     expect(createTransportMock).not.toHaveBeenCalled();
   });
 
@@ -260,7 +261,7 @@ describe('emailService', () => {
     );
     expect(payload.htmlContent).toContain('Redefina sua senha');
     expect(payload.htmlContent).toContain(
-      'Agora é só digitá-lo na tela de recuperação de senha do nosso app.',
+      'Agora é só digitá-lo na tela de recuperação do nosso app para criar uma nova senha.',
     );
     expect(payload.htmlContent).not.toContain('Abrir tela de recuperação');
     expect(payload.htmlContent).not.toContain('/recuperar-senha');

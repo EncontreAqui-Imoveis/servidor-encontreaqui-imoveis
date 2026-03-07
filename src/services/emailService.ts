@@ -493,16 +493,18 @@ export async function sendEmailCodeEmail(params: {
       : 'Redefina sua senha';
   const subtitle =
     params.purpose === 'verify_email'
-      ? `${greeting} Use o código abaixo para confirmar seu e-mail.`
-      : `${greeting} Use o código abaixo para definir uma nova senha com segurança.`;
+      ? `${greeting}. Use o código abaixo para confirmar seu e-mail.`
+      : `${greeting}. Use o código abaixo para redefinir sua senha com segurança.`;
   const preheader =
     params.purpose === 'verify_email'
       ? 'Código de 6 dígitos para confirmar seu e-mail.'
       : 'Código de 6 dígitos para redefinir sua senha.';
   const helperText =
     params.purpose === 'verify_email'
-      ? 'Agora é só digitá-lo na tela de confirmação do nosso app.'
-      : 'Agora é só digitá-lo na tela de recuperação de senha do nosso app.';
+      ? 'Agora é só digitá-lo na tela de confirmação do nosso app para concluir a verificação.'
+      : 'Agora é só digitá-lo na tela de recuperação do nosso app para criar uma nova senha.';
+  const warningText =
+    'Importante: nunca vamos pedir esse código por mensagem, telefone ou e-mail. Não compartilhe.';
 
   const text =
     `${greeting}.\n\n` +
@@ -510,7 +512,7 @@ export async function sendEmailCodeEmail(params: {
     `${params.code}\n\n` +
     `Esse código expira em ${expiresAtText}.\n\n` +
     `${helperText}\n\n` +
-    'Atenção: a gente nunca entra em contato para pedir esse código por mensagem, telefone ou e-mail.\n\n' +
+    `${warningText}\n\n` +
     'Se não foi você, ignore este e-mail.\n';
 
   const html = buildEmailHtmlDocument({
@@ -520,8 +522,7 @@ export async function sendEmailCodeEmail(params: {
     code: params.code,
     expiresAtText,
     helperText,
-    supportText:
-      'Atenção: a gente nunca entra em contato para pedir esse código por mensagem, telefone ou e-mail. Se não foi você, ignore este e-mail.',
+    supportText: `${warningText} Se não foi você, ignore este e-mail.`,
   });
 
   await deliverEmail({

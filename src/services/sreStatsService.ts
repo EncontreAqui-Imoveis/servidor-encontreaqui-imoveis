@@ -146,6 +146,7 @@ export async function loadSreStats(): Promise<SreStats> {
             { name: 'Railway', provider: 'API Engine', status: 'operational', latency: '82ms', cost: 180.00 },
             { name: 'Cloudflare R2', provider: 'Storage', status: 'operational', cost: 45.00 },
             { name: 'Cloudinary', provider: 'CDN', status: 'operational', cost: 89.90 },
+            { name: 'Brevo', provider: 'Email/Marketing', status: 'operational', cost: 50.00 },
             { name: 'Firebase', provider: 'Auth/Push', status: 'operational', cost: 0.00 }
         ],
         releases: [

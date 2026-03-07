@@ -34,46 +34,6 @@ function resolveLogoUrl() {
   ).trim();
 }
 
-function resolveSurfaceUrl(purpose: 'verify_email' | 'password_reset') {
-  const explicitUrl = purpose === 'verify_email'
-    ? process.env.EMAIL_VERIFICATION_SURFACE_URL
-    : process.env.PASSWORD_RESET_SURFACE_URL;
-  if (explicitUrl?.trim()) {
-    return explicitUrl.trim();
-  }
-
-  const handlerUrl = String(process.env.EMAIL_VERIFICATION_HANDLER_URL ?? '').trim();
-  if (!handlerUrl) return null;
-
-  try {
-    const base = new URL(handlerUrl);
-    base.pathname = purpose === 'verify_email' ? '/verificacao' : '/recuperar-senha';
-    base.search = '';
-    base.hash = '';
-    return base.toString();
-  } catch {
-    return null;
-  }
-}
-
-function renderBulletproofButton(params: { href: string; label: string }) {
-  const href = escapeHtml(params.href);
-  const label = escapeHtml(params.label);
-  return (
-    `<!--[if mso]>` +
-    `<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${href}" style="height:52px;v-text-anchor:middle;width:280px;" arcsize="18%" stroke="f" fillcolor="#F6C644">` +
-    `<w:anchorlock/>` +
-    `<center style="color:#1B1D1D;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">${label}</center>` +
-    `</v:roundrect>` +
-    `<![endif]-->` +
-    `<!--[if !mso]><!-- -->` +
-    `<a href="${href}" target="_blank" rel="noopener noreferrer" style="background-color:#F6C644;border:1px solid #E4B326;border-radius:14px;color:#1B1D1D;display:inline-block;font-family:Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:280px;-webkit-text-size-adjust:none;box-shadow:0 6px 18px rgba(19,35,43,0.12);">` +
-    `${label}` +
-    `</a>` +
-    `<!--<![endif]-->`
-  );
-}
-
 function renderLogoMarkup(params?: { footer?: boolean }) {
   const brandName = escapeHtml(resolveBrandName());
   const logoUrl = resolveLogoUrl();
@@ -118,8 +78,7 @@ function buildEmailHtmlDocument(params: {
   subtitle: string;
   code: string;
   expiresAtText: string;
-  ctaUrl?: string | null;
-  ctaLabel: string;
+  helperText: string;
   supportText: string;
 }) {
   const brandName = escapeHtml(resolveBrandName());
@@ -128,20 +87,9 @@ function buildEmailHtmlDocument(params: {
   const subtitle = escapeHtml(params.subtitle);
   const code = escapeHtml(params.code);
   const expiresAtText = escapeHtml(params.expiresAtText);
+  const helperText = escapeHtml(params.helperText);
   const supportText = escapeHtml(params.supportText);
-  const headerLogo = renderLogoMarkup();
   const footerLogo = renderLogoMarkup({ footer: true });
-  const cta =
-    params.ctaUrl && params.ctaUrl.trim().length > 0
-      ? renderBulletproofButton({
-          href: params.ctaUrl.trim(),
-          label: params.ctaLabel,
-        })
-      : '';
-  const fallbackLink =
-    params.ctaUrl && params.ctaUrl.trim().length > 0
-      ? `<p style="margin:0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748B;text-align:center;">Se o botão não funcionar, copie e cole este endereço no navegador:<br><a href="${escapeHtml(params.ctaUrl.trim())}" target="_blank" rel="noopener noreferrer" style="color:#0D5D50;text-decoration:underline;word-break:break-all;">${escapeHtml(params.ctaUrl.trim())}</a></p>`
-      : '';
 
   return (
     '<!DOCTYPE html>' +
@@ -151,32 +99,24 @@ function buildEmailHtmlDocument(params: {
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
     `<title>${title}</title>` +
     '</head>' +
-    '<body style="margin:0;padding:0;background-color:#FFFFFF;">' +
+    '<body style="margin:0;padding:0;background-color:#F4F4F5;">' +
     `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${preheader}</div>` +
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background-color:#FFFFFF;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background-color:#F4F4F5;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
     '<tr>' +
-    '<td align="center" style="padding:0;background-color:#0d5051;">' +
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:640px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
-    '<tr>' +
-    '<td align="center" style="padding:28px 24px 22px;">' +
-    headerLogo +
-    '</td>' +
-    '</tr>' +
-    '<tr>' +
-    '<td align="center" style="padding:0 16px 40px;">' +
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:560px;border-collapse:separate;background-color:#FFFFFF;border:1px solid #0d5051;border-radius:28px;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<td align="center" style="padding:36px 12px;background-color:#F4F4F5;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:600px;border-collapse:separate;background-color:#FFFFFF;border:1px solid #D6D3D1;border-radius:24px;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
     '<tr>' +
     '<td align="center" style="padding:36px 32px 12px;">' +
-    '<div style="display:inline-block;background-color:#ffca45;color:#0d5051;font-family:Arial,sans-serif;font-size:12px;line-height:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;padding:10px 16px;border-radius:999px;">Código de segurança</div>' +
+    '<div style="display:inline-block;background-color:#E7E5E4;color:#44403C;font-family:Arial,sans-serif;font-size:12px;line-height:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;padding:10px 16px;border-radius:999px;">Código de segurança</div>' +
     '</td>' +
     '</tr>' +
     '<tr>' +
-    '<td align="center" style="padding:0 32px 10px;font-family:Arial,sans-serif;font-size:34px;line-height:40px;font-weight:800;color:#0d5051;">' +
+    '<td align="center" style="padding:0 32px 10px;font-family:Arial,sans-serif;font-size:34px;line-height:40px;font-weight:800;color:#1F2937;">' +
     title +
     '</td>' +
     '</tr>' +
     '<tr>' +
-    '<td align="center" style="padding:0 32px 0;font-family:Arial,sans-serif;font-size:18px;line-height:28px;color:#0d5051;">' +
+    '<td align="center" style="padding:0 32px 0;font-family:Arial,sans-serif;font-size:18px;line-height:28px;color:#334155;">' +
     subtitle +
     '</td>' +
     '</tr>' +
@@ -184,7 +124,7 @@ function buildEmailHtmlDocument(params: {
     '<td align="center" style="padding:28px 32px 12px;">' +
     '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">' +
     '<tr>' +
-    '<td align="center" style="background-color:#ffca45;border:1px solid #ffca45;border-radius:18px;padding:18px 28px;font-family:Arial,sans-serif;font-size:34px;line-height:38px;font-weight:800;letter-spacing:10px;color:#0d5051;">' +
+    '<td align="center" style="background-color:#F8FAFC;border:1px dashed #94A3B8;border-radius:16px;padding:18px 28px;font-family:Arial,sans-serif;font-size:34px;line-height:38px;font-weight:800;letter-spacing:10px;color:#0F172A;">' +
     code +
     '</td>' +
     '</tr>' +
@@ -192,41 +132,33 @@ function buildEmailHtmlDocument(params: {
     '</td>' +
     '</tr>' +
     '<tr>' +
-    '<td align="center" style="padding:4px 32px 0;font-family:Arial,sans-serif;font-size:15px;line-height:24px;color:#0d5051;">' +
+    '<td align="center" style="padding:4px 32px 0;font-family:Arial,sans-serif;font-size:15px;line-height:24px;color:#475569;">' +
     `Esse código expira em <strong>${expiresAtText}</strong>.` +
     '</td>' +
     '</tr>' +
     '<tr>' +
-    '<td align="center" style="padding:24px 32px 0;">' +
-    cta +
+    '<td align="center" style="padding:20px 32px 0;font-family:Arial,sans-serif;font-size:15px;line-height:24px;color:#334155;">' +
+    helperText +
     '</td>' +
     '</tr>' +
     '<tr>' +
-    '<td align="center" style="padding:16px 32px 0;">' +
-    fallbackLink +
-    '</td>' +
-    '</tr>' +
-    '<tr>' +
-    '<td align="center" style="padding:24px 32px 36px;font-family:Arial,sans-serif;font-size:13px;line-height:21px;color:#0d5051;">' +
+    '<td align="center" style="padding:16px 32px 36px;font-family:Arial,sans-serif;font-size:13px;line-height:21px;color:#64748B;">' +
     supportText +
     '</td>' +
     '</tr>' +
     '</table>' +
     '</td>' +
     '</tr>' +
-    '</table>' +
-    '</td>' +
-    '</tr>' +
     '<tr>' +
-    '<td align="center" style="padding:28px 16px 40px;background-color:#FFFFFF;">' +
-    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:640px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<td align="center" style="padding:24px 16px 40px;background-color:#F4F4F5;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:600px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
     '<tr>' +
     '<td align="center" style="padding:0 0 10px;">' +
     footerLogo +
     '</td>' +
     '</tr>' +
     '<tr>' +
-    '<td align="center" style="font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#0d5051;">' +
+    '<td align="center" style="font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748B;">' +
     `© ${new Date().getFullYear()} ${brandName}. Todos os direitos reservados.` +
     '</td>' +
     '</tr>' +
@@ -567,19 +499,19 @@ export async function sendEmailCodeEmail(params: {
     params.purpose === 'verify_email'
       ? 'Código de 6 dígitos para confirmar seu e-mail.'
       : 'Código de 6 dígitos para redefinir sua senha.';
-  const ctaUrl = resolveSurfaceUrl(params.purpose);
-  const ctaLabel =
+  const helperText =
     params.purpose === 'verify_email'
-      ? 'Abrir tela de verificação'
-      : 'Abrir tela de recuperação';
+      ? 'Agora é só digitá-lo na tela de confirmação do nosso app.'
+      : 'Agora é só digitá-lo na tela de recuperação de senha do nosso app.';
 
   const text =
     `${greeting}.\n\n` +
     `Seu código ${params.purpose === 'verify_email' ? 'de verificação' : 'de recuperação'} ${purposeText}.\n\n` +
     `${params.code}\n\n` +
     `Esse código expira em ${expiresAtText}.\n\n` +
-    'Se não foi você, ignore este e-mail.\n' +
-    (ctaUrl ? `\nAbra a tela no site: ${ctaUrl}\n` : '');
+    `${helperText}\n\n` +
+    'Atenção: a gente nunca entra em contato para pedir esse código por mensagem, telefone ou e-mail.\n\n' +
+    'Se não foi você, ignore este e-mail.\n';
 
   const html = buildEmailHtmlDocument({
     preheader,
@@ -587,9 +519,9 @@ export async function sendEmailCodeEmail(params: {
     subtitle,
     code: params.code,
     expiresAtText,
-    ctaUrl,
-    ctaLabel,
-    supportText: 'Se não foi você, ignore este e-mail.',
+    helperText,
+    supportText:
+      'Atenção: a gente nunca entra em contato para pedir esse código por mensagem, telefone ou e-mail. Se não foi você, ignore este e-mail.',
   });
 
   await deliverEmail({

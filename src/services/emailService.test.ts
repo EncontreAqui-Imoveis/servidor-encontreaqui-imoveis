@@ -60,9 +60,6 @@ describe('emailService', () => {
     process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
     process.env.EMAIL_FROM_NAME = 'EncontreAqui Imoveis';
     process.env.EMAIL_BRAND_NAME = 'EncontreAqui Imóveis';
-    process.env.EMAIL_VERIFICATION_HANDLER_URL =
-      'https://site.exemplo.com/auth/verificar-email';
-
     fetchMock.mockResolvedValue({
       ok: true,
       text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-123' })),
@@ -100,14 +97,20 @@ describe('emailService', () => {
     expect(payload.htmlContent).toContain('charset=UTF-8');
     expect(payload.htmlContent).toContain('role="presentation"');
     expect(payload.htmlContent).toContain('EncontreAqui Imóveis');
-    expect(payload.htmlContent).toContain('background-color:#0d5051');
+    expect(payload.htmlContent).toContain('background-color:#F4F4F5');
     expect(payload.htmlContent).toContain('Código de segurança');
     expect(payload.htmlContent).toContain('194492');
-    expect(payload.htmlContent).toContain('Abrir tela de verificação');
-    expect(payload.htmlContent).toContain('/verificacao');
+    expect(payload.htmlContent).toContain(
+      'Agora é só digitá-lo na tela de confirmação do nosso app.',
+    );
+    expect(payload.htmlContent).not.toContain('Abrir tela de verificação');
+    expect(payload.htmlContent).not.toContain('/verificacao');
     expect(payload.htmlContent).toContain('©');
     expect(payload.textContent).toContain('Seu código');
     expect(payload.textContent).toContain('Se não foi você');
+    expect(payload.textContent).toContain(
+      'Agora é só digitá-lo na tela de confirmação do nosso app.',
+    );
     expect(createTransportMock).not.toHaveBeenCalled();
   });
 
@@ -117,9 +120,6 @@ describe('emailService', () => {
     process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
     process.env.EMAIL_BRAND_NAME = 'EncontreAqui Imóveis';
     process.env.EMAIL_LOGO_URL_2X = 'https://res.cloudinary.com/demo/image/upload/v1/logo.png';
-    process.env.EMAIL_VERIFICATION_HANDLER_URL =
-      'https://site.exemplo.com/auth/verificar-email';
-
     fetchMock.mockResolvedValue({
       ok: true,
       text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-124' })),
@@ -135,6 +135,11 @@ describe('emailService', () => {
 
     const [, options] = fetchMock.mock.calls[0];
     const payload = JSON.parse(String(options.body));
+    expect(
+      (payload.htmlContent.match(
+        /https:\/\/res\.cloudinary\.com\/demo\/image\/upload\/v1\/logo\.png/g,
+      ) || []).length,
+    ).toBe(1);
     expect(payload.htmlContent).toContain(
       'https://res.cloudinary.com/demo/image/upload/v1/logo.png',
     );
@@ -234,8 +239,6 @@ describe('emailService', () => {
     process.env.EMAIL_PROVIDER = 'brevo';
     process.env.BREVO_API_KEY = 'brevo-key';
     process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
-    process.env.EMAIL_VERIFICATION_HANDLER_URL =
-      'https://site.exemplo.com/auth/verificar-email';
     fetchMock.mockResolvedValue({
       ok: true,
       text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-456' })),
@@ -255,8 +258,11 @@ describe('emailService', () => {
       'Seu código para redefinir a senha do app EncontreAqui Imóveis',
     );
     expect(payload.htmlContent).toContain('Redefina sua senha');
-    expect(payload.htmlContent).toContain('Abrir tela de recuperação');
-    expect(payload.htmlContent).toContain('/recuperar-senha');
+    expect(payload.htmlContent).toContain(
+      'Agora é só digitá-lo na tela de recuperação de senha do nosso app.',
+    );
+    expect(payload.htmlContent).not.toContain('Abrir tela de recuperação');
+    expect(payload.htmlContent).not.toContain('/recuperar-senha');
   });
 
   it('surfaces resend provider errors with status code context', async () => {

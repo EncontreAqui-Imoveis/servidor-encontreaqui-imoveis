@@ -17,7 +17,7 @@ class SreController {
         const { cost, status } = req.body;
 
         try {
-            const success = updateExternalService(name, { cost, status });
+            const success = await updateExternalService(name, { cost, status });
             if (success) {
                 res.json({ message: 'Serviço atualizado com sucesso' });
             } else {

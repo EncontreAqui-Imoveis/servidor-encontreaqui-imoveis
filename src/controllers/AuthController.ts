@@ -4,13 +4,15 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
 import { authDb } from '../services/authPersistenceService';
 import {
-  checkEmailVerificationStatus,
-  deleteEmailVerificationRequest,
-  issueEmailVerificationRequest,
-} from '../services/emailVerificationService';
+  confirmPasswordReset as confirmPasswordResetChallenge,
+  deleteEmailCodeChallenge,
+  getEmailVerificationStatus,
+  issueEmailCodeChallenge,
+  verifyEmailCode,
+  verifyPasswordResetCode as verifyPasswordResetChallengeCode,
+} from '../services/emailCodeChallengeService';
 import {
-  buildEmailVerificationHandlerUrl,
-  sendEmailVerificationEmail,
+  sendEmailCodeEmail,
 } from '../services/emailService';
 import {
   buildUserPayload,
@@ -28,6 +30,14 @@ import { hasValidCreci, normalizeCreci } from '../utils/creci';
 class AuthController {
   private normalizePhoneOtpInput(value: unknown): string {
     return String(value ?? '').replace(/\D/g, '');
+  }
+
+  private normalizeEmailCodeInput(value: unknown): string {
+    return String(value ?? '').replace(/\D/g, '');
+  }
+
+  private isPasswordValid(password: string): boolean {
+    return password.trim().length >= 6;
   }
 
   private buildOtpIssueResponse(issue: {
@@ -137,15 +147,14 @@ class AuthController {
   async requestPasswordReset(req: Request, res: Response) {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     const genericMessage =
-      'Se o email informado existir, as instrucoes de recuperacao serao enviadas.';
+      'Se o email informado existir, enviaremos um codigo para redefinir sua senha.';
     if (!email) {
       return res.status(400).json({ error: 'Email e obrigatorio.' });
     }
 
     try {
-      // 1. Check if user exists in SQL
       const [rows] = await authDb.query<RowDataPacket[]>(
-        'SELECT id, name, firebase_uid FROM users WHERE email = ? LIMIT 1',
+        'SELECT id, name, firebase_uid, password_hash FROM users WHERE email = ? LIMIT 1',
         [email],
       );
 
@@ -154,41 +163,61 @@ class AuthController {
       }
 
       const user = rows[0];
-
-      // 2. If user is Legacy (no firebase_uid), migrate them NOW.
-      if (!user.firebase_uid) {
-        try {
-          // Check if user already exists in Firebase (edge case: registered in Firebase but not linked in SQL)
-          let firebaseUser;
-          try {
-            firebaseUser = await admin.auth().getUserByEmail(email);
-          } catch (e: any) {
-            if (e.code === 'auth/user-not-found') {
-              // Create user in Firebase
-              firebaseUser = await admin.auth().createUser({
-                email: email,
-                emailVerified: true, // We trust our SQL verification or just assume true for legacy
-                displayName: user.name,
-              });
-            } else {
-              throw e;
-            }
-          }
-
-          // Update SQL with new UID
-          await authDb.query(
-            'UPDATE users SET firebase_uid = ? WHERE id = ?',
-            [firebaseUser.uid, user.id],
-          );
-          console.log(`[Migration] User ${user.id} migrated to Firebase UID ${firebaseUser.uid}`);
-        } catch (migrationError) {
-          console.error('Erro na migracao para Firebase:', migrationError);
-          return res.status(500).json({ error: 'Erro ao preparar conta para recuperacao.' });
-        }
+      const hasFirebaseUid = user.firebase_uid != null;
+      const hasPassword = !!user.password_hash;
+      if (hasFirebaseUid && !hasPassword) {
+        return res.status(200).json({ message: genericMessage });
       }
 
-      // 3. Respond OK so Frontend can trigger the Firebase SDK email
-      return res.status(200).json({ message: genericMessage });
+      const issue = await issueEmailCodeChallenge({
+        email,
+        purpose: 'password_reset',
+        userId: Number(user.id) || null,
+      });
+      if (!issue.allowed) {
+        return res.status(200).json({
+          message: genericMessage,
+          status: 'ok',
+          delivery: 'sent',
+          resend_type: 'resend',
+          expires_at: new Date(
+            Date.now() + 15 * 60 * 1000
+          ).toISOString(),
+        });
+      }
+
+      try {
+        await sendEmailCodeEmail({
+          to: email,
+          name: String(user.name ?? '').trim() || null,
+          code: issue.code,
+          purpose: 'password_reset',
+          expiresAt: issue.expiresAt,
+          idempotencyKey: `password-reset-${issue.requestId}`,
+        });
+      } catch (deliveryError) {
+        await deleteEmailCodeChallenge(issue.requestId);
+        console.error('Falha ao enviar codigo de redefinicao de senha:', deliveryError);
+        return this.errorWithCode(
+          req,
+          res,
+          503,
+          'DEPENDENCY_UNAVAILABLE',
+          'Servico temporariamente indisponivel. Tente novamente em instantes.',
+          true
+        );
+      }
+
+      return res.status(200).json({
+        status: 'ok',
+        delivery: 'sent',
+        resend_type: issue.resendType,
+        expires_at: issue.expiresAt.toISOString(),
+        cooldown_sec: issue.cooldownSec,
+        daily_remaining: issue.dailyRemaining,
+        message: genericMessage,
+        correlation_id: this.correlationId(req),
+      });
     } catch (error) {
       console.error('Erro ao solicitar reset de senha:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
@@ -197,9 +226,6 @@ class AuthController {
 
   async sendEmailVerification(req: Request, res: Response) {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
-    const handlerUrl = String(
-      process.env.EMAIL_VERIFICATION_HANDLER_URL ?? ''
-    ).trim();
     if (!email) {
       return this.errorWithCode(
         req,
@@ -210,28 +236,38 @@ class AuthController {
         false
       );
     }
-    if (!handlerUrl) {
-      return this.errorWithCode(
-        req,
-        res,
-        503,
-        'DEPENDENCY_UNAVAILABLE',
-        'Servico temporariamente indisponivel. Tente novamente em instantes.',
-        true
-      );
-    }
-
     try {
       const [userRows] = await authDb.query<RowDataPacket[]>(
-        'SELECT id, name FROM users WHERE email = ? LIMIT 1',
+        'SELECT id, name, email_verified_at FROM users WHERE email = ? LIMIT 1',
         [email]
       );
       const userId =
         userRows.length > 0 ? Number(userRows[0].id) || null : null;
       const userName =
         userRows.length > 0 ? String(userRows[0].name ?? '').trim() || null : null;
+      const emailVerifiedAt = userRows.length > 0
+        ? userRows[0].email_verified_at ?? null
+        : null;
 
-      const issue = await issueEmailVerificationRequest({ email, userId });
+      if (emailVerifiedAt != null) {
+        return res.status(200).json({
+          status: 'ok',
+          delivery: 'already_verified',
+          resend_type: 'initial',
+          expires_at: null,
+          cooldown_sec: 0,
+          daily_remaining: 0,
+          verified: true,
+          verified_at: new Date(emailVerifiedAt).toISOString(),
+          correlation_id: this.correlationId(req),
+        });
+      }
+
+      const issue = await issueEmailCodeChallenge({
+        email,
+        purpose: 'verify_email',
+        userId,
+      });
       if (!issue.allowed) {
         return this.errorWithCode(
           req,
@@ -248,28 +284,16 @@ class AuthController {
       }
 
       try {
-        const firebaseLink = await withTimeout(
-          admin.auth().generateEmailVerificationLink(email),
-          8000,
-          'firebase generateEmailVerificationLink'
-        );
-        const continueUrl = new URL('/auth/login', handlerUrl).toString();
-        const actionUrl = buildEmailVerificationHandlerUrl({
-          handlerUrl,
-          firebaseActionLink: firebaseLink,
-          email,
-          continueUrl,
-        });
-
-        await sendEmailVerificationEmail({
+        await sendEmailCodeEmail({
           to: email,
           name: userName,
-          actionUrl,
+          code: issue.code,
+          purpose: 'verify_email',
           expiresAt: issue.expiresAt,
           idempotencyKey: `email-verification-${issue.requestId}`,
         });
       } catch (deliveryError) {
-        await deleteEmailVerificationRequest(issue.requestId);
+        await deleteEmailCodeChallenge(issue.requestId);
         console.error('Falha ao montar ou enviar email de verificacao:', deliveryError);
         return this.errorWithCode(
           req,
@@ -305,7 +329,6 @@ class AuthController {
 
   async checkEmailVerification(req: Request, res: Response) {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
-    const idToken = String(req.body?.idToken ?? '').trim();
     if (!email) {
       return this.errorWithCode(
         req,
@@ -318,77 +341,7 @@ class AuthController {
     }
 
     try {
-      let firebaseVerified = false;
-      if (idToken) {
-        try {
-          const decoded = await withTimeout(
-            admin.auth().verifyIdToken(idToken),
-            8000,
-            'firebase verifyIdToken email verification check'
-          );
-          const tokenEmail = String(decoded.email ?? '').trim().toLowerCase();
-          if (!tokenEmail) {
-            return this.errorWithCode(
-              req,
-              res,
-              400,
-              'EMAIL_TOKEN_MISSING_EMAIL',
-              'Token de email invalido.',
-              false
-            );
-          }
-
-          if (tokenEmail !== email) {
-            return this.errorWithCode(
-              req,
-              res,
-              403,
-              'EMAIL_TOKEN_MISMATCH',
-              'Token de email nao corresponde ao usuario informado.',
-              false
-            );
-          }
-
-          firebaseVerified = decoded.email_verified === true;
-        } catch (providerError: any) {
-          if (
-            providerError?.code === 'auth/id-token-expired' ||
-            providerError?.code === 'auth/argument-error'
-          ) {
-            return this.errorWithCode(
-              req,
-              res,
-              401,
-              'EMAIL_TOKEN_INVALID',
-              'Sessao de verificacao expirada. Reenvie o email e tente novamente.',
-              false
-            );
-          }
-          console.error('Falha ao verificar status no provedor de email:', providerError);
-          return this.errorWithCode(
-            req,
-            res,
-            503,
-            'DEPENDENCY_UNAVAILABLE',
-            'Servico temporariamente indisponivel. Tente novamente em instantes.',
-            true
-          );
-        }
-      } else {
-        return this.errorWithCode(
-          req,
-          res,
-          400,
-          'EMAIL_TOKEN_REQUIRED',
-          'Token de verificacao e obrigatorio.',
-          false
-        );
-      }
-
-      const status = await checkEmailVerificationStatus({
-        email,
-        isVerified: firebaseVerified,
-      });
+      const status = await getEmailVerificationStatus({ email });
 
       if (status.status === 'verified') {
         return res.status(200).json({
@@ -433,6 +386,223 @@ class AuthController {
         'INTERNAL_SERVER_ERROR',
         'Erro interno do servidor.',
         false
+        );
+    }
+  }
+
+  async verifyEmailVerificationCode(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const code = this.normalizeEmailCodeInput(req.body?.code);
+
+    if (!email || code.length !== 6) {
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'EMAIL_CODE_REQUIRED',
+        'Email e codigo de 6 digitos sao obrigatorios.',
+        false
+      );
+    }
+
+    try {
+      const result = await verifyEmailCode({ email, code });
+      if (result.status === 'verified') {
+        return res.status(200).json({
+          status: 'ok',
+          verified: true,
+          verified_at: result.verifiedAt.toISOString(),
+          correlation_id: this.correlationId(req),
+        });
+      }
+
+      if (result.status === 'expired') {
+        return this.errorWithCode(
+          req,
+          res,
+          410,
+          'EMAIL_CODE_EXPIRED',
+          'Esse codigo expirou. Solicite um novo.',
+          true,
+          {
+            expires_at: result.expiresAt?.toISOString() ?? null,
+          }
+        );
+      }
+
+      if (result.status === 'locked') {
+        return this.errorWithCode(
+          req,
+          res,
+          423,
+          'EMAIL_CODE_LOCKED',
+          'Voce atingiu o limite de tentativas. Solicite um novo codigo.',
+          true
+        );
+      }
+
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'EMAIL_CODE_INVALID',
+        'Codigo invalido.',
+        false,
+        result.status === 'invalid'
+          ? { remaining_attempts: result.remainingAttempts }
+          : undefined
+      );
+    } catch (error) {
+      console.error('Erro ao validar codigo de verificacao de email:', error);
+      return this.errorWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Erro interno do servidor.',
+        false
+      );
+    }
+  }
+
+  async verifyPasswordResetCode(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const code = this.normalizeEmailCodeInput(req.body?.code);
+
+    if (!email || code.length !== 6) {
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'PASSWORD_RESET_CODE_REQUIRED',
+        'Email e codigo de 6 digitos sao obrigatorios.',
+        false
+      );
+    }
+
+    try {
+      const result = await verifyPasswordResetChallengeCode({ email, code });
+      if (result.status === 'verified') {
+        return res.status(200).json({
+          status: 'ok',
+          reset_session_token: result.resetSessionToken,
+          expires_at: result.expiresAt.toISOString(),
+          correlation_id: this.correlationId(req),
+        });
+      }
+
+      if (result.status === 'expired') {
+        return this.errorWithCode(
+          req,
+          res,
+          410,
+          'PASSWORD_RESET_CODE_EXPIRED',
+          'Esse codigo expirou. Solicite um novo.',
+          true,
+          {
+            expires_at: result.expiresAt?.toISOString() ?? null,
+          }
+        );
+      }
+
+      if (result.status === 'locked') {
+        return this.errorWithCode(
+          req,
+          res,
+          423,
+          'PASSWORD_RESET_CODE_LOCKED',
+          'Voce atingiu o limite de tentativas. Solicite um novo codigo.',
+          true
+        );
+      }
+
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'PASSWORD_RESET_CODE_INVALID',
+        'Codigo invalido.',
+        false,
+        result.status === 'invalid'
+          ? { remaining_attempts: result.remainingAttempts }
+          : undefined
+      );
+    } catch (error) {
+      console.error('Erro ao validar codigo de redefinicao de senha:', error);
+      return this.errorWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Erro interno do servidor.',
+        false
+      );
+    }
+  }
+
+  async confirmPasswordReset(req: Request, res: Response) {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const resetSessionToken = String(req.body?.reset_session_token ?? '').trim();
+    const newPassword = String(req.body?.new_password ?? '');
+
+    if (!email || !resetSessionToken || !this.isPasswordValid(newPassword)) {
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'PASSWORD_RESET_CONFIRM_INVALID',
+        'Email, sessao de redefinicao e nova senha valida sao obrigatorios.',
+        false
+      );
+    }
+
+    try {
+      const passwordHash = await bcrypt.hash(newPassword, 8);
+      const result = await confirmPasswordResetChallenge({
+        email,
+        resetSessionToken,
+        passwordHash,
+      });
+
+      if (result.status === 'consumed') {
+        return res.status(200).json({
+          status: 'ok',
+          reset_at: result.consumedAt.toISOString(),
+          correlation_id: this.correlationId(req),
+        });
+      }
+
+      if (result.status === 'expired') {
+        return this.errorWithCode(
+          req,
+          res,
+          410,
+          'PASSWORD_RESET_SESSION_EXPIRED',
+          'Sua sessao de redefinicao expirou. Solicite um novo codigo.',
+          true,
+          {
+            expires_at: result.expiresAt?.toISOString() ?? null,
+          }
+        );
+      }
+
+      return this.errorWithCode(
+        req,
+        res,
+        400,
+        'PASSWORD_RESET_SESSION_INVALID',
+        'Sessao de redefinicao invalida.',
+        false
+      );
+    } catch (error) {
+      console.error('Erro ao confirmar redefinicao de senha:', error);
+      return this.errorWithCode(
+        req,
+        res,
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'Erro interno do servidor.',
+        false
       );
     }
   }
@@ -453,6 +623,7 @@ class AuthController {
             u.id,
             u.name,
             u.email,
+            u.email_verified_at,
             u.phone,
             u.street,
             u.number,
@@ -606,13 +777,14 @@ class AuthController {
 
       const [userResult] = await authDb.query<ResultSetHeader>(
         `
-          INSERT INTO users (firebase_uid, name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (firebase_uid, name, email, email_verified_at, password_hash, phone, street, number, complement, bairro, city, state, cep)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           firebaseUid,
           name,
           email,
+          isGoogleRegistration ? new Date() : null,
           passwordHash,
           phone ?? null,
           addressResult.value.street,
@@ -640,6 +812,7 @@ class AuthController {
           id: userId,
           name,
           email,
+          email_verified_at: isGoogleRegistration ? new Date().toISOString() : null,
           phone,
           street: addressResult.value.street,
           number: addressResult.value.number,
@@ -690,7 +863,7 @@ class AuthController {
     try {
       const [rows] = await authDb.query<RowDataPacket[]>(
         `
-          SELECT u.id, u.name, u.email, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
+          SELECT u.id, u.name, u.email, u.email_verified_at, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  u.token_version,
                  CASE
                    WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
@@ -771,7 +944,7 @@ class AuthController {
       }
 
       const [existingRows] = await authDb.query<RowDataPacket[]>(
-        `SELECT u.id, u.name, u.email, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
+        `SELECT u.id, u.name, u.email, u.email_verified_at, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
                 b.id AS broker_id, b.status AS broker_status, b.creci AS creci,
                 bd.status AS broker_documents_status
            FROM users u
@@ -800,6 +973,13 @@ class AuthController {
       const row = existingRows[0];
       if (!row.firebase_uid) {
         await authDb.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
+      }
+      if (decoded.email_verified === true && row.email_verified_at == null) {
+        await authDb.query(
+          'UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?',
+          [new Date(), row.id],
+        );
+        row.email_verified_at = new Date().toISOString();
       }
 
       const brokerStatus = String(row.broker_status ?? '').trim();

@@ -309,6 +309,63 @@ export async function sendPasswordResetEmail(params: {
   });
 }
 
+export async function sendEmailCodeEmail(params: {
+  to: string;
+  name?: string | null;
+  code: string;
+  purpose: 'verify_email' | 'password_reset';
+  expiresAt: Date;
+  idempotencyKey?: string | null;
+}) {
+  const greeting = params.name ? `Ola, ${params.name}` : 'Ola';
+  const expiresAtText = params.expiresAt.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+  });
+  const purposeText =
+    params.purpose === 'verify_email'
+      ? 'para confirmar seu email'
+      : 'para redefinir sua senha';
+  const subject =
+    params.purpose === 'verify_email'
+      ? 'Seu codigo de verificacao do app EncontreAqui Imoveis'
+      : 'Seu codigo para redefinir a senha do app EncontreAqui Imoveis';
+
+  const text =
+    `${greeting}.\n\n` +
+    `Use o codigo abaixo ${purposeText}.\n\n` +
+    `${params.code}\n\n` +
+    `Esse codigo expira em ${expiresAtText}.\n\n` +
+    'Se nao foi voce, ignore este email.\n';
+
+  const html =
+    `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#f8fafc;color:#0f172a">` +
+    `<div style="background:#ffffff;border-radius:20px;padding:32px;border:1px solid #e2e8f0">` +
+    `<div style="text-align:center;margin-bottom:20px">` +
+    `<div style="width:72px;height:72px;margin:0 auto 16px;border-radius:999px;background:#fff3d6;display:flex;align-items:center;justify-content:center;font-size:28px">✉️</div>` +
+    `<h1 style="margin:0 0 8px;font-size:26px;line-height:1.2">` +
+    `${params.purpose === 'verify_email' ? 'Confirmar email' : 'Redefinir senha'}` +
+    `</h1>` +
+    `<p style="margin:0;color:#475569;font-size:15px">${greeting}. Use o codigo abaixo ${purposeText}.</p>` +
+    `</div>` +
+    `<div style="margin:28px 0;text-align:center">` +
+    `<div style="display:inline-block;padding:16px 24px;border-radius:16px;background:#0d5d50;color:#ffffff;font-size:32px;font-weight:800;letter-spacing:10px">` +
+    `${params.code}` +
+    `</div>` +
+    `</div>` +
+    `<p style="margin:0 0 16px;color:#475569;font-size:14px;text-align:center">Esse codigo expira em <strong>${expiresAtText}</strong>.</p>` +
+    `<p style="margin:0;color:#64748b;font-size:13px;text-align:center">Se nao foi voce, ignore este email.</p>` +
+    `</div>` +
+    `</div>`;
+
+  await deliverEmail({
+    to: params.to,
+    subject,
+    text,
+    html,
+    idempotencyKey: params.idempotencyKey ?? null,
+  });
+}
+
 export function buildEmailVerificationHandlerUrl(params: {
   handlerUrl: string;
   firebaseActionLink: string;

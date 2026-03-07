@@ -261,7 +261,7 @@ class UserController {
 
     try {
       const userRows = await runUserQuery<RowDataPacket[]>(
-        'SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
+          'SELECT id, name, email, email_verified_at, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
         [userId]
       );
 
@@ -293,11 +293,13 @@ class UserController {
             role: 'broker',
             status: brokerStatus,
             requiresDocuments,
-            user: {
-              id: user.id,
-              name: user.name,
-              email: user.email,
-              phone: user.phone,
+              user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                email_verified: user.email_verified_at != null,
+                email_verified_at: user.email_verified_at ?? null,
+                phone: user.phone,
               street: user.street,
               number: user.number,
               complement: user.complement,
@@ -313,11 +315,13 @@ class UserController {
       return res.json({
         role: 'client',
         requiresDocuments: false,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            email_verified: user.email_verified_at != null,
+            email_verified_at: user.email_verified_at ?? null,
+            phone: user.phone,
           street: user.street,
           number: user.number,
           complement: user.complement,

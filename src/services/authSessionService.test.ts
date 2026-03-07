@@ -14,6 +14,7 @@ describe('authSessionService', () => {
         id: 10,
         name: 'Broker Test',
         email: 'broker@test.com',
+        email_verified_at: '2026-03-06T00:00:00.000Z',
         broker_id: 22,
         broker_status: 'approved',
         creci: '1234-A',
@@ -22,6 +23,8 @@ describe('authSessionService', () => {
     );
 
     expect(payload.role).toBe('broker');
+    expect(payload.email_verified).toBe(true);
+    expect(payload.email_verified_at).toBe('2026-03-06T00:00:00.000Z');
     expect(payload.broker).toEqual({
       id: 22,
       status: 'approved',

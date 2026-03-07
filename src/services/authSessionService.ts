@@ -24,10 +24,13 @@ function buildBrokerPayload(row: any) {
 
 export function buildUserPayload(row: any, profileType: ProfileType) {
   const broker = buildBrokerPayload(row);
+  const emailVerifiedAt = row.email_verified_at ?? row.emailVerifiedAt ?? null;
   return {
     id: row.id,
     name: row.name,
     email: row.email,
+    email_verified: emailVerifiedAt != null,
+    email_verified_at: emailVerifiedAt,
     phone: row.phone ?? null,
     street: row.street ?? null,
     number: row.number ?? null,

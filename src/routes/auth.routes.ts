@@ -42,11 +42,20 @@ authRoutes.post('/email-verification/send', authSensitiveLimiter, (req, res) =>
 authRoutes.post('/email-verification/check', authSensitiveLimiter, (req, res) =>
   authController.checkEmailVerification(req, res)
 );
+authRoutes.post('/email-verification/verify-code', authSensitiveLimiter, (req, res) =>
+  authController.verifyEmailVerificationCode(req, res)
+);
 authRoutes.get('/check-email', authSensitiveLimiter, (req, res) =>
   authController.checkEmail(req, res)
 );
 authRoutes.post('/password-reset/request', authSensitiveLimiter, (req, res) =>
   authController.requestPasswordReset(req, res)
+);
+authRoutes.post('/password-reset/verify-code', authSensitiveLimiter, (req, res) =>
+  authController.verifyPasswordResetCode(req, res)
+);
+authRoutes.post('/password-reset/confirm', authSensitiveLimiter, (req, res) =>
+  authController.confirmPasswordReset(req, res)
 );
 authRoutes.post('/logout', authMiddleware, (req, res) =>
   authController.logout(req as any, res)

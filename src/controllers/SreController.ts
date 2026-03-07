@@ -35,7 +35,7 @@ class SreController {
 
         console.log(`Github Webhook: Deploy detectado no repo ${repo} (SHA: ${version})`);
 
-        updateRelease('github', repo, {
+        await updateRelease('github', repo, {
             version,
             status: 'success',
             impact: payload.head_commit?.message || 'Push to main'
@@ -51,7 +51,7 @@ class SreController {
 
         console.log(`Vercel Webhook: Deploy detectado para ${repo}`);
 
-        updateRelease('vercel', repo, {
+        await updateRelease('vercel', repo, {
             version,
             status: payload.type === 'deployment.succeeded' ? 'success' : 'stable',
             impact: 'Vercel Preview/Prod'

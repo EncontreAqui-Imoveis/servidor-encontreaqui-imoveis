@@ -75,18 +75,35 @@ function generateHistory(baseline: number, count: number, variance: number = 0.2
 }
 
 export class SreStatsService {
-    private releases: Record<string, any[]> = {
-        "github:backend": [
-            { version: "1.4.9", date: "Hoje", time: "18:10", status: "success", impact: "Nenhum" },
-            { version: "1.4.8", date: "Hoje", time: "14:20", status: "stable", impact: "Nenhum" }
-        ],
-        "github:frontend": [
-            { version: "2.1.0", date: "Ontem", time: "09:30", status: "success", impact: "UX Melhorada" }
-        ],
-        "vercel:frontend": [
-            { version: "2.1.0", date: "Ontem", time: "09:45", status: "success", impact: "Prod Deployed" }
-        ]
-    };
+    constructor() {
+        // Iniciar o worker a cada 5 minutos (300000 ms)
+        setInterval(() => this.takeMetricsSnapshot(), 5 * 60 * 1000);
+    }
+
+    private async takeMetricsSnapshot() {
+        try {
+            const real = await this.getRealMetrics();
+            const cpuUtil = os.loadavg()[0] * 10;
+            const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
+            const utilization = (cpuUtil + memoryUtil) / 2;
+
+            const queries = [
+                ['latency', real.latency],
+                ['traffic', real.rps],
+                ['errors', real.errorRate],
+                ['utilization', utilization]
+            ];
+
+            for (const [name, value] of queries) {
+                await connection.query(
+                    'INSERT INTO sre_metrics_history (metric_name, value) VALUES (?, ?)',
+                    [name, value]
+                );
+            }
+        } catch (e) {
+            console.error('Falha ao tirar snapshot de métricas:', e);
+        }
+    }
 
     private async getSystemLoadFactor(): Promise<number> {
         try {
@@ -153,10 +170,73 @@ export class SreStatsService {
         }
     }
 
+    private async getHistoryFromDb(metricName: string, count: number): Promise<number[]> {
+        try {
+            const [rows] = await connection.query(
+                'SELECT value FROM sre_metrics_history WHERE metric_name = ? ORDER BY timestamp DESC LIMIT ?',
+                [metricName, count]
+            ) as any;
+
+            if (!rows || rows.length === 0) return [];
+            return rows.map((r: any) => Number(r.value)).reverse();
+        } catch (e) {
+            return [];
+        }
+    }
+
     public async getSreStats(): Promise<SreStats> {
         const cpuUtil = os.loadavg()[0] * 10;
         const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
         const real = await this.getRealMetrics();
+
+        // Gerar Alertas Reais baseado em heurísticas SRE
+        const alerts: any[] = [];
+        if (real.errorRate > 1) {
+            alerts.push({
+                id: 'err-' + Date.now(),
+                severity: 'critical',
+                service: 'API Server',
+                message: `Taxa de erro elevada (${real.errorRate.toFixed(2)}%) detectada no Railway.`,
+                duration: 'Agora',
+                time: new Date().toLocaleTimeString()
+            });
+        }
+        if (real.latency > 500) {
+            alerts.push({
+                id: 'lat-' + Date.now(),
+                severity: 'warning',
+                service: 'Database/API',
+                message: `Latência P99 acima do SLO: ${real.latency.toFixed(0)}ms.`,
+                duration: '2m',
+                time: new Date().toLocaleTimeString()
+            });
+        }
+        if (cpuUtil > 80) {
+            alerts.push({
+                id: 'cpu-' + Date.now(),
+                severity: 'warning',
+                service: 'Railway Engine',
+                message: `Alta utilização de CPU: ${cpuUtil.toFixed(1)}%.`,
+                duration: '1m',
+                time: new Date().toLocaleTimeString()
+            });
+        }
+
+        // Adicionar alerta informativo de persistência
+        alerts.push({
+            id: 'info-1',
+            severity: 'info',
+            service: 'SRE Core',
+            message: 'Histórico de métricas persistido no TiDB Cloud.',
+            duration: 'Ativo',
+            time: 'Agora'
+        });
+
+        // Buscar histórico real do banco
+        const latencyHistory = await this.getHistoryFromDb('latency', 24);
+        const trafficHistory = await this.getHistoryFromDb('traffic', 24);
+        const errorHistory = await this.getHistoryFromDb('errors', 24);
+        const utilHistory = await this.getHistoryFromDb('utilization', 24);
 
         return {
             latency: {
@@ -165,7 +245,7 @@ export class SreStatsService {
                 status: real.latency > 500 ? 'warning' : 'healthy',
                 trend: 'neutral',
                 trendValue: `0%`,
-                history: generateHistory(real.latency, 24)
+                history: latencyHistory.length > 0 ? latencyHistory : generateHistory(real.latency, 24)
             },
             traffic: {
                 rps: `${real.rps.toFixed(1)}`,
@@ -173,7 +253,7 @@ export class SreStatsService {
                 status: 'healthy',
                 trend: 'neutral',
                 trendValue: '0%',
-                history: generateHistory(real.rps || 0.5, 24)
+                history: trafficHistory.length > 0 ? trafficHistory : generateHistory(real.rps || 0.5, 24)
             },
             errors: {
                 rate: `${real.errorRate.toFixed(3)}`,
@@ -181,7 +261,7 @@ export class SreStatsService {
                 status: real.errorRate > 1 ? 'critical' : real.errorRate > 0.1 ? 'warning' : 'healthy',
                 trend: 'neutral',
                 trendValue: '0%',
-                history: generateHistory(real.errorRate, 24, 0.5)
+                history: errorHistory.length > 0 ? errorHistory : generateHistory(real.errorRate, 24, 0.5)
             },
             saturation: {
                 cpu: `${cpuUtil.toFixed(1)}`,
@@ -190,22 +270,42 @@ export class SreStatsService {
                 status: cpuUtil > 80 ? 'warning' : 'healthy',
                 trend: 'neutral',
                 trendValue: '0%',
-                history: generateHistory(cpuUtil, 24)
+                history: utilHistory.length > 0 ? utilHistory : generateHistory(cpuUtil, 24)
             },
             availability: this.generateAvailabilityData(),
-            alerts: [
-                {
-                    id: '1',
-                    severity: 'info',
-                    service: 'Sistema de Monitoramento',
-                    message: 'Métricas reais integradas com TiDB Cloud e Railway.',
-                    duration: '5m',
-                    time: 'Agora'
-                }
-            ],
+            alerts,
             externalServices: await this.getExternalServices(),
-            releases: this.releases
+            releases: await this.getReleases()
         };
+    }
+
+    private async getReleases(): Promise<Record<string, any[]>> {
+        try {
+            const [rows] = await connection.query('SELECT platform, repo, version, status, impact, applied_at FROM sre_releases ORDER BY applied_at DESC LIMIT 50') as any;
+            const grouped: Record<string, any[]> = {};
+
+            rows.forEach((r: any) => {
+                const key = `${r.platform}:${r.repo}`;
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push({
+                    version: r.version,
+                    date: 'Hoje',
+                    time: new Date(r.applied_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                    status: r.status,
+                    impact: r.impact
+                });
+            });
+
+            return grouped;
+        } catch (e) {
+            // Fallback
+            return {
+                "github:backend": [
+                    { version: "1.4.9", date: "Hoje", time: "18:10", status: "success", impact: "Nenhum" },
+                    { version: "1.4.8", date: "Hoje", time: "14:20", status: "stable", impact: "Nenhum" }
+                ]
+            };
+        }
     }
 
     private async getExternalServices(): Promise<any[]> {
@@ -257,20 +357,17 @@ export class SreStatsService {
         }
     }
 
-    public updateRelease(platform: string, repo: string, data: any) {
-        const key = `${platform}:${repo}`;
-        if (!this.releases[key]) this.releases[key] = [];
-
-        this.releases[key].unshift({
-            version: data.version || 'unknown',
-            date: 'Hoje',
-            time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            status: data.status || 'success',
-            impact: data.impact || 'Webhook Deploy'
-        });
-
-        if (this.releases[key].length > 10) this.releases[key].pop();
-        return true;
+    public async updateRelease(platform: string, repo: string, data: any) {
+        try {
+            await connection.query(
+                'INSERT INTO sre_releases (platform, repo, version, status, impact) VALUES (?, ?, ?, ?, ?)',
+                [platform, repo, data.version || 'unknown', data.status || 'success', data.impact || 'Webhook Deploy']
+            );
+            return true;
+        } catch (e) {
+            console.error('Erro ao persistir release no banco:', e);
+            return false;
+        }
     }
 }
 
@@ -283,6 +380,6 @@ export function updateExternalService(name: string, data: any) {
     return sreStatsService.updateExternalService(name, data);
 }
 
-export function updateRelease(platform: string, repo: string, data: any) {
+export async function updateRelease(platform: string, repo: string, data: any) {
     return sreStatsService.updateRelease(platform, repo, data);
 }

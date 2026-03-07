@@ -13,6 +13,232 @@ type EmailMessage = {
   idempotencyKey?: string | null;
 };
 
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function resolveBrandName() {
+  return String(process.env.EMAIL_BRAND_NAME ?? 'Sua Empresa').trim() || 'Sua Empresa';
+}
+
+function resolveLogoUrl() {
+  return String(
+    process.env.EMAIL_LOGO_URL_2X ??
+    process.env.EMAIL_LOGO_URL ??
+    ''
+  ).trim();
+}
+
+function resolveSurfaceUrl(purpose: 'verify_email' | 'password_reset') {
+  const explicitUrl = purpose === 'verify_email'
+    ? process.env.EMAIL_VERIFICATION_SURFACE_URL
+    : process.env.PASSWORD_RESET_SURFACE_URL;
+  if (explicitUrl?.trim()) {
+    return explicitUrl.trim();
+  }
+
+  const handlerUrl = String(process.env.EMAIL_VERIFICATION_HANDLER_URL ?? '').trim();
+  if (!handlerUrl) return null;
+
+  try {
+    const base = new URL(handlerUrl);
+    base.pathname = purpose === 'verify_email' ? '/verificacao' : '/recuperar-senha';
+    base.search = '';
+    base.hash = '';
+    return base.toString();
+  } catch {
+    return null;
+  }
+}
+
+function renderBulletproofButton(params: { href: string; label: string }) {
+  const href = escapeHtml(params.href);
+  const label = escapeHtml(params.label);
+  return (
+    `<!--[if mso]>` +
+    `<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${href}" style="height:52px;v-text-anchor:middle;width:280px;" arcsize="18%" stroke="f" fillcolor="#F6C644">` +
+    `<w:anchorlock/>` +
+    `<center style="color:#1B1D1D;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">${label}</center>` +
+    `</v:roundrect>` +
+    `<![endif]-->` +
+    `<!--[if !mso]><!-- -->` +
+    `<a href="${href}" target="_blank" rel="noopener noreferrer" style="background-color:#F6C644;border:1px solid #E4B326;border-radius:14px;color:#1B1D1D;display:inline-block;font-family:Arial,sans-serif;font-size:16px;font-weight:700;line-height:52px;text-align:center;text-decoration:none;width:280px;-webkit-text-size-adjust:none;box-shadow:0 6px 18px rgba(19,35,43,0.12);">` +
+    `${label}` +
+    `</a>` +
+    `<!--<![endif]-->`
+  );
+}
+
+function renderLogoMarkup(params?: { footer?: boolean }) {
+  const brandName = escapeHtml(resolveBrandName());
+  const logoUrl = resolveLogoUrl();
+  const maxWidth = params?.footer ? 120 : 180;
+
+  if (!logoUrl) {
+    return (
+      `<div style="` +
+      `font-family:Arial,sans-serif;` +
+      `font-size:${params?.footer ? 18 : 28}px;` +
+      `line-height:${params?.footer ? 24 : 34}px;` +
+      `font-weight:800;` +
+      `color:${params?.footer ? '#0d5051' : '#FFFFFF'};` +
+      `letter-spacing:-0.02em;` +
+      `">` +
+      `${brandName}` +
+      `</div>`
+    );
+  }
+
+  return (
+    `<img ` +
+    `src="${escapeHtml(logoUrl)}" ` +
+    `alt="${brandName}" ` +
+    `width="${maxWidth}" ` +
+    `style="` +
+    `display:block;` +
+    `width:100%;` +
+    `max-width:${maxWidth}px;` +
+    `height:auto;` +
+    `border:0;` +
+    `outline:none;` +
+    `text-decoration:none;` +
+    `"` +
+    `>`
+  );
+}
+
+function buildEmailHtmlDocument(params: {
+  preheader: string;
+  title: string;
+  subtitle: string;
+  code: string;
+  expiresAtText: string;
+  ctaUrl?: string | null;
+  ctaLabel: string;
+  supportText: string;
+}) {
+  const brandName = escapeHtml(resolveBrandName());
+  const preheader = escapeHtml(params.preheader);
+  const title = escapeHtml(params.title);
+  const subtitle = escapeHtml(params.subtitle);
+  const code = escapeHtml(params.code);
+  const expiresAtText = escapeHtml(params.expiresAtText);
+  const supportText = escapeHtml(params.supportText);
+  const headerLogo = renderLogoMarkup();
+  const footerLogo = renderLogoMarkup({ footer: true });
+  const cta =
+    params.ctaUrl && params.ctaUrl.trim().length > 0
+      ? renderBulletproofButton({
+          href: params.ctaUrl.trim(),
+          label: params.ctaLabel,
+        })
+      : '';
+  const fallbackLink =
+    params.ctaUrl && params.ctaUrl.trim().length > 0
+      ? `<p style="margin:0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#64748B;text-align:center;">Se o botão não funcionar, copie e cole este endereço no navegador:<br><a href="${escapeHtml(params.ctaUrl.trim())}" target="_blank" rel="noopener noreferrer" style="color:#0D5D50;text-decoration:underline;word-break:break-all;">${escapeHtml(params.ctaUrl.trim())}</a></p>`
+      : '';
+
+  return (
+    '<!DOCTYPE html>' +
+    '<html lang="pt-BR">' +
+    '<head>' +
+    '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+    `<title>${title}</title>` +
+    '</head>' +
+    '<body style="margin:0;padding:0;background-color:#FFFFFF;">' +
+    `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${preheader}</div>` +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background-color:#FFFFFF;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td align="center" style="padding:0;background-color:#0d5051;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:640px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td align="center" style="padding:28px 24px 22px;">' +
+    headerLogo +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:0 16px 40px;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:560px;border-collapse:separate;background-color:#FFFFFF;border:1px solid #0d5051;border-radius:28px;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td align="center" style="padding:36px 32px 12px;">' +
+    '<div style="display:inline-block;background-color:#ffca45;color:#0d5051;font-family:Arial,sans-serif;font-size:12px;line-height:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;padding:10px 16px;border-radius:999px;">Código de segurança</div>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:0 32px 10px;font-family:Arial,sans-serif;font-size:34px;line-height:40px;font-weight:800;color:#0d5051;">' +
+    title +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:0 32px 0;font-family:Arial,sans-serif;font-size:18px;line-height:28px;color:#0d5051;">' +
+    subtitle +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:28px 32px 12px;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">' +
+    '<tr>' +
+    '<td align="center" style="background-color:#ffca45;border:1px solid #ffca45;border-radius:18px;padding:18px 28px;font-family:Arial,sans-serif;font-size:34px;line-height:38px;font-weight:800;letter-spacing:10px;color:#0d5051;">' +
+    code +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:4px 32px 0;font-family:Arial,sans-serif;font-size:15px;line-height:24px;color:#0d5051;">' +
+    `Esse código expira em <strong>${expiresAtText}</strong>.` +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:24px 32px 0;">' +
+    cta +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:16px 32px 0;">' +
+    fallbackLink +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:24px 32px 36px;font-family:Arial,sans-serif;font-size:13px;line-height:21px;color:#0d5051;">' +
+    supportText +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:28px 16px 40px;background-color:#FFFFFF;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:640px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td align="center" style="padding:0 0 10px;">' +
+    footerLogo +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#0d5051;">' +
+    `© ${new Date().getFullYear()} ${brandName}. Todos os direitos reservados.` +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</body>' +
+    '</html>'
+  );
+}
+
 function resolveEmailProvider(): EmailProvider {
   if (cachedProvider) {
     return cachedProvider;
@@ -317,45 +543,54 @@ export async function sendEmailCodeEmail(params: {
   expiresAt: Date;
   idempotencyKey?: string | null;
 }) {
-  const greeting = params.name ? `Ola, ${params.name}` : 'Ola';
+  const greeting = params.name ? `Olá, ${params.name}` : 'Olá';
   const expiresAtText = params.expiresAt.toLocaleString('pt-BR', {
     timeZone: 'America/Sao_Paulo',
   });
   const purposeText =
     params.purpose === 'verify_email'
-      ? 'para confirmar seu email'
+      ? 'para confirmar seu e-mail'
       : 'para redefinir sua senha';
   const subject =
     params.purpose === 'verify_email'
-      ? 'Seu codigo de verificacao do app EncontreAqui Imoveis'
-      : 'Seu codigo para redefinir a senha do app EncontreAqui Imoveis';
+      ? 'Seu código de verificação do app EncontreAqui Imóveis'
+      : 'Seu código para redefinir a senha do app EncontreAqui Imóveis';
+  const title =
+    params.purpose === 'verify_email'
+      ? 'Confirme seu e-mail'
+      : 'Redefina sua senha';
+  const subtitle =
+    params.purpose === 'verify_email'
+      ? `${greeting} Use o código abaixo para confirmar seu e-mail.`
+      : `${greeting} Use o código abaixo para definir uma nova senha com segurança.`;
+  const preheader =
+    params.purpose === 'verify_email'
+      ? 'Código de 6 dígitos para confirmar seu e-mail.'
+      : 'Código de 6 dígitos para redefinir sua senha.';
+  const ctaUrl = resolveSurfaceUrl(params.purpose);
+  const ctaLabel =
+    params.purpose === 'verify_email'
+      ? 'Abrir tela de verificação'
+      : 'Abrir tela de recuperação';
 
   const text =
     `${greeting}.\n\n` +
-    `Use o codigo abaixo ${purposeText}.\n\n` +
+    `Seu código ${params.purpose === 'verify_email' ? 'de verificação' : 'de recuperação'} ${purposeText}.\n\n` +
     `${params.code}\n\n` +
-    `Esse codigo expira em ${expiresAtText}.\n\n` +
-    'Se nao foi voce, ignore este email.\n';
+    `Esse código expira em ${expiresAtText}.\n\n` +
+    'Se não foi você, ignore este e-mail.\n' +
+    (ctaUrl ? `\nAbra a tela no site: ${ctaUrl}\n` : '');
 
-  const html =
-    `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;background:#f8fafc;color:#0f172a">` +
-    `<div style="background:#ffffff;border-radius:20px;padding:32px;border:1px solid #e2e8f0">` +
-    `<div style="text-align:center;margin-bottom:20px">` +
-    `<div style="width:72px;height:72px;margin:0 auto 16px;border-radius:999px;background:#fff3d6;display:flex;align-items:center;justify-content:center;font-size:28px">✉️</div>` +
-    `<h1 style="margin:0 0 8px;font-size:26px;line-height:1.2">` +
-    `${params.purpose === 'verify_email' ? 'Confirmar email' : 'Redefinir senha'}` +
-    `</h1>` +
-    `<p style="margin:0;color:#475569;font-size:15px">${greeting}. Use o codigo abaixo ${purposeText}.</p>` +
-    `</div>` +
-    `<div style="margin:28px 0;text-align:center">` +
-    `<div style="display:inline-block;padding:16px 24px;border-radius:16px;background:#0d5d50;color:#ffffff;font-size:32px;font-weight:800;letter-spacing:10px">` +
-    `${params.code}` +
-    `</div>` +
-    `</div>` +
-    `<p style="margin:0 0 16px;color:#475569;font-size:14px;text-align:center">Esse codigo expira em <strong>${expiresAtText}</strong>.</p>` +
-    `<p style="margin:0;color:#64748b;font-size:13px;text-align:center">Se nao foi voce, ignore este email.</p>` +
-    `</div>` +
-    `</div>`;
+  const html = buildEmailHtmlDocument({
+    preheader,
+    title,
+    subtitle,
+    code: params.code,
+    expiresAtText,
+    ctaUrl,
+    ctaLabel,
+    supportText: 'Se não foi você, ignore este e-mail.',
+  });
 
   await deliverEmail({
     to: params.to,

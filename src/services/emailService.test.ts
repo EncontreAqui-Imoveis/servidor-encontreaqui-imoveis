@@ -15,6 +15,7 @@ vi.mock('nodemailer', () => ({
 
 import {
   resetEmailServiceForTests,
+  sendEmailCodeEmail,
   sendEmailVerificationEmail,
   sendPasswordResetEmail,
 } from './emailService';
@@ -36,6 +37,8 @@ describe('emailService', () => {
     delete process.env.RESEND_FROM_NAME;
     delete process.env.EMAIL_FROM;
     delete process.env.EMAIL_FROM_NAME;
+    delete process.env.EMAIL_BRAND_NAME;
+    delete process.env.EMAIL_LOGO_URL_2X;
     delete process.env.SMTP_HOST;
     delete process.env.SMTP_PORT;
     delete process.env.SMTP_SECURE;
@@ -51,11 +54,14 @@ describe('emailService', () => {
     });
   });
 
-  it('sends verification email through Brevo HTTP API with idempotency key', async () => {
+  it('sends code email through Brevo HTTP API with full HTML document and idempotency key', async () => {
     process.env.EMAIL_PROVIDER = 'brevo';
     process.env.BREVO_API_KEY = 'brevo-key';
     process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
     process.env.EMAIL_FROM_NAME = 'EncontreAqui Imoveis';
+    process.env.EMAIL_BRAND_NAME = 'EncontreAqui Imóveis';
+    process.env.EMAIL_VERIFICATION_HANDLER_URL =
+      'https://site.exemplo.com/auth/verificar-email';
 
     fetchMock.mockResolvedValue({
       ok: true,
@@ -63,10 +69,11 @@ describe('emailService', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await sendEmailVerificationEmail({
+    await sendEmailCodeEmail({
       to: 'user@test.com',
       name: 'Usuario',
-      actionUrl: 'https://site.exemplo.com/auth/verificar-email?oobCode=123',
+      code: '194492',
+      purpose: 'verify_email',
       expiresAt: new Date('2026-03-06T15:00:00.000Z'),
       idempotencyKey: 'email-verification-42',
     });
@@ -83,11 +90,55 @@ describe('emailService', () => {
       name: 'EncontreAqui Imoveis',
     });
     expect(payload.to).toEqual([{ email: 'user@test.com' }]);
-    expect(payload.subject).toBe('Verifique seu email do app EncontreAqui Imoveis');
+    expect(payload.subject).toBe(
+      'Seu código de verificação do app EncontreAqui Imóveis',
+    );
     expect(payload.headers).toEqual({
       idempotencyKey: 'email-verification-42',
     });
+    expect(payload.htmlContent).toContain('<!DOCTYPE html>');
+    expect(payload.htmlContent).toContain('charset=UTF-8');
+    expect(payload.htmlContent).toContain('role="presentation"');
+    expect(payload.htmlContent).toContain('EncontreAqui Imóveis');
+    expect(payload.htmlContent).toContain('background-color:#0d5051');
+    expect(payload.htmlContent).toContain('Código de segurança');
+    expect(payload.htmlContent).toContain('194492');
+    expect(payload.htmlContent).toContain('Abrir tela de verificação');
+    expect(payload.htmlContent).toContain('/verificacao');
+    expect(payload.htmlContent).toContain('©');
+    expect(payload.textContent).toContain('Seu código');
+    expect(payload.textContent).toContain('Se não foi você');
     expect(createTransportMock).not.toHaveBeenCalled();
+  });
+
+  it('uses hosted logo markup when EMAIL_LOGO_URL_2X is configured', async () => {
+    process.env.EMAIL_PROVIDER = 'brevo';
+    process.env.BREVO_API_KEY = 'brevo-key';
+    process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
+    process.env.EMAIL_BRAND_NAME = 'EncontreAqui Imóveis';
+    process.env.EMAIL_LOGO_URL_2X = 'https://res.cloudinary.com/demo/image/upload/v1/logo.png';
+    process.env.EMAIL_VERIFICATION_HANDLER_URL =
+      'https://site.exemplo.com/auth/verificar-email';
+
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-124' })),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendEmailCodeEmail({
+      to: 'user@test.com',
+      code: '123456',
+      purpose: 'verify_email',
+      expiresAt: new Date('2026-03-06T15:00:00.000Z'),
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const payload = JSON.parse(String(options.body));
+    expect(payload.htmlContent).toContain(
+      'https://res.cloudinary.com/demo/image/upload/v1/logo.png',
+    );
+    expect(payload.htmlContent).toContain('alt="EncontreAqui Imóveis"');
   });
 
   it('sends verification email through Resend HTTP API with idempotency key', async () => {
@@ -177,6 +228,35 @@ describe('emailService', () => {
         expiresAt: new Date('2026-03-06T15:00:00.000Z'),
       }),
     ).rejects.toThrow('Brevo send failed (401): invalid api key');
+  });
+
+  it('builds password reset code email with recovery CTA route', async () => {
+    process.env.EMAIL_PROVIDER = 'brevo';
+    process.env.BREVO_API_KEY = 'brevo-key';
+    process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
+    process.env.EMAIL_VERIFICATION_HANDLER_URL =
+      'https://site.exemplo.com/auth/verificar-email';
+    fetchMock.mockResolvedValue({
+      ok: true,
+      text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-456' })),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendEmailCodeEmail({
+      to: 'user@test.com',
+      code: '123456',
+      purpose: 'password_reset',
+      expiresAt: new Date('2026-03-06T15:00:00.000Z'),
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const payload = JSON.parse(String(options.body));
+    expect(payload.subject).toBe(
+      'Seu código para redefinir a senha do app EncontreAqui Imóveis',
+    );
+    expect(payload.htmlContent).toContain('Redefina sua senha');
+    expect(payload.htmlContent).toContain('Abrir tela de recuperação');
+    expect(payload.htmlContent).toContain('/recuperar-senha');
   });
 
   it('surfaces resend provider errors with status code context', async () => {

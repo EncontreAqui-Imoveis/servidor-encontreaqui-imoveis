@@ -105,6 +105,7 @@ describe('emailService', () => {
     );
     expect(payload.htmlContent).not.toContain('Abrir tela de verificação');
     expect(payload.htmlContent).not.toContain('/verificacao');
+    expect(payload.htmlContent).not.toContain('<a href=');
     expect(payload.htmlContent).toContain('©');
     expect(payload.textContent).toContain('Seu código');
     expect(payload.textContent).toContain('Se não foi você');
@@ -263,6 +264,7 @@ describe('emailService', () => {
     );
     expect(payload.htmlContent).not.toContain('Abrir tela de recuperação');
     expect(payload.htmlContent).not.toContain('/recuperar-senha');
+    expect(payload.htmlContent).not.toContain('<a href=');
   });
 
   it('surfaces resend provider errors with status code context', async () => {

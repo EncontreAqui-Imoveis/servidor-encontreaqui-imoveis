@@ -171,6 +171,131 @@ function buildEmailHtmlDocument(params: {
   );
 }
 
+function buildEmailActionHtmlDocument(params: {
+  preheader: string;
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  buttonLabel: string;
+  buttonUrl: string;
+  expiresAtText: string;
+  helperText: string;
+  supportText: string;
+}) {
+  const brandName = escapeHtml(resolveBrandName());
+  const preheader = escapeHtml(params.preheader);
+  const eyebrow = escapeHtml(params.eyebrow);
+  const title = escapeHtml(params.title);
+  const subtitle = escapeHtml(params.subtitle);
+  const buttonLabel = escapeHtml(params.buttonLabel);
+  const buttonUrl = escapeHtml(params.buttonUrl);
+  const expiresAtText = escapeHtml(params.expiresAtText);
+  const helperText = escapeHtml(params.helperText);
+  const supportText = escapeHtml(params.supportText);
+  const headerLogo = renderLogoMarkup();
+  const footerLogo = renderLogoMarkup({ footer: true });
+
+  return (
+    '<!DOCTYPE html>' +
+    '<html lang="pt-BR">' +
+    '<head>' +
+    '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
+    `<title>${title}</title>` +
+    '</head>' +
+    '<body style="margin:0;padding:0;background-color:#F3F4F6;">' +
+    `<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;visibility:hidden;mso-hide:all;">${preheader}</div>` +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background-color:#F3F4F6;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td align="center" style="padding:36px 12px;background-color:#F3F4F6;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:620px;border-collapse:separate;background-color:#FFFFFF;border:1px solid #D1D5DB;border-radius:28px;overflow:hidden;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td style="padding:0;background:linear-gradient(180deg,#0D5051 0%,#123F40 100%);border-radius:28px 28px 0 0;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;">' +
+    '<tr>' +
+    '<td align="center" style="padding:34px 32px 18px;">' +
+    headerLogo +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:0 32px 12px;">' +
+    '<div style="display:inline-block;background-color:rgba(255,202,69,0.18);border:1px solid rgba(255,202,69,0.34);color:#FFCA45;font-family:Arial,sans-serif;font-size:12px;line-height:12px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;padding:10px 16px;border-radius:999px;">' +
+    eyebrow +
+    '</div>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:0 32px 10px;font-family:Arial,sans-serif;font-size:34px;line-height:40px;font-weight:800;color:#FFFFFF;">' +
+    title +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:0 32px 34px;font-family:Arial,sans-serif;font-size:17px;line-height:28px;color:rgba(255,255,255,0.86);">' +
+    subtitle +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:30px 32px 0;font-family:Arial,sans-serif;font-size:16px;line-height:26px;color:#334155;">' +
+    helperText +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:28px 32px 0;">' +
+    `<a href="${buttonUrl}" style="display:inline-block;padding:16px 28px;background-color:#0D5051;border:1px solid #0D5051;border-radius:16px;color:#FFFFFF;font-family:Arial,sans-serif;font-size:16px;line-height:16px;font-weight:800;text-decoration:none;">${buttonLabel}</a>` +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:18px 32px 0;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:#475569;">' +
+    `Esse link expira em <strong>${expiresAtText}</strong>.` +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="left" style="padding:24px 32px 0;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background-color:#F8FAFC;border:1px solid #CBD5E1;border-radius:18px;">' +
+    '<tr>' +
+    '<td style="padding:18px 18px 10px;font-family:Arial,sans-serif;font-size:14px;line-height:22px;color:#334155;font-weight:700;">Se o botão não abrir, use este link:</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td style="padding:0 18px 18px;font-family:Arial,sans-serif;font-size:13px;line-height:22px;word-break:break-all;">' +
+    `<a href="${buttonUrl}" style="color:#0D5051;text-decoration:underline;">${buttonUrl}</a>` +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:18px 32px 36px;font-family:Arial,sans-serif;font-size:13px;line-height:22px;color:#64748B;">' +
+    supportText +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="padding:24px 16px 40px;background-color:#F3F4F6;">' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;max-width:620px;border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;">' +
+    '<tr>' +
+    '<td align="center" style="padding:0 0 10px;">' +
+    footerLogo +
+    '</td>' +
+    '</tr>' +
+    '<tr>' +
+    '<td align="center" style="font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748B;">' +
+    `© ${new Date().getFullYear()} ${brandName}. Todos os direitos reservados.` +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</td>' +
+    '</tr>' +
+    '</table>' +
+    '</body>' +
+    '</html>'
+  );
+}
+
 function resolveEmailProvider(): EmailProvider {
   if (cachedProvider) {
     return cachedProvider;
@@ -567,25 +692,38 @@ export async function sendEmailVerificationEmail(params: {
   expiresAt: Date;
   idempotencyKey?: string | null;
 }) {
-  const greeting = params.name ? `Ola, ${params.name}` : 'Ola';
-  const subject = 'Verifique seu email do app EncontreAqui Imoveis';
+  const greeting = params.name ? `Olá, ${params.name}` : 'Olá';
+  const brandName = resolveBrandName();
+  const subject = `Confirme seu e-mail no ${brandName}`;
   const expiresAtText = params.expiresAt.toLocaleString('pt-BR', {
     timeZone: 'America/Sao_Paulo',
   });
+  const preheader = 'Confirme seu e-mail para continuar o cadastro no app.';
+  const helperText =
+    'Toque no botão abaixo para confirmar seu e-mail e liberar as próximas etapas do fluxo.';
+  const supportText =
+    'Se você não iniciou esta ação, ignore esta mensagem com segurança.';
 
   const text =
     `${greeting}.\n\n` +
-    'Clique no link abaixo para confirmar seu email.\n\n' +
+    `Confirme seu e-mail para continuar no ${brandName}.\n\n` +
+    'Clique no link abaixo para concluir a verificação.\n\n' +
     `${params.actionUrl}\n\n` +
     `Esse link expira em ${expiresAtText}.\n\n` +
-    'Se nao foi você, ignore este email.\n';
+    `${helperText}\n\n` +
+    `${supportText}\n`;
 
-  const html =
-    `<p>${greeting}.</p>` +
-    '<p>Clique no botão abaixo para confirmar seu email.</p>' +
-    `<p><a href="${params.actionUrl}" style="display:inline-block;padding:12px 20px;background:#0D5D50;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">Clique aqui para confirmar seu e-mail</a></p>` +
-    `<p>Esse link expira em <strong>${expiresAtText}</strong>.</p>` +
-    '<p>Se nao foi você, ignore este email.</p>';
+  const html = buildEmailActionHtmlDocument({
+    preheader,
+    eyebrow: 'Verificação de e-mail',
+    title: 'Confirme seu e-mail',
+    subtitle: `${greeting}. Finalize esta etapa para continuar o cadastro no ${brandName}.`,
+    buttonLabel: 'Confirmar e-mail',
+    buttonUrl: params.actionUrl,
+    expiresAtText,
+    helperText,
+    supportText,
+  });
 
   await deliverEmail({
     to: params.to,

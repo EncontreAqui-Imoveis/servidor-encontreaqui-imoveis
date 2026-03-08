@@ -23,7 +23,7 @@ function escapeHtml(value: string) {
 }
 
 function resolveBrandName() {
-  return String(process.env.EMAIL_BRAND_NAME ?? 'Sua Empresa').trim() || 'Sua Empresa';
+  return String(process.env.EMAIL_BRAND_NAME ?? 'EncontreAqui Imóveis').trim() || 'EncontreAqui Imóveis';
 }
 
 function resolveLogoUrl() {
@@ -578,14 +578,14 @@ export async function sendEmailVerificationEmail(params: {
     'Clique no link abaixo para confirmar seu email.\n\n' +
     `${params.actionUrl}\n\n` +
     `Esse link expira em ${expiresAtText}.\n\n` +
-    'Se nao foi voce, ignore este email.\n';
+    'Se nao foi você, ignore este email.\n';
 
   const html =
     `<p>${greeting}.</p>` +
-    '<p>Clique no botao abaixo para confirmar seu email.</p>' +
+    '<p>Clique no botão abaixo para confirmar seu email.</p>' +
     `<p><a href="${params.actionUrl}" style="display:inline-block;padding:12px 20px;background:#0D5D50;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:700;">Clique aqui para confirmar seu e-mail</a></p>` +
     `<p>Esse link expira em <strong>${expiresAtText}</strong>.</p>` +
-    '<p>Se nao foi voce, ignore este email.</p>';
+    '<p>Se nao foi você, ignore este email.</p>';
 
   await deliverEmail({
     to: params.to,

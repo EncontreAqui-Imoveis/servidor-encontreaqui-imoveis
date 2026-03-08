@@ -47,23 +47,62 @@ class SreController {
     public async handleRailwayWebhook(req: Request, res: Response): Promise<void> {
         const payload = req.body;
 
+        const eventType = payload.type || '';
         const statusStr = payload.status || 'SUCCESS';
 
         let status = 'stable';
-        if (statusStr === 'SUCCESS') status = 'success';
-        else if (statusStr === 'FAILED' || statusStr === 'CRASHED') status = 'failed';
-        else if (statusStr === 'BUILDING' || statusStr === 'INITIALIZING') status = 'building';
-        else status = 'stable';
+
+        // Mapeamento Exaustivo de Eventos do Railway fornecido pelo usuário
+        if (
+            eventType === 'DEPLOYMENT_FAILED' ||
+            eventType === 'DEPLOYMENT_CRASHED' ||
+            eventType === 'DEPLOYMENT_OOM_KILLED' ||
+            statusStr === 'FAILED' ||
+            statusStr === 'CRASHED'
+        ) {
+            status = 'failed';
+        } else if (
+            eventType === 'DEPLOYMENT_BUILDING' ||
+            eventType === 'DEPLOYMENT_DEPLOYING' ||
+            eventType === 'DEPLOYMENT_QUEUED' ||
+            eventType === 'DEPLOYMENT_WAITING' ||
+            eventType === 'DEPLOYMENT_NEEDS_APPROVAL' ||
+            statusStr === 'BUILDING' ||
+            statusStr === 'INITIALIZING'
+        ) {
+            status = 'building';
+        } else if (
+            eventType === 'DEPLOYMENT_DEPLOYED' ||
+            eventType === 'DEPLOYMENT_REDEPLOYED' ||
+            eventType === 'DEPLOYMENT_RESTARTED' ||
+            statusStr === 'SUCCESS'
+        ) {
+            status = 'success';
+        } else if (eventType === 'DEPLOYMENT_REMOVED') {
+            status = 'rollback';
+        } else {
+            // Monitor Triggered, VolumeAlert Triggered, Slept, Resumed, etc.
+            status = 'warning';
+            if (eventType === 'DEPLOYMENT_RESUMED' || eventType === 'VOLUME_ALERT_RESOLVED') {
+                status = 'stable';
+            }
+        }
 
         const repo = payload.project?.name || 'backend';
         const version = payload.deployment?.meta?.commitHash?.substring(0, 7) || 'unknown';
-        const impact = payload.deployment?.meta?.commitMessage || 'Railway Deploy';
 
-        console.log(`Railway Webhook: Deploy ${statusStr} para ${repo} (SHA: ${version})`);
+        // Customizar impacto baseado no evento extremo
+        let impact = payload.deployment?.meta?.commitMessage || 'Railway Deploy';
+        if (eventType === 'VOLUME_ALERT_TRIGGERED') impact = '⚠️ Alerta de Espaço (Volume) no Railway!';
+        else if (eventType === 'DEPLOYMENT_OOM_KILLED') impact = '💥 Servidor derrubado por falta de Memória (OOM)';
+        else if (eventType === 'MONITOR_TRIGGERED') impact = '📉 Monitoramento de Saúde falhou';
+        else if (eventType === 'DEPLOYMENT_SLEPT') impact = '💤 Servidor entrou em hibernação';
+
+        console.log(`Railway Webhook: Evento ${eventType} para ${repo} (SHA: ${version}) -> Status ${status}`);
 
         await updateRelease('railway', repo, {
             version,
-            status,
+            status: status === 'warning' ? 'failed' : status, // Mapear warning tbm para visual failure por agora se for critico
             impact
         });
 

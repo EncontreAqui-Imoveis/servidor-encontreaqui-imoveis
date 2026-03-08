@@ -1,6 +1,10 @@
 import os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import connection from '../database/connection';
 import { getRegistry } from '../middlewares/metrics';
+
+const execAsync = promisify(exec);
 
 export interface SreStats {
     latency: {
@@ -76,16 +80,22 @@ function generateHistory(baseline: number, count: number, variance: number = 0.2
 
 export class SreStatsService {
     constructor() {
-        // Iniciar o worker a cada 5 minutos (300000 ms)
+        // Iniciar os workers
+        this.takeMetricsSnapshot();
         setInterval(() => this.takeMetricsSnapshot(), 5 * 60 * 1000);
+
+        this.checkExternalHealth();
+        setInterval(() => this.checkExternalHealth(), 10 * 60 * 1000);
+
+        this.seedRealGitHistory();
     }
 
     private async takeMetricsSnapshot() {
         try {
             const real = await this.getRealMetrics();
-            const cpuUtil = os.loadavg()[0] * 10;
-            const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
-            const utilization = (cpuUtil + memoryUtil) / 2;
+            const cpuUtil = Math.min(100, Math.max(0, os.loadavg()[0] * 10));
+            const memoryUtil = Math.min(100, Math.max(0, (1 - os.freemem() / os.totalmem()) * 100));
+            const utilization = Math.min(100, Math.max(0, (cpuUtil + memoryUtil) / 2));
 
             const queries = [
                 ['latency', real.latency],
@@ -102,6 +112,56 @@ export class SreStatsService {
             }
         } catch (e) {
             console.error('Falha ao tirar snapshot de métricas:', e);
+        }
+    }
+
+    private async checkExternalHealth() {
+        try {
+            const [rows] = await connection.query('SELECT name, probe_url FROM sre_external_services WHERE probe_url IS NOT NULL') as any;
+
+            for (const service of rows) {
+                try {
+                    const start = Date.now();
+                    const response = await fetch(service.probe_url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
+                    const latency = Date.now() - start;
+
+                    const status = response.ok ? 'operational' : 'degraded';
+                    await connection.query(
+                        'UPDATE sre_external_services SET status = ?, latency = ? WHERE name = ?',
+                        [status, `${latency}ms`, service.name]
+                    );
+                } catch (e) {
+                    await connection.query(
+                        'UPDATE sre_external_services SET status = ?, latency = ? WHERE name = ?',
+                        ['outage', 'timeout', service.name]
+                    );
+                }
+            }
+        } catch (e) {
+            console.error('Erro no worker de health check:', e);
+        }
+    }
+
+    private async seedRealGitHistory() {
+        try {
+            const [rows] = await connection.query('SELECT COUNT(*) as count FROM sre_releases') as any;
+            if (rows[0].count > 0) return;
+
+            console.log('Seeding real Git history...');
+            const { stdout } = await execAsync('git log -n 5 --pretty=format:"%h|%s|%at"');
+            const lines = stdout.split('\n');
+
+            for (const line of lines) {
+                const [sha, message, timestamp] = line.split('|');
+                await this.updateRelease('github', 'backend', {
+                    version: sha,
+                    status: 'success',
+                    impact: message,
+                    applied_at: new Date(Number(timestamp) * 1000)
+                });
+            }
+        } catch (e) {
+            console.error('Falha ao ler histórico Git real:', e);
         }
     }
 
@@ -161,9 +221,9 @@ export class SreStatsService {
             }
 
             return {
-                latency: p99 || 45,
-                errorRate: totalReqs > 0 ? (errorReqs / totalReqs) * 100 : 0,
-                rps: totalReqs / 60
+                latency: Math.max(0, p99 || 45),
+                errorRate: Math.min(100, Math.max(0, totalReqs > 0 ? (errorReqs / totalReqs) * 100 : 0)),
+                rps: Math.max(0, totalReqs / 60)
             };
         } catch (e) {
             return { latency: 45, errorRate: 0, rps: 0.5 };
@@ -185,8 +245,8 @@ export class SreStatsService {
     }
 
     public async getSreStats(): Promise<SreStats> {
-        const cpuUtil = os.loadavg()[0] * 10;
-        const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
+        const cpuUtil = Math.min(100, Math.max(0, os.loadavg()[0] * 10));
+        const memoryUtil = Math.min(100, Math.max(0, (1 - os.freemem() / os.totalmem()) * 100));
         const real = await this.getRealMetrics();
 
         // Gerar Alertas Reais baseado em heurísticas SRE
@@ -226,7 +286,7 @@ export class SreStatsService {
             id: 'info-1',
             severity: 'info',
             service: 'SRE Core',
-            message: 'Histórico de métricas persistido no TiDB Cloud.',
+            message: 'Monitoramento Ativo: Railway, Cloudinary e TiDB saudáveis.',
             duration: 'Ativo',
             time: 'Agora'
         });
@@ -359,8 +419,8 @@ export class SreStatsService {
     public async updateRelease(platform: string, repo: string, data: any) {
         try {
             await connection.query(
-                'INSERT INTO sre_releases (platform, repo, version, status, impact) VALUES (?, ?, ?, ?, ?)',
-                [platform, repo, data.version || 'unknown', data.status || 'success', data.impact || 'Webhook Deploy']
+                'INSERT INTO sre_releases (platform, repo, version, status, impact, applied_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [platform, repo, data.version || 'unknown', data.status || 'success', data.impact || 'Webhook Deploy', data.applied_at || new Date()]
             );
             return true;
         } catch (e) {

@@ -38,6 +38,12 @@ function isAdminRoute(req: Request): boolean {
   const baseUrl = String(req.baseUrl ?? '');
   const path = String(req.path ?? '');
   const originalUrl = String(req.originalUrl ?? '');
+
+  // Ignorar rotas de webhook que moram sob /admin
+  if (originalUrl.includes('/webhook/')) {
+    return false;
+  }
+
   return (
     baseUrl.startsWith('/admin') ||
     path.startsWith('/admin') ||

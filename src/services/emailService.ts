@@ -588,7 +588,7 @@ export async function sendEmailVerificationEmail(params: {
     '<p>Se nao foi voce, ignore este email.</p>';
 
   await deliverEmail({
-    to: params.to,
+    to: param?s.to,
     subject,
     text,
     html,

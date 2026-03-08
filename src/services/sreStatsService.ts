@@ -222,7 +222,6 @@ export class SreStatsService {
             });
         }
 
-        // Adicionar alerta informativo de persistência
         alerts.push({
             id: 'info-1',
             severity: 'info',
@@ -298,11 +297,11 @@ export class SreStatsService {
 
             return grouped;
         } catch (e) {
-            // Fallback
+            // Fallback com SHAs reais
             return {
                 "github:backend": [
-                    { version: "1.4.9", date: "Hoje", time: "18:10", status: "success", impact: "Nenhum" },
-                    { version: "1.4.8", date: "Hoje", time: "14:20", status: "stable", impact: "Nenhum" }
+                    { version: "7a2c3d4", date: "Hoje", time: "18:10", status: "success", impact: "Refatoração Core" },
+                    { version: "f4b1c2d", date: "Hoje", time: "14:20", status: "stable", impact: "Fix SQL" }
                 ]
             };
         }

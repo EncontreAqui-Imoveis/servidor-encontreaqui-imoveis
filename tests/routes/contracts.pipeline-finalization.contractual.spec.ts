@@ -309,4 +309,31 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(String(response.body.error ?? '')).toContain('inconsistentes');
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
   });
+
+  it('rejects sale finalization when financial split is below 100% of valorVenda', async () => {
+    contractState = createContractState({
+      status: 'AWAITING_SIGNATURES',
+      property_purpose: 'Venda',
+    });
+    evidenceCounts = {
+      signedContract: 1,
+      paymentReceipt: 1,
+      inspectionBoleto: 0,
+    };
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/finalize')
+      .send({
+        commissionData: {
+          valorVenda: 10000,
+          comissaoCaptador: 4000,
+          comissaoVendedor: 3000,
+          taxaPlataforma: 2000,
+        },
+      });
+
+    expect(response.status).toBe(400);
+    expect(String(response.body.error ?? '')).toContain('exatamente 100%');
+    expect(contractState.status).toBe('AWAITING_SIGNATURES');
+  });
 });

@@ -27,6 +27,7 @@ export const CONTRACT_DOCUMENT_TYPES = [
   'contrato_assinado',
   'comprovante_pagamento',
   'boleto_vistoria',
+  'outro',
 ] as const;
 
 export type ContractDocumentType = (typeof CONTRACT_DOCUMENT_TYPES)[number];

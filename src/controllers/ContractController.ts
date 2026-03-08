@@ -307,6 +307,10 @@ function isSignedDocumentType(value: string): boolean {
   );
 }
 
+function isAdminSupplementalDocumentType(value: string): boolean {
+  return value === 'outro';
+}
+
 function parseDocumentSide(value: unknown): 'seller' | 'buyer' | null {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (!normalized) {
@@ -1622,6 +1626,29 @@ class ContractController {
         });
       }
 
+      const normalizedPurpose = String(contract.property_purpose ?? '')
+        .trim()
+        .toLowerCase();
+      const isRentalOnly =
+        normalizedPurpose.includes('alug') &&
+        !normalizedPurpose.includes('venda');
+      if (!isRentalOnly) {
+        const totalSplits = Number(
+          (
+            commissionData.comissaoCaptador +
+            commissionData.comissaoVendedor +
+            commissionData.taxaPlataforma
+          ).toFixed(2)
+        );
+        if (Math.abs(totalSplits - commissionData.valorVenda) > 0.01) {
+          await tx.rollback();
+          return res.status(400).json({
+            error:
+              'Na venda, a soma de comissões e taxa precisa fechar exatamente 100% do valor.',
+          });
+        }
+      }
+
       const finalStatuses = resolveFinalDealStatuses(contract.property_purpose);
 
       await tx.query(
@@ -1864,8 +1891,9 @@ class ContractController {
     const documentTypeRaw = String(
       body.documentType ?? body.document_type ?? ''
     ).trim();
+    const normalizedDocumentType = documentTypeRaw.toLowerCase();
     const requestedSide = parseDocumentSide(body.side);
-    if (!isContractDocumentType(documentTypeRaw)) {
+    if (!isContractDocumentType(normalizedDocumentType)) {
       return res.status(400).json({ error: 'Tipo de documento inválido.' });
     }
 
@@ -1890,22 +1918,26 @@ class ContractController {
       }
 
       const currentStatus = resolveContractStatus(contract.status);
-      if (isSignedDocumentType(documentTypeRaw)) {
+      const role = String(req.userRole ?? '').toLowerCase();
+      const isAdminSupplemental =
+        role === 'admin' && isAdminSupplementalDocumentType(normalizedDocumentType);
+      if (isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental) {
         if (currentStatus !== 'AWAITING_SIGNATURES') {
           await tx.rollback();
           return res.status(400).json({
             error:
-              'Contratos assinados e comprovantes só podem ser enviados em AWAITING_SIGNATURES.',
+              'Documentos assinados, comprovantes e anexos complementares só podem ser enviados em AWAITING_SIGNATURES.',
           });
         }
       }
 
       const doubleEnded = isDoubleEndedDeal(contract);
-      const role = String(req.userRole ?? '').toLowerCase();
       const canEditSeller = canEditSellerSide(req, contract);
       const canEditBuyer = canEditBuyerSide(req, contract);
 
-      const resolvedSide: 'seller' | 'buyer' | null = isSignedDocumentType(documentTypeRaw)
+      const resolvedSide: 'seller' | 'buyer' | null = (
+        isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental
+      )
         ? requestedSide
         : (() => {
             if (requestedSide) {
@@ -1923,7 +1955,11 @@ class ContractController {
             return null;
           })();
 
-      if (!isSignedDocumentType(documentTypeRaw) && resolvedSide == null) {
+      if (
+        !isSignedDocumentType(normalizedDocumentType) &&
+        !isAdminSupplemental &&
+        resolvedSide == null
+      ) {
         await tx.rollback();
         return res.status(400).json({
           error:
@@ -1945,7 +1981,7 @@ class ContractController {
         });
       }
 
-      if (!isSignedDocumentType(documentTypeRaw) && role !== 'admin') {
+      if (!isSignedDocumentType(normalizedDocumentType) && role !== 'admin') {
         const sellerStatus = resolveContractApprovalStatus(
           contract.seller_approval_status
         );
@@ -1987,8 +2023,8 @@ class ContractController {
         `,
         [
           contract.negotiation_id,
-          resolveDocumentStorageType(documentTypeRaw),
-          documentTypeRaw,
+          resolveDocumentStorageType(normalizedDocumentType),
+          normalizedDocumentType,
           JSON.stringify({
             contractId,
             side: resolvedSide,
@@ -2003,7 +2039,7 @@ class ContractController {
       const documentId = Number(insertResult.insertId ?? 0);
 
       const shouldMarkOnlineSignatureMethod =
-        role !== 'admin' && documentTypeRaw.toLowerCase() === 'contrato_assinado';
+        role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
 
       if (shouldMarkOnlineSignatureMethod) {
         const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {

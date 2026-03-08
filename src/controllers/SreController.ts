@@ -30,15 +30,41 @@ class SreController {
 
     public async handleGithubWebhook(req: Request, res: Response): Promise<void> {
         const payload = req.body;
-        const repo = payload.repository?.name || 'backend';
-        const version = payload.head_commit?.id?.substring(0, 7) || 'commiting';
+        // Match the frontend component expected key releases["github:backend"]
+        const repo = payload.repository?.name === 'painel-adm-maisimoveis' || payload.repository?.name === 'frontend' ? 'frontend' : 'backend';
 
-        console.log(`Github Webhook: Deploy detectado no repo ${repo} (SHA: ${version})`);
+        let version = 'unknown';
+        let status = 'stable';
+        let impact = 'GitHub Action';
+
+        if (payload.workflow_run) {
+            // Evento workflow_run
+            version = payload.workflow_run.head_commit?.id?.substring(0, 7) || payload.workflow_run.head_sha?.substring(0, 7) || 'unknown';
+            impact = payload.workflow_run.head_commit?.message || `Workflow: ${payload.workflow_run.name}`;
+
+            if (payload.workflow_run.status === 'completed') {
+                if (payload.workflow_run.conclusion === 'success') status = 'success';
+                else if (payload.workflow_run.conclusion === 'failure') status = 'failed';
+                else status = 'rollback'; // cancelled, skipped
+            } else {
+                status = 'building';
+            }
+        } else if (payload.head_commit) {
+            // Fallback para push event
+            version = payload.head_commit.id?.substring(0, 7) || 'commiting';
+            impact = payload.head_commit.message || 'Push to main';
+            status = 'building';
+        } else {
+            res.json({ status: 'ignored' });
+            return;
+        }
+
+        console.log(`Github Webhook: Evento detectado no repo ${repo} (SHA: ${version}) -> Status ${status}`);
 
         await updateRelease('github', repo, {
             version,
-            status: 'building',
-            impact: payload.head_commit?.message || 'Push to main'
+            status,
+            impact
         });
 
         res.json({ status: 'processed' });

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -79,6 +80,8 @@ function generateHistory(baseline: number, count: number, variance: number = 0.2
 }
 
 export class SreStatsService {
+    private railwayStatus: string = 'UP';
+
     constructor() {
         // Iniciar os workers
         this.takeMetricsSnapshot();
@@ -91,9 +94,8 @@ export class SreStatsService {
     private async takeMetricsSnapshot() {
         try {
             const real = await this.getRealMetrics();
-            const cpuUtil = os.loadavg()[0] * 10;
-            const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
-            const utilization = (cpuUtil + memoryUtil) / 2;
+            const { cpu, memory } = this.getContainerMetrics();
+            const utilization = (cpu + memory) / 2;
 
             const queries = [
                 ['latency', real.latency],
@@ -115,6 +117,17 @@ export class SreStatsService {
 
     private async checkExternalHealth() {
         try {
+            // Check Railway Status API directly
+            try {
+                const railwayRes = await fetch('https://status.railway.com/api/v2/summary.json', { signal: AbortSignal.timeout(5000) });
+                if (railwayRes.ok) {
+                    const data = await railwayRes.json();
+                    this.railwayStatus = data?.page?.status || 'UP';
+                }
+            } catch (e) {
+                console.error('Falha ao buscar status do Railway:', e);
+            }
+
             const [rows] = await connection.query('SELECT name, probe_url FROM sre_external_services WHERE probe_url IS NOT NULL') as any;
 
             for (const service of rows) {
@@ -158,11 +171,50 @@ export class SreStatsService {
         }
     }
 
+    private getContainerMetrics() {
+        try {
+            // Check cgroups v2
+            if (fs.existsSync('/sys/fs/cgroup/memory.current') && fs.existsSync('/sys/fs/cgroup/memory.max')) {
+                const memCurrent = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8').trim());
+                let memMax = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim());
+                if (isNaN(memMax) || memMax <= 0) memMax = os.totalmem();
+                const memoryUtil = Math.min(100, (memCurrent / memMax) * 100);
+
+                const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
+                return { cpu: cpuUtil, memory: memoryUtil };
+            }
+
+            // Check cgroups v1
+            if (fs.existsSync('/sys/fs/cgroup/memory/memory.usage_in_bytes') && fs.existsSync('/sys/fs/cgroup/memory/memory.limit_in_bytes')) {
+                const memCurrent = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8').trim());
+                let memMax = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8').trim());
+                if (isNaN(memMax) || memMax <= 0) memMax = os.totalmem();
+
+                const memoryUtil = Math.min(100, (memCurrent / Math.min(memMax, os.totalmem())) * 100);
+                const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
+                return { cpu: cpuUtil, memory: memoryUtil };
+            }
+
+            // Fallback for Windows/macOS or when cgroups are unavailable
+            const memoryUtil = Math.min(100, (1 - os.freemem() / os.totalmem()) * 100);
+            const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
+            return { cpu: cpuUtil, memory: memoryUtil };
+        } catch (e) {
+            const memoryUtil = Math.min(100, (1 - os.freemem() / os.totalmem()) * 100);
+            const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
+            return { cpu: cpuUtil, memory: memoryUtil };
+        }
+    }
+
     private generateAvailabilityData() {
+        const isUp = this.railwayStatus === 'UP';
+        const currentUptime = isUp ? 100 : 0;
+        const currentDowntime = isUp ? 0 : 1; // Simplificado
+
         return {
-            "Minuto": { uptimeCurrent: 100, downtimeMinutes: 0, history: [100, 100, 100, 100, 100] },
-            "Hora": { uptimeCurrent: 99.99, downtimeMinutes: 0.1, history: generateHistory(100, 10, 0.01) },
-            "Dia": { uptimeCurrent: 99.98, downtimeMinutes: 0.5, history: generateHistory(99.99, 10, 0.02) },
+            "Minuto": { uptimeCurrent: currentUptime, downtimeMinutes: currentDowntime, history: generateHistory(currentUptime, 5, 0) },
+            "Hora": { uptimeCurrent: isUp ? 99.99 : 98.5, downtimeMinutes: isUp ? 0.1 : 15, history: generateHistory(isUp ? 100 : 95, 10, 2) },
+            "Dia": { uptimeCurrent: isUp ? 99.98 : 99.2, downtimeMinutes: isUp ? 0.5 : 45, history: generateHistory(isUp ? 99.99 : 98, 10, 1) },
             "Semana": { uptimeCurrent: 99.88, downtimeMinutes: 12.0, history: generateHistory(99.88, 7, 0.05) },
             "Mês": { uptimeCurrent: 99.92, downtimeMinutes: 34.5, history: generateHistory(99.92, 30, 0.1) },
             "Ano": { uptimeCurrent: 99.50, downtimeMinutes: 438, history: generateHistory(99.5, 12, 0.5) }
@@ -220,8 +272,9 @@ export class SreStatsService {
     }
 
     public async getSreStats(): Promise<SreStats> {
-        const cpuUtil = os.loadavg()[0] * 10;
-        const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
+        const { cpu, memory } = this.getContainerMetrics();
+        const cpuUtil = cpu;
+        const memoryUtil = memory;
         const real = await this.getRealMetrics();
 
         // Gerar Alertas Reais baseado em heurísticas SRE

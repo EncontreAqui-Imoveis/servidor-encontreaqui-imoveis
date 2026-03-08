@@ -388,10 +388,30 @@ export class SreStatsService {
 
     public async updateRelease(platform: string, repo: string, data: any) {
         try {
-            await connection.query(
-                'INSERT INTO sre_releases (platform, repo, version, status, impact, applied_at) VALUES (?, ?, ?, ?, ?, ?)',
-                [platform, repo, data.version || 'unknown', data.status || 'success', data.impact || 'Webhook Deploy', data.applied_at || new Date()]
-            );
+            // Check if release with this version already exists
+            const [existing] = await connection.query(
+                'SELECT id FROM sre_releases WHERE version = ? LIMIT 1',
+                [data.version]
+            ) as any;
+
+            if (existing && existing.length > 0) {
+                // Update
+                const fields: string[] = [];
+                const values: any[] = [];
+                if (data.status) { fields.push('status = ?'); values.push(data.status); }
+                if (data.impact) { fields.push('impact = ?'); values.push(data.impact); }
+
+                if (fields.length > 0) {
+                    values.push(existing[0].id);
+                    await connection.query(`UPDATE sre_releases SET ${fields.join(', ')} WHERE id = ?`, values);
+                }
+            } else {
+                // Insert
+                await connection.query(
+                    'INSERT INTO sre_releases (platform, repo, version, status, impact, applied_at) VALUES (?, ?, ?, ?, ?, ?)',
+                    [platform, repo, data.version || 'unknown', data.status || 'success', data.impact || 'Webhook Deploy', data.applied_at || new Date()]
+                );
+            }
             return true;
         } catch (e) {
             console.error('Erro ao persistir release no banco:', e);

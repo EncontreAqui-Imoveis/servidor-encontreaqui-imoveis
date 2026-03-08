@@ -10,5 +10,6 @@ router.get('/sre', authMiddleware, isAdmin, sreController.getStats);
 router.put('/sre/external-services/:name', authMiddleware, isAdmin, sreController.updateService);
 router.post('/webhook/github', sreController.handleGithubWebhook);
 router.post('/webhook/vercel', sreController.handleVercelWebhook);
+router.post('/webhook/railway', sreController.handleRailwayWebhook);
 
 export default router;

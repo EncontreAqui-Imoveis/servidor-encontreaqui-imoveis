@@ -37,8 +37,34 @@ class SreController {
 
         await updateRelease('github', repo, {
             version,
-            status: 'success',
+            status: 'building',
             impact: payload.head_commit?.message || 'Push to main'
+        });
+
+        res.json({ status: 'processed' });
+    }
+
+    public async handleRailwayWebhook(req: Request, res: Response): Promise<void> {
+        const payload = req.body;
+
+        const statusStr = payload.status || 'SUCCESS';
+
+        let status = 'stable';
+        if (statusStr === 'SUCCESS') status = 'success';
+        else if (statusStr === 'FAILED' || statusStr === 'CRASHED') status = 'failed';
+        else if (statusStr === 'BUILDING' || statusStr === 'INITIALIZING') status = 'building';
+        else status = 'stable';
+
+        const repo = payload.project?.name || 'backend';
+        const version = payload.deployment?.meta?.commitHash?.substring(0, 7) || 'unknown';
+        const impact = payload.deployment?.meta?.commitMessage || 'Railway Deploy';
+
+        console.log(`Railway Webhook: Deploy ${statusStr} para ${repo} (SHA: ${version})`);
+
+        await updateRelease('railway', repo, {
+            version,
+            status,
+            impact
         });
 
         res.json({ status: 'processed' });
@@ -49,11 +75,17 @@ class SreController {
         const repo = payload.payload?.name || 'frontend';
         const version = payload.payload?.deployment?.id?.substring(0, 7) || 'deploy';
 
-        console.log(`Vercel Webhook: Deploy detectado para ${repo}`);
+        let status = 'stable';
+        if (payload.type === 'deployment.created') status = 'building';
+        else if (payload.type === 'deployment.succeeded') status = 'success';
+        else if (payload.type === 'deployment.error') status = 'failed';
+        else if (payload.type === 'deployment.canceled') status = 'rollback';
+
+        console.log(`Vercel Webhook: Deploy detectado para ${repo} (Status: ${status})`);
 
         await updateRelease('vercel', repo, {
             version,
-            status: payload.type === 'deployment.succeeded' ? 'success' : 'stable',
+            status,
             impact: 'Vercel Preview/Prod'
         });
 

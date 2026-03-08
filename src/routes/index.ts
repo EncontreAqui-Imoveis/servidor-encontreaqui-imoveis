@@ -21,8 +21,8 @@ mainRoutes.use('/brokers', brokerRoutes);
 mainRoutes.use('/properties', propertyRoutes);
 mainRoutes.use('/negotiations', negotiationRoutes);
 mainRoutes.use('/locations', locationRoutes);
+mainRoutes.use('/admin/dashboard', dashboardRoutes);
 mainRoutes.use('/admin', adminRoutes);
-mainRoutes.use('/admin/dashboard', dashboardRoutes); 
 mainRoutes.use(contractRoutes);
 
 export default mainRoutes;

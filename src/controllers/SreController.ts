@@ -114,7 +114,8 @@ class SreController {
             }
         }
 
-        const repo = payload.project?.name || 'backend';
+        // Force map the Railway project name to 'backend' to match Frontend UI expectations
+        const repo = 'backend';
         const version = payload.deployment?.meta?.commitHash?.substring(0, 7) || 'unknown';
 
         // Customizar impacto baseado no evento extremo
@@ -126,7 +127,8 @@ class SreController {
 
         console.log(`Railway Webhook: Evento ${eventType} para ${repo} (SHA: ${version}) -> Status ${status}`);
 
-        await updateRelease('railway', repo, {
+        // Save as 'github' platform so it groups correctly in the frontend UI with the git commits
+        await updateRelease('github', repo, {
             version,
             status: status === 'warning' ? 'failed' : status, // Mapear warning tbm para visual failure por agora se for critico
             impact

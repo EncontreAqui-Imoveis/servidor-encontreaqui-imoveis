@@ -86,16 +86,14 @@ export class SreStatsService {
 
         this.checkExternalHealth();
         setInterval(() => this.checkExternalHealth(), 10 * 60 * 1000);
-
-        this.seedRealGitHistory();
     }
 
     private async takeMetricsSnapshot() {
         try {
             const real = await this.getRealMetrics();
-            const cpuUtil = Math.min(100, Math.max(0, os.loadavg()[0] * 10));
-            const memoryUtil = Math.min(100, Math.max(0, (1 - os.freemem() / os.totalmem()) * 100));
-            const utilization = Math.min(100, Math.max(0, (cpuUtil + memoryUtil) / 2));
+            const cpuUtil = os.loadavg()[0] * 10;
+            const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
+            const utilization = (cpuUtil + memoryUtil) / 2;
 
             const queries = [
                 ['latency', real.latency],
@@ -139,29 +137,6 @@ export class SreStatsService {
             }
         } catch (e) {
             console.error('Erro no worker de health check:', e);
-        }
-    }
-
-    private async seedRealGitHistory() {
-        try {
-            const [rows] = await connection.query('SELECT COUNT(*) as count FROM sre_releases') as any;
-            if (rows[0].count > 0) return;
-
-            console.log('Seeding real Git history...');
-            const { stdout } = await execAsync('git log -n 5 --pretty=format:"%h|%s|%at"');
-            const lines = stdout.split('\n');
-
-            for (const line of lines) {
-                const [sha, message, timestamp] = line.split('|');
-                await this.updateRelease('github', 'backend', {
-                    version: sha,
-                    status: 'success',
-                    impact: message,
-                    applied_at: new Date(Number(timestamp) * 1000)
-                });
-            }
-        } catch (e) {
-            console.error('Falha ao ler histórico Git real:', e);
         }
     }
 
@@ -221,9 +196,9 @@ export class SreStatsService {
             }
 
             return {
-                latency: Math.max(0, p99 || 45),
-                errorRate: Math.min(100, Math.max(0, totalReqs > 0 ? (errorReqs / totalReqs) * 100 : 0)),
-                rps: Math.max(0, totalReqs / 60)
+                latency: p99 || 45,
+                errorRate: totalReqs > 0 ? (errorReqs / totalReqs) * 100 : 0,
+                rps: totalReqs / 60
             };
         } catch (e) {
             return { latency: 45, errorRate: 0, rps: 0.5 };
@@ -245,8 +220,8 @@ export class SreStatsService {
     }
 
     public async getSreStats(): Promise<SreStats> {
-        const cpuUtil = Math.min(100, Math.max(0, os.loadavg()[0] * 10));
-        const memoryUtil = Math.min(100, Math.max(0, (1 - os.freemem() / os.totalmem()) * 100));
+        const cpuUtil = os.loadavg()[0] * 10;
+        const memoryUtil = (1 - os.freemem() / os.totalmem()) * 100;
         const real = await this.getRealMetrics();
 
         // Gerar Alertas Reais baseado em heurísticas SRE
@@ -357,13 +332,8 @@ export class SreStatsService {
 
             return grouped;
         } catch (e) {
-            // Fallback com SHAs reais
-            return {
-                "github:backend": [
-                    { version: "7a2c3d4", date: "Hoje", time: "18:10", status: "success", impact: "Refatoração Core" },
-                    { version: "f4b1c2d", date: "Hoje", time: "14:20", status: "stable", impact: "Fix SQL" }
-                ]
-            };
+            // Em vez de retornar fakes, retorna vazio se a tabela não existir ou der erro
+            return {};
         }
     }
 

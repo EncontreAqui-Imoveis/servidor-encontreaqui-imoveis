@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import JSZip from 'jszip';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
@@ -84,6 +85,10 @@ interface ContractDocumentRow extends RowDataPacket {
   document_type: string | null;
   metadata_json: unknown;
   created_at: Date | string | null;
+}
+
+interface ContractDocumentDownloadRow extends ContractDocumentRow {
+  file_content: Buffer;
 }
 
 interface ContractDocumentForDeleteRow extends RowDataPacket {
@@ -2289,6 +2294,65 @@ class ContractController {
     } catch (error) {
       console.error('Erro ao buscar contrato:', error);
       return res.status(500).json({ error: 'Falha ao buscar contrato.' });
+    }
+  }
+
+  async downloadDocumentsZip(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    try {
+      const contract = await fetchContractById(contractId);
+      if (!contract) {
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (!canAccessContract(req, contract)) {
+        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
+      }
+
+      const documents = await queryContractRows<ContractDocumentDownloadRow>(
+        `
+          SELECT id, type, document_type, metadata_json, created_at, file_content
+          FROM negotiation_documents
+          WHERE ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
+          ORDER BY created_at DESC, id DESC
+        `,
+        [contract.negotiation_id, contract.id]
+      );
+
+      if (documents.length === 0) {
+        return res.status(404).json({
+          error: 'Nenhum documento vinculado a este contrato foi encontrado.',
+        });
+      }
+
+      const zip = new JSZip();
+      for (const document of documents) {
+        const mapped = mapDocument(document);
+        const fallbackName =
+          mapped.originalFileName ??
+          `${String(mapped.documentType ?? 'documento').trim() || 'documento'}_${mapped.id}.bin`;
+        zip.file(fallbackName, document.file_content);
+      }
+
+      const fileNameBase =
+        String(contract.property_code ?? '').trim() ||
+        `contrato_${contract.id}`;
+      const fileBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${fileNameBase}_documentos.zip"`
+      );
+      res.setHeader('Content-Length', String(fileBuffer.length));
+      return res.status(200).send(fileBuffer);
+    } catch (error) {
+      console.error('Erro ao gerar ZIP dos documentos do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao gerar o arquivo ZIP.' });
     }
   }
 

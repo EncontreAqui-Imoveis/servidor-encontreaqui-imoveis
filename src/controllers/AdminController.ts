@@ -1895,14 +1895,45 @@ class AdminController {
   }
 
   async deleteUser(req: Request, res: Response) {
-    const { id } = req.params;
+    const userId = Number(req.params.id);
 
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({ error: 'Identificador de usuario invalido.' });
+    }
+
+    const tx = await adminDb.getConnection();
     try {
-      await adminDb.query('DELETE FROM users WHERE id = ?', [id]);
+      await tx.beginTransaction();
+
+      try {
+        await tx.query('UPDATE negotiation_history SET actor_id = NULL WHERE actor_id = ?', [
+          userId,
+        ]);
+      } catch (historyError) {
+        console.warn(
+          'Falha ao anonimizar actor_id em negotiation_history; removendo historico vinculado ao usuario.',
+          historyError
+        );
+        await tx.query('DELETE FROM negotiation_history WHERE actor_id = ?', [userId]);
+      }
+
+      const [result] = await tx.query<ResultSetHeader>('DELETE FROM users WHERE id = ?', [
+        userId,
+      ]);
+
+      if (result.affectedRows === 0) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Usuario nao encontrado.' });
+      }
+
+      await tx.commit();
       return res.status(200).json({ message: 'Usuario deletado com sucesso.' });
     } catch (error) {
+      await tx.rollback();
       console.error('Erro ao deletar usuario:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 

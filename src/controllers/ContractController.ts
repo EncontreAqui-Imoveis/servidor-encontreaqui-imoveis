@@ -469,6 +469,32 @@ function resolveActingBrokerName(req: AuthRequest, contract: ContractRow): strin
   return userId > 0 ? `Corretor #${userId}` : 'Corretor';
 }
 
+function resolveContractPropertyTitle(contract: ContractRow): string {
+  const title = String(contract.property_title ?? '').trim();
+  return title || 'Imóvel sem título';
+}
+
+function resolveApprovalSideLabel(
+  contract: ContractRow,
+  side: 'seller' | 'buyer'
+): string {
+  if (isDoubleEndedDeal(contract)) {
+    return 'documentação do contrato';
+  }
+
+  return side === 'seller' ? 'documentação do captador' : 'documentação do vendedor';
+}
+
+function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
+  return Array.from(
+    new Set(
+      [contract.capturing_broker_id, contract.selling_broker_id]
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+    )
+  );
+}
+
 function toDocumentCount(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -757,6 +783,78 @@ function resetWorkflowMetadataForRestart(value: unknown): Record<string, unknown
   }
 
   return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+}
+
+function resetWorkflowMetadataForStepBack(value: unknown): Record<string, unknown> | null {
+  const metadata = parseStoredJsonObject(value);
+  const nextMetadata = { ...metadata };
+  const keysToRemove = [
+    'signatureMethod',
+    'signatureMethodDeclaredAt',
+    'signatureMethodDeclaredBy',
+    'signatureMethodDeclaredByName',
+    'signedContractUploadedOnlineAt',
+    'signedContractUploadedOnlineBy',
+    'agencySignedContractReceivedAt',
+    'agencySignedContractReceivedBy',
+  ];
+
+  for (const key of keysToRemove) {
+    delete nextMetadata[key];
+  }
+
+  return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+}
+
+function resolveRollbackDocumentTypes(targetStatus: ContractStatus): string[] {
+  if (targetStatus === 'IN_DRAFT') {
+    return ['contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria', 'outro'];
+  }
+
+  if (targetStatus === 'AWAITING_DOCS') {
+    return [
+      'contrato_minuta',
+      'contrato_assinado',
+      'comprovante_pagamento',
+      'boleto_vistoria',
+      'outro',
+    ];
+  }
+
+  return [];
+}
+
+async function fetchDocumentsForStepBackCleanup(
+  tx: PoolConnection,
+  contract: Pick<ContractRow, 'id' | 'negotiation_id'>,
+  targetStatus: ContractStatus
+): Promise<ContractDocumentForDeleteRow[]> {
+  const documentTypes = resolveRollbackDocumentTypes(targetStatus);
+  if (documentTypes.length === 0) {
+    return [];
+  }
+
+  const placeholders = documentTypes.map(() => '?').join(', ');
+  const [rows] = await tx.query<ContractDocumentForDeleteRow[]>(
+    `
+      SELECT id, type, document_type, metadata_json
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND COALESCE(document_type, '') IN (${placeholders})
+        AND COALESCE(type, '') <> 'proposal'
+        AND (
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+          OR (
+            JSON_EXTRACT(metadata_json, '$.contractId') IS NULL
+            AND COALESCE(document_type, '') <> 'outro'
+          )
+        )
+      ORDER BY id DESC
+    `,
+    [contract.negotiation_id, ...documentTypes, contract.id]
+  );
+
+  return rows;
 }
 
 async function cleanupContractDocumentAssets(
@@ -1390,6 +1488,10 @@ class ContractController {
       }
 
       const nextStatus = CONTRACT_STATUS_FLOW[targetIndex];
+      const documentsToCleanup =
+        direction === 'previous'
+          ? await fetchDocumentsForStepBackCleanup(tx, contract, nextStatus)
+          : [];
 
       if (nextStatus === 'FINALIZED') {
         await tx.rollback();
@@ -1419,11 +1521,79 @@ class ContractController {
         [nextStatus, contractId]
       );
 
+      if (direction === 'previous' && nextStatus === 'AWAITING_DOCS') {
+        await tx.query(
+          `
+            UPDATE contracts
+            SET
+              seller_approval_status = 'PENDING',
+              buyer_approval_status = 'PENDING',
+              seller_approval_reason = NULL,
+              buyer_approval_reason = NULL,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [contractId]
+        );
+      }
+
+      if (direction === 'previous' && documentsToCleanup.length > 0) {
+        const placeholders = documentsToCleanup.map(() => '?').join(', ');
+        await tx.query(
+          `
+            DELETE FROM negotiation_documents
+            WHERE id IN (${placeholders})
+          `,
+          documentsToCleanup.map((document) => Number(document.id))
+        );
+      }
+
+      if (direction === 'previous') {
+        const nextWorkflowMetadata = resetWorkflowMetadataForStepBack(
+          contract.workflow_metadata
+        );
+
+        if (nextWorkflowMetadata) {
+          await tx.query(
+            `
+              UPDATE contracts
+              SET workflow_metadata = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `,
+            [JSON.stringify(nextWorkflowMetadata), contractId]
+          );
+        } else {
+          await tx.query(
+            `
+              UPDATE contracts
+              SET workflow_metadata = NULL, updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `,
+            [contractId]
+          );
+        }
+      }
+
       const updated = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
 
+      if (direction === 'previous' && documentsToCleanup.length > 0) {
+        await cleanupContractDocumentAssets(documentsToCleanup, {
+          action: 'contract_step_back_cleanup',
+          contractId,
+          negotiationId: contract.negotiation_id,
+        });
+      }
+
+      const message =
+        direction === 'previous' && nextStatus === 'AWAITING_DOCS'
+          ? 'Contrato atualizado para a aba de documentos pendentes.'
+          : direction === 'previous' && nextStatus === 'IN_DRAFT'
+            ? 'Contrato atualizado para a aba de confecção da minuta.'
+            : `Contrato atualizado para ${nextStatus}.`;
+
       return res.status(200).json({
-        message: `Contrato atualizado para ${nextStatus}.`,
+        message,
         contract: updated ? mapContract(updated) : null,
       });
     } catch (error) {
@@ -1544,6 +1714,36 @@ class ContractController {
 
       const updated = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
+
+      if (nextSideStatus === 'APPROVED_WITH_RES' && reasonText.length > 0) {
+        const recipientIds = resolveNegotiationBrokerRecipientIds(contract);
+        const propertyTitle = resolveContractPropertyTitle(contract);
+        const sideLabel = resolveApprovalSideLabel(contract, side as 'seller' | 'buyer');
+
+        for (const recipientId of recipientIds) {
+          try {
+            await createUserNotification({
+              type: 'negotiation',
+              title: 'Contrato aprovado com ressalvas',
+              message: `O admin aprovou com ressalvas a ${sideLabel} do contrato do imóvel "${propertyTitle}". Observação: ${reasonText}`,
+              recipientId,
+              relatedEntityId: Number(contract.property_id),
+              metadata: {
+                contractId,
+                negotiationId: contract.negotiation_id,
+                side: isDoubleEndedDeal(contract) ? 'both' : side,
+                status: nextSideStatus,
+                reason: reasonText,
+              },
+            });
+          } catch (notificationError) {
+            console.error(
+              'Falha ao notificar corretor sobre aprovação com ressalvas do contrato:',
+              notificationError
+            );
+          }
+        }
+      }
 
       return res.status(200).json({
         message: 'Avaliação do lado atualizada com sucesso.',
@@ -1985,6 +2185,27 @@ class ContractController {
           [contractId]
         );
       }
+
+      await tx.query(
+        `
+          UPDATE negotiations
+          SET status = 'IN_NEGOTIATION'
+          WHERE id = ?
+        `,
+        [contract.negotiation_id]
+      );
+
+      await tx.query(
+        `
+          UPDATE properties
+          SET
+            status = 'negociacao',
+            visibility = 'HIDDEN',
+            lifecycle_status = 'AVAILABLE'
+          WHERE id = ?
+        `,
+        [contract.property_id]
+      );
 
       const updatedContract = await fetchContractForUpdate(tx, contractId);
       await tx.commit();

@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
+const { txMock, getConnectionMock, queryMock, createUserNotificationMock } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -16,6 +16,7 @@ const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
     txMock: tx,
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
+    createUserNotificationMock: vi.fn(),
   };
 });
 
@@ -26,6 +27,11 @@ vi.mock('../../src/database/connection', () => ({
     query: queryMock,
     execute: vi.fn(),
   },
+}));
+
+vi.mock('../../src/services/notificationService', () => ({
+  createAdminNotification: vi.fn(),
+  createUserNotification: createUserNotificationMock,
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -114,6 +120,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     txMock.commit.mockResolvedValue(undefined);
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
+    createUserNotificationMock.mockResolvedValue(undefined);
 
     txMock.query.mockImplementation(
       async (sql: string, params: unknown[] = []) => {
@@ -198,6 +205,28 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(secondResponse.body.contract.sellerApprovalStatus).toBe('APPROVED');
     expect(secondResponse.body.contract.buyerApprovalStatus).toBe(
       'APPROVED_WITH_RES'
+    );
+    expect(createUserNotificationMock).toHaveBeenCalledTimes(2);
+    expect(createUserNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'negotiation',
+        title: 'Contrato aprovado com ressalvas',
+        recipientId: 30001,
+        relatedEntityId: 101,
+        message: expect.stringContaining('Observação: Documentos válidos com ressalva contratual.'),
+        metadata: expect.objectContaining({
+          contractId: 'contract-1',
+          negotiationId: 'neg-1',
+          side: 'buyer',
+          status: 'APPROVED_WITH_RES',
+          reason: 'Documentos válidos com ressalva contratual.',
+        }),
+      })
+    );
+    expect(createUserNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientId: 30002,
+      })
     );
   });
 

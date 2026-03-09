@@ -141,6 +141,9 @@ describe('Admin management for finalized contracts', () => {
 
   let contractState: MutableContractState | null;
   let documentsState: MutableDocument[];
+  let negotiationStatus: string;
+  let propertyStatus: string;
+  let propertyLifecycleStatus: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -176,6 +179,9 @@ describe('Admin management for finalized contracts', () => {
         metadata_json: JSON.stringify({ contractId: 'contract-old-1' }),
       },
     ];
+    negotiationStatus = 'SOLD';
+    propertyStatus = 'sold';
+    propertyLifecycleStatus = 'SOLD';
 
     getConnectionMock.mockResolvedValue(txMock);
     queryMock.mockResolvedValue([]);
@@ -225,6 +231,17 @@ describe('Admin management for finalized contracts', () => {
           contractState.seller_approval_reason = null;
           contractState.buyer_approval_reason = null;
         }
+        return [{ affectedRows: 1 }];
+      }
+
+      if (sql.includes("UPDATE negotiations") && sql.includes("SET status = 'IN_NEGOTIATION'")) {
+        negotiationStatus = 'IN_NEGOTIATION';
+        return [{ affectedRows: 1 }];
+      }
+
+      if (sql.includes("UPDATE properties") && sql.includes("status = 'negociacao'")) {
+        propertyStatus = 'negociacao';
+        propertyLifecycleStatus = 'AVAILABLE';
         return [{ affectedRows: 1 }];
       }
 
@@ -289,6 +306,9 @@ describe('Admin management for finalized contracts', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
+    expect(negotiationStatus).toBe('IN_NEGOTIATION');
+    expect(propertyStatus).toBe('negociacao');
+    expect(propertyLifecycleStatus).toBe('AVAILABLE');
     expect(documentsState.map((item) => item.id)).toEqual([9003]);
     expect(deleteCloudinaryAssetMock).toHaveBeenCalledTimes(2);
     expect(response.body.message).toContain('documentos vinculados foram removidos');

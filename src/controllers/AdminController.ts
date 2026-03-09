@@ -9,7 +9,7 @@ import {
   sanitizeAddressInput,
   signAdminToken,
 } from '../services/adminControllerSupport';
-import cloudinary, { uploadToCloudinary } from '../config/cloudinary';
+import cloudinary, { deleteCloudinaryAsset, uploadToCloudinary } from '../config/cloudinary';
 import { createUserNotification, notifyAdmins } from '../services/notificationService';
 import { sendPushNotifications, type PushNotificationResult } from '../services/pushNotificationService';
 import {
@@ -81,6 +81,27 @@ const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'lifecycle_status',
   'video_url',
 ]);
+
+async function cleanupPropertyMediaAssets(
+  urls: Array<string | null | undefined>,
+  context: string
+): Promise<void> {
+  for (const rawUrl of urls) {
+    const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+    if (!url) {
+      continue;
+    }
+
+    try {
+      await deleteCloudinaryAsset({ url, invalidate: true });
+    } catch (error) {
+      console.error(`Erro ao excluir asset do Cloudinary (${context}):`, {
+        url,
+        error,
+      });
+    }
+  }
+}
 const CLOUDINARY_IMAGE_ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'svg'];
 const CLOUDINARY_VIDEO_ALLOWED_FORMATS = ['mp4', 'mov', 'avi', 'webm', '3gp'];
 
@@ -1901,7 +1922,28 @@ class AdminController {
     const { id } = req.params;
 
     try {
+      const [propertyRows] = await adminDb.query<RowDataPacket[]>(
+        'SELECT id, video_url FROM properties WHERE id = ?',
+        [id]
+      );
+
+      if (propertyRows.length === 0) {
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      const [imageRows] = await adminDb.query<RowDataPacket[]>(
+        'SELECT image_url FROM property_images WHERE property_id = ?',
+        [id]
+      );
+      const mediaUrls = [
+        ...imageRows.map((row) =>
+          typeof row.image_url === 'string' ? row.image_url : null
+        ),
+        typeof propertyRows[0]?.video_url === 'string' ? propertyRows[0].video_url : null,
+      ];
+
       await adminDb.query('DELETE FROM properties WHERE id = ?', [id]);
+      await cleanupPropertyMediaAssets(mediaUrls, 'admin_delete_property');
       return res.status(200).json({ message: 'Imovel deletado com sucesso.' });
     } catch (error) {
       console.error('Erro ao deletar imovel:', error);
@@ -3770,6 +3812,13 @@ class AdminController {
     }
 
     try {
+      const [imageRows] = await adminDb.query<RowDataPacket[]>(
+        'SELECT image_url FROM property_images WHERE id = ? AND property_id = ?',
+        [imageId, propertyId]
+      );
+      const imageUrl =
+        typeof imageRows[0]?.image_url === 'string' ? imageRows[0].image_url : null;
+
       const [imageCountRows] = await adminDb.query<RowDataPacket[]>(
         'SELECT COUNT(*) AS total FROM property_images WHERE property_id = ?',
         [propertyId]
@@ -3788,6 +3837,7 @@ class AdminController {
         return res.status(404).json({ error: 'Imagem nao encontrada para este imovel.' });
       }
 
+      await cleanupPropertyMediaAssets([imageUrl], 'admin_delete_property_image');
       return res.status(200).json({ message: 'Imagem removida com sucesso.' });
     } catch (error) {
       console.error('Erro ao remover imagem:', error);
@@ -3835,6 +3885,13 @@ class AdminController {
     }
 
     try {
+      const [propertyRows] = await adminDb.query<RowDataPacket[]>(
+        'SELECT video_url FROM properties WHERE id = ?',
+        [propertyId]
+      );
+      const videoUrl =
+        typeof propertyRows[0]?.video_url === 'string' ? propertyRows[0].video_url : null;
+
       const [result] = await adminDb.query<ResultSetHeader>(
         'UPDATE properties SET video_url = NULL WHERE id = ?',
         [propertyId]
@@ -3844,6 +3901,7 @@ class AdminController {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
+      await cleanupPropertyMediaAssets([videoUrl], 'admin_delete_property_video');
       return res.status(200).json({ message: 'Video removido com sucesso.' });
     } catch (error) {
       console.error('Erro ao remover video:', error);

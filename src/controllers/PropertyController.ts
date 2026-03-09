@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
-import { uploadToCloudinary } from "../config/cloudinary";
+import { deleteCloudinaryAsset, uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
 import { notifyAdmins } from "../services/notificationService";
 import {
@@ -117,6 +117,27 @@ const RECURRENCE_INTERVALS = new Set<RecurrenceInterval>([
   "monthly",
   "yearly",
 ]);
+
+async function cleanupPropertyMediaAssets(
+  urls: Array<string | null | undefined>,
+  context: string,
+): Promise<void> {
+  for (const rawUrl of urls) {
+    const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+    if (!url) {
+      continue;
+    }
+
+    try {
+      await deleteCloudinaryAsset({ url, invalidate: true });
+    } catch (error) {
+      console.error(`Erro ao excluir asset do Cloudinary (${context}):`, {
+        url,
+        error,
+      });
+    }
+  }
+}
 
 interface PropertyRow extends RowDataPacket {
   id: number;
@@ -2389,7 +2410,7 @@ class PropertyController {
 
     try {
       const propertyRows = await runPropertyQuery<RowDataPacket[]>(
-        'SELECT broker_id, owner_id FROM properties WHERE id = ?',
+        'SELECT broker_id, owner_id, video_url FROM properties WHERE id = ?',
         [propertyId]
       );
 
@@ -2405,7 +2426,19 @@ class PropertyController {
         return res.status(403).json({ error: 'Voce nao tem permissao para deletar este imovel.' });
       }
 
+      const imageRows = await runPropertyQuery<RowDataPacket[]>(
+        'SELECT image_url FROM property_images WHERE property_id = ?',
+        [propertyId]
+      );
+      const mediaUrls = [
+        ...imageRows.map((row) =>
+          typeof row.image_url === 'string' ? row.image_url : null
+        ),
+        typeof property.video_url === 'string' ? property.video_url : null,
+      ];
+
       await runPropertyQuery('DELETE FROM properties WHERE id = ?', [propertyId]);
+      await cleanupPropertyMediaAssets(mediaUrls, 'delete_property');
 
       return res.status(200).json({ message: 'Imóvel deletado com sucesso!' });
     } catch (error) {

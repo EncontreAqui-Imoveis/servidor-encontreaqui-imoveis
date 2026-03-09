@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
+import { deleteCloudinaryAsset } from '../config/cloudinary';
 import type { AuthRequest } from '../middlewares/auth';
 import { getRequestId } from '../middlewares/requestContext';
 import {
@@ -171,6 +172,12 @@ interface ContractDocumentGateCounts {
 
 type ContractDocumentDeleteScope = 'linked_only' | 'linked_or_legacy';
 
+type CloudinaryAssetReference = {
+  publicId: string | null;
+  url: string | null;
+  resourceType: string | null;
+};
+
 function normalizeJsonObject(
   value: unknown,
   fieldName: string,
@@ -228,6 +235,19 @@ function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   }
 
   return {};
+}
+
+function readMetadataText(
+  metadata: Record<string, unknown>,
+  keys: string[]
+): string | null {
+  for (const key of keys) {
+    const value = String(metadata[key] ?? '').trim();
+    if (value) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function mergeStoredJsonObject(
@@ -679,6 +699,105 @@ function logContractAdminAudit(
     action,
     ...details,
   });
+}
+
+function extractCloudinaryAssetReference(
+  document: Pick<ContractDocumentForDeleteRow, 'metadata_json'>
+): CloudinaryAssetReference | null {
+  const metadata = parseStoredJsonObject(document.metadata_json);
+  const publicId = readMetadataText(metadata, [
+    'cloudinaryPublicId',
+    'cloudinary_public_id',
+    'publicId',
+    'public_id',
+  ]);
+  const url = readMetadataText(metadata, [
+    'cloudinaryUrl',
+    'cloudinary_url',
+    'secureUrl',
+    'secure_url',
+    'fileUrl',
+    'file_url',
+    'url',
+  ]);
+  const resourceType = readMetadataText(metadata, [
+    'cloudinaryResourceType',
+    'cloudinary_resource_type',
+    'resourceType',
+    'resource_type',
+  ]);
+
+  if (!publicId && !url) {
+    return null;
+  }
+
+  return {
+    publicId,
+    url,
+    resourceType,
+  };
+}
+
+function resetWorkflowMetadataForRestart(value: unknown): Record<string, unknown> | null {
+  const metadata = parseStoredJsonObject(value);
+  const nextMetadata = { ...metadata };
+  const keysToRemove = [
+    'signatureMethod',
+    'signatureMethodDeclaredAt',
+    'signatureMethodDeclaredBy',
+    'signatureMethodDeclaredByName',
+    'signedContractUploadedOnlineAt',
+    'signedContractUploadedOnlineBy',
+    'agencySignedContractReceivedAt',
+    'agencySignedContractReceivedBy',
+  ];
+
+  for (const key of keysToRemove) {
+    delete nextMetadata[key];
+  }
+
+  return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
+}
+
+async function cleanupContractDocumentAssets(
+  documents: ContractDocumentForDeleteRow[],
+  context: {
+    action: string;
+    contractId: string;
+    negotiationId: string;
+  }
+): Promise<{ attempted: number; failed: number }> {
+  let attempted = 0;
+  let failed = 0;
+
+  for (const document of documents) {
+    const assetReference = extractCloudinaryAssetReference(document);
+    if (!assetReference) {
+      continue;
+    }
+
+    attempted += 1;
+    try {
+      await deleteCloudinaryAsset({
+        publicId: assetReference.publicId,
+        url: assetReference.url,
+        resourceType: assetReference.resourceType,
+        invalidate: true,
+      });
+    } catch (error) {
+      failed += 1;
+      console.error('Falha ao excluir asset externo do documento do contrato:', {
+        action: context.action,
+        contractId: context.contractId,
+        negotiationId: context.negotiationId,
+        documentId: Number(document.id ?? 0),
+        documentType: document.document_type ?? null,
+        error,
+      });
+    }
+  }
+
+  return { attempted, failed };
 }
 
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
@@ -1813,26 +1932,81 @@ class ContractController {
         });
       }
 
-      await tx.query(
-        `
-          UPDATE contracts
-          SET status = 'AWAITING_SIGNATURES', updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
+      const contractDocuments = await fetchDocumentsForContractScope(
+        tx,
+        contract,
+        'linked_or_legacy'
       );
+
+      if (contractDocuments.length > 0) {
+        await tx.query(
+          `
+            DELETE FROM negotiation_documents
+            WHERE ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
+          `,
+          [contract.negotiation_id, contract.id]
+        );
+      }
+
+      const nextWorkflowMetadata = resetWorkflowMetadataForRestart(
+        contract.workflow_metadata
+      );
+
+      if (nextWorkflowMetadata) {
+        await tx.query(
+          `
+            UPDATE contracts
+            SET
+              status = 'AWAITING_DOCS',
+              seller_approval_status = 'PENDING',
+              buyer_approval_status = 'PENDING',
+              seller_approval_reason = NULL,
+              buyer_approval_reason = NULL,
+              workflow_metadata = CAST(? AS JSON),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [JSON.stringify(nextWorkflowMetadata), contractId]
+        );
+      } else {
+        await tx.query(
+          `
+            UPDATE contracts
+            SET
+              status = 'AWAITING_DOCS',
+              seller_approval_status = 'PENDING',
+              buyer_approval_status = 'PENDING',
+              seller_approval_reason = NULL,
+              buyer_approval_reason = NULL,
+              workflow_metadata = NULL,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [contractId]
+        );
+      }
 
       const updatedContract = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
+
+      const cleanupStats = await cleanupContractDocumentAssets(contractDocuments, {
+        action: 'reopen_finalized_contract',
+        contractId,
+        negotiationId: contract.negotiation_id,
+      });
 
       logContractAdminAudit(req, 'reopen_finalized_contract', {
         contractId,
         negotiationId: contract.negotiation_id,
         propertyId: Number(contract.property_id),
+        deletedDocumentCount: contractDocuments.length,
+        cloudinaryCleanupAttempted: cleanupStats.attempted,
+        cloudinaryCleanupFailed: cleanupStats.failed,
       });
 
       return res.status(200).json({
-        message: 'Contrato reiniciado com sucesso.',
+        message:
+          'Contrato reiniciado com sucesso. Todos os documentos vinculados foram removidos.',
         contract: updatedContract ? mapContract(updatedContract) : null,
       });
     } catch (error) {
@@ -2163,12 +2337,20 @@ class ContractController {
 
       await tx.commit();
 
+      const cleanupStats = await cleanupContractDocumentAssets([document], {
+        action: 'delete_finalized_document',
+        contractId,
+        negotiationId: contract.negotiation_id,
+      });
+
       logContractAdminAudit(req, 'delete_finalized_document', {
         contractId,
         negotiationId: contract.negotiation_id,
         propertyId: Number(contract.property_id),
         documentId,
         documentType: document.document_type ?? null,
+        cloudinaryCleanupAttempted: cleanupStats.attempted,
+        cloudinaryCleanupFailed: cleanupStats.failed,
       });
 
       return res.status(200).json({
@@ -2234,11 +2416,19 @@ class ContractController {
 
       await tx.commit();
 
+      const cleanupStats = await cleanupContractDocumentAssets(contractDocuments, {
+        action: 'delete_finalized_contract',
+        contractId,
+        negotiationId: contract.negotiation_id,
+      });
+
       logContractAdminAudit(req, 'delete_finalized_contract', {
         contractId,
         negotiationId: contract.negotiation_id,
         propertyId: Number(contract.property_id),
         deletedDocumentCount: contractDocuments.length,
+        cloudinaryCleanupAttempted: cleanupStats.attempted,
+        cloudinaryCleanupFailed: cleanupStats.failed,
       });
 
       return res.status(200).json({

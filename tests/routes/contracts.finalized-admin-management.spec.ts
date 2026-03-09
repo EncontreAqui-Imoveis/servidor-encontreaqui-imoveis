@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
+const { txMock, getConnectionMock, queryMock, deleteCloudinaryAssetMock } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -16,6 +16,7 @@ const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
     txMock: tx,
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
+    deleteCloudinaryAssetMock: vi.fn(),
   };
 });
 
@@ -26,6 +27,13 @@ vi.mock('../../src/database/connection', () => ({
     query: queryMock,
     execute: vi.fn(),
   },
+}));
+
+vi.mock('../../src/config/cloudinary', () => ({
+  __esModule: true,
+  default: {},
+  uploadToCloudinary: vi.fn(),
+  deleteCloudinaryAsset: deleteCloudinaryAssetMock,
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -143,14 +151,22 @@ describe('Admin management for finalized contracts', () => {
         negotiation_id: 'neg-final-1',
         type: 'contract',
         document_type: 'contrato_assinado',
-        metadata_json: JSON.stringify({ contractId: 'contract-final-1' }),
+        metadata_json: JSON.stringify({
+          contractId: 'contract-final-1',
+          cloudinaryPublicId: 'contracts/final/contract-final-1/contrato_assinado',
+          cloudinaryResourceType: 'raw',
+        }),
       },
       {
         id: 9002,
         negotiation_id: 'neg-final-1',
         type: 'other',
         document_type: 'doc_identidade',
-        metadata_json: JSON.stringify({ side: 'seller' }),
+        metadata_json: JSON.stringify({
+          side: 'seller',
+          cloudinaryUrl:
+            'https://res.cloudinary.com/demo/raw/upload/v123/contracts/final/contract-final-1/doc_identidade.pdf',
+        }),
       },
       {
         id: 9003,
@@ -167,6 +183,7 @@ describe('Admin management for finalized contracts', () => {
     txMock.commit.mockResolvedValue(undefined);
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
+    deleteCloudinaryAssetMock.mockResolvedValue({ deleted: true });
 
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
@@ -200,9 +217,13 @@ describe('Admin management for finalized contracts', () => {
         return [scopedDocs];
       }
 
-      if (sql.includes("SET status = 'AWAITING_SIGNATURES'")) {
+      if (sql.includes("status = 'AWAITING_DOCS'")) {
         if (contractState) {
-          contractState.status = 'AWAITING_SIGNATURES';
+          contractState.status = 'AWAITING_DOCS';
+          contractState.seller_approval_status = 'PENDING';
+          contractState.buyer_approval_status = 'PENDING';
+          contractState.seller_approval_reason = null;
+          contractState.buyer_approval_reason = null;
         }
         return [{ affectedRows: 1 }];
       }
@@ -263,11 +284,14 @@ describe('Admin management for finalized contracts', () => {
     });
   });
 
-  it('reopens a finalized contract to AWAITING_SIGNATURES', async () => {
+  it('restarts a finalized contract to AWAITING_DOCS and removes linked documents', async () => {
     const response = await request(app).put('/admin/contracts/contract-final-1/reopen').send({});
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(response.body.contract.status).toBe('AWAITING_DOCS');
+    expect(documentsState.map((item) => item.id)).toEqual([9003]);
+    expect(deleteCloudinaryAssetMock).toHaveBeenCalledTimes(2);
+    expect(response.body.message).toContain('documentos vinculados foram removidos');
   });
 
   it('updates commission_data for a finalized contract', async () => {
@@ -322,5 +346,6 @@ describe('Admin management for finalized contracts', () => {
     expect(response.status).toBe(200);
     expect(contractState).toBeNull();
     expect(documentsState.map((item) => item.id)).toEqual([9003]);
+    expect(deleteCloudinaryAssetMock).toHaveBeenCalledTimes(2);
   });
 });

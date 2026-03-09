@@ -30,6 +30,134 @@ export const uploadToCloudinary = (
   return uploadByStream(file, targetFolder);
 };
 
+type CloudinaryResourceType = 'image' | 'video' | 'raw';
+
+type DeleteCloudinaryAssetInput = {
+  publicId?: string | null;
+  url?: string | null;
+  resourceType?: string | null;
+  invalidate?: boolean;
+};
+
+function normalizeResourceType(value: unknown): CloudinaryResourceType | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'image' || normalized === 'video' || normalized === 'raw') {
+    return normalized;
+  }
+  return null;
+}
+
+function resolveCloudinaryReferenceFromUrl(urlValue: string): {
+  publicId: string;
+  resourceType: CloudinaryResourceType | null;
+} | null {
+  try {
+    const parsed = new URL(urlValue);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'res.cloudinary.com') {
+      return null;
+    }
+
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const resourceIndex = segments.findIndex(
+      (segment, index) =>
+        normalizeResourceType(segment) != null && segments[index + 1] === 'upload'
+    );
+
+    if (resourceIndex < 0) {
+      return null;
+    }
+
+    const resourceType = normalizeResourceType(segments[resourceIndex]);
+    const afterUpload = segments.slice(resourceIndex + 2);
+    const versionIndex = afterUpload.findIndex((segment) => /^v\d+$/i.test(segment));
+    const publicIdSegments = versionIndex >= 0 ? afterUpload.slice(versionIndex + 1) : afterUpload;
+
+    if (publicIdSegments.length === 0) {
+      return null;
+    }
+
+    const lastSegment = publicIdSegments[publicIdSegments.length - 1] ?? '';
+    publicIdSegments[publicIdSegments.length - 1] = decodeURIComponent(lastSegment).replace(
+      /\.[^./]+$/,
+      ''
+    );
+
+    const publicId = publicIdSegments.join('/').trim();
+    if (!publicId) {
+      return null;
+    }
+
+    return {
+      publicId,
+      resourceType,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteCloudinaryAsset(
+  input: DeleteCloudinaryAssetInput
+): Promise<{
+  deleted: boolean;
+  publicId: string | null;
+  resourceType: CloudinaryResourceType | null;
+}> {
+  const directPublicId = String(input.publicId ?? '').trim();
+  const directUrl = String(input.url ?? '').trim();
+  const resolvedFromUrl = directUrl ? resolveCloudinaryReferenceFromUrl(directUrl) : null;
+  const publicId = directPublicId || resolvedFromUrl?.publicId || '';
+  const preferredResourceType =
+    normalizeResourceType(input.resourceType) ?? resolvedFromUrl?.resourceType ?? null;
+
+  if (!publicId) {
+    return {
+      deleted: false,
+      publicId: null,
+      resourceType: preferredResourceType,
+    };
+  }
+
+  const candidateResourceTypes = Array.from(
+    new Set<CloudinaryResourceType>([
+      ...(preferredResourceType ? [preferredResourceType] : []),
+      'raw',
+      'image',
+      'video',
+    ])
+  );
+
+  let lastError: unknown = null;
+  for (const resourceType of candidateResourceTypes) {
+    try {
+      const result = (await cloudinary.uploader.destroy(publicId, {
+        resource_type: resourceType,
+        invalidate: input.invalidate ?? true,
+      })) as { result?: string };
+
+      if (result?.result === 'ok') {
+        return {
+          deleted: true,
+          publicId,
+          resourceType,
+        };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw mapCloudinaryError(lastError);
+  }
+
+  return {
+    deleted: false,
+    publicId,
+    resourceType: preferredResourceType,
+  };
+}
+
 function mapCloudinaryError(error: unknown): Error {
   const cloudinaryError = error as { message?: string; http_code?: number } | undefined;
   if (cloudinaryError?.http_code === 413) {

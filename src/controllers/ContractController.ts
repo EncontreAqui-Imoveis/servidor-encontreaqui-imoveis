@@ -3,6 +3,7 @@ import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
+import { getRequestId } from '../middlewares/requestContext';
 import {
   createAdminNotification,
   createUserNotification,
@@ -102,6 +103,7 @@ interface CommissionContractRow extends RowDataPacket {
   property_id: number;
   property_title: string | null;
   property_code: string | null;
+  property_purpose: string | null;
   updated_at: Date | string | null;
   commission_data: unknown;
 }
@@ -139,6 +141,11 @@ interface FinalizeBody {
   commissionData?: unknown;
 }
 
+interface UpdateCommissionDataBody {
+  commission_data?: unknown;
+  commissionData?: unknown;
+}
+
 interface SignatureMethodBody {
   method?: unknown;
 }
@@ -156,6 +163,8 @@ interface ContractDocumentGateCounts {
   paymentReceiptTotal: number;
   inspectionBoletoTotal: number;
 }
+
+type ContractDocumentDeleteScope = 'linked_only' | 'linked_or_legacy';
 
 function normalizeJsonObject(
   value: unknown,
@@ -603,6 +612,70 @@ function resolveDocumentStorageType(documentType: string): 'contract' | 'other' 
   return 'other';
 }
 
+function documentTypeRequiresSide(documentType: string): boolean {
+  const normalized = documentType.trim().toLowerCase();
+  return (
+    normalized !== 'contrato_minuta' &&
+    normalized !== 'contrato_assinado' &&
+    normalized !== 'comprovante_pagamento' &&
+    normalized !== 'boleto_vistoria' &&
+    normalized !== 'outro'
+  );
+}
+
+function buildContractDocumentDeleteWhereClause(
+  scope: ContractDocumentDeleteScope
+): string {
+  if (scope === 'linked_only') {
+    return `
+      negotiation_id = ?
+      AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+      AND COALESCE(document_type, '') <> 'proposal'
+      AND COALESCE(type, '') <> 'proposal'
+    `;
+  }
+
+  return `
+    negotiation_id = ?
+    AND (
+      JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+      OR JSON_EXTRACT(metadata_json, '$.contractId') IS NULL
+    )
+    AND COALESCE(document_type, '') <> 'proposal'
+    AND COALESCE(type, '') <> 'proposal'
+  `;
+}
+
+async function fetchDocumentsForContractScope(
+  tx: PoolConnection,
+  contract: Pick<ContractRow, 'id' | 'negotiation_id'>,
+  scope: ContractDocumentDeleteScope
+): Promise<ContractDocumentForDeleteRow[]> {
+  const [rows] = await tx.query<ContractDocumentForDeleteRow[]>(
+    `
+      SELECT id, type, document_type, metadata_json
+      FROM negotiation_documents
+      WHERE ${buildContractDocumentDeleteWhereClause(scope)}
+      ORDER BY id DESC
+    `,
+    [contract.negotiation_id, contract.id]
+  );
+
+  return rows;
+}
+
+function logContractAdminAudit(
+  req: Request,
+  action: string,
+  details: Record<string, unknown>
+): void {
+  console.info('Contract admin audit:', {
+    requestId: getRequestId(req),
+    action,
+    ...details,
+  });
+}
+
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   const role = String(req.userRole ?? '').toLowerCase();
   if (role === 'admin') {
@@ -775,7 +848,8 @@ class ContractController {
             c.commission_data,
             c.updated_at,
             p.title AS property_title,
-            p.code AS property_code
+            p.code AS property_code,
+            p.purpose AS property_purpose
           FROM contracts c
           JOIN properties p ON p.id = c.property_id
           WHERE c.status = 'FINALIZED'
@@ -791,7 +865,7 @@ class ContractController {
       let totalVendedores = 0;
       let totalPlataforma = 0;
 
-      const transactions = rows.map((row) => {
+      const transactions = rows.flatMap((row) => {
         const commissionData = parseStoredJsonObject(row.commission_data);
         const valorVenda = readCommissionValue(commissionData, 'valorVenda');
         const comissaoCaptador = readCommissionValue(
@@ -807,17 +881,22 @@ class ContractController {
           'taxaPlataforma'
         );
 
+        if (valorVenda <= 0) {
+          return [];
+        }
+
         totalVGV += valorVenda;
         totalCaptadores += comissaoCaptador;
         totalVendedores += comissaoVendedor;
         totalPlataforma += taxaPlataforma;
 
-        return {
+        return [{
           contractId: row.id,
           negotiationId: row.negotiation_id,
           propertyId: Number(row.property_id),
           propertyTitle: row.property_title ?? null,
           propertyCode: row.property_code ?? null,
+          propertyPurpose: row.property_purpose ?? null,
           finalizedAt: toIsoString(row.updated_at),
           commissionData: {
             valorVenda,
@@ -825,7 +904,7 @@ class ContractController {
             comissaoVendedor,
             taxaPlataforma,
           },
-        };
+        }];
       });
 
       return res.status(200).json({
@@ -1706,6 +1785,470 @@ class ContractController {
     }
   }
 
+  async reopenFinalized(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Somente contratos finalizados podem ser reiniciados.',
+        });
+      }
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET status = 'AWAITING_SIGNATURES', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [contractId]
+      );
+
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+
+      logContractAdminAudit(req, 'reopen_finalized_contract', {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        propertyId: Number(contract.property_id),
+      });
+
+      return res.status(200).json({
+        message: 'Contrato reiniciado com sucesso.',
+        contract: updatedContract ? mapContract(updatedContract) : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao reiniciar contrato finalizado:', error);
+      return res.status(500).json({ error: 'Falha ao reiniciar contrato.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async updateCommissionData(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const body = (req.body ?? {}) as UpdateCommissionDataBody;
+    const rawCommissionData = body.commission_data ?? body.commissionData;
+    let commissionData: NormalizedCommissionData;
+    try {
+      commissionData = normalizeCommissionData(rawCommissionData);
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'commission_data inválido.',
+      });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Somente contratos finalizados podem ter o VGV editado.',
+        });
+      }
+
+      const normalizedPurpose = String(contract.property_purpose ?? '')
+        .trim()
+        .toLowerCase();
+      const isRentalOnly =
+        normalizedPurpose.includes('alug') && !normalizedPurpose.includes('venda');
+      if (!isRentalOnly) {
+        const totalSplits = Number(
+          (
+            commissionData.comissaoCaptador +
+            commissionData.comissaoVendedor +
+            commissionData.taxaPlataforma
+          ).toFixed(2)
+        );
+        if (Math.abs(totalSplits - commissionData.valorVenda) > 0.01) {
+          await tx.rollback();
+          return res.status(400).json({
+            error:
+              'Na venda, a soma de comissões e taxa precisa fechar exatamente 100% do valor.',
+          });
+        }
+      }
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET commission_data = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [JSON.stringify(commissionData), contractId]
+      );
+
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+
+      logContractAdminAudit(req, 'update_commission_data', {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        propertyId: Number(contract.property_id),
+      });
+
+      return res.status(200).json({
+        message: 'VGV atualizado com sucesso.',
+        contract: updatedContract ? mapContract(updatedContract) : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao atualizar VGV do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao atualizar o VGV.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async deleteCommissionData(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Somente contratos finalizados podem ter o VGV excluído.',
+        });
+      }
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET commission_data = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [contractId]
+      );
+
+      await tx.commit();
+
+      logContractAdminAudit(req, 'delete_commission_data', {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        propertyId: Number(contract.property_id),
+      });
+
+      return res.status(200).json({
+        message: 'VGV excluído com sucesso.',
+        contractId,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao excluir VGV do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao excluir o VGV.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async uploadFinalizedDocument(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const body = (req.body ?? {}) as UploadContractDocumentBody;
+    const documentTypeRaw = String(
+      body.documentType ?? body.document_type ?? ''
+    ).trim();
+    const normalizedDocumentType = documentTypeRaw.toLowerCase();
+    const requestedSide = parseDocumentSide(body.side);
+    if (!isContractDocumentType(normalizedDocumentType)) {
+      return res.status(400).json({ error: 'Tipo de documento inválido.' });
+    }
+
+    if (documentTypeRequiresSide(normalizedDocumentType) && requestedSide == null) {
+      return res.status(400).json({
+        error: 'Informe o lado do documento (seller ou buyer) para este tipo.',
+      });
+    }
+
+    const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
+    if (!uploadedFile?.buffer || uploadedFile.buffer.length === 0) {
+      return res.status(400).json({ error: 'Arquivo obrigatório para upload.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Somente contratos finalizados podem receber documentos nesta área.',
+        });
+      }
+
+      const [insertResult] = await tx.query<ResultSetHeader>(
+        `
+          INSERT INTO negotiation_documents (
+            negotiation_id,
+            type,
+            document_type,
+            metadata_json,
+            file_content,
+            created_at
+          ) VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
+        `,
+        [
+          contract.negotiation_id,
+          resolveDocumentStorageType(normalizedDocumentType),
+          normalizedDocumentType,
+          JSON.stringify({
+            contractId,
+            side: requestedSide,
+            originalFileName: uploadedFile.originalname ?? null,
+            uploadedBy: Number(req.userId ?? 0) || null,
+            uploadedAt: new Date().toISOString(),
+            uploadedVia: 'admin-finalized',
+          }),
+          uploadedFile.buffer,
+        ]
+      );
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [contractId]
+      );
+
+      await tx.commit();
+
+      logContractAdminAudit(req, 'upload_finalized_document', {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        propertyId: Number(contract.property_id),
+        documentType: normalizedDocumentType,
+        side: requestedSide,
+        documentId: Number(insertResult.insertId ?? 0),
+      });
+
+      return res.status(201).json({
+        message: 'Documento anexado com sucesso ao contrato finalizado.',
+        document: {
+          id: Number(insertResult.insertId ?? 0),
+          contractId,
+          documentType: normalizedDocumentType,
+          side: requestedSide,
+          originalFileName: uploadedFile.originalname ?? null,
+          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${Number(
+            insertResult.insertId ?? 0
+          )}/download`,
+        },
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao anexar documento no contrato finalizado:', error);
+      return res.status(500).json({ error: 'Falha ao anexar documento.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async deleteFinalizedDocument(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const documentId = Number(req.params.documentId);
+    if (!Number.isFinite(documentId) || documentId <= 0) {
+      return res.status(400).json({ error: 'ID do documento inválido.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Somente contratos finalizados podem remover documentos nesta área.',
+        });
+      }
+
+      const [documentRows] = await tx.query<ContractDocumentForDeleteRow[]>(
+        `
+          SELECT id, type, document_type, metadata_json
+          FROM negotiation_documents
+          WHERE id = ?
+            AND ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [documentId, contract.negotiation_id, contract.id]
+      );
+
+      const document = documentRows[0];
+      if (!document) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Documento não encontrado para este contrato.' });
+      }
+
+      await tx.query(
+        `
+          DELETE FROM negotiation_documents
+          WHERE id = ? AND ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
+          LIMIT 1
+        `,
+        [documentId, contract.negotiation_id, contract.id]
+      );
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [contractId]
+      );
+
+      await tx.commit();
+
+      logContractAdminAudit(req, 'delete_finalized_document', {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        propertyId: Number(contract.property_id),
+        documentId,
+        documentType: document.document_type ?? null,
+      });
+
+      return res.status(200).json({
+        message: 'Documento removido do contrato finalizado com sucesso.',
+        documentId,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao remover documento do contrato finalizado:', error);
+      return res.status(500).json({ error: 'Falha ao remover documento.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async deleteFinalized(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Somente contratos finalizados podem ser excluídos nesta área.',
+        });
+      }
+
+      const contractDocuments = await fetchDocumentsForContractScope(
+        tx,
+        contract,
+        'linked_or_legacy'
+      );
+
+      if (contractDocuments.length > 0) {
+        await tx.query(
+          `
+            DELETE FROM negotiation_documents
+            WHERE ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
+          `,
+          [contract.negotiation_id, contract.id]
+        );
+      }
+
+      await tx.query(
+        `
+          DELETE FROM contracts
+          WHERE id = ?
+          LIMIT 1
+        `,
+        [contractId]
+      );
+
+      await tx.commit();
+
+      logContractAdminAudit(req, 'delete_finalized_contract', {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        propertyId: Number(contract.property_id),
+        deletedDocumentCount: contractDocuments.length,
+      });
+
+      return res.status(200).json({
+        message: 'Contrato finalizado excluído com sucesso.',
+        contractId,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao excluir contrato finalizado:', error);
+      return res.status(500).json({ error: 'Falha ao excluir contrato finalizado.' });
+    } finally {
+      tx.release();
+    }
+  }
+
   async getById(req: AuthRequest, res: Response): Promise<Response> {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
@@ -1738,7 +2281,10 @@ class ContractController {
         contract: mapContract(contract),
         documents: documents
           .filter((document) => !isProposalDocument(document))
-          .map(mapDocument),
+          .map((document) => ({
+            ...mapDocument(document),
+            downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
+          })),
       });
     } catch (error) {
       console.error('Erro ao buscar contrato:', error);
@@ -1778,7 +2324,10 @@ class ContractController {
         contract: mapContract(contract),
         documents: documents
           .filter((document) => !isProposalDocument(document))
-          .map(mapDocument),
+          .map((document) => ({
+            ...mapDocument(document),
+            downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
+          })),
       });
     } catch (error) {
       console.error('Erro ao buscar contrato por negociação:', error);

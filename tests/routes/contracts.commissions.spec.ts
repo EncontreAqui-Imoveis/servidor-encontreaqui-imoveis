@@ -48,6 +48,7 @@ describe('GET /admin/commissions', () => {
           property_id: 102,
           property_title: 'Apartamento Norte',
           property_code: 'RV-102',
+          property_purpose: 'Venda',
           updated_at: '2026-02-22T14:30:00.000Z',
           commission_data: {
             valorVenda: 300000,
@@ -55,6 +56,16 @@ describe('GET /admin/commissions', () => {
             comissaoVendedor: 6000,
             taxaPlataforma: 1500,
           },
+        },
+        {
+          id: 'contract-3',
+          negotiation_id: 'neg-3',
+          property_id: 103,
+          property_title: 'Casa Sem VGV',
+          property_code: 'RV-103',
+          property_purpose: 'Venda',
+          updated_at: '2026-02-23T10:00:00.000Z',
+          commission_data: {},
         },
       ],
     ]);
@@ -85,4 +96,3 @@ describe('GET /admin/commissions', () => {
     expect(queryMock).not.toHaveBeenCalled();
   });
 });
-

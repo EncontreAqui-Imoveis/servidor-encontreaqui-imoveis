@@ -66,6 +66,26 @@ adminRoutes.post(
 adminRoutes.post('/contracts/:id/finalize', (req, res) =>
   contractController.finalize(req, res)
 );
+adminRoutes.put('/contracts/:id/reopen', (req, res) =>
+  contractController.reopenFinalized(req, res)
+);
+adminRoutes.delete('/contracts/:id', (req, res) =>
+  contractController.deleteFinalized(req, res)
+);
+adminRoutes.put('/contracts/:id/commission-data', (req, res) =>
+  contractController.updateCommissionData(req, res)
+);
+adminRoutes.delete('/contracts/:id/commission-data', (req, res) =>
+  contractController.deleteCommissionData(req, res)
+);
+adminRoutes.post(
+  '/contracts/:id/finalized-docs',
+  contractDocumentUpload.single('file'),
+  (req, res) => contractController.uploadFinalizedDocument(req, res)
+);
+adminRoutes.delete('/contracts/:id/finalized-docs/:documentId', (req, res) =>
+  contractController.deleteFinalizedDocument(req, res)
+);
 
 adminRoutes.post(
   '/properties',

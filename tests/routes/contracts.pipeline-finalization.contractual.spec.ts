@@ -239,7 +239,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       });
 
     expect(response.status).toBe(400);
-    expect(response.body.error).toContain('contrato assinado');
+    expect(response.body.error).toContain('comprovante de pagamento');
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
     expect(negotiationStatusUpdate).toBeNull();
     expect(propertyStatusUpdate).toBeNull();
@@ -334,6 +334,33 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
     expect(response.status).toBe(400);
     expect(String(response.body.error ?? '')).toContain('exatamente 100%');
+    expect(contractState.status).toBe('AWAITING_SIGNATURES');
+  });
+
+  it('informs exactly when payment proof is missing', async () => {
+    contractState = createContractState({
+      status: 'AWAITING_SIGNATURES',
+      property_purpose: 'Venda',
+    });
+    evidenceCounts = {
+      signedContract: 1,
+      paymentReceipt: 0,
+      inspectionBoleto: 0,
+    };
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/finalize')
+      .send({
+        commissionData: {
+          valorVenda: 10000,
+          comissaoCaptador: 5000,
+          comissaoVendedor: 3000,
+          taxaPlataforma: 2000,
+        },
+      });
+
+    expect(response.status).toBe(400);
+    expect(String(response.body.error ?? '')).toContain('comprovante de pagamento');
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
   });
 });

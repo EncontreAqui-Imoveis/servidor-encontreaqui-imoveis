@@ -1619,10 +1619,17 @@ class ContractController {
       const hasPaymentProof = documentCounts.paymentReceiptTotal > 0;
 
       if (!hasSignedContract || !hasPaymentProof) {
+        const missingDocuments: string[] = [];
+        if (!hasSignedContract) {
+          missingDocuments.push('contrato assinado');
+        }
+        if (!hasPaymentProof) {
+          missingDocuments.push('comprovante de pagamento');
+        }
         await tx.rollback();
         return res.status(400).json({
           error:
-            'Anexe contrato assinado e comprovante de pagamento válidos, vinculados a este contrato e não rejeitados, antes de finalizar.',
+            `Ainda falta ${missingDocuments.join(' e ')} válido${missingDocuments.length > 1 ? 's' : ''}, vinculado${missingDocuments.length > 1 ? 's' : ''} a este contrato, para finalizar.`,
         });
       }
 

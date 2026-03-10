@@ -17,6 +17,7 @@ type MockResponse = Response & {
   status: FnMock;
   json: FnMock;
   send: FnMock;
+  end: FnMock;
   setHeader: FnMock;
 };
 
@@ -26,6 +27,7 @@ function createMockResponse(): MockResponse {
   res.status = vi.fn().mockReturnValue(res);
   res.json = vi.fn().mockReturnValue(res);
   res.send = vi.fn().mockReturnValue(res);
+  res.end = vi.fn().mockReturnValue(res);
   res.setHeader = vi.fn();
 
   return res as MockResponse;
@@ -73,7 +75,7 @@ describe('NegotiationController.downloadDocument', () => {
       'attachment; filename="proposal_123.pdf"; filename*=UTF-8\'\'proposal_123.pdf'
     );
     expect(res.setHeader).toHaveBeenCalledWith('Content-Length', fileContent.length.toString());
-    expect(res.send).toHaveBeenCalledWith(fileContent);
+    expect(res.end).toHaveBeenCalledWith(fileContent);
   });
 
   it('should return 404 when document is not found', async () => {

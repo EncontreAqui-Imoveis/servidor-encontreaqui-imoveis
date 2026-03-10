@@ -2,7 +2,13 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { txMock, getConnectionMock, queryMock, createUserNotificationMock } = vi.hoisted(() => {
+const {
+  txMock,
+  getConnectionMock,
+  queryMock,
+  createUserNotificationMock,
+  storeNegotiationDocumentToR2Mock,
+} = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -17,6 +23,7 @@ const { txMock, getConnectionMock, queryMock, createUserNotificationMock } = vi.
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
     createUserNotificationMock: vi.fn(),
+    storeNegotiationDocumentToR2Mock: vi.fn(),
   };
 });
 
@@ -32,6 +39,14 @@ vi.mock('../../src/database/connection', () => ({
 vi.mock('../../src/services/notificationService', () => ({
   createAdminNotification: vi.fn(),
   createUserNotification: createUserNotificationMock,
+}));
+
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  readNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: vi.fn(),
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -121,6 +136,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
     createUserNotificationMock.mockResolvedValue(undefined);
+    storeNegotiationDocumentToR2Mock.mockResolvedValue(90001);
 
     txMock.query.mockImplementation(
       async (sql: string, params: unknown[] = []) => {
@@ -154,10 +170,6 @@ describe('Contract granular approval and signed docs endpoints', () => {
           sql.includes('updated_at = CURRENT_TIMESTAMP')
         ) {
           return [{ affectedRows: 1 }];
-        }
-
-        if (sql.includes('INSERT INTO negotiation_documents')) {
-          return [{ insertId: 90001 }];
         }
 
         return [[]];
@@ -245,9 +257,12 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.status).toBe(201);
     expect(response.body.readyForFinalization).toBe(true);
     expect(response.body.document.documentType).toBe('contrato_assinado');
-    expect(txMock.query).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO negotiation_documents'),
-      expect.arrayContaining(['neg-1', 'contrato_assinado', expect.any(Buffer)])
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        documentType: 'contrato_assinado',
+        content: expect.any(Buffer),
+      })
     );
     expect(txMock.query).toHaveBeenCalledWith(
       expect.stringContaining('workflow_metadata = CAST(? AS JSON)'),

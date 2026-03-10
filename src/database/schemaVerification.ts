@@ -109,6 +109,11 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['contracts', 'buyer_approval_reason'],
     ['negotiation_documents', 'document_type'],
     ['negotiation_documents', 'metadata_json'],
+    ['negotiation_documents', 'storage_provider'],
+    ['negotiation_documents', 'storage_bucket'],
+    ['negotiation_documents', 'storage_key'],
+    ['negotiation_documents', 'storage_content_type'],
+    ['negotiation_documents', 'storage_size_bytes'],
     ['admins', 'token_version'],
     ['users', 'token_version'],
   ] as const;

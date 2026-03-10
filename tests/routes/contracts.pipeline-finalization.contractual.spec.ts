@@ -21,6 +21,10 @@ const { txMock, getConnectionMock, queryMock, createUserNotificationMock } =
     };
   });
 
+const { storeNegotiationDocumentToR2Mock } = vi.hoisted(() => ({
+  storeNegotiationDocumentToR2Mock: vi.fn(),
+}));
+
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
@@ -33,6 +37,14 @@ vi.mock('../../src/database/connection', () => ({
 vi.mock('../../src/services/notificationService', () => ({
   createUserNotification: createUserNotificationMock,
   notifyAdmins: vi.fn(),
+}));
+
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  readNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: vi.fn(),
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -131,6 +143,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     getConnectionMock.mockResolvedValue(txMock);
     queryMock.mockResolvedValue([]);
     createUserNotificationMock.mockResolvedValue(undefined);
+    storeNegotiationDocumentToR2Mock.mockResolvedValue(98001);
 
     txMock.beginTransaction.mockResolvedValue(undefined);
     txMock.commit.mockResolvedValue(undefined);
@@ -141,14 +154,6 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       async (sql: string, params: unknown[] = []) => {
         if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
           return [[{ ...contractState }]];
-        }
-
-        if (
-          sql.includes('INSERT INTO negotiation_documents') &&
-          sql.includes("'contrato_minuta'")
-        ) {
-          draftInsertCount += 1;
-          return [{ insertId: 98001 }];
         }
 
         if (
@@ -212,7 +217,13 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
-    expect(draftInsertCount).toBe(1);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        documentType: 'contrato_minuta',
+        content: expect.any(Buffer),
+      })
+    );
     expect(createUserNotificationMock).toHaveBeenCalled();
   });
 

@@ -2,26 +2,20 @@ import type {
   NegotiationDocumentsRepository as NegotiationDocumentsRepositoryPort,
 } from '../domain/states/NegotiationState';
 import type { SqlExecutor } from './NegotiationRepository';
+import {
+  parseNegotiationDocumentMetadata,
+  readNegotiationDocumentObject,
+  storeNegotiationDocumentToR2,
+  type StoredNegotiationDocumentRow,
+} from '../../../services/negotiationDocumentStorageService';
 
 interface CountRow {
   pending_or_rejected: number | null;
   approved: number | null;
 }
 
-interface DocumentRow {
-  negotiation_id: string;
-  file_content: Buffer | Uint8Array | null;
-  type: string;
-  document_type: string | null;
-  metadata_json: unknown;
-}
-
-interface NegotiationDocumentRow extends DocumentRow {
+interface NegotiationDocumentRow extends StoredNegotiationDocumentRow {
   id: number;
-}
-
-interface InsertResult {
-  insertId?: number;
 }
 
 const toRows = <T>(result: T[] | [T[], unknown]): T[] => {
@@ -54,7 +48,9 @@ export class NegotiationDocumentsRepository
       WHERE negotiation_id = ?
     `;
 
-    const rows = toRows<CountRow>(await executor.execute<CountRow[]>(sql, [params.negotiationId]));
+    const rows = toRows<CountRow>(
+      await executor.execute<CountRow[]>(sql, [params.negotiationId])
+    );
 
     const row = rows?.[0];
 
@@ -76,43 +72,36 @@ export class NegotiationDocumentsRepository
   } | null> {
     const executor = trx ?? this.executor;
     const sql = `
-      SELECT negotiation_id, file_content, type, document_type, metadata_json
+      SELECT
+        negotiation_id,
+        type,
+        document_type,
+        metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        storage_content_type,
+        storage_size_bytes,
+        storage_etag
       FROM negotiation_documents
       WHERE id = ?
       LIMIT 1
     `;
 
-    const rows = toRows<DocumentRow>(await executor.execute<DocumentRow[]>(sql, [documentId]));
+    const rows = toRows<NegotiationDocumentRow>(
+      await executor.execute<NegotiationDocumentRow[]>(sql, [documentId])
+    );
     const row = rows?.[0];
-    if (!row?.file_content) {
+    if (!row) {
       return null;
     }
 
-    const fileContent = Buffer.isBuffer(row.file_content)
-      ? row.file_content
-      : Buffer.from(row.file_content);
-
     return {
       negotiationId: String(row.negotiation_id),
-      fileContent,
+      fileContent: await readNegotiationDocumentObject(row),
       type: row.type,
       documentType: row.document_type ?? null,
-      metadataJson:
-        row.metadata_json && typeof row.metadata_json === 'object'
-          ? (row.metadata_json as Record<string, unknown>)
-          : (() => {
-              if (typeof row.metadata_json !== 'string') {
-                return {};
-              }
-              try {
-                const parsed = JSON.parse(row.metadata_json) as unknown;
-                return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-                  ? (parsed as Record<string, unknown>)
-                  : {};
-              } catch {
-                return {};
-              }
-            })(),
+      metadataJson: parseNegotiationDocumentMetadata(row.metadata_json),
     };
   }
 
@@ -124,23 +113,18 @@ export class NegotiationDocumentsRepository
   ): Promise<number> {
     const executor = trx ?? this.executor;
 
-    const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, document_type, metadata_json, file_content)
-      VALUES (?, 'proposal', 'contrato_minuta', CAST(? AS JSON), ?)
-    `;
-
-    const result = await executor.execute<InsertResult>(sql, [
+    return storeNegotiationDocumentToR2({
+      executor,
       negotiationId,
-      JSON.stringify(
+      type: 'proposal',
+      documentType: 'contrato_minuta',
+      content: pdfBuffer,
+      metadataJson:
         metadataJson ?? {
           originalFileName: 'proposta.pdf',
           generated: true,
-        }
-      ),
-      pdfBuffer,
-    ]);
-    const header = Array.isArray(result) ? result[0] : result;
-    return Number(header?.insertId ?? 0);
+        },
+    });
   }
 
   async saveSignedProposal(
@@ -151,22 +135,17 @@ export class NegotiationDocumentsRepository
   ): Promise<number> {
     const executor = trx ?? this.executor;
 
-    const sql = `
-      INSERT INTO negotiation_documents (negotiation_id, type, document_type, metadata_json, file_content)
-      VALUES (?, 'other', 'contrato_assinado', CAST(? AS JSON), ?)
-    `;
-
-    const result = await executor.execute<InsertResult>(sql, [
+    return storeNegotiationDocumentToR2({
+      executor,
       negotiationId,
-      JSON.stringify(
+      type: 'other',
+      documentType: 'contrato_assinado',
+      content: pdfBuffer,
+      metadataJson:
         metadataJson ?? {
           originalFileName: 'proposta_assinada.pdf',
-        }
-      ),
-      pdfBuffer,
-    ]);
-    const header = Array.isArray(result) ? result[0] : result;
-    return Number(header?.insertId ?? 0);
+        },
+    });
   }
 
   async findLatestByNegotiationAndType(
@@ -176,7 +155,18 @@ export class NegotiationDocumentsRepository
   ): Promise<{ id: number; fileContent: Buffer; type: string } | null> {
     const executor = trx ?? this.executor;
     const sql = `
-      SELECT id, file_content, type
+      SELECT
+        id,
+        negotiation_id,
+        type,
+        document_type,
+        metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        storage_content_type,
+        storage_size_bytes,
+        storage_etag
       FROM negotiation_documents
       WHERE negotiation_id = ? AND type = ?
       ORDER BY created_at DESC, id DESC
@@ -187,17 +177,13 @@ export class NegotiationDocumentsRepository
       await executor.execute<NegotiationDocumentRow[]>(sql, [negotiationId, type])
     );
     const row = rows?.[0];
-    if (!row?.file_content) {
+    if (!row) {
       return null;
     }
 
-    const fileContent = Buffer.isBuffer(row.file_content)
-      ? row.file_content
-      : Buffer.from(row.file_content);
-
     return {
       id: Number(row.id),
-      fileContent,
+      fileContent: await readNegotiationDocumentObject(row),
       type: row.type,
     };
   }

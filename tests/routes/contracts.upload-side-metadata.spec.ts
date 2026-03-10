@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
+const { txMock, getConnectionMock, queryMock, storeNegotiationDocumentToR2Mock } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -16,6 +16,7 @@ const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
     txMock: tx,
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
+    storeNegotiationDocumentToR2Mock: vi.fn(),
   };
 });
 
@@ -26,6 +27,14 @@ vi.mock('../../src/database/connection', () => ({
     query: queryMock,
     execute: vi.fn(),
   },
+}));
+
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  readNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: vi.fn(),
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -99,20 +108,17 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     txMock.commit.mockResolvedValue(undefined);
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
+    storeNegotiationDocumentToR2Mock.mockImplementation(async (params: any) => {
+      if (String(params.documentType ?? '') === 'doc_identidade') {
+        expect(params.metadataJson.side).toBe('seller');
+        expect(String(params.metadataJson.originalFileName ?? '')).toBe('identidade.pdf');
+      }
+      return 999;
+    });
 
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
         return [[{ ...activeContract }]];
-      }
-
-      if (sql.includes('INSERT INTO negotiation_documents')) {
-        const metadataJson = String(params[3] ?? '{}');
-        const metadata = JSON.parse(metadataJson) as Record<string, unknown>;
-        if (String(params[2] ?? '') === 'doc_identidade') {
-          expect(metadata.side).toBe('seller');
-          expect(String(metadata.originalFileName ?? '')).toBe('identidade.pdf');
-        }
-        return [{ insertId: 999 }];
       }
 
       if (
@@ -140,6 +146,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
 
     expect(response.status).toBe(201);
     expect(response.body.document).toMatchObject({
+      id: 999,
       documentType: 'doc_identidade',
       side: 'seller',
       originalFileName: 'identidade.pdf',
@@ -158,6 +165,13 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       .attach('file', Buffer.from('%PDF-1.4 signed'), 'contrato_assinado.pdf');
 
     expect(response.status).toBe(201);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        documentType: 'contrato_assinado',
+        content: expect.any(Buffer),
+      })
+    );
     expect(activeContract.workflow_metadata).toEqual(
       expect.objectContaining({
         signatureMethod: 'online',

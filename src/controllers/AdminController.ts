@@ -18,6 +18,7 @@ import {
 } from '../services/priceDropNotificationService';
 import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
 import type AuthRequest from '../middlewares/auth';
+import { readNegotiationDocumentObject } from '../services/negotiationDocumentStorageService';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
@@ -95,7 +96,8 @@ async function cleanupPropertyMediaAssets(
     try {
       await deleteCloudinaryAsset({ url, invalidate: true });
     } catch (error) {
-      console.error(`Erro ao excluir asset do Cloudinary (${context}):`, {
+      console.error('Erro ao excluir asset do Cloudinary:', {
+        context,
         url,
         error,
       });
@@ -522,7 +524,12 @@ interface AdminNegotiationDocumentRow extends RowDataPacket {
   type: string | null;
   document_type: string | null;
   metadata_json: unknown;
-  file_content: Buffer | Uint8Array | null;
+  storage_provider: string | null;
+  storage_bucket: string | null;
+  storage_key: string | null;
+  storage_content_type: string | null;
+  storage_size_bytes: number | null;
+  storage_etag: string | null;
 }
 
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
@@ -1340,7 +1347,17 @@ class AdminController {
     try {
       const [rows] = await adminDb.query<AdminNegotiationDocumentRow[]>(
         `
-          SELECT id, type, document_type, metadata_json, file_content
+          SELECT
+            id,
+            type,
+            document_type,
+            metadata_json,
+            storage_provider,
+            storage_bucket,
+            storage_key,
+            storage_content_type,
+            storage_size_bytes,
+            storage_etag
           FROM negotiation_documents
           WHERE negotiation_id = ? AND type = 'other'
           ORDER BY created_at DESC, id DESC
@@ -1350,13 +1367,11 @@ class AdminController {
       );
 
       const document = rows[0];
-      if (!document?.file_content) {
+      if (!document) {
         return res.status(404).json({ error: 'Proposta assinada não encontrada.' });
       }
 
-      const fileContent = Buffer.isBuffer(document.file_content)
-        ? document.file_content
-        : Buffer.from(document.file_content);
+      const fileContent = await readNegotiationDocumentObject(document);
 
       const metadata = parseJsonObjectSafe(document.metadata_json);
       const originalFileName = String(metadata.originalFileName ?? '').trim();

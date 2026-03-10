@@ -6,6 +6,7 @@ const {
   txMock,
   getConnectionMock,
   generateProposalMock,
+  storeNegotiationDocumentToR2Mock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -20,6 +21,7 @@ const {
     txMock: tx,
     getConnectionMock: vi.fn(),
     generateProposalMock: vi.fn(),
+    storeNegotiationDocumentToR2Mock: vi.fn(),
   };
 });
 
@@ -46,6 +48,14 @@ vi.mock('../../src/modules/negotiations/infra/ExternalPdfService', () => ({
   },
 }));
 
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  readNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: vi.fn(),
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
+}));
+
 import negotiationRoutes from '../../src/routes/negotiation.routes';
 
 describe('POST /negotiations/proposal', () => {
@@ -62,6 +72,7 @@ describe('POST /negotiations/proposal', () => {
     txMock.release.mockResolvedValue(undefined);
     txMock.execute.mockResolvedValue({ insertId: 91001 });
     generateProposalMock.mockResolvedValue(Buffer.from('%PDF-fake-proposal%'));
+    storeNegotiationDocumentToR2Mock.mockResolvedValue(91001);
   });
 
   it('persists negotiation as proposal sent and returns generated PDF', async () => {

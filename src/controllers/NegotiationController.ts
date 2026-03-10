@@ -1090,7 +1090,8 @@ class NegotiationController {
       res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
       res.setHeader('Content-Length', document.fileContent.length.toString());
 
-      return res.send(document.fileContent);
+      res.end(document.fileContent);
+      return res;
     } catch (error) {
       console.error('Erro ao baixar documento da negociacao:', error);
       return res.status(500).json({ error: 'Falha ao baixar documento.' });
@@ -1145,7 +1146,8 @@ class NegotiationController {
       res.setHeader('Content-Length', document.fileContent.length.toString());
       res.setHeader('X-Document-Id', String(document.id));
 
-      return res.send(document.fileContent);
+      res.end(document.fileContent);
+      return res;
     } catch (error) {
       console.error('Erro ao baixar proposta da negociação:', error);
       return res.status(500).json({ error: 'Falha ao baixar proposta.' });

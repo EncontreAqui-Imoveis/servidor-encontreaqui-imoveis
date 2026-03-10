@@ -490,6 +490,62 @@ async function ensureNegotiationDocumentMetadataColumn(): Promise<void> {
   }
 }
 
+async function ensureNegotiationDocumentStorageColumns(): Promise<void> {
+  if (!(await tableExists('negotiation_documents'))) {
+    return;
+  }
+
+  if (!(await columnExists('negotiation_documents', 'storage_provider'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN storage_provider VARCHAR(32) NULL AFTER file_content
+    `);
+  }
+
+  if (!(await columnExists('negotiation_documents', 'storage_bucket'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN storage_bucket VARCHAR(255) NULL AFTER storage_provider
+    `);
+  }
+
+  if (!(await columnExists('negotiation_documents', 'storage_key'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN storage_key VARCHAR(1024) NULL AFTER storage_bucket
+    `);
+  }
+
+  if (!(await columnExists('negotiation_documents', 'storage_content_type'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN storage_content_type VARCHAR(255) NULL AFTER storage_key
+    `);
+  }
+
+  if (!(await columnExists('negotiation_documents', 'storage_size_bytes'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN storage_size_bytes BIGINT NULL AFTER storage_content_type
+    `);
+  }
+
+  if (!(await columnExists('negotiation_documents', 'storage_etag'))) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      ADD COLUMN storage_etag VARCHAR(255) NULL AFTER storage_size_bytes
+    `);
+  }
+
+  const fileContentType = await getColumnType('negotiation_documents', 'file_content');
+  if (fileContentType && fileContentType.toLowerCase().includes('blob')) {
+    await connection.query(`
+      ALTER TABLE negotiation_documents
+      MODIFY COLUMN file_content LONGBLOB NULL
+    `);
+  }
+}
+
 async function ensureAdminsTokenVersionColumn(): Promise<void> {
   if (!(await tableExists('admins'))) {
     return;
@@ -536,6 +592,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureContractWorkflowMetadataColumn();
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
+    await ensureNegotiationDocumentStorageColumns();
     await ensureAdminsTokenVersionColumn();
     await ensureUsersTokenVersionColumn();
     console.log('Migrations aplicadas com sucesso.');

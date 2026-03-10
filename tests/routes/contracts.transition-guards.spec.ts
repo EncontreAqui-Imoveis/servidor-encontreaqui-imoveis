@@ -125,10 +125,7 @@ describe('PUT /admin/contracts/:id/transition guards', () => {
         return [[{ ...contractState }]];
       }
 
-      if (
-        sql.includes('SELECT id, type, document_type, metadata_json') &&
-        sql.includes('FROM negotiation_documents')
-      ) {
+      if (sql.includes('FROM negotiation_documents') && sql.includes('storage_provider')) {
         const negotiationId = String(params[0] ?? '');
         const contractId = String(params[params.length - 1] ?? '');
         const requestedTypes = params.slice(1, -1).map((value) => String(value));

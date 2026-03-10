@@ -62,7 +62,7 @@ describe('verifyCriticalSchemaState', () => {
 
     expect(result).toEqual({
       checkedTables: 5,
-      checkedColumns: 9,
+      checkedColumns: 14,
       checkedEnums: 3,
     });
   });

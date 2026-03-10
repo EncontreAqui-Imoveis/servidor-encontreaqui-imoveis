@@ -20,6 +20,16 @@ const { txMock, getConnectionMock, queryMock, deleteCloudinaryAssetMock } = vi.h
   };
 });
 
+const {
+  storeNegotiationDocumentToR2Mock,
+  deleteNegotiationDocumentObjectMock,
+  readNegotiationDocumentObjectMock,
+} = vi.hoisted(() => ({
+  storeNegotiationDocumentToR2Mock: vi.fn(),
+  deleteNegotiationDocumentObjectMock: vi.fn(),
+  readNegotiationDocumentObjectMock: vi.fn(),
+}));
+
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
@@ -34,6 +44,14 @@ vi.mock('../../src/config/cloudinary', () => ({
   default: {},
   uploadToCloudinary: vi.fn(),
   deleteCloudinaryAsset: deleteCloudinaryAssetMock,
+}));
+
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  deleteNegotiationDocumentObject: deleteNegotiationDocumentObjectMock,
+  readNegotiationDocumentObject: readNegotiationDocumentObjectMock,
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -71,6 +89,9 @@ type MutableDocument = {
   type: string;
   document_type: string;
   metadata_json: string;
+  storage_provider?: string | null;
+  storage_bucket?: string | null;
+  storage_key?: string | null;
   created_at?: string;
 };
 
@@ -159,6 +180,9 @@ describe('Admin management for finalized contracts', () => {
           cloudinaryPublicId: 'contracts/final/contract-final-1/contrato_assinado',
           cloudinaryResourceType: 'raw',
         }),
+        storage_provider: 'R2',
+        storage_bucket: 'bucket',
+        storage_key: 'neg-final-1/contracts/contract-final-1/contrato_assinado/file.pdf',
       },
       {
         id: 9002,
@@ -170,6 +194,9 @@ describe('Admin management for finalized contracts', () => {
           cloudinaryUrl:
             'https://res.cloudinary.com/demo/raw/upload/v123/contracts/final/contract-final-1/doc_identidade.pdf',
         }),
+        storage_provider: 'R2',
+        storage_bucket: 'bucket',
+        storage_key: 'neg-final-1/contracts/contract-final-1/doc_identidade/file.pdf',
       },
       {
         id: 9003,
@@ -190,13 +217,28 @@ describe('Admin management for finalized contracts', () => {
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
     deleteCloudinaryAssetMock.mockResolvedValue({ deleted: true });
+    storeNegotiationDocumentToR2Mock.mockImplementation(async (params: any) => {
+      documentsState.push({
+        id: 9999,
+        negotiation_id: String(params.negotiationId),
+        type: String(params.type),
+        document_type: String(params.documentType),
+        metadata_json: JSON.stringify(params.metadataJson ?? {}),
+        storage_provider: 'R2',
+        storage_bucket: 'bucket',
+        storage_key: 'neg-final-1/contracts/contract-final-1/outro/extra.pdf',
+      });
+      return 9999;
+    });
+    deleteNegotiationDocumentObjectMock.mockResolvedValue(undefined);
+    readNegotiationDocumentObjectMock.mockResolvedValue(Buffer.from('%PDF-1.4 fake'));
 
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
         return contractState ? [[{ ...contractState }]] : [[]];
       }
 
-      if (sql.includes('SELECT id, type, document_type, metadata_json') && sql.includes('FROM negotiation_documents')) {
+      if (sql.includes('SELECT') && sql.includes('FROM negotiation_documents') && sql.includes('metadata_json')) {
         const requestedDocumentId = Number(params[0]);
 
         if (sql.includes('WHERE id = ?')) {
@@ -257,18 +299,6 @@ describe('Admin management for finalized contracts', () => {
           contractState.commission_data = null;
         }
         return [{ affectedRows: 1 }];
-      }
-
-      if (sql.includes('INSERT INTO negotiation_documents')) {
-        const nextId = 9999;
-        documentsState.push({
-          id: nextId,
-          negotiation_id: String(params[0]),
-          type: String(params[1]),
-          document_type: String(params[2]),
-          metadata_json: String(params[3]),
-        });
-        return [{ insertId: nextId }];
       }
 
       if (sql.includes('DELETE FROM negotiation_documents')) {
@@ -350,7 +380,13 @@ describe('Admin management for finalized contracts', () => {
 
     expect(uploadResponse.status).toBe(201);
     expect(uploadResponse.body.document.contractId).toBe('contract-final-1');
-    expect(documentsState.some((item) => item.id === 9999)).toBe(true);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-final-1',
+        documentType: 'outro',
+        content: expect.any(Buffer),
+      })
+    );
 
     const deleteResponse = await request(app).delete(
       '/admin/contracts/contract-final-1/finalized-docs/9999'

@@ -177,8 +177,8 @@ describe('emailService', () => {
     const payload = JSON.parse(String(options.body));
     expect(payload.from).toBe('no-reply@encontreaquiimoveis.com');
     expect(payload.to).toEqual(['user@test.com']);
-    expect(payload.subject).toBe('Verifique seu email do app EncontreAqui Imoveis');
-    expect(payload.html).toContain('Clique aqui para confirmar seu e-mail');
+    expect(payload.subject).toBe('Confirme seu e-mail no EncontreAqui Imóveis');
+    expect(payload.html).toContain('Toque no botão abaixo para confirmar seu e-mail');
     expect(createTransportMock).not.toHaveBeenCalled();
   });
 

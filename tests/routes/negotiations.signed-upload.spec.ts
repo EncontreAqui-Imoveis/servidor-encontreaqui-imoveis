@@ -7,6 +7,7 @@ const {
   getConnectionMock,
   queryMock,
   createAdminNotificationMock,
+  storeNegotiationDocumentToR2Mock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -22,6 +23,7 @@ const {
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
     createAdminNotificationMock: vi.fn(),
+    storeNegotiationDocumentToR2Mock: vi.fn(),
   };
 });
 
@@ -47,6 +49,14 @@ vi.mock('../../src/services/notificationService', () => ({
   notifyAdmins: vi.fn(),
 }));
 
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  readNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: vi.fn(),
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
+}));
+
 import negotiationRoutes from '../../src/routes/negotiation.routes';
 
 describe('POST /negotiations/:id/proposals/signed', () => {
@@ -63,6 +73,7 @@ describe('POST /negotiations/:id/proposals/signed', () => {
     txMock.release.mockResolvedValue(undefined);
     txMock.execute.mockResolvedValue({ insertId: 70001 });
     createAdminNotificationMock.mockResolvedValue(undefined);
+    storeNegotiationDocumentToR2Mock.mockResolvedValue(70001);
     queryMock.mockResolvedValue([]);
   });
 
@@ -88,9 +99,12 @@ describe('POST /negotiations/:id/proposals/signed', () => {
 
     expect(response.status).toBe(201);
     expect(response.body.status).toBe('UNDER_REVIEW');
-    expect(txMock.execute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO negotiation_documents'),
-      expect.arrayContaining(['neg-uuid-1', expect.any(Buffer)])
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-uuid-1',
+        documentType: 'contrato_assinado',
+        content: expect.any(Buffer),
+      })
     );
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('UPDATE negotiations'),

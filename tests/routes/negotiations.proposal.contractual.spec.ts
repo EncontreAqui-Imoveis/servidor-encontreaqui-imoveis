@@ -2,7 +2,12 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { txMock, getConnectionMock, generateProposalMock } = vi.hoisted(() => {
+const {
+  txMock,
+  getConnectionMock,
+  generateProposalMock,
+  storeNegotiationDocumentToR2Mock,
+} = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -16,6 +21,7 @@ const { txMock, getConnectionMock, generateProposalMock } = vi.hoisted(() => {
     txMock: tx,
     getConnectionMock: vi.fn(),
     generateProposalMock: vi.fn(),
+    storeNegotiationDocumentToR2Mock: vi.fn(),
   };
 });
 
@@ -40,6 +46,14 @@ vi.mock('../../src/modules/negotiations/infra/ExternalPdfService', () => ({
   ExternalPdfService: class MockExternalPdfService {
     generateProposal = generateProposalMock;
   },
+}));
+
+vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
+  storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  readNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: vi.fn(),
+  parseNegotiationDocumentMetadata: (value: unknown) =>
+    value && typeof value === 'object' ? value : {},
 }));
 
 import negotiationRoutes from '../../src/routes/negotiation.routes';
@@ -68,6 +82,7 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
     txMock.release.mockResolvedValue(undefined);
     txMock.execute.mockResolvedValue({ insertId: 92001 });
     generateProposalMock.mockResolvedValue(Buffer.from('%PDF-proposal%'));
+    storeNegotiationDocumentToR2Mock.mockResolvedValue(92001);
   });
 
   it('persists proposal_validity_date (+10d) and ignores tampered property value from payload', async () => {

@@ -15,6 +15,11 @@ import {
   queryContractRows,
 } from '../services/contractPersistenceService';
 import {
+  deleteNegotiationDocumentObject,
+  readNegotiationDocumentObject,
+  storeNegotiationDocumentToR2,
+} from '../services/negotiationDocumentStorageService';
+import {
   isContractApprovalStatus,
   isContractDocumentType,
   isContractStatus,
@@ -89,7 +94,12 @@ interface ContractDocumentRow extends RowDataPacket {
 }
 
 interface ContractDocumentDownloadRow extends ContractDocumentRow {
-  file_content: Buffer;
+  storage_provider: string | null;
+  storage_bucket: string | null;
+  storage_key: string | null;
+  storage_content_type: string | null;
+  storage_size_bytes: number | null;
+  storage_etag: string | null;
 }
 
 interface ContractDocumentForDeleteRow extends RowDataPacket {
@@ -97,6 +107,12 @@ interface ContractDocumentForDeleteRow extends RowDataPacket {
   type: string;
   document_type: string | null;
   metadata_json: unknown;
+  storage_provider: string | null;
+  storage_bucket: string | null;
+  storage_key: string | null;
+  storage_content_type: string | null;
+  storage_size_bytes: number | null;
+  storage_etag: string | null;
 }
 
 interface ContractDocumentListRow extends ContractDocumentRow {
@@ -704,7 +720,17 @@ async function fetchDocumentsForContractScope(
 ): Promise<ContractDocumentForDeleteRow[]> {
   const [rows] = await tx.query<ContractDocumentForDeleteRow[]>(
     `
-      SELECT id, type, document_type, metadata_json
+      SELECT
+        id,
+        type,
+        document_type,
+        metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        storage_content_type,
+        storage_size_bytes,
+        storage_etag
       FROM negotiation_documents
       WHERE ${buildContractDocumentDeleteWhereClause(scope)}
       ORDER BY id DESC
@@ -837,7 +863,17 @@ async function fetchDocumentsForStepBackCleanup(
   const placeholders = documentTypes.map(() => '?').join(', ');
   const [rows] = await tx.query<ContractDocumentForDeleteRow[]>(
     `
-      SELECT id, type, document_type, metadata_json
+      SELECT
+        id,
+        type,
+        document_type,
+        metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        storage_content_type,
+        storage_size_bytes,
+        storage_etag
       FROM negotiation_documents
       WHERE negotiation_id = ?
         AND COALESCE(document_type, '') IN (${placeholders})
@@ -869,29 +905,50 @@ async function cleanupContractDocumentAssets(
   let failed = 0;
 
   for (const document of documents) {
+    const hasNegotiationObject =
+      String(document.storage_provider ?? '').trim().toUpperCase() === 'R2' &&
+      String(document.storage_bucket ?? '').trim().length > 0 &&
+      String(document.storage_key ?? '').trim().length > 0;
     const assetReference = extractCloudinaryAssetReference(document);
-    if (!assetReference) {
-      continue;
+
+    if (hasNegotiationObject) {
+      attempted += 1;
+      try {
+        await deleteNegotiationDocumentObject(document);
+      } catch (error) {
+        failed += 1;
+        console.error('Falha ao excluir objeto R2 do documento do contrato:', {
+          action: context.action,
+          contractId: context.contractId,
+          negotiationId: context.negotiationId,
+          documentId: Number(document.id ?? 0),
+          documentType: document.document_type ?? null,
+          storageKey: String(document.storage_key ?? ''),
+          error,
+        });
+      }
     }
 
-    attempted += 1;
-    try {
-      await deleteCloudinaryAsset({
-        publicId: assetReference.publicId,
-        url: assetReference.url,
-        resourceType: assetReference.resourceType,
-        invalidate: true,
-      });
-    } catch (error) {
-      failed += 1;
-      console.error('Falha ao excluir asset externo do documento do contrato:', {
-        action: context.action,
-        contractId: context.contractId,
-        negotiationId: context.negotiationId,
-        documentId: Number(document.id ?? 0),
-        documentType: document.document_type ?? null,
-        error,
-      });
+    if (assetReference) {
+      attempted += 1;
+      try {
+        await deleteCloudinaryAsset({
+          publicId: assetReference.publicId,
+          url: assetReference.url,
+          resourceType: assetReference.resourceType,
+          invalidate: true,
+        });
+      } catch (error) {
+        failed += 1;
+        console.error('Falha ao excluir asset externo do documento do contrato:', {
+          action: context.action,
+          contractId: context.contractId,
+          negotiationId: context.negotiationId,
+          documentId: Number(document.id ?? 0),
+          documentType: document.document_type ?? null,
+          error,
+        });
+      }
     }
   }
 
@@ -1800,30 +1857,20 @@ class ContractController {
         });
       }
 
-      const [insertResult] = await tx.query<ResultSetHeader>(
-        `
-          INSERT INTO negotiation_documents (
-            negotiation_id,
-            type,
-            document_type,
-            metadata_json,
-            file_content,
-            created_at
-          ) VALUES (?, 'contract', ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
-        `,
-        [
-          contract.negotiation_id,
-          documentTypeRaw,
-          JSON.stringify({
-            contractId,
-            side,
-            originalFileName: uploadedFile.originalname ?? null,
-            uploadedAt: new Date().toISOString(),
-            uploadedVia: 'admin',
-          }),
-          uploadedFile.buffer,
-        ]
-      );
+      const documentId = await storeNegotiationDocumentToR2({
+        executor: tx,
+        negotiationId: contract.negotiation_id,
+        type: 'contract',
+        documentType: documentTypeRaw,
+        content: uploadedFile.buffer,
+        metadataJson: {
+          contractId,
+          side,
+          originalFileName: uploadedFile.originalname ?? null,
+          uploadedAt: new Date().toISOString(),
+          uploadedVia: 'admin',
+        },
+      });
 
       if (documentTypeRaw.toLowerCase() === 'contrato_assinado') {
         const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
@@ -1858,7 +1905,7 @@ class ContractController {
         message: 'Documento assinado/comprovante enviado com sucesso.',
         readyForFinalization: true,
         document: {
-          id: Number(insertResult.insertId ?? 0),
+          id: documentId,
           contractId,
           documentType: documentTypeRaw,
           side,
@@ -1903,28 +1950,19 @@ class ContractController {
         });
       }
 
-      await tx.query(
-        `
-          INSERT INTO negotiation_documents (
-            negotiation_id,
-            type,
-            document_type,
-            metadata_json,
-            file_content,
-            created_at
-          ) VALUES (?, 'contract', 'contrato_minuta', CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
-        `,
-        [
-          contract.negotiation_id,
-          JSON.stringify({
-            contractId,
-            originalFileName: uploadedFile.originalname ?? null,
-            uploadedAt: new Date().toISOString(),
-            uploadedVia: 'admin',
-          }),
-          uploadedFile.buffer,
-        ]
-      );
+      await storeNegotiationDocumentToR2({
+        executor: tx,
+        negotiationId: contract.negotiation_id,
+        type: 'contract',
+        documentType: 'contrato_minuta',
+        content: uploadedFile.buffer,
+        metadataJson: {
+          contractId,
+          originalFileName: uploadedFile.originalname ?? null,
+          uploadedAt: new Date().toISOString(),
+          uploadedVia: 'admin',
+        },
+      });
 
       await tx.query(
         `
@@ -2423,32 +2461,21 @@ class ContractController {
         });
       }
 
-      const [insertResult] = await tx.query<ResultSetHeader>(
-        `
-          INSERT INTO negotiation_documents (
-            negotiation_id,
-            type,
-            document_type,
-            metadata_json,
-            file_content,
-            created_at
-          ) VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
-        `,
-        [
-          contract.negotiation_id,
-          resolveDocumentStorageType(normalizedDocumentType),
-          normalizedDocumentType,
-          JSON.stringify({
-            contractId,
-            side: requestedSide,
-            originalFileName: uploadedFile.originalname ?? null,
-            uploadedBy: Number(req.userId ?? 0) || null,
-            uploadedAt: new Date().toISOString(),
-            uploadedVia: 'admin-finalized',
-          }),
-          uploadedFile.buffer,
-        ]
-      );
+      const documentId = await storeNegotiationDocumentToR2({
+        executor: tx,
+        negotiationId: contract.negotiation_id,
+        type: resolveDocumentStorageType(normalizedDocumentType),
+        documentType: normalizedDocumentType,
+        content: uploadedFile.buffer,
+        metadataJson: {
+          contractId,
+          side: requestedSide,
+          originalFileName: uploadedFile.originalname ?? null,
+          uploadedBy: Number(req.userId ?? 0) || null,
+          uploadedAt: new Date().toISOString(),
+          uploadedVia: 'admin-finalized',
+        },
+      });
 
       await tx.query(
         `
@@ -2467,20 +2494,18 @@ class ContractController {
         propertyId: Number(contract.property_id),
         documentType: normalizedDocumentType,
         side: requestedSide,
-        documentId: Number(insertResult.insertId ?? 0),
+        documentId,
       });
 
       return res.status(201).json({
         message: 'Documento anexado com sucesso ao contrato finalizado.',
         document: {
-          id: Number(insertResult.insertId ?? 0),
+          id: documentId,
           contractId,
           documentType: normalizedDocumentType,
           side: requestedSide,
           originalFileName: uploadedFile.originalname ?? null,
-          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${Number(
-            insertResult.insertId ?? 0
-          )}/download`,
+          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${documentId}/download`,
         },
       });
     } catch (error) {
@@ -2522,7 +2547,17 @@ class ContractController {
 
       const [documentRows] = await tx.query<ContractDocumentForDeleteRow[]>(
         `
-          SELECT id, type, document_type, metadata_json
+          SELECT
+            id,
+            type,
+            document_type,
+            metadata_json,
+            storage_provider,
+            storage_bucket,
+            storage_key,
+            storage_content_type,
+            storage_size_bytes,
+            storage_etag
           FROM negotiation_documents
           WHERE id = ?
             AND ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
@@ -2726,7 +2761,18 @@ class ContractController {
 
       const documents = await queryContractRows<ContractDocumentDownloadRow>(
         `
-          SELECT id, type, document_type, metadata_json, created_at, file_content
+          SELECT
+            id,
+            type,
+            document_type,
+            metadata_json,
+            created_at,
+            storage_provider,
+            storage_bucket,
+            storage_key,
+            storage_content_type,
+            storage_size_bytes,
+            storage_etag
           FROM negotiation_documents
           WHERE ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
           ORDER BY created_at DESC, id DESC
@@ -2746,7 +2792,7 @@ class ContractController {
         const fallbackName =
           mapped.originalFileName ??
           `${String(mapped.documentType ?? 'documento').trim() || 'documento'}_${mapped.id}.bin`;
-        zip.file(fallbackName, document.file_content);
+        zip.file(fallbackName, await readNegotiationDocumentObject(document));
       }
 
       const fileNameBase =
@@ -3041,33 +3087,20 @@ class ContractController {
         }
       }
 
-      const [insertResult] = await tx.query<ResultSetHeader>(
-        `
-          INSERT INTO negotiation_documents (
-            negotiation_id,
-            type,
-            document_type,
-            metadata_json,
-            file_content,
-            created_at
-          ) VALUES (?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP)
-        `,
-        [
-          contract.negotiation_id,
-          resolveDocumentStorageType(normalizedDocumentType),
-          normalizedDocumentType,
-          JSON.stringify({
-            contractId,
-            side: resolvedSide,
-            originalFileName: uploadedFile.originalname ?? null,
-            uploadedBy: Number(req.userId ?? 0) || null,
-            uploadedAt: new Date().toISOString(),
-          }),
-          uploadedFile.buffer,
-        ]
-      );
-
-      const documentId = Number(insertResult.insertId ?? 0);
+      const documentId = await storeNegotiationDocumentToR2({
+        executor: tx,
+        negotiationId: contract.negotiation_id,
+        type: resolveDocumentStorageType(normalizedDocumentType),
+        documentType: normalizedDocumentType,
+        content: uploadedFile.buffer,
+        metadataJson: {
+          contractId,
+          side: resolvedSide,
+          originalFileName: uploadedFile.originalname ?? null,
+          uploadedBy: Number(req.userId ?? 0) || null,
+          uploadedAt: new Date().toISOString(),
+        },
+      });
 
       const shouldMarkOnlineSignatureMethod =
         role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
@@ -3149,7 +3182,17 @@ class ContractController {
 
       const [documentRows] = await tx.query<ContractDocumentForDeleteRow[]>(
         `
-          SELECT id, type, document_type, metadata_json
+          SELECT
+            id,
+            type,
+            document_type,
+            metadata_json,
+            storage_provider,
+            storage_bucket,
+            storage_key,
+            storage_content_type,
+            storage_size_bytes,
+            storage_etag
           FROM negotiation_documents
           WHERE id = ? AND negotiation_id = ?
           LIMIT 1
@@ -3238,6 +3281,11 @@ class ContractController {
       );
 
       await tx.commit();
+      await cleanupContractDocumentAssets([document], {
+        action: 'delete_contract_document',
+        contractId,
+        negotiationId: contract.negotiation_id,
+      });
       return res.status(200).json({
         message: 'Documento removido com sucesso.',
         documentId,

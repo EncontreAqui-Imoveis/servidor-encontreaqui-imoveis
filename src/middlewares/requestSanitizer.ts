@@ -23,6 +23,19 @@ function sanitizeUnknown(value: unknown, depth = 0): unknown {
   return output;
 }
 
+function replaceObjectContents(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>
+): void {
+  for (const key of Object.keys(target)) {
+    delete target[key];
+  }
+
+  for (const [key, value] of Object.entries(source)) {
+    target[key] = value;
+  }
+}
+
 function sanitizeDigitField(
   payload: Record<string, unknown>,
   field: string
@@ -75,8 +88,20 @@ export function requestSanitizer(
   _res: Response,
   next: NextFunction
 ) {
-  req.query = sanitizeUnknown(req.query) as Request['query'];
-  req.params = sanitizeUnknown(req.params) as Request['params'];
+  if (req.query && typeof req.query === 'object') {
+    replaceObjectContents(
+      req.query as Record<string, unknown>,
+      sanitizeUnknown(req.query) as Record<string, unknown>
+    );
+  }
+
+  if (req.params && typeof req.params === 'object') {
+    replaceObjectContents(
+      req.params as Record<string, unknown>,
+      sanitizeUnknown(req.params) as Record<string, unknown>
+    );
+  }
+
   req.body = sanitizeUnknown(req.body) as Request['body'];
 
   if (req.body && typeof req.body === 'object') {

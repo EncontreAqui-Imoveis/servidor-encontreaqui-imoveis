@@ -8,7 +8,7 @@ import type { SqlExecutor } from '../modules/negotiations/infra/NegotiationRepos
 
 const executor: SqlExecutor = {
   execute<T = unknown>(sql: string, params?: unknown[]): Promise<T | [T, unknown]> {
-    return connection.execute(sql, params as unknown[]) as unknown as Promise<T | [T, unknown]>;
+    return connection.execute(sql, params as any) as unknown as Promise<T | [T, unknown]>;
   },
 };
 
@@ -19,7 +19,7 @@ export async function queryNegotiationRows<T extends RowDataPacket>(
   sql: string,
   params: unknown[]
 ): Promise<T[]> {
-  const [rows] = await connection.query<T[]>(sql, params as unknown[]);
+  const [rows] = await connection.query<T[]>(sql, params as any);
   return rows;
 }
 
@@ -27,7 +27,7 @@ export async function executeNegotiationStatement(
   sql: string,
   params: unknown[]
 ): Promise<void> {
-  await connection.execute(sql, params as unknown[]);
+  await connection.execute(sql, params as any);
 }
 
 export function getNegotiationDbConnection(): Promise<PoolConnection> {

@@ -12,7 +12,7 @@ import {
 type DocumentStorageProvider = 'R2';
 
 type StorageExecutor = {
-  execute<T = unknown>(sql: string, params?: unknown[]): Promise<T | [T, unknown]>;
+  execute<T = unknown>(sql: string, params?: any): Promise<T | [T, unknown]>;
 };
 
 type InsertResult = {

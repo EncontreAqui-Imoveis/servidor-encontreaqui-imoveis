@@ -13,7 +13,7 @@ class SreController {
     }
 
     public async updateService(req: Request, res: Response): Promise<void> {
-        const { name } = req.params;
+        const name = String(req.params.name ?? '').trim();
         const { cost, status } = req.body;
 
         try {

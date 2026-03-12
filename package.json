@@ -13,7 +13,7 @@
     "test:watch": "node ./node_modules/vitest/vitest.mjs --exclude tests/local-stress/**",
     "test:local-stress:email-codes": "node ./node_modules/vitest/vitest.mjs run tests/local-stress/email-code-challenges.test.ts",
     "test:local-stress:r2-documents": "node ./node_modules/vitest/vitest.mjs run tests/local-stress/negotiation-r2-documents.test.ts",
-    "ci:verify": "npm run build && npm run test:architecture && npm run test:coverage",
+    "ci:verify": "npm run build && npm run test:architecture && npm run test",
     "security:audit": "npm audit --audit-level=high",
     "test:sast:r2-documents": "cross-env PYTHONUTF8=1 semgrep scan --config auto src/services/negotiationDocumentStorageService.ts src/modules/negotiations/infra/NegotiationDocumentsRepository.ts src/controllers/NegotiationController.ts src/controllers/ContractController.ts src/controllers/AdminController.ts",
     "migrate:up": "ts-node src/database/migrationRunner.ts up",

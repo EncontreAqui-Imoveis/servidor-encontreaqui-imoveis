@@ -32,6 +32,21 @@ interface NegotiationUploadRow extends RowDataPacket {
   broker_name: string | null;
 }
 
+interface NegotiationListRow extends RowDataPacket {
+  id: string;
+  property_id: number;
+  property_title: string | null;
+  property_city: string | null;
+  property_state: string | null;
+  property_image: string | null;
+  status: string;
+  client_name: string | null;
+  client_cpf: string | null;
+  proposal_validity_date: Date | string | null;
+  created_at: Date | string | null;
+  updated_at: Date | string | null;
+}
+
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
   capturing_broker_id: number | null;
@@ -310,6 +325,15 @@ function buildProposalValidityDate(days: number): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function toIsoString(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+  return parsed.toISOString();
+}
+
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
   if (!value) {
     return {};
@@ -411,6 +435,83 @@ class NegotiationController {
       correlation_id: this.correlationId(req),
       ...(extras ?? {}),
     });
+  }
+
+  async listMine(req: AuthRequest, res: Response): Promise<Response> {
+    const userId = Number(req.userId);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    try {
+      const rows = await queryNegotiationRows<NegotiationListRow>(
+        `
+          SELECT
+            n.id,
+            n.property_id,
+            p.title AS property_title,
+            p.city AS property_city,
+            p.state AS property_state,
+            MIN(pi.image_url) AS property_image,
+            n.status,
+            COALESCE(
+              NULLIF(n.client_name, ''),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+            ) AS client_name,
+            COALESCE(
+              NULLIF(n.client_cpf, ''),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+            ) AS client_cpf,
+            n.proposal_validity_date,
+            n.created_at,
+            n.updated_at
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          LEFT JOIN property_images pi ON pi.property_id = p.id
+          WHERE n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?
+          GROUP BY
+            n.id,
+            n.property_id,
+            p.title,
+            p.city,
+            p.state,
+            n.status,
+            client_name,
+            client_cpf,
+            n.proposal_validity_date,
+            n.created_at,
+            n.updated_at
+          ORDER BY n.updated_at DESC, n.created_at DESC
+        `,
+        [userId, userId, userId]
+      );
+
+      return res.status(200).json({
+        data: rows.map((row) => ({
+          id: row.id,
+          propertyId: Number(row.property_id),
+          propertyTitle: row.property_title ?? '',
+          propertyCity: row.property_city ?? null,
+          propertyState: row.property_state ?? null,
+          propertyImage: row.property_image ?? null,
+          status: String(row.status ?? '').trim().toUpperCase(),
+          clientName: row.client_name ?? null,
+          clientCpf: row.client_cpf ?? null,
+          createdAt: toIsoString(row.created_at),
+          updatedAt: toIsoString(row.updated_at),
+          proposalValidUntil: toIsoString(row.proposal_validity_date),
+        })),
+      });
+    } catch (error) {
+      console.error('Erro ao listar negociações do usuário:', error);
+      return res.status(500).json({ error: 'Falha ao listar negociações.' });
+    }
   }
 
   async generateProposal(req: AuthRequest, res: Response): Promise<Response> {

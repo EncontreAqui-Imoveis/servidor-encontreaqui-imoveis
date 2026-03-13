@@ -45,7 +45,23 @@ interface NegotiationListRow extends RowDataPacket {
   proposal_validity_date: Date | string | null;
   created_at: Date | string | null;
   updated_at: Date | string | null;
+  payment_details?: unknown;
 }
+
+type NegotiationSummaryPayload = {
+  id: string;
+  propertyId: number;
+  propertyTitle: string;
+  propertyCity: string | null;
+  propertyState: string | null;
+  propertyImage: string | null;
+  status: string;
+  clientName: string | null;
+  clientCpf: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  proposalValidUntil: string | null;
+};
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
@@ -334,6 +350,281 @@ function toIsoString(value: Date | string | null | undefined): string | null {
   return parsed.toISOString();
 }
 
+function isSchemaCompatibilityError(error: unknown): boolean {
+  const code = String((error as { code?: unknown })?.code ?? '').trim().toUpperCase();
+  return (
+    code === 'ER_BAD_FIELD_ERROR' ||
+    code === 'ER_PARSE_ERROR' ||
+    code === 'ER_INVALID_JSON_TEXT' ||
+    code === 'ER_WRONG_FIELD_WITH_GROUP'
+  );
+}
+
+function getNestedObjectValue(
+  source: Record<string, unknown>,
+  path: readonly string[]
+): unknown {
+  let current: unknown = source;
+  for (const segment of path) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim();
+    if (normalized.length > 0 && normalized.toLowerCase() !== 'null') {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function resolveNegotiationClientName(row: NegotiationListRow): string | null {
+  const paymentDetails = parseJsonObjectSafe(row.payment_details);
+  return firstNonEmptyString(
+    row.client_name,
+    getNestedObjectValue(paymentDetails, ['details', 'clientName']),
+    getNestedObjectValue(paymentDetails, ['details', 'client_name']),
+    paymentDetails.clientName,
+    paymentDetails.client_name
+  );
+}
+
+function resolveNegotiationClientCpf(row: NegotiationListRow): string | null {
+  const paymentDetails = parseJsonObjectSafe(row.payment_details);
+  return firstNonEmptyString(
+    row.client_cpf,
+    getNestedObjectValue(paymentDetails, ['details', 'clientCpf']),
+    getNestedObjectValue(paymentDetails, ['details', 'client_cpf']),
+    paymentDetails.clientCpf,
+    paymentDetails.client_cpf
+  );
+}
+
+function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPayload {
+  return {
+    id: row.id,
+    propertyId: Number(row.property_id),
+    propertyTitle: row.property_title ?? '',
+    propertyCity: row.property_city ?? null,
+    propertyState: row.property_state ?? null,
+    propertyImage: row.property_image ?? null,
+    status: String(row.status ?? '').trim().toUpperCase(),
+    clientName: resolveNegotiationClientName(row),
+    clientCpf: resolveNegotiationClientCpf(row),
+    createdAt: toIsoString(row.created_at),
+    updatedAt: toIsoString(row.updated_at),
+    proposalValidUntil: toIsoString(row.proposal_validity_date),
+  };
+}
+
+type NegotiationColumnFlags = {
+  hasSellingBrokerId: boolean;
+  hasBuyerClientId: boolean;
+  hasClientName: boolean;
+  hasClientCpf: boolean;
+  hasProposalValidityDate: boolean;
+  hasUpdatedAt: boolean;
+  hasPaymentDetails: boolean;
+};
+
+async function getNegotiationColumnFlags(): Promise<NegotiationColumnFlags> {
+  const rows = await queryNegotiationRows<RowDataPacket>(
+    `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = 'negotiations'
+        AND column_name IN (
+          'selling_broker_id',
+          'buyer_client_id',
+          'client_name',
+          'client_cpf',
+          'proposal_validity_date',
+          'updated_at',
+          'payment_details'
+        )
+    `,
+    []
+  );
+
+  const columns = new Set(
+    rows.map((row) => String((row as { column_name?: unknown }).column_name ?? '').trim())
+  );
+
+  return {
+    hasSellingBrokerId: columns.has('selling_broker_id'),
+    hasBuyerClientId: columns.has('buyer_client_id'),
+    hasClientName: columns.has('client_name'),
+    hasClientCpf: columns.has('client_cpf'),
+    hasProposalValidityDate: columns.has('proposal_validity_date'),
+    hasUpdatedAt: columns.has('updated_at'),
+    hasPaymentDetails: columns.has('payment_details'),
+  };
+}
+
+async function queryMineNegotiationsCurrent(userId: number): Promise<NegotiationSummaryPayload[]> {
+  const rows = await queryNegotiationRows<NegotiationListRow>(
+    `
+      SELECT
+        n.id,
+        n.property_id,
+        p.title AS property_title,
+        p.city AS property_city,
+        p.state AS property_state,
+        MIN(pi.image_url) AS property_image,
+        n.status,
+        COALESCE(
+          NULLIF(n.client_name, ''),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+        ) AS client_name,
+        COALESCE(
+          NULLIF(n.client_cpf, ''),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+        ) AS client_cpf,
+        n.proposal_validity_date,
+        n.created_at,
+        n.updated_at
+      FROM negotiations n
+      JOIN properties p ON p.id = n.property_id
+      LEFT JOIN property_images pi ON pi.property_id = p.id
+      WHERE n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?
+      GROUP BY
+        n.id,
+        n.property_id,
+        p.title,
+        p.city,
+        p.state,
+        n.status,
+        client_name,
+        client_cpf,
+        n.proposal_validity_date,
+        n.created_at,
+        n.updated_at
+      ORDER BY n.updated_at DESC, n.created_at DESC
+    `,
+    [userId, userId, userId]
+  );
+
+  return rows.map(mapNegotiationSummaryRow);
+}
+
+async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationSummaryPayload[]> {
+  const rows = await queryNegotiationRows<NegotiationListRow>(
+    `
+      SELECT
+        n.id,
+        n.property_id,
+        p.title AS property_title,
+        p.city AS property_city,
+        p.state AS property_state,
+        MIN(pi.image_url) AS property_image,
+        n.status,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+        ) AS client_name,
+        COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+        ) AS client_cpf,
+        NULL AS proposal_validity_date,
+        n.created_at,
+        n.created_at AS updated_at
+      FROM negotiations n
+      JOIN properties p ON p.id = n.property_id
+      LEFT JOIN property_images pi ON pi.property_id = p.id
+      WHERE n.capturing_broker_id = ?
+      GROUP BY
+        n.id,
+        n.property_id,
+        p.title,
+        p.city,
+        p.state,
+        n.status,
+        n.created_at
+      ORDER BY n.created_at DESC
+    `,
+    [userId]
+  );
+
+  return rows.map(mapNegotiationSummaryRow);
+}
+
+async function queryMineNegotiationsSchemaAware(
+  userId: number
+): Promise<NegotiationSummaryPayload[]> {
+  const flags = await getNegotiationColumnFlags();
+
+  const selectClientName = flags.hasClientName ? 'n.client_name' : 'NULL';
+  const selectClientCpf = flags.hasClientCpf ? 'n.client_cpf' : 'NULL';
+  const selectProposalValidityDate = flags.hasProposalValidityDate
+    ? 'n.proposal_validity_date'
+    : 'NULL';
+  const selectUpdatedAt = flags.hasUpdatedAt ? 'n.updated_at' : 'n.created_at';
+  const selectPaymentDetails = flags.hasPaymentDetails ? 'n.payment_details' : 'NULL';
+
+  const whereClauses = ['n.capturing_broker_id = ?'];
+  const params: number[] = [userId];
+
+  if (flags.hasSellingBrokerId) {
+    whereClauses.push('n.selling_broker_id = ?');
+    params.push(userId);
+  }
+
+  if (flags.hasBuyerClientId) {
+    whereClauses.push('n.buyer_client_id = ?');
+    params.push(userId);
+  }
+
+  const rows = await queryNegotiationRows<NegotiationListRow>(
+    `
+      SELECT
+        n.id,
+        n.property_id,
+        p.title AS property_title,
+        p.city AS property_city,
+        p.state AS property_state,
+        (
+          SELECT pi.image_url
+          FROM property_images pi
+          WHERE pi.property_id = p.id
+          ORDER BY pi.id ASC
+          LIMIT 1
+        ) AS property_image,
+        n.status,
+        ${selectClientName} AS client_name,
+        ${selectClientCpf} AS client_cpf,
+        ${selectProposalValidityDate} AS proposal_validity_date,
+        n.created_at,
+        ${selectUpdatedAt} AS updated_at,
+        ${selectPaymentDetails} AS payment_details
+      FROM negotiations n
+      JOIN properties p ON p.id = n.property_id
+      WHERE ${whereClauses.join(' OR ')}
+      ORDER BY ${selectUpdatedAt} DESC, n.created_at DESC
+    `,
+    params
+  );
+
+  return rows.map(mapNegotiationSummaryRow);
+}
+
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
   if (!value) {
     return {};
@@ -444,69 +735,36 @@ class NegotiationController {
     }
 
     try {
-      const rows = await queryNegotiationRows<NegotiationListRow>(
-        `
-          SELECT
-            n.id,
-            n.property_id,
-            p.title AS property_title,
-            p.city AS property_city,
-            p.state AS property_state,
-            MIN(pi.image_url) AS property_image,
-            n.status,
-            COALESCE(
-              NULLIF(n.client_name, ''),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-            ) AS client_name,
-            COALESCE(
-              NULLIF(n.client_cpf, ''),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
-            ) AS client_cpf,
-            n.proposal_validity_date,
-            n.created_at,
-            n.updated_at
-          FROM negotiations n
-          JOIN properties p ON p.id = n.property_id
-          LEFT JOIN property_images pi ON pi.property_id = p.id
-          WHERE n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?
-          GROUP BY
-            n.id,
-            n.property_id,
-            p.title,
-            p.city,
-            p.state,
-            n.status,
-            client_name,
-            client_cpf,
-            n.proposal_validity_date,
-            n.created_at,
-            n.updated_at
-          ORDER BY n.updated_at DESC, n.created_at DESC
-        `,
-        [userId, userId, userId]
-      );
+      let data: NegotiationSummaryPayload[];
+      try {
+        data = await queryMineNegotiationsCurrent(userId);
+      } catch (error) {
+        console.warn(
+          'Fallback schema-aware ativado em /negotiations/mine:',
+          (error as { code?: string; message?: string }).code ??
+            (error as { message?: string }).message ??
+            error,
+        );
+
+        try {
+          data = await queryMineNegotiationsSchemaAware(userId);
+        } catch (fallbackError) {
+          if (!isSchemaCompatibilityError(fallbackError)) {
+            throw fallbackError;
+          }
+
+          console.warn(
+            'Fallback legado ativado em /negotiations/mine:',
+            (fallbackError as { code?: string; message?: string }).code ??
+              (fallbackError as { message?: string }).message ??
+              fallbackError,
+          );
+          data = await queryMineNegotiationsLegacy(userId);
+        }
+      }
 
       return res.status(200).json({
-        data: rows.map((row) => ({
-          id: row.id,
-          propertyId: Number(row.property_id),
-          propertyTitle: row.property_title ?? '',
-          propertyCity: row.property_city ?? null,
-          propertyState: row.property_state ?? null,
-          propertyImage: row.property_image ?? null,
-          status: String(row.status ?? '').trim().toUpperCase(),
-          clientName: row.client_name ?? null,
-          clientCpf: row.client_cpf ?? null,
-          createdAt: toIsoString(row.created_at),
-          updatedAt: toIsoString(row.updated_at),
-          proposalValidUntil: toIsoString(row.proposal_validity_date),
-        })),
+        data,
       });
     } catch (error) {
       console.error('Erro ao listar negociações do usuário:', error);

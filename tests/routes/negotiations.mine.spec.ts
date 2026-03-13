@@ -72,4 +72,58 @@ describe('GET /negotiations/mine', () => {
     ]);
     expect(queryMock).toHaveBeenCalledTimes(1);
   });
+
+  it('falls back to the schema-aware query when the modern query is incompatible', async () => {
+    queryMock
+      .mockRejectedValueOnce(Object.assign(new Error('Unknown column buyer_client_id'), {
+        code: 'ER_BAD_FIELD_ERROR',
+      }))
+      .mockResolvedValueOnce([
+        [
+          { column_name: 'client_name' },
+          { column_name: 'client_cpf' },
+          { column_name: 'updated_at' },
+          { column_name: 'payment_details' },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-legacy',
+            property_id: 101,
+            property_title: 'Apartamento Centro',
+            property_city: 'Goiânia',
+            property_state: 'GO',
+            property_image: null,
+            status: 'IN_NEGOTIATION',
+            client_name: null,
+            client_cpf: null,
+            proposal_validity_date: null,
+            created_at: '2026-03-01 10:00:00',
+            updated_at: '2026-03-02 10:00:00',
+            payment_details: JSON.stringify({
+              details: {
+                clientName: 'Cliente Legacy',
+                clientCpf: '99988877766',
+              },
+            }),
+          },
+        ],
+      ]);
+
+    const response = await request(app).get('/negotiations/mine');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({
+        id: 'neg-legacy',
+        propertyId: 101,
+        propertyTitle: 'Apartamento Centro',
+        status: 'IN_NEGOTIATION',
+        clientName: 'Cliente Legacy',
+        clientCpf: '99988877766',
+      }),
+    ]);
+    expect(queryMock).toHaveBeenCalledTimes(3);
+  });
 });

@@ -429,6 +429,7 @@ type NegotiationColumnFlags = {
   hasClientName: boolean;
   hasClientCpf: boolean;
   hasProposalValidityDate: boolean;
+  hasCreatedAt: boolean;
   hasUpdatedAt: boolean;
   hasPaymentDetails: boolean;
 };
@@ -446,6 +447,7 @@ async function getNegotiationColumnFlags(): Promise<NegotiationColumnFlags> {
           'client_name',
           'client_cpf',
           'proposal_validity_date',
+          'created_at',
           'updated_at',
           'payment_details'
         )
@@ -463,6 +465,7 @@ async function getNegotiationColumnFlags(): Promise<NegotiationColumnFlags> {
     hasClientName: columns.has('client_name'),
     hasClientCpf: columns.has('client_cpf'),
     hasProposalValidityDate: columns.has('proposal_validity_date'),
+    hasCreatedAt: columns.has('created_at'),
     hasUpdatedAt: columns.has('updated_at'),
     hasPaymentDetails: columns.has('payment_details'),
   };
@@ -521,6 +524,10 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
 }
 
 async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationSummaryPayload[]> {
+  const flags = await getNegotiationColumnFlags();
+  const selectCreatedAt = flags.hasCreatedAt ? 'n.created_at' : 'NULL';
+  const selectPaymentDetails = flags.hasPaymentDetails ? 'n.payment_details' : 'NULL';
+
   const rows = await queryNegotiationRows<NegotiationListRow>(
     `
       SELECT
@@ -529,36 +536,24 @@ async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationS
         p.title AS property_title,
         p.city AS property_city,
         p.state AS property_state,
-        MIN(pi.image_url) AS property_image,
+        (
+          SELECT pi.image_url
+          FROM property_images pi
+          WHERE pi.property_id = p.id
+          ORDER BY pi.id ASC
+          LIMIT 1
+        ) AS property_image,
         n.status,
-        COALESCE(
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-        ) AS client_name,
-        COALESCE(
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
-        ) AS client_cpf,
+        NULL AS client_name,
+        NULL AS client_cpf,
         NULL AS proposal_validity_date,
-        n.created_at,
-        n.created_at AS updated_at
+        ${selectCreatedAt} AS created_at,
+        ${selectCreatedAt} AS updated_at,
+        ${selectPaymentDetails} AS payment_details
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
-      LEFT JOIN property_images pi ON pi.property_id = p.id
       WHERE n.capturing_broker_id = ?
-      GROUP BY
-        n.id,
-        n.property_id,
-        p.title,
-        p.city,
-        p.state,
-        n.status,
-        n.created_at
-      ORDER BY n.created_at DESC
+      ORDER BY ${flags.hasCreatedAt ? 'n.created_at DESC,' : ''} n.id DESC
     `,
     [userId]
   );
@@ -576,7 +571,12 @@ async function queryMineNegotiationsSchemaAware(
   const selectProposalValidityDate = flags.hasProposalValidityDate
     ? 'n.proposal_validity_date'
     : 'NULL';
-  const selectUpdatedAt = flags.hasUpdatedAt ? 'n.updated_at' : 'n.created_at';
+  const selectCreatedAt = flags.hasCreatedAt ? 'n.created_at' : 'NULL';
+  const selectUpdatedAt = flags.hasUpdatedAt
+    ? 'n.updated_at'
+    : flags.hasCreatedAt
+      ? 'n.created_at'
+      : 'NULL';
   const selectPaymentDetails = flags.hasPaymentDetails ? 'n.payment_details' : 'NULL';
 
   const whereClauses = ['n.capturing_broker_id = ?'];
@@ -611,13 +611,15 @@ async function queryMineNegotiationsSchemaAware(
         ${selectClientName} AS client_name,
         ${selectClientCpf} AS client_cpf,
         ${selectProposalValidityDate} AS proposal_validity_date,
-        n.created_at,
+        ${selectCreatedAt} AS created_at,
         ${selectUpdatedAt} AS updated_at,
         ${selectPaymentDetails} AS payment_details
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
       WHERE ${whereClauses.join(' OR ')}
-      ORDER BY ${selectUpdatedAt} DESC, n.created_at DESC
+      ORDER BY ${selectUpdatedAt !== 'NULL' ? `${selectUpdatedAt} DESC,` : ''} ${
+        selectCreatedAt !== 'NULL' ? `${selectCreatedAt} DESC,` : ''
+      } n.id DESC
     `,
     params
   );

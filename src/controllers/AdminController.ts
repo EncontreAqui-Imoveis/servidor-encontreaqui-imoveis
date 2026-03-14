@@ -2865,10 +2865,7 @@ class AdminController {
         return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
       }
 
-      if (semNumeroFlag !== 1 && numero && String(numero).trim().length > 0 && !normalizeDigits(numero)) {
-        return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
-      }
-      const normalizedNumero = semNumeroFlag === 1 ? null : stringOrNull(normalizeDigits(numero));
+      const normalizedNumero = semNumeroFlag === 1 ? null : stringOrNull(numero);
 
       if (
         numericBedrooms == null ||

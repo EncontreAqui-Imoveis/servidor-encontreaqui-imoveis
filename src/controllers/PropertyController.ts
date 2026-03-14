@@ -827,7 +827,7 @@ class PropertyController {
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
       const ownerPhoneDigits = String(owner_phone).replace(/\D/g, "");
-      if (ownerPhoneDigits.length !== 11) {
+      if (ownerPhoneDigits.length < 10 || ownerPhoneDigits.length > 13) {
         return res.status(400).json({
           error: "Telefone do proprietário inválido.",
         });
@@ -1272,7 +1272,7 @@ class PropertyController {
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
       const ownerPhoneDigits = String(owner_phone).replace(/\D/g, '');
-      if (ownerPhoneDigits.length !== 11) {
+      if (ownerPhoneDigits.length < 10 || ownerPhoneDigits.length > 13) {
         return res.status(400).json({
           error: 'Telefone do proprietário inválido.',
         });
@@ -1962,7 +1962,7 @@ class PropertyController {
             const text = String(body[key] ?? '').trim();
             if (text.length > 0) {
               const digits = text.replace(/\D/g, '');
-              if (digits.length !== 11) {
+              if (digits.length < 10 || digits.length > 13) {
                 return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
               }
               fields.push('owner_phone = ?');

@@ -59,6 +59,7 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
 
 const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
+const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'title',
   'description',
@@ -542,6 +543,20 @@ function hasValidPropertyDescription(value: unknown): boolean {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PROPERTY_DESCRIPTION_LENGTH;
 }
 
+function validateMaxTextLength(
+  value: unknown,
+  label: string,
+  maxLength: number = MAX_GENERIC_PROPERTY_TEXT_LENGTH,
+): string | null {
+  if (value == null) return null;
+  const normalized = String(value).trim();
+  if (!normalized) return null;
+  if (normalized.length > maxLength) {
+    return `${label} deve ter no máximo ${maxLength} caracteres.`;
+  }
+  return null;
+}
+
 async function upsertSaleRecord(
   db: PropertyQueryExecutor,
   payload: {
@@ -823,6 +838,24 @@ class PropertyController {
 
     if (!stringOrNull(tipo_lote)) {
       return res.status(400).json({ error: "Tipo de lote é obrigatório." });
+    }
+
+    const createTextValidationError = [
+      validateMaxTextLength(title, 'Título'),
+      validateMaxTextLength(owner_name, 'Nome do proprietário'),
+      validateMaxTextLength(address, 'Endereço'),
+      validateMaxTextLength(numero, 'Número', 25),
+      validateMaxTextLength(bairro, 'Bairro'),
+      validateMaxTextLength(complemento, 'Complemento'),
+      validateMaxTextLength(city, 'Cidade'),
+      validateMaxTextLength(quadra, 'Quadra', 25),
+      validateMaxTextLength(lote, 'Lote', 25),
+      validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
+      validateMaxTextLength(code, 'Código'),
+    ].find(Boolean);
+
+    if (createTextValidationError) {
+      return res.status(400).json({ error: createTextValidationError });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
@@ -1270,6 +1303,24 @@ class PropertyController {
       return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
     }
 
+    const createClientTextValidationError = [
+      validateMaxTextLength(title, 'Título'),
+      validateMaxTextLength(owner_name, 'Nome do proprietário'),
+      validateMaxTextLength(address, 'Endereço'),
+      validateMaxTextLength(numero, 'Número', 25),
+      validateMaxTextLength(bairro, 'Bairro'),
+      validateMaxTextLength(complemento, 'Complemento'),
+      validateMaxTextLength(city, 'Cidade'),
+      validateMaxTextLength(quadra, 'Quadra', 25),
+      validateMaxTextLength(lote, 'Lote', 25),
+      validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
+      validateMaxTextLength(code, 'Código'),
+    ].find(Boolean);
+
+    if (createClientTextValidationError) {
+      return res.status(400).json({ error: createClientTextValidationError });
+    }
+
     if (owner_phone && String(owner_phone).trim().length > 0) {
       const ownerPhoneDigits = String(owner_phone).replace(/\D/g, '');
       if (ownerPhoneDigits.length < 10 || ownerPhoneDigits.length > 13) {
@@ -1667,6 +1718,24 @@ class PropertyController {
       const nextTipoLote = stringOrNull(body.tipo_lote ?? property.tipo_lote);
       if (!nextTipoLote) {
         return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
+      }
+
+      const updateTextValidationError = [
+        validateMaxTextLength(body.title ?? property.title, 'Título'),
+        validateMaxTextLength(body.owner_name ?? property.owner_name, 'Nome do proprietário'),
+        validateMaxTextLength(body.address ?? property.address, 'Endereço'),
+        validateMaxTextLength(body.numero ?? property.numero, 'Número', 25),
+        validateMaxTextLength(body.bairro ?? property.bairro, 'Bairro'),
+        validateMaxTextLength(body.complemento ?? property.complemento, 'Complemento'),
+        validateMaxTextLength(body.city ?? property.city, 'Cidade'),
+        validateMaxTextLength(body.quadra ?? property.quadra, 'Quadra', 25),
+        validateMaxTextLength(body.lote ?? property.lote, 'Lote', 25),
+        validateMaxTextLength(nextTipoLote, 'Tipo de lote', 25),
+        validateMaxTextLength(body.code ?? property.code, 'Código'),
+      ].find(Boolean);
+
+      if (updateTextValidationError) {
+        return res.status(400).json({ error: updateTextValidationError });
       }
 
       const nextPurpose = normalizePurpose(body.purpose) ?? property.purpose;

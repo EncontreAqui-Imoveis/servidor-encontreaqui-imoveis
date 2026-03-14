@@ -60,6 +60,8 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
 const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
+const MAX_PROPERTY_COUNT = 99;
+const MAX_PROPERTY_AREA = 99999999.99;
 const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'title',
   'description',
@@ -557,6 +559,23 @@ function validateMaxTextLength(
   return null;
 }
 
+function validatePropertyNumericRange(
+  value: number | null,
+  label: string,
+  options: { max: number; allowNull?: boolean },
+): string | null {
+  if (value == null) {
+    return options.allowNull ? null : `${label} inválido.`;
+  }
+  if (value < 0) {
+    return `${label} inválido.`;
+  }
+  if (value > options.max) {
+    return `${label} deve ser no máximo ${options.max}.`;
+  }
+  return null;
+}
+
 async function upsertSaleRecord(
   db: PropertyQueryExecutor,
   payload: {
@@ -1038,6 +1057,18 @@ class PropertyController {
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
 
+      const numericValidationError = [
+        validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+      ].find(Boolean);
+
+      if (numericValidationError) {
+        return res.status(400).json({ error: numericValidationError });
+      }
+
       const hasWifiFlag = parseBoolean(has_wifi);
       const temPiscinaFlag = parseBoolean(tem_piscina);
       const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
@@ -1480,6 +1511,18 @@ class PropertyController {
       const numericAreaTerreno = parseDecimal(area_terreno);
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
+
+      const numericValidationError = [
+        validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+      ].find(Boolean);
+
+      if (numericValidationError) {
+        return res.status(400).json({ error: numericValidationError });
+      }
 
       const hasWifiFlag = parseBoolean(has_wifi);
       const temPiscinaFlag = parseBoolean(tem_piscina);

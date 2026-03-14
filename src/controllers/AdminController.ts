@@ -63,6 +63,8 @@ const ALLOWED_PURPOSES = new Set(['Venda', 'Aluguel', 'Venda e Aluguel']);
 const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
+const MAX_PROPERTY_COUNT = 99;
+const MAX_PROPERTY_AREA = 99999999.99;
 const IMAGE_UPLOAD_CONCURRENCY = 4;
 const DIRECT_UPLOAD_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
 const DIRECT_UPLOAD_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
@@ -242,6 +244,23 @@ function validateMaxTextLength(
   if (!normalized) return null;
   if (normalized.length > maxLength) {
     return `${label} deve ter no máximo ${maxLength} caracteres.`;
+  }
+  return null;
+}
+
+function validatePropertyNumericRange(
+  value: number | null,
+  label: string,
+  options: { max: number; allowNull?: boolean },
+): string | null {
+  if (value == null) {
+    return options.allowNull ? null : `${label} inválido.`;
+  }
+  if (value < 0) {
+    return `${label} inválido.`;
+  }
+  if (value > options.max) {
+    return `${label} deve ser no máximo ${options.max}.`;
   }
   return null;
 }
@@ -2384,6 +2403,28 @@ class AdminController {
         }
       }
 
+      const numericValidationError = [
+        Object.prototype.hasOwnProperty.call(body, 'bedrooms')
+          ? validatePropertyNumericRange(parseInteger(body.bedrooms), 'Quartos', { max: MAX_PROPERTY_COUNT })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'bathrooms')
+          ? validatePropertyNumericRange(parseInteger(body.bathrooms), 'Banheiros', { max: MAX_PROPERTY_COUNT })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'garage_spots')
+          ? validatePropertyNumericRange(parseInteger(body.garage_spots), 'Garagens', { max: MAX_PROPERTY_COUNT })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'area_construida')
+          ? validatePropertyNumericRange(parseDecimal(body.area_construida), 'Área construída', { max: MAX_PROPERTY_AREA })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'area_terreno')
+          ? validatePropertyNumericRange(parseDecimal(body.area_terreno), 'Área do terreno', { max: MAX_PROPERTY_AREA })
+          : null,
+      ].find(Boolean);
+
+      if (numericValidationError) {
+        return res.status(400).json({ error: numericValidationError });
+      }
+
       if (!supportsSale && Object.prototype.hasOwnProperty.call(body, 'promotion_price')) {
         setParts.push('promotion_price = ?');
         params.push(null);
@@ -2751,6 +2792,17 @@ class AdminController {
       const numericAreaTerreno = parseDecimal(area_terreno);
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
+      const numericValidationError = [
+        validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
+        validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+      ].find(Boolean);
+
+      if (numericValidationError) {
+        return res.status(400).json({ error: numericValidationError });
+      }
       const brokerIdValue = broker_id ? Number(broker_id) : null;
 
       const hasWifiFlag = parseBoolean(has_wifi);

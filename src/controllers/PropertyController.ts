@@ -58,6 +58,7 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
 ]);
 
 const MAX_IMAGES_PER_PROPERTY = 20;
+const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'title',
   'description',
@@ -537,6 +538,10 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
   };
 }
 
+function hasValidPropertyDescription(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PROPERTY_DESCRIPTION_LENGTH;
+}
+
 async function upsertSaleRecord(
   db: PropertyQueryExecutor,
   payload: {
@@ -800,6 +805,12 @@ class PropertyController {
       return res.status(400).json({ error: "Campos obrigatórios não informados." });
     }
 
+    if (!hasValidPropertyDescription(description)) {
+      return res.status(400).json({
+        error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
+      });
+    }
+
     const normalizedType = normalizePropertyType(type);
     if (!normalizedType) {
       return res.status(400).json({ error: "Tipo de imóvel inválido." });
@@ -808,6 +819,10 @@ class PropertyController {
     const normalizedPurpose = normalizePurpose(purpose);
     if (!normalizedPurpose) {
       return res.status(400).json({ error: "Finalidade do imóvel invalida." });
+    }
+
+    if (!stringOrNull(tipo_lote)) {
+      return res.status(400).json({ error: "Tipo de lote é obrigatório." });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
@@ -1235,6 +1250,12 @@ class PropertyController {
       return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
     }
 
+    if (!hasValidPropertyDescription(description)) {
+      return res.status(400).json({
+        error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
+      });
+    }
+
     const normalizedType = normalizePropertyType(type);
     if (!normalizedType) {
       return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
@@ -1243,6 +1264,10 @@ class PropertyController {
     const normalizedPurpose = normalizePurpose(purpose);
     if (!normalizedPurpose) {
       return res.status(400).json({ error: 'Finalidade do imovel invalida.' });
+    }
+
+    if (!stringOrNull(tipo_lote)) {
+      return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
@@ -1631,6 +1656,18 @@ class PropertyController {
       const bodyKeys = Object.keys(body);
       const semNumeroBody =
         body.sem_numero !== undefined ? parseBoolean(body.sem_numero) : null;
+
+      const nextDescription = String(body.description ?? property.description ?? '').trim();
+      if (!hasValidPropertyDescription(nextDescription)) {
+        return res.status(400).json({
+          error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
+        });
+      }
+
+      const nextTipoLote = stringOrNull(body.tipo_lote ?? property.tipo_lote);
+      if (!nextTipoLote) {
+        return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
+      }
 
       const nextPurpose = normalizePurpose(body.purpose) ?? property.purpose;
       const purposeLower = String(nextPurpose ?? '').toLowerCase();

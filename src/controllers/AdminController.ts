@@ -64,7 +64,9 @@ const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const MAX_PROPERTY_COUNT = 99;
-const MAX_PROPERTY_AREA = 99999999.99;
+const MAX_PROPERTY_AREA = 9999999.99;
+const MAX_PROPERTY_PRICE = 9999999999.99;
+const MAX_PROPERTY_FEE = 99999999.99;
 const IMAGE_UPLOAD_CONCURRENCY = 4;
 const DIRECT_UPLOAD_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
 const DIRECT_UPLOAD_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
@@ -2404,6 +2406,15 @@ class AdminController {
       }
 
       const numericValidationError = [
+        validatePropertyNumericRange(
+          supportsSale && nextSalePrice != null ? nextSalePrice : supportsRent ? nextRentPrice : nextSalePrice,
+          'Preço base',
+          { max: MAX_PROPERTY_PRICE }
+        ),
+        validatePropertyNumericRange(nextSalePrice, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(nextRentPrice, 'Preço de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(nextPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(nextPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         Object.prototype.hasOwnProperty.call(body, 'bedrooms')
           ? validatePropertyNumericRange(parseInteger(body.bedrooms), 'Quartos', { max: MAX_PROPERTY_COUNT })
           : null,
@@ -2418,6 +2429,12 @@ class AdminController {
           : null,
         Object.prototype.hasOwnProperty.call(body, 'area_terreno')
           ? validatePropertyNumericRange(parseDecimal(body.area_terreno), 'Área do terreno', { max: MAX_PROPERTY_AREA })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'valor_condominio')
+          ? validatePropertyNumericRange(parseDecimal(body.valor_condominio), 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'valor_iptu')
+          ? validatePropertyNumericRange(parseDecimal(body.valor_iptu), 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true })
           : null,
       ].find(Boolean);
 
@@ -2793,11 +2810,18 @@ class AdminController {
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
       const numericValidationError = [
+        validatePropertyNumericRange(resolvedPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
+        validatePropertyNumericRange(resolvedPriceSale, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(resolvedPriceRent, 'Preço de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(resolvedPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(resolvedPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
+        validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
 
       if (numericValidationError) {

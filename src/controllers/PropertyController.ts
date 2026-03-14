@@ -61,7 +61,9 @@ const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const MAX_PROPERTY_COUNT = 99;
-const MAX_PROPERTY_AREA = 99999999.99;
+const MAX_PROPERTY_AREA = 9999999.99;
+const MAX_PROPERTY_PRICE = 9999999999.99;
+const MAX_PROPERTY_FEE = 99999999.99;
 const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'title',
   'description',
@@ -1058,11 +1060,18 @@ class PropertyController {
       const numericValorIptu = parseDecimal(valor_iptu);
 
       const numericValidationError = [
+        validatePropertyNumericRange(numericPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
+        validatePropertyNumericRange(numericPriceSale, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(numericPriceRent, 'Preço de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(numericPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(numericPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
+        validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
 
       if (numericValidationError) {
@@ -1513,11 +1522,18 @@ class PropertyController {
       const numericValorIptu = parseDecimal(valor_iptu);
 
       const numericValidationError = [
+        validatePropertyNumericRange(numericPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
+        validatePropertyNumericRange(numericPriceSale, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(numericPriceRent, 'Preço de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(numericPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(numericPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
+        validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
 
       if (numericValidationError) {
@@ -2135,6 +2151,45 @@ class PropertyController {
         fields.push('promotional_rent_percentage = ?');
         values.push(null);
         nextPromotionalRentPercentage = null;
+      }
+
+      const nextBasePrice =
+        supportsSale && nextSalePrice != null
+          ? nextSalePrice
+          : supportsRent
+            ? nextRentPrice
+            : nextSalePrice;
+      const numericValidationError = [
+        validatePropertyNumericRange(nextBasePrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
+        validatePropertyNumericRange(nextSalePrice, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(nextRentPrice, 'Preço de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(nextPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        validatePropertyNumericRange(nextPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
+        bodyKeys.includes('bedrooms')
+          ? validatePropertyNumericRange(parseInteger(body.bedrooms), 'Quartos', { max: MAX_PROPERTY_COUNT, allowNull: true })
+          : null,
+        bodyKeys.includes('bathrooms')
+          ? validatePropertyNumericRange(parseInteger(body.bathrooms), 'Banheiros', { max: MAX_PROPERTY_COUNT, allowNull: true })
+          : null,
+        bodyKeys.includes('garage_spots')
+          ? validatePropertyNumericRange(parseInteger(body.garage_spots), 'Garagens', { max: MAX_PROPERTY_COUNT, allowNull: true })
+          : null,
+        bodyKeys.includes('area_construida')
+          ? validatePropertyNumericRange(parseDecimal(body.area_construida), 'Área construída', { max: MAX_PROPERTY_AREA, allowNull: true })
+          : null,
+        bodyKeys.includes('area_terreno')
+          ? validatePropertyNumericRange(parseDecimal(body.area_terreno), 'Área do terreno', { max: MAX_PROPERTY_AREA, allowNull: true })
+          : null,
+        bodyKeys.includes('valor_condominio')
+          ? validatePropertyNumericRange(parseDecimal(body.valor_condominio), 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true })
+          : null,
+        bodyKeys.includes('valor_iptu')
+          ? validatePropertyNumericRange(parseDecimal(body.valor_iptu), 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true })
+          : null,
+      ].find(Boolean);
+
+      if (numericValidationError) {
+        return res.status(400).json({ error: numericValidationError });
       }
 
       if (

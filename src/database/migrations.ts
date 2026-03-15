@@ -193,6 +193,23 @@ async function ensurePropertiesColumns(): Promise<void> {
     );
   }
 
+  const priceColumns: Array<{ name: string; nullable: boolean }> = [
+    { name: 'price', nullable: false },
+    { name: 'price_sale', nullable: true },
+    { name: 'price_rent', nullable: true },
+    { name: 'promotion_price', nullable: true },
+    { name: 'promotional_rent_price', nullable: true },
+  ];
+
+  for (const { name, nullable } of priceColumns) {
+    const currentType = await getColumnType('properties', name);
+    if (currentType && currentType.toLowerCase() !== 'decimal(12,2)') {
+      await connection.query(
+        `ALTER TABLE properties MODIFY COLUMN ${name} DECIMAL(12, 2) ${nullable ? 'NULL' : 'NOT NULL'}`
+      );
+    }
+  }
+
   for (const { from, to } of PROPERTY_TYPE_LEGACY_UPDATES) {
     await connection.query(
       'UPDATE properties SET type = ? WHERE type = ?',

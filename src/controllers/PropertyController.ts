@@ -1310,9 +1310,20 @@ class PropertyController {
     } catch (error) {
       console.error('Erro ao criar imóvel:', error);
       const knownError = error as { statusCode?: number } | null;
+      const message = error instanceof Error ? error.message : '';
       if (knownError?.statusCode === 413) {
         return res.status(413).json({
           error: 'Arquivo muito grande. Reduza o tamanho das imagens e tente novamente.',
+        });
+      }
+      if (message.includes("Out of range value for column 'price'")) {
+        return res.status(400).json({
+          error: 'Preço fora do limite permitido para o banco de dados. Reduza o valor e tente novamente.',
+        });
+      }
+      if (message.includes("Data truncated for column 'type'")) {
+        return res.status(400).json({
+          error: 'O tipo do imóvel não é aceito pelo schema atual do banco. Reinicie o backend para aplicar as migrations.',
         });
       }
       return res.status(500).json({ error: 'Erro interno do servidor.' });
@@ -1806,9 +1817,20 @@ class PropertyController {
     } catch (error) {
       console.error('Erro ao criar imovel (cliente):', error);
       const knownError = error as { statusCode?: number } | null;
+      const message = error instanceof Error ? error.message : '';
       if (knownError?.statusCode === 413) {
         return res.status(413).json({
           error: 'Arquivo muito grande. Reduza o tamanho das imagens e tente novamente.',
+        });
+      }
+      if (message.includes("Out of range value for column 'price'")) {
+        return res.status(400).json({
+          error: 'Preço fora do limite permitido para o banco de dados. Reduza o valor e tente novamente.',
+        });
+      }
+      if (message.includes("Data truncated for column 'type'")) {
+        return res.status(400).json({
+          error: 'O tipo do imóvel não é aceito pelo schema atual do banco. Reinicie o backend para aplicar as migrations.',
         });
       }
       return res.status(500).json({ error: 'Erro interno do servidor.' });

@@ -186,6 +186,13 @@ async function ensurePropertiesColumns(): Promise<void> {
     );
   }
 
+  const propertyTypeType = await getColumnType('properties', 'type');
+  if (propertyTypeType && !propertyTypeType.toLowerCase().includes('varchar')) {
+    await connection.query(
+      'ALTER TABLE properties MODIFY COLUMN type VARCHAR(100) NOT NULL'
+    );
+  }
+
   for (const { from, to } of PROPERTY_TYPE_LEGACY_UPDATES) {
     await connection.query(
       'UPDATE properties SET type = ? WHERE type = ?',

@@ -9,6 +9,7 @@ import {
   runPropertyQuery,
   type PropertyQueryExecutor,
 } from "../services/propertyPersistenceService";
+import { getRequestId } from "../middlewares/requestContext";
 import {
   notifyPriceDropIfNeeded,
   notifyPromotionStarted,
@@ -123,6 +124,20 @@ const RECURRENCE_INTERVALS = new Set<RecurrenceInterval>([
   "monthly",
   "yearly",
 ]);
+
+function logPropertyCreateValidationFailure(
+  req: Request,
+  flow: "broker" | "client",
+  reason: string,
+  details?: Record<string, unknown>
+): void {
+  console.warn("Property create validation failed:", {
+    requestId: getRequestId(req),
+    flow,
+    reason,
+    details,
+  });
+}
 
 async function cleanupPropertyMediaAssets(
   urls: Array<string | null | undefined>,
@@ -838,10 +853,22 @@ class PropertyController {
     const semNumeroFlag = parseBoolean(sem_numero);
 
     if (!title || !description || !type || !purpose || !address || !city || !state) {
+      logPropertyCreateValidationFailure(req, "broker", "missing_required_fields", {
+        title: Boolean(title),
+        descriptionLength: typeof description === "string" ? description.trim().length : 0,
+        type: Boolean(type),
+        purpose: Boolean(purpose),
+        address: Boolean(address),
+        city: Boolean(city),
+        state: Boolean(state),
+      });
       return res.status(400).json({ error: "Campos obrigatórios não informados." });
     }
 
     if (!hasValidPropertyDescription(description)) {
+      logPropertyCreateValidationFailure(req, "broker", "invalid_description_length", {
+        descriptionLength: String(description ?? "").trim().length,
+      });
       return res.status(400).json({
         error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
       });
@@ -876,12 +903,18 @@ class PropertyController {
     ].find(Boolean);
 
     if (createTextValidationError) {
+      logPropertyCreateValidationFailure(req, "broker", "text_validation_error", {
+        error: createTextValidationError,
+      });
       return res.status(400).json({ error: createTextValidationError });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
       const ownerPhoneDigits = String(owner_phone).replace(/\D/g, "");
       if (ownerPhoneDigits.length < 10 || ownerPhoneDigits.length > 13) {
+        logPropertyCreateValidationFailure(req, "broker", "invalid_owner_phone", {
+          digitsLength: ownerPhoneDigits.length,
+        });
         return res.status(400).json({
           error: "Telefone do proprietário inválido.",
         });
@@ -889,6 +922,9 @@ class PropertyController {
     }
     const numeroDigits = String(numero ?? '').replace(/\D/g, '');
     if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+      logPropertyCreateValidationFailure(req, "broker", "invalid_numero", {
+        rawNumero: String(numero ?? ''),
+      });
       return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
     }
     const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
@@ -923,6 +959,9 @@ class PropertyController {
         promotionEnd = null;
       }
     } catch (parseError) {
+      logPropertyCreateValidationFailure(req, "broker", "promotion_parse_error", {
+        message: (parseError as Error).message,
+      });
       return res.status(400).json({ error: (parseError as Error).message });
     }
 
@@ -1009,6 +1048,9 @@ class PropertyController {
         promotionFlag = 1;
       }
     } catch (parseError) {
+      logPropertyCreateValidationFailure(req, "broker", "price_parse_error", {
+        message: (parseError as Error).message,
+      });
       return res.status(400).json({ error: (parseError as Error).message });
     }
 
@@ -1075,6 +1117,9 @@ class PropertyController {
       ].find(Boolean);
 
       if (numericValidationError) {
+        logPropertyCreateValidationFailure(req, "broker", "numeric_validation_error", {
+          error: numericValidationError,
+        });
         return res.status(400).json({ error: numericValidationError });
       }
 
@@ -1090,6 +1135,7 @@ class PropertyController {
 
       const imageFiles = files.images ?? [];
       if (imageFiles.length < 1) {
+        logPropertyCreateValidationFailure(req, "broker", "missing_images");
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
       }
       if (imageFiles.length > MAX_IMAGES_PER_PROPERTY) {
@@ -1320,10 +1366,22 @@ class PropertyController {
     const semNumeroFlag = parseBoolean(sem_numero);
 
     if (!title || !description || !type || !purpose || !address || !city || !state) {
+      logPropertyCreateValidationFailure(req, "client", "missing_required_fields", {
+        title: Boolean(title),
+        descriptionLength: typeof description === "string" ? description.trim().length : 0,
+        type: Boolean(type),
+        purpose: Boolean(purpose),
+        address: Boolean(address),
+        city: Boolean(city),
+        state: Boolean(state),
+      });
       return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
     }
 
     if (!hasValidPropertyDescription(description)) {
+      logPropertyCreateValidationFailure(req, "client", "invalid_description_length", {
+        descriptionLength: String(description ?? "").trim().length,
+      });
       return res.status(400).json({
         error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
       });
@@ -1358,12 +1416,18 @@ class PropertyController {
     ].find(Boolean);
 
     if (createClientTextValidationError) {
+      logPropertyCreateValidationFailure(req, "client", "text_validation_error", {
+        error: createClientTextValidationError,
+      });
       return res.status(400).json({ error: createClientTextValidationError });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
       const ownerPhoneDigits = String(owner_phone).replace(/\D/g, '');
       if (ownerPhoneDigits.length < 10 || ownerPhoneDigits.length > 13) {
+        logPropertyCreateValidationFailure(req, "client", "invalid_owner_phone", {
+          digitsLength: ownerPhoneDigits.length,
+        });
         return res.status(400).json({
           error: 'Telefone do proprietário inválido.',
         });
@@ -1371,6 +1435,9 @@ class PropertyController {
     }
     const numeroDigits = String(numero ?? '').replace(/\D/g, '');
     if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+      logPropertyCreateValidationFailure(req, "client", "invalid_numero", {
+        rawNumero: String(numero ?? ''),
+      });
       return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
     }
     const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
@@ -1405,6 +1472,9 @@ class PropertyController {
         promotionEnd = null;
       }
     } catch (parseError) {
+      logPropertyCreateValidationFailure(req, "client", "promotion_parse_error", {
+        message: (parseError as Error).message,
+      });
       return res.status(400).json({ error: (parseError as Error).message });
     }
 
@@ -1490,6 +1560,9 @@ class PropertyController {
         promotionFlag = 1;
       }
     } catch (parseError) {
+      logPropertyCreateValidationFailure(req, "client", "price_parse_error", {
+        message: (parseError as Error).message,
+      });
       return res.status(400).json({ error: (parseError as Error).message });
     }
 
@@ -1537,6 +1610,9 @@ class PropertyController {
       ].find(Boolean);
 
       if (numericValidationError) {
+        logPropertyCreateValidationFailure(req, "client", "numeric_validation_error", {
+          error: numericValidationError,
+        });
         return res.status(400).json({ error: numericValidationError });
       }
 
@@ -1552,6 +1628,7 @@ class PropertyController {
 
       const imageFiles = files.images ?? [];
       if (imageFiles.length < 1) {
+        logPropertyCreateValidationFailure(req, "client", "missing_images");
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imovel.' });
       }
       if (imageFiles.length > MAX_IMAGES_PER_PROPERTY) {

@@ -1004,7 +1004,7 @@ class UserController {
       );
 
       if (favoriteRows.length > 0) {
-        return res.status(409).json({ error: 'Este imóvel ja esta nos seus favoritos.' });
+        return res.status(200).json({ message: 'Imóvel já estava nos favoritos.' });
       }
 
       await runUserQuery('INSERT INTO favoritos (usuario_id, imovel_id) VALUES (?, ?)', [userId, propertyId]);
@@ -1035,7 +1035,7 @@ class UserController {
       );
 
       if (result.affectedRows === 0) {
-        return res.status(404).json({ error: 'Favorito não encontrado.' });
+        return res.status(200).json({ message: 'Imóvel já não estava nos favoritos.' });
       }
 
       return res.status(200).json({ message: 'Imóvel removido dos favoritos.' });

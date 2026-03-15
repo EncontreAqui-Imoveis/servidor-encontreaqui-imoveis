@@ -514,6 +514,8 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
       row.promotional_rent_percentage != null
         ? Number(row.promotional_rent_percentage)
         : null,
+    broker_id: row.broker_id != null ? Number(row.broker_id) : null,
+    owner_id: row.owner_id != null ? Number(row.owner_id) : null,
     code: row.code ?? null,
     owner_name: includeOwnerInfo ? (row.owner_name ?? null) : null,
     owner_phone: includeOwnerInfo ? (row.owner_phone ?? null) : null,
@@ -1867,6 +1869,11 @@ class PropertyController {
         (property.owner_id != null && property.owner_id === userId);
       if (!isOwner) {
         return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+      }
+      if (property.status === 'pending_approval') {
+        return res.status(409).json({
+          error: 'Imóveis pendentes não podem ser editados até o fim da análise.',
+        });
       }
 
       const previousSalePrice =

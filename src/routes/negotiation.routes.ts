@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { negotiationController } from '../controllers/NegotiationController';
-import { authMiddleware } from '../middlewares/auth';
+import { authMiddleware, isBroker } from '../middlewares/auth';
 import { signedProposalUpload } from '../middlewares/uploadMiddleware';
 
 const negotiationRoutes = Router();
@@ -10,11 +10,11 @@ negotiationRoutes.get('/mine', authMiddleware, (req, res) =>
   negotiationController.listMine(req as any, res)
 );
 
-negotiationRoutes.post('/proposal', authMiddleware, (req, res) =>
+negotiationRoutes.post('/proposal', authMiddleware, isBroker, (req, res) =>
   negotiationController.generateProposalFromProperty(req as any, res)
 );
 
-negotiationRoutes.post('/:id/proposals', authMiddleware, (req, res) =>
+negotiationRoutes.post('/:id/proposals', authMiddleware, isBroker, (req, res) =>
   negotiationController.generateProposal(req as any, res)
 );
 

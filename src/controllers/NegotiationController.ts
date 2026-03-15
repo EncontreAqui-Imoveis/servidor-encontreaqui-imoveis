@@ -82,6 +82,9 @@ interface ProposalIdempotencyRow extends RowDataPacket {
 
 interface PropertyRow extends RowDataPacket {
   id: number;
+  broker_id: number | null;
+  owner_id: number | null;
+  status: string | null;
   address: string | null;
   numero: string | null;
   quadra: string | null;
@@ -963,6 +966,9 @@ class NegotiationController {
         `
           SELECT
             id,
+            broker_id,
+            owner_id,
+            status,
             address,
             numero,
             quadra,
@@ -985,6 +991,22 @@ class NegotiationController {
       if (!property) {
         await tx.rollback();
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+      if (String(req.userRole ?? '').trim().toLowerCase() !== 'broker') {
+        await tx.rollback();
+        return res.status(403).json({ error: 'Apenas corretores aprovados podem gerar proposta.' });
+      }
+      if (Number(property.broker_id ?? 0) !== Number(req.userId ?? 0)) {
+        await tx.rollback();
+        return res.status(403).json({
+          error: 'Somente o corretor captador deste imóvel pode gerar proposta.',
+        });
+      }
+      if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'A proposta só pode ser gerada para imóveis aprovados.',
+        });
       }
 
       const propertyValue = resolvePropertyValue(property);

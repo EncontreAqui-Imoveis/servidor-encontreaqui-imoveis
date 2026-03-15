@@ -773,9 +773,14 @@ class PropertyController {
         (property.broker_id != null && property.broker_id === (req as AuthRequest).userId) ||
         (property.owner_id != null && property.owner_id === (req as AuthRequest).userId);
       const isAdmin = (req as AuthRequest).userRole === 'admin';
+      const isCapturingBrokerOwner =
+        property.broker_id != null && property.broker_id === (req as AuthRequest).userId;
       const isPubliclyVisible =
         property.status === 'approved' &&
         String(property.visibility ?? 'PUBLIC').toUpperCase() === 'PUBLIC';
+      if (property.status === 'pending_approval' && !isAdmin && !isCapturingBrokerOwner) {
+        return res.status(404).json({ error: "Imóvel não encontrado." });
+      }
       if (!isOwner && !isAdmin && !isPubliclyVisible) {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }

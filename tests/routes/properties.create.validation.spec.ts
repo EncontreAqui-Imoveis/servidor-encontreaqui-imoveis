@@ -125,6 +125,33 @@ describe('POST /properties description length contract', () => {
     expect(insertParams).toEqual(expect.arrayContaining([description500]));
   });
 
+  it('accepts a 500-character description even when line breaks arrive as CRLF', async () => {
+    const crlfDescription = `${'a'.repeat(248)}\r\n${'b'.repeat(248)}\r\ncc`;
+    expect(crlfDescription.length).toBe(502);
+    expect(crlfDescription.replace(/\r\n/g, '\n').length).toBe(500);
+
+    queryMock.mockResolvedValueOnce([[{ status: 'approved' }]]);
+    queryMock.mockResolvedValueOnce([[]]);
+    queryMock.mockResolvedValueOnce([{ insertId: 124, affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'desc-crlf-500')
+      .send({
+        ...basePayload,
+        description: crlfDescription,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBe(124);
+
+    const insertParams = queryMock.mock.calls[2]?.[1] as unknown[];
+    expect(insertParams).toEqual(
+      expect.arrayContaining([crlfDescription.replace(/\r\n/g, '\n')])
+    );
+  });
+
   it('rejects a description above 500 characters and logs the reason', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

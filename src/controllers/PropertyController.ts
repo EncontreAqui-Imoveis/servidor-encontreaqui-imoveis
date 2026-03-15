@@ -559,7 +559,15 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
 }
 
 function hasValidPropertyDescription(value: unknown): boolean {
-  return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= MAX_PROPERTY_DESCRIPTION_LENGTH;
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const normalized = normalizePropertyDescription(value);
+  return normalized.length > 0 && normalized.length <= MAX_PROPERTY_DESCRIPTION_LENGTH;
+}
+
+function normalizePropertyDescription(value: string): string {
+  return value.replace(/\r\n/g, '\n').trim();
 }
 
 function validateMaxTextLength(
@@ -852,10 +860,12 @@ class PropertyController {
     } = req.body ?? {};
     const semNumeroFlag = parseBoolean(sem_numero);
 
+    const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
+
     if (!title || !description || !type || !purpose || !address || !city || !state) {
       logPropertyCreateValidationFailure(req, "broker", "missing_required_fields", {
         title: Boolean(title),
-        descriptionLength: typeof description === "string" ? description.trim().length : 0,
+        descriptionLength: normalizedDescription.length,
         type: Boolean(type),
         purpose: Boolean(purpose),
         address: Boolean(address),
@@ -867,7 +877,8 @@ class PropertyController {
 
     if (!hasValidPropertyDescription(description)) {
       logPropertyCreateValidationFailure(req, "broker", "invalid_description_length", {
-        descriptionLength: String(description ?? "").trim().length,
+        descriptionLength: normalizedDescription.length,
+        rawDescriptionLength: String(description ?? "").trim().length,
       });
       return res.status(400).json({
         error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
@@ -1210,7 +1221,7 @@ class PropertyController {
           brokerId,
           null,
           title,
-          description,
+          normalizedDescription,
           normalizedType,
           normalizedPurpose,
           'pending_approval',
@@ -1365,10 +1376,12 @@ class PropertyController {
     } = req.body ?? {};
     const semNumeroFlag = parseBoolean(sem_numero);
 
+    const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
+
     if (!title || !description || !type || !purpose || !address || !city || !state) {
       logPropertyCreateValidationFailure(req, "client", "missing_required_fields", {
         title: Boolean(title),
-        descriptionLength: typeof description === "string" ? description.trim().length : 0,
+        descriptionLength: normalizedDescription.length,
         type: Boolean(type),
         purpose: Boolean(purpose),
         address: Boolean(address),
@@ -1380,7 +1393,8 @@ class PropertyController {
 
     if (!hasValidPropertyDescription(description)) {
       logPropertyCreateValidationFailure(req, "client", "invalid_description_length", {
-        descriptionLength: String(description ?? "").trim().length,
+        descriptionLength: normalizedDescription.length,
+        rawDescriptionLength: String(description ?? "").trim().length,
       });
       return res.status(400).json({
         error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
@@ -1703,7 +1717,7 @@ class PropertyController {
           null,
           userId,
           title,
-          description,
+          normalizedDescription,
           normalizedType,
           normalizedPurpose,
           'pending_approval',
@@ -1844,7 +1858,9 @@ class PropertyController {
       const semNumeroBody =
         body.sem_numero !== undefined ? parseBoolean(body.sem_numero) : null;
 
-      const nextDescription = String(body.description ?? property.description ?? '').trim();
+      const nextDescription = normalizePropertyDescription(
+        String(body.description ?? property.description ?? '')
+      );
       if (!hasValidPropertyDescription(nextDescription)) {
         return res.status(400).json({
           error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,

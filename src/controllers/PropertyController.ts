@@ -887,7 +887,11 @@ class PropertyController {
         });
       }
     }
-    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numero);
+    const numeroDigits = String(numero ?? '').replace(/\D/g, '');
+    if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+    }
+    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
@@ -1365,7 +1369,11 @@ class PropertyController {
         });
       }
     }
-    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numero);
+    const numeroDigits = String(numero ?? '').replace(/\D/g, '');
+    if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
+      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+    }
+    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
@@ -2104,8 +2112,12 @@ class PropertyController {
               break;
             }
             const rawNumero = String(body.numero ?? '').trim();
+            const numeroDigits = rawNumero.replace(/\D/g, '');
+            if (rawNumero.length > 0 && numeroDigits.length === 0) {
+              return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+            }
             fields.push('numero = ?');
-            values.push(stringOrNull(rawNumero));
+            values.push(stringOrNull(numeroDigits));
             break;
           }
           default: {

@@ -1448,6 +1448,11 @@ class AdminController {
       const searchColumn = String(req.query.searchColumn ?? 'p.title');
       const status = normalizeStatus(req.query.status);
       const city = String(req.query.city ?? '').trim();
+      const requestTypeRaw = String(req.query.requestType ?? '').trim().toLowerCase();
+      const requestType =
+        requestTypeRaw === 'creation' || requestTypeRaw === 'edit'
+          ? requestTypeRaw
+          : 'all';
       const sortBy = String(req.query.sortBy ?? 'p.created_at');
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -1469,6 +1474,7 @@ class AdminController {
         'u_owner.name',
         'p.price',
         'p.created_at',
+        'p.updated_at',
         'p.code',
         'p.status',
       ]);
@@ -1492,6 +1498,16 @@ class AdminController {
       if (city) {
         whereClauses.push('p.city = ?');
         params.push(city);
+      }
+
+      if (requestType === 'creation') {
+        whereClauses.push(
+          'TIMESTAMPDIFF(SECOND, p.created_at, COALESCE(p.updated_at, p.created_at)) < 60'
+        );
+      } else if (requestType === 'edit') {
+        whereClauses.push(
+          'TIMESTAMPDIFF(SECOND, p.created_at, COALESCE(p.updated_at, p.created_at)) >= 60'
+        );
       }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -1529,10 +1545,16 @@ class AdminController {
             p.cep,
             p.purpose,
             p.created_at,
+            p.updated_at,
             p.broker_id,
             p.owner_id,
             p.owner_name,
             p.owner_phone,
+            CASE
+              WHEN TIMESTAMPDIFF(SECOND, p.created_at, COALESCE(p.updated_at, p.created_at)) >= 60
+              THEN 'edit'
+              ELSE 'creation'
+            END AS request_type,
             COALESCE(u.name, u_owner.name) AS broker_name,
             COALESCE(u.phone, u_owner.phone) AS broker_phone,
             b.status AS broker_status,

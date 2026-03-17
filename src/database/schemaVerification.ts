@@ -95,6 +95,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'negotiation_documents',
     'admins',
     'users',
+    'property_edit_requests',
   ] as const;
 
   for (const tableName of requiredTables) {
@@ -116,6 +117,11 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['negotiation_documents', 'storage_size_bytes'],
     ['admins', 'token_version'],
     ['users', 'token_version'],
+    ['properties', 'updated_at'],
+    ['property_edit_requests', 'updated_at'],
+    ['property_edit_requests', 'before_json'],
+    ['property_edit_requests', 'after_json'],
+    ['property_edit_requests', 'diff_json'],
   ] as const;
 
   for (const [tableName, columnName] of requiredColumns) {
@@ -149,10 +155,16 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'boleto_vistoria',
   ]);
 
+  await assertEnumContains('property_edit_requests', 'status', [
+    'PENDING',
+    'APPROVED',
+    'REJECTED',
+  ]);
+
   return {
     checkedTables: requiredTables.length,
     checkedColumns: requiredColumns.length,
-    checkedEnums: 3,
+    checkedEnums: 4,
   };
 }
 

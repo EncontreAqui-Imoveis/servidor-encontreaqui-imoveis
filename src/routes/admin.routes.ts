@@ -127,6 +127,10 @@ adminRoutes.delete('/brokers/:id', adminController.deleteBroker);
 adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
 
 adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
+adminRoutes.get('/property-edit-requests', adminController.listPropertyEditRequests);
+adminRoutes.get('/property-edit-requests/:id', adminController.getPropertyEditRequestById);
+adminRoutes.post('/property-edit-requests/:id/approve', adminController.approvePropertyEditRequest);
+adminRoutes.post('/property-edit-requests/:id/reject', adminController.rejectPropertyEditRequest);
 adminRoutes.get('/properties/archive', adminController.listArchivedProperties);
 adminRoutes.put('/properties/:id/relist', adminController.relistProperty);
 adminRoutes.get('/properties/:id', adminController.getPropertyDetails);

@@ -55,6 +55,20 @@ propertyRoutes.patch(
   (req, res) => propertyController.update(req as any, res)
 );
 
+propertyRoutes.post(
+  '/:id/edit-requests',
+  authMiddleware,
+  isBroker,
+  (req, res) => propertyController.createEditRequest(req as any, res)
+);
+
+propertyRoutes.post(
+  '/client/:id/edit-requests',
+  authMiddleware,
+  isClient,
+  (req, res) => propertyController.createEditRequest(req as any, res)
+);
+
 propertyRoutes.patch(
   '/:id/status',
   authMiddleware,

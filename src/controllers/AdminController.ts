@@ -17,6 +17,13 @@ import {
   notifyPromotionStarted,
 } from '../services/priceDropNotificationService';
 import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
+import {
+  buildEditablePropertyState,
+  buildPropertyEditDbPatch,
+  preparePropertyEditPatch,
+  type EditablePropertyDiff,
+  type EditablePropertyPatch,
+} from '../services/propertyEditRequestService';
 import type AuthRequest from '../middlewares/auth';
 import { readNegotiationDocumentObject } from '../services/negotiationDocumentStorageService';
 
@@ -431,12 +438,45 @@ interface ArchivePropertyRow extends RowDataPacket {
   transaction_date: Date | string | null;
 }
 
+interface PropertyEditRequestListRow extends RowDataPacket {
+  id: number;
+  property_id: number;
+  requester_user_id: number;
+  requester_role: string;
+  status: string;
+  before_json: unknown;
+  after_json: unknown;
+  diff_json: unknown;
+  review_reason: string | null;
+  reviewed_by: number | null;
+  reviewed_at: Date | string | null;
+  created_at: Date | string | null;
+  updated_at: Date | string | null;
+  property_title: string | null;
+  property_code: string | null;
+  requester_name: string | null;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') {
     return null;
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildUpdateStatementFromPatch(
+  dbPatch: Record<string, unknown>
+): { assignments: string[]; values: unknown[] } {
+  const assignments: string[] = [];
+  const values: unknown[] = [];
+
+  for (const [key, value] of Object.entries(dbPatch)) {
+    assignments.push(`\`${key}\` = ?`);
+    values.push(value);
+  }
+
+  return { assignments, values };
 }
 
 function mapAdminProperty(row: PropertyDetailRow) {
@@ -511,6 +551,27 @@ function mapAdminProperty(row: PropertyDetailRow) {
     broker_creci: row.broker_creci ?? null,
     created_at: row.created_at ? String(row.created_at) : null,
     updated_at: row.updated_at ? String(row.updated_at) : null,
+  };
+}
+
+function mapPropertyEditRequest(row: PropertyEditRequestListRow) {
+  return {
+    id: Number(row.id),
+    propertyId: Number(row.property_id),
+    propertyTitle: row.property_title ?? null,
+    propertyCode: row.property_code ?? null,
+    requesterUserId: Number(row.requester_user_id),
+    requesterRole: String(row.requester_role ?? '').toLowerCase(),
+    requesterName: row.requester_name ?? null,
+    status: String(row.status ?? '').toUpperCase(),
+    before: parseJsonObjectSafe(row.before_json),
+    after: parseJsonObjectSafe(row.after_json),
+    diff: parseJsonObjectSafe(row.diff_json),
+    reviewReason: row.review_reason ?? null,
+    reviewedBy: row.reviewed_by != null ? Number(row.reviewed_by) : null,
+    reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
+    createdAt: row.created_at ? String(row.created_at) : null,
+    updatedAt: row.updated_at ? String(row.updated_at) : null,
   };
 }
 
@@ -1448,11 +1509,6 @@ class AdminController {
       const searchColumn = String(req.query.searchColumn ?? 'p.title');
       const status = normalizeStatus(req.query.status);
       const city = String(req.query.city ?? '').trim();
-      const requestTypeRaw = String(req.query.requestType ?? '').trim().toLowerCase();
-      const requestType =
-        requestTypeRaw === 'creation' || requestTypeRaw === 'edit'
-          ? requestTypeRaw
-          : 'all';
       const sortBy = String(req.query.sortBy ?? 'p.created_at');
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -1474,7 +1530,6 @@ class AdminController {
         'u_owner.name',
         'p.price',
         'p.created_at',
-        'p.updated_at',
         'p.code',
         'p.status',
       ]);
@@ -1498,16 +1553,6 @@ class AdminController {
       if (city) {
         whereClauses.push('p.city = ?');
         params.push(city);
-      }
-
-      if (requestType === 'creation') {
-        whereClauses.push(
-          'TIMESTAMPDIFF(SECOND, p.created_at, COALESCE(p.updated_at, p.created_at)) < 60'
-        );
-      } else if (requestType === 'edit') {
-        whereClauses.push(
-          'TIMESTAMPDIFF(SECOND, p.created_at, COALESCE(p.updated_at, p.created_at)) >= 60'
-        );
       }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -1545,16 +1590,10 @@ class AdminController {
             p.cep,
             p.purpose,
             p.created_at,
-            p.updated_at,
             p.broker_id,
             p.owner_id,
             p.owner_name,
             p.owner_phone,
-            CASE
-              WHEN TIMESTAMPDIFF(SECOND, p.created_at, COALESCE(p.updated_at, p.created_at)) >= 60
-              THEN 'edit'
-              ELSE 'creation'
-            END AS request_type,
             COALESCE(u.name, u_owner.name) AS broker_name,
             COALESCE(u.phone, u_owner.phone) AS broker_phone,
             b.status AS broker_status,
@@ -1574,6 +1613,324 @@ class AdminController {
     } catch (error) {
       console.error('Erro ao listar imoveis com corretores:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async listPropertyEditRequests(req: Request, res: Response) {
+    try {
+      const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
+      const offset = (page - 1) * limit;
+      const requestedStatus = String(req.query.status ?? 'PENDING').trim().toUpperCase();
+      const allowedStatuses = new Set(['PENDING', 'APPROVED', 'REJECTED', 'ALL']);
+      const normalizedStatus = allowedStatuses.has(requestedStatus) ? requestedStatus : 'PENDING';
+
+      const whereClause =
+        normalizedStatus === 'ALL' ? '' : 'WHERE per.status = ?';
+      const whereParams = normalizedStatus === 'ALL' ? [] : [normalizedStatus];
+
+      const [countRows] = await adminDb.query<RowDataPacket[]>(
+        `
+          SELECT COUNT(*) AS total
+          FROM property_edit_requests per
+          ${whereClause}
+        `,
+        whereParams
+      );
+      const total = Number(countRows[0]?.total ?? 0);
+
+      const [rows] = await adminDb.query<PropertyEditRequestListRow[]>(
+        `
+          SELECT
+            per.id,
+            per.property_id,
+            per.requester_user_id,
+            per.requester_role,
+            per.status,
+            per.before_json,
+            per.after_json,
+            per.diff_json,
+            per.review_reason,
+            per.reviewed_by,
+            per.reviewed_at,
+            per.created_at,
+            per.updated_at,
+            p.title AS property_title,
+            p.code AS property_code,
+            u.name AS requester_name
+          FROM property_edit_requests per
+          INNER JOIN properties p ON p.id = per.property_id
+          INNER JOIN users u ON u.id = per.requester_user_id
+          ${whereClause}
+          ORDER BY per.created_at DESC, per.id DESC
+          LIMIT ? OFFSET ?
+        `,
+        [...whereParams, limit, offset]
+      );
+
+      return res.status(200).json({
+        data: rows.map((row) => mapPropertyEditRequest(row)),
+        total,
+        page,
+        limit,
+      });
+    } catch (error) {
+      console.error('Erro ao listar solicitacoes de edicao de imovel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async getPropertyEditRequestById(req: Request, res: Response) {
+    const requestId = Number(req.params.id);
+
+    if (Number.isNaN(requestId)) {
+      return res.status(400).json({ error: 'Identificador da solicitacao invalido.' });
+    }
+
+    try {
+      const [rows] = await adminDb.query<PropertyEditRequestListRow[]>(
+        `
+          SELECT
+            per.id,
+            per.property_id,
+            per.requester_user_id,
+            per.requester_role,
+            per.status,
+            per.before_json,
+            per.after_json,
+            per.diff_json,
+            per.review_reason,
+            per.reviewed_by,
+            per.reviewed_at,
+            per.created_at,
+            per.updated_at,
+            p.title AS property_title,
+            p.code AS property_code,
+            u.name AS requester_name
+          FROM property_edit_requests per
+          INNER JOIN properties p ON p.id = per.property_id
+          INNER JOIN users u ON u.id = per.requester_user_id
+          WHERE per.id = ?
+          LIMIT 1
+        `,
+        [requestId]
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Solicitacao de edicao nao encontrada.' });
+      }
+
+      return res.status(200).json(mapPropertyEditRequest(rows[0]));
+    } catch (error) {
+      console.error('Erro ao buscar solicitacao de edicao de imovel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async approvePropertyEditRequest(req: AuthRequest, res: Response) {
+    const requestId = Number(req.params.id);
+    const reviewerId = req.userId ?? null;
+
+    if (Number.isNaN(requestId)) {
+      return res.status(400).json({ error: 'Identificador da solicitacao invalido.' });
+    }
+
+    const db = await adminDb.getConnection();
+    try {
+      await db.beginTransaction();
+
+      const [requestRows] = await db.query<PropertyEditRequestListRow[]>(
+        `
+          SELECT
+            per.id,
+            per.property_id,
+            per.requester_user_id,
+            per.requester_role,
+            per.status,
+            per.before_json,
+            per.after_json,
+            per.diff_json,
+            per.review_reason,
+            per.reviewed_by,
+            per.reviewed_at,
+            per.created_at,
+            per.updated_at,
+            p.title AS property_title,
+            p.code AS property_code,
+            u.name AS requester_name
+          FROM property_edit_requests per
+          INNER JOIN properties p ON p.id = per.property_id
+          INNER JOIN users u ON u.id = per.requester_user_id
+          WHERE per.id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [requestId]
+      );
+
+      if (requestRows.length === 0) {
+        await db.rollback();
+        return res.status(404).json({ error: 'Solicitacao de edicao nao encontrada.' });
+      }
+
+      const requestRow = requestRows[0];
+      if (String(requestRow.status ?? '').toUpperCase() !== 'PENDING') {
+        await db.rollback();
+        return res.status(409).json({ error: 'Esta solicitacao nao esta mais pendente.' });
+      }
+
+      const [propertyRows] = await db.query<RowDataPacket[]>(
+        'SELECT * FROM properties WHERE id = ? LIMIT 1 FOR UPDATE',
+        [requestRow.property_id]
+      );
+
+      if (propertyRows.length === 0) {
+        await db.rollback();
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+
+      const property = propertyRows[0] as Record<string, unknown>;
+      const currentState = buildEditablePropertyState(property);
+      const afterPayload = parseJsonObjectSafe(requestRow.after_json);
+      const preparedPatch = preparePropertyEditPatch(afterPayload, currentState);
+      const dbPatch = buildPropertyEditDbPatch(currentState, preparedPatch.patch);
+      const updateStatement = buildUpdateStatementFromPatch(dbPatch);
+
+      if (updateStatement.assignments.length > 0) {
+        await db.query(
+          `
+            UPDATE properties
+            SET ${updateStatement.assignments.join(', ')}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [...updateStatement.values, requestRow.property_id]
+        );
+      }
+
+      await db.query(
+        `
+          UPDATE property_edit_requests
+          SET
+            status = 'APPROVED',
+            review_reason = NULL,
+            reviewed_by = ?,
+            reviewed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [reviewerId, requestId]
+      );
+
+      await db.commit();
+
+      return res.status(200).json({
+        message: 'Solicitacao de edicao aprovada com sucesso.',
+        request: mapPropertyEditRequest({
+          ...requestRow,
+          status: 'APPROVED',
+          review_reason: null,
+          reviewed_by: reviewerId,
+          reviewed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as PropertyEditRequestListRow),
+      });
+    } catch (error: any) {
+      await db.rollback();
+      if (error?.code === 'ER_DUP_ENTRY') {
+        return res.status(409).json({
+          error: 'Nao foi possivel aprovar a edicao por conflito de dados unicos do imovel.',
+        });
+      }
+      if (error instanceof Error && error.message.trim().length > 0) {
+        return res.status(400).json({ error: error.message });
+      }
+      console.error('Erro ao aprovar solicitacao de edicao de imovel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      db.release();
+    }
+  }
+
+  async rejectPropertyEditRequest(req: AuthRequest, res: Response) {
+    const requestId = Number(req.params.id);
+    const reviewerId = req.userId ?? null;
+    const reason = String(req.body?.reason ?? '').trim();
+
+    if (Number.isNaN(requestId)) {
+      return res.status(400).json({ error: 'Identificador da solicitacao invalido.' });
+    }
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Informe o motivo da rejeicao.' });
+    }
+
+    const db = await adminDb.getConnection();
+    try {
+      await db.beginTransaction();
+
+      const [rows] = await db.query<PropertyEditRequestListRow[]>(
+        `
+          SELECT
+            id,
+            property_id,
+            requester_user_id,
+            requester_role,
+            status,
+            before_json,
+            after_json,
+            diff_json,
+            review_reason,
+            reviewed_by,
+            reviewed_at,
+            created_at,
+            updated_at,
+            NULL AS property_title,
+            NULL AS property_code,
+            NULL AS requester_name
+          FROM property_edit_requests
+          WHERE id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [requestId]
+      );
+
+      if (rows.length === 0) {
+        await db.rollback();
+        return res.status(404).json({ error: 'Solicitacao de edicao nao encontrada.' });
+      }
+
+      const requestRow = rows[0];
+      if (String(requestRow.status ?? '').toUpperCase() !== 'PENDING') {
+        await db.rollback();
+        return res.status(409).json({ error: 'Esta solicitacao nao esta mais pendente.' });
+      }
+
+      await db.query(
+        `
+          UPDATE property_edit_requests
+          SET
+            status = 'REJECTED',
+            review_reason = ?,
+            reviewed_by = ?,
+            reviewed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [reason, reviewerId, requestId]
+      );
+
+      await db.commit();
+
+      return res.status(200).json({
+        message: 'Solicitacao de edicao rejeitada com sucesso.',
+      });
+    } catch (error) {
+      await db.rollback();
+      console.error('Erro ao rejeitar solicitacao de edicao de imovel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      db.release();
     }
   }
 

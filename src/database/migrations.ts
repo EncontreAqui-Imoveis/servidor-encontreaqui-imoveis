@@ -161,6 +161,12 @@ async function ensurePropertiesColumns(): Promise<void> {
     );
   }
 
+  if (!(await columnExists('properties', 'updated_at'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    );
+  }
+
   if (!(await columnExists('properties', 'quadra'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN quadra VARCHAR(100) NULL');
   }
@@ -214,6 +220,40 @@ async function ensurePropertiesColumns(): Promise<void> {
     await connection.query(
       'UPDATE properties SET type = ? WHERE type = ?',
       [to, from]
+    );
+  }
+}
+
+async function ensurePropertyEditRequestsTable(): Promise<void> {
+  if (!(await tableExists('property_edit_requests'))) {
+    await connection.query(`
+      CREATE TABLE property_edit_requests (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        property_id INT NOT NULL,
+        requester_user_id INT NOT NULL,
+        requester_role ENUM('broker', 'client') NOT NULL,
+        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        before_json JSON NOT NULL,
+        after_json JSON NOT NULL,
+        diff_json JSON NOT NULL,
+        review_reason TEXT NULL,
+        reviewed_by INT NULL,
+        reviewed_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_property_edit_requests_property_status (property_id, status),
+        INDEX idx_property_edit_requests_status_created (status, created_at),
+        FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (requester_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (reviewed_by) REFERENCES admins(id) ON DELETE SET NULL
+      )
+    `);
+    return;
+  }
+
+  if (!(await columnExists('property_edit_requests', 'updated_at'))) {
+    await connection.query(
+      'ALTER TABLE property_edit_requests ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
     );
   }
 }
@@ -605,6 +645,7 @@ async function ensureUsersTokenVersionColumn(): Promise<void> {
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
+    await ensurePropertyEditRequestsTable();
     await ensureFeaturedPropertiesTable();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();

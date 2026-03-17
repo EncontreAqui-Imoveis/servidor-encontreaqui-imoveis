@@ -157,6 +157,31 @@ const DDL_STATEMENTS: DDLStatement[] = [
     `,
   },
   {
+    name: 'property_edit_requests',
+    sql: `
+      CREATE TABLE IF NOT EXISTS property_edit_requests (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        property_id INT NOT NULL,
+        requester_user_id INT NOT NULL,
+        requester_role ENUM('broker', 'client') NOT NULL,
+        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        before_json JSON NOT NULL,
+        after_json JSON NOT NULL,
+        diff_json JSON NOT NULL,
+        review_reason TEXT NULL,
+        reviewed_by INT NULL,
+        reviewed_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_property_edit_requests_property_status (property_id, status),
+        INDEX idx_property_edit_requests_status_created (status, created_at),
+        FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE,
+        FOREIGN KEY (requester_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (reviewed_by) REFERENCES admins(id) ON DELETE SET NULL
+      );
+    `,
+  },
+  {
     name: 'featured_properties',
     sql: `
       CREATE TABLE IF NOT EXISTS featured_properties (

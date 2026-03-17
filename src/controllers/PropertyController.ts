@@ -14,6 +14,12 @@ import {
   notifyPriceDropIfNeeded,
   notifyPromotionStarted,
 } from "../services/priceDropNotificationService";
+import {
+  buildEditablePropertyState,
+  buildPropertyEditDbPatch,
+  preparePropertyEditPatch,
+  type EditablePropertyPatch,
+} from "../services/propertyEditRequestService";
 import { normalizePropertyType } from "../utils/propertyTypes";
 
 interface MulterFiles {
@@ -222,6 +228,7 @@ interface PropertyRow extends RowDataPacket {
   video_url?: string | null;
   created_at?: Date;
   updated_at?: Date;
+  pending_edit_request_id?: number | null;
   images?: string | null;
   agency_id?: number | null;
   agency_name?: string | null;
@@ -238,6 +245,22 @@ interface PropertyRow extends RowDataPacket {
 
 interface PropertyAggregateRow extends PropertyRow {
   images?: string | null;
+}
+
+interface PropertyEditRequestRow extends RowDataPacket {
+  id: number;
+  property_id: number;
+  requester_user_id: number;
+  requester_role: string;
+  status: string;
+  before_json: unknown;
+  after_json: unknown;
+  diff_json: unknown;
+  review_reason: string | null;
+  reviewed_by: number | null;
+  reviewed_at: Date | string | null;
+  created_at: Date | string | null;
+  updated_at: Date | string | null;
 }
 
 function normalizeStatus(value: unknown): Nullable<PropertyStatus> {
@@ -555,6 +578,13 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     activeNegotiationId: activeNegotiationId,
     negotiation,
     activeNegotiation: negotiation,
+    hasPendingEditRequest:
+      row.pending_edit_request_id != null &&
+      Number(row.pending_edit_request_id) > 0,
+    pendingEditRequestId:
+      row.pending_edit_request_id != null
+        ? Number(row.pending_edit_request_id)
+        : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -570,6 +600,44 @@ function hasValidPropertyDescription(value: unknown): boolean {
 
 function normalizePropertyDescription(value: string): string {
   return value.replace(/\r\n/g, '\n').trim();
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function buildUpdateStatementFromPatch(
+  dbPatch: Record<string, unknown>
+): { assignments: string[]; values: unknown[] } {
+  const assignments: string[] = [];
+  const values: unknown[] = [];
+
+  for (const [key, value] of Object.entries(dbPatch)) {
+    assignments.push(`\`${key}\` = ?`);
+    values.push(value);
+  }
+
+  return { assignments, values };
+}
+
+function resolveEditRequesterRole(req: AuthRequest): 'broker' | 'client' {
+  return String(req.userRole ?? '').toLowerCase() === 'broker' ? 'broker' : 'client';
 }
 
 function validateMaxTextLength(
@@ -714,6 +782,7 @@ async function fetchPropertyAggregateById(
         ANY_VALUE(an.status) AS active_negotiation_status,
         ANY_VALUE(an.final_value) AS active_negotiation_value,
         ANY_VALUE(nbu.name) AS active_negotiation_client_name,
+        ANY_VALUE(per.id) AS pending_edit_request_id,
         GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
       FROM properties p
       LEFT JOIN brokers b ON p.broker_id = b.id
@@ -744,6 +813,9 @@ async function fetchPropertyAggregateById(
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
       LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN property_edit_requests per
+        ON per.property_id = p.id
+       AND per.status = 'PENDING'
       LEFT JOIN property_images pi ON pi.property_id = p.id
       WHERE p.id = ?
         ${publicOnly ? "AND p.status = 'approved' AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'" : ''}
@@ -1850,6 +1922,146 @@ class PropertyController {
     }
   }
 
+  async createEditRequest(req: AuthRequest, res: Response) {
+    const propertyId = Number(req.params.id);
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
+    }
+
+    const payload = (req.body ?? {}) as Record<string, unknown>;
+    const db = await getPropertyDbConnection();
+
+    try {
+      await db.beginTransaction();
+
+      const [propertyRows] = await db.query<PropertyRow[]>(
+        'SELECT * FROM properties WHERE id = ? LIMIT 1 FOR UPDATE',
+        [propertyId]
+      );
+
+      if (!propertyRows || propertyRows.length === 0) {
+        await db.rollback();
+        return res.status(404).json({ error: 'Imóvel nao encontrado.' });
+      }
+
+      const property = propertyRows[0];
+      const isOwner =
+        (property.broker_id != null && property.broker_id === userId) ||
+        (property.owner_id != null && property.owner_id === userId);
+
+      if (!isOwner) {
+        await db.rollback();
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+      }
+
+      if (property.status === 'pending_approval') {
+        await db.rollback();
+        return res.status(409).json({
+          error: 'Imóveis pendentes não podem solicitar edição até o fim da análise.',
+        });
+      }
+
+      const [pendingRows] = await db.query<PropertyEditRequestRow[]>(
+        `
+          SELECT id, status
+          FROM property_edit_requests
+          WHERE property_id = ? AND status = 'PENDING'
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [propertyId]
+      );
+
+      if (pendingRows.length > 0) {
+        await db.rollback();
+        return res.status(409).json({
+          error: 'Este imóvel já possui uma solicitação de edição pendente.',
+        });
+      }
+
+      const currentState = buildEditablePropertyState(property as Record<string, unknown>);
+      const preparedPatch = preparePropertyEditPatch(payload, currentState);
+
+      if (Object.keys(preparedPatch.diff).length === 0) {
+        await db.rollback();
+        return res.status(400).json({
+          error: 'Nenhuma alteração válida foi identificada para enviar à aprovação.',
+        });
+      }
+
+      const requesterRole = resolveEditRequesterRole(req);
+
+      const [insertResult] = await db.query<ResultSetHeader>(
+        `
+          INSERT INTO property_edit_requests (
+            property_id,
+            requester_user_id,
+            requester_role,
+            status,
+            before_json,
+            after_json,
+            diff_json,
+            review_reason,
+            reviewed_by,
+            reviewed_at
+          ) VALUES (
+            ?,
+            ?,
+            ?,
+            'PENDING',
+            CAST(? AS JSON),
+            CAST(? AS JSON),
+            CAST(? AS JSON),
+            NULL,
+            NULL,
+            NULL
+          )
+        `,
+        [
+          propertyId,
+          userId,
+          requesterRole,
+          JSON.stringify(preparedPatch.before),
+          JSON.stringify(preparedPatch.after),
+          JSON.stringify(preparedPatch.diff),
+        ]
+      );
+
+      await db.commit();
+
+      try {
+        await notifyAdmins(
+          `Nova solicitacao de edicao do imovel '${property.title}'.`,
+          'property',
+          propertyId
+        );
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre solicitacao de edicao:', notifyError);
+      }
+
+      return res.status(202).json({
+        message: 'Solicitação de edição enviada para aprovação.',
+        requestId: insertResult.insertId,
+      });
+    } catch (error) {
+      await db.rollback();
+      const message = error instanceof Error ? error.message : '';
+      if (message) {
+        return res.status(400).json({ error: message });
+      }
+      console.error('Erro ao criar solicitacao de edicao do imovel:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    } finally {
+      db.release();
+    }
+  }
+
   async update(req: AuthRequest, res: Response) {
     const propertyId = Number(req.params.id);
     const userId = req.userId;
@@ -2835,6 +3047,7 @@ class PropertyController {
             ANY_VALUE(an.status) AS active_negotiation_status,
             ANY_VALUE(an.final_value) AS active_negotiation_value,
             ANY_VALUE(nbu.name) AS active_negotiation_client_name,
+            ANY_VALUE(per.id) AS pending_edit_request_id,
             GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
           FROM properties p
           LEFT JOIN brokers b ON p.broker_id = b.id
@@ -2865,6 +3078,9 @@ class PropertyController {
             WHERE ranked.rn = 1
           ) an ON an.property_id = p.id
           LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+          LEFT JOIN property_edit_requests per
+            ON per.property_id = p.id
+           AND per.status = 'PENDING'
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.owner_id = ? OR p.broker_id = ?
           GROUP BY p.id

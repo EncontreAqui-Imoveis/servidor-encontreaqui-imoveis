@@ -122,6 +122,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['property_edit_requests', 'before_json'],
     ['property_edit_requests', 'after_json'],
     ['property_edit_requests', 'diff_json'],
+    ['property_edit_requests', 'field_reviews_json'],
   ] as const;
 
   for (const [tableName, columnName] of requiredColumns) {
@@ -159,6 +160,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'PENDING',
     'APPROVED',
     'REJECTED',
+    'PARTIALLY_APPROVED',
   ]);
 
   return {

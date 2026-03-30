@@ -232,10 +232,11 @@ async function ensurePropertyEditRequestsTable(): Promise<void> {
         property_id INT NOT NULL,
         requester_user_id INT NOT NULL,
         requester_role ENUM('broker', 'client') NOT NULL,
-        status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+        status ENUM('PENDING', 'APPROVED', 'REJECTED', 'PARTIALLY_APPROVED') NOT NULL DEFAULT 'PENDING',
         before_json JSON NOT NULL,
         after_json JSON NOT NULL,
         diff_json JSON NOT NULL,
+        field_reviews_json JSON NULL,
         review_reason TEXT NULL,
         reviewed_by INT NULL,
         reviewed_at TIMESTAMP NULL,
@@ -254,6 +255,19 @@ async function ensurePropertyEditRequestsTable(): Promise<void> {
   if (!(await columnExists('property_edit_requests', 'updated_at'))) {
     await connection.query(
       'ALTER TABLE property_edit_requests ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    );
+  }
+
+  if (!(await columnExists('property_edit_requests', 'field_reviews_json'))) {
+    await connection.query(
+      'ALTER TABLE property_edit_requests ADD COLUMN field_reviews_json JSON NULL AFTER diff_json'
+    );
+  }
+
+  const statusType = await getColumnType('property_edit_requests', 'status');
+  if (statusType && !statusType.includes('PARTIALLY_APPROVED')) {
+    await connection.query(
+      "ALTER TABLE property_edit_requests MODIFY COLUMN status ENUM('PENDING', 'APPROVED', 'REJECTED', 'PARTIALLY_APPROVED') NOT NULL DEFAULT 'PENDING'"
     );
   }
 }

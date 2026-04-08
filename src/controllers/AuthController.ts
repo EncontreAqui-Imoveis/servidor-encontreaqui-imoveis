@@ -774,6 +774,13 @@ class AuthController {
       const passwordHash = isGoogleRegistration
         ? null
         : await bcrypt.hash(password, 8);
+      let emailVerifiedAt: Date | null = isGoogleRegistration ? new Date() : null;
+      if (!isGoogleRegistration) {
+        const verificationStatus = await getEmailVerificationStatus({ email });
+        if (verificationStatus.status === 'verified') {
+          emailVerifiedAt = verificationStatus.verifiedAt ?? new Date();
+        }
+      }
 
       const [userResult] = await authDb.query<ResultSetHeader>(
         `
@@ -784,7 +791,7 @@ class AuthController {
           firebaseUid,
           name,
           email,
-          isGoogleRegistration ? new Date() : null,
+          emailVerifiedAt,
           passwordHash,
           phone ?? null,
           addressResult.value.street,
@@ -812,7 +819,7 @@ class AuthController {
           id: userId,
           name,
           email,
-          email_verified_at: isGoogleRegistration ? new Date().toISOString() : null,
+          email_verified_at: emailVerifiedAt?.toISOString() ?? null,
           phone,
           street: addressResult.value.street,
           number: addressResult.value.number,

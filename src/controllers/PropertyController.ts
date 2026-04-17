@@ -3192,10 +3192,13 @@ class PropertyController {
       tem_automacao,
       tem_ar_condicionado,
       eh_mobiliada,
-      sortBy,
+      sortBy: sortByQuery,
       order,
       status,
     } = req.query;
+    const minPriceParam = minPrice ?? req.query.min_price;
+    const maxPriceParam = maxPrice ?? req.query.max_price;
+    const sortByResolved = sortByQuery ?? req.query.sort;
     const searchTermRaw = req.query.searchTerm ?? req.query.search;
     const searchTerm =
       typeof searchTermRaw === 'string' && searchTermRaw.trim().length > 0
@@ -3251,16 +3254,16 @@ class PropertyController {
       params.push(`%${bairro}%`);
     }
 
-    if (minPrice) {
-      const value = Number(minPrice);
+    if (minPriceParam) {
+      const value = Number(minPriceParam);
       if (!Number.isNaN(value)) {
         whereClauses.push(`${priceColumn} >= ?`);
         params.push(value);
       }
     }
 
-    if (maxPrice) {
-      const value = Number(maxPrice);
+    if (maxPriceParam) {
+      const value = Number(maxPriceParam);
       if (!Number.isNaN(value)) {
         whereClauses.push(`${priceColumn} <= ?`);
         params.push(value);
@@ -3353,6 +3356,27 @@ class PropertyController {
       params.push(term, term, term, term);
     }
 
+    const uuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const idRaw = req.query.id;
+    const idTrimmed = typeof idRaw === 'string' ? idRaw.trim() : '';
+    const codeOrIdRaw = req.query.code ?? req.query.propertyCode;
+    const codeOrId =
+      typeof codeOrIdRaw === 'string' && codeOrIdRaw.trim().length > 0 ? codeOrIdRaw.trim() : '';
+
+    if (idTrimmed && uuidRe.test(idTrimmed)) {
+      whereClauses.push('p.id = ?');
+      params.push(idTrimmed);
+    } else if (codeOrId) {
+      if (uuidRe.test(codeOrId)) {
+        whereClauses.push('p.id = ?');
+        params.push(codeOrId);
+      } else {
+        whereClauses.push('TRIM(p.code) = ?');
+        params.push(codeOrId);
+      }
+    }
+
     const negotiationPlaceholders = NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ');
     whereClauses.push(`NOT EXISTS (
       SELECT 1 FROM negotiations nx
@@ -3369,7 +3393,7 @@ class PropertyController {
       area_construida: 'p.area_construida',
     };
 
-    const sortColumn = allowedSortColumns[String(sortBy ?? '').toLowerCase()] ?? 'p.created_at';
+    const sortColumn = allowedSortColumns[String(sortByResolved ?? '').toLowerCase()] ?? 'p.created_at';
     const sortDirection = String(order ?? 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
     try {

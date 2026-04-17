@@ -22,6 +22,11 @@ import {
 } from "../services/propertyEditRequestService";
 import { normalizePropertyType } from "../utils/propertyTypes";
 import { allocateNextPropertyCode } from "../utils/propertyCode";
+import {
+  areaInputToSquareMeters,
+  normalizeAreaUnidade,
+  type AreaConstruidaUnidade,
+} from "../utils/propertyAreaUnits";
 
 interface MulterFiles {
   [fieldname: string]: Express.Multer.File[];
@@ -213,7 +218,10 @@ interface PropertyRow extends RowDataPacket {
   bedrooms?: number | null;
   bathrooms?: number | null;
   area_construida?: number | string | null;
+  area_construida_unidade?: string | null;
   area_terreno?: number | string | null;
+  sem_quadra?: number | boolean | string | null;
+  sem_lote?: number | boolean | string | null;
   garage_spots?: number | null;
   has_wifi?: number | boolean | null;
   tem_piscina?: number | boolean | null;
@@ -557,6 +565,12 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
     area_construida:
       row.area_construida != null ? Number(row.area_construida) : null,
+    area_construida_unidade: normalizeAreaUnidade(
+      (row as PropertyRow & { area_construida_unidade?: string | null })
+        .area_construida_unidade,
+    ) as AreaConstruidaUnidade,
+    sem_quadra: toBoolean((row as PropertyRow & { sem_quadra?: unknown }).sem_quadra),
+    sem_lote: toBoolean((row as PropertyRow & { sem_lote?: unknown }).sem_lote),
     area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
     garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
     has_wifi: toBoolean(row.has_wifi),
@@ -943,8 +957,13 @@ class PropertyController {
       eh_mobiliada,
       valor_condominio,
       valor_iptu,
+      sem_quadra,
+      sem_lote,
+      area_construida_unidade,
     } = req.body ?? {};
     const semNumeroFlag = parseBoolean(sem_numero);
+    const semQuadraFlag = parseBoolean(sem_quadra);
+    const semLoteFlag = parseBoolean(sem_lote);
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
 
@@ -993,8 +1012,8 @@ class PropertyController {
       validateMaxTextLength(bairro, 'Bairro'),
       validateMaxTextLength(complemento, 'Complemento'),
       validateMaxTextLength(city, 'Cidade'),
-      validateMaxTextLength(quadra, 'Quadra', 25),
-      validateMaxTextLength(lote, 'Lote', 25),
+      ...(semQuadraFlag ? [] : [validateMaxTextLength(quadra, 'Quadra', 25)]),
+      ...(semLoteFlag ? [] : [validateMaxTextLength(lote, 'Lote', 25)]),
       validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
       validateMaxTextLength(code, 'Código'),
     ].find(Boolean);
@@ -1171,6 +1190,9 @@ class PropertyController {
           .json({ error: 'Apenas corretores aprovados podem criar imóveis.' });
       }
 
+      const effectiveQuadra = semQuadraFlag ? null : stringOrNull(quadra);
+      const effectiveLote = semLoteFlag ? null : stringOrNull(lote);
+
       const duplicateRows = await runPropertyQuery<RowDataPacket[]>(
         `
           SELECT id FROM properties
@@ -1181,7 +1203,7 @@ class PropertyController {
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
         `,
-        [address, quadra ?? null, lote ?? null, numeroNormalizado, bairro ?? null]
+        [address, effectiveQuadra, effectiveLote, numeroNormalizado, bairro ?? null]
       );
 
       if (duplicateRows.length > 0) {
@@ -1193,7 +1215,18 @@ class PropertyController {
       const numericBedrooms = parseInteger(bedrooms);
       const numericBathrooms = parseInteger(bathrooms);
       const numericGarageSpots = parseInteger(garage_spots);
-      const numericAreaConstruida = parseDecimal(area_construida ?? area);
+      const areaUnidade = normalizeAreaUnidade(
+        typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
+      );
+      const rawAreaInput = parseDecimal(area_construida ?? area);
+      let numericAreaConstruida: number | null = null;
+      if (rawAreaInput != null) {
+        const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
+        if (Number.isNaN(converted)) {
+          return res.status(400).json({ error: 'Área construída inválida.' });
+        }
+        numericAreaConstruida = converted;
+      }
       const numericAreaTerreno = parseDecimal(area_terreno);
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
@@ -1285,7 +1318,9 @@ class PropertyController {
             owner_phone,
             address,
             quadra,
+            sem_quadra,
             lote,
+            sem_lote,
             numero,
             bairro,
             complemento,
@@ -1296,6 +1331,7 @@ class PropertyController {
             bedrooms,
             bathrooms,
             area_construida,
+            area_construida_unidade,
             area_terreno,
             garage_spots,
             has_wifi,
@@ -1307,7 +1343,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
@@ -1334,8 +1370,10 @@ class PropertyController {
           stringOrNull(owner_name),
           stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
           address,
-          stringOrNull(quadra),
-          stringOrNull(lote),
+          effectiveQuadra,
+          semQuadraFlag,
+          effectiveLote,
+          semLoteFlag,
           numeroNormalizado,
           stringOrNull(bairro),
           stringOrNull(complemento),
@@ -1346,6 +1384,7 @@ class PropertyController {
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
+          areaUnidade,
           numericAreaTerreno,
           numericGarageSpots,
           hasWifiFlag,
@@ -1476,8 +1515,13 @@ class PropertyController {
       eh_mobiliada,
       valor_condominio,
       valor_iptu,
+      sem_quadra,
+      sem_lote,
+      area_construida_unidade,
     } = req.body ?? {};
     const semNumeroFlag = parseBoolean(sem_numero);
+    const semQuadraFlag = parseBoolean(sem_quadra);
+    const semLoteFlag = parseBoolean(sem_lote);
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
 
@@ -1526,8 +1570,8 @@ class PropertyController {
       validateMaxTextLength(bairro, 'Bairro'),
       validateMaxTextLength(complemento, 'Complemento'),
       validateMaxTextLength(city, 'Cidade'),
-      validateMaxTextLength(quadra, 'Quadra', 25),
-      validateMaxTextLength(lote, 'Lote', 25),
+      ...(semQuadraFlag ? [] : [validateMaxTextLength(quadra, 'Quadra', 25)]),
+      ...(semLoteFlag ? [] : [validateMaxTextLength(lote, 'Lote', 25)]),
       validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
       validateMaxTextLength(code, 'Código'),
     ].find(Boolean);
@@ -1684,6 +1728,9 @@ class PropertyController {
     }
 
     try {
+      const effectiveQuadra = semQuadraFlag ? null : stringOrNull(quadra);
+      const effectiveLote = semLoteFlag ? null : stringOrNull(lote);
+
       const duplicateRows = await runPropertyQuery<RowDataPacket[]>(
         `
           SELECT id FROM properties
@@ -1694,7 +1741,7 @@ class PropertyController {
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
         `,
-        [address, quadra ?? null, lote ?? null, numeroNormalizado, bairro ?? null]
+        [address, effectiveQuadra, effectiveLote, numeroNormalizado, bairro ?? null]
       );
 
       if (duplicateRows.length > 0) {
@@ -1706,7 +1753,18 @@ class PropertyController {
       const numericBedrooms = parseInteger(bedrooms);
       const numericBathrooms = parseInteger(bathrooms);
       const numericGarageSpots = parseInteger(garage_spots);
-      const numericAreaConstruida = parseDecimal(area_construida ?? area);
+      const areaUnidade = normalizeAreaUnidade(
+        typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
+      );
+      const rawAreaInput = parseDecimal(area_construida ?? area);
+      let numericAreaConstruida: number | null = null;
+      if (rawAreaInput != null) {
+        const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
+        if (Number.isNaN(converted)) {
+          return res.status(400).json({ error: 'Área construída inválida.' });
+        }
+        numericAreaConstruida = converted;
+      }
       const numericAreaTerreno = parseDecimal(area_terreno);
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
@@ -1798,7 +1856,9 @@ class PropertyController {
             owner_phone,
             address,
             quadra,
+            sem_quadra,
             lote,
+            sem_lote,
             numero,
             bairro,
             complemento,
@@ -1809,6 +1869,7 @@ class PropertyController {
             bedrooms,
             bathrooms,
             area_construida,
+            area_construida_unidade,
             area_terreno,
             garage_spots,
             has_wifi,
@@ -1820,7 +1881,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           null,
@@ -1847,8 +1908,10 @@ class PropertyController {
           stringOrNull(owner_name),
           stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
           address,
-          stringOrNull(quadra),
-          stringOrNull(lote),
+          effectiveQuadra,
+          semQuadraFlag,
+          effectiveLote,
+          semLoteFlag,
           numeroNormalizado,
           stringOrNull(bairro),
           stringOrNull(complemento),
@@ -1859,6 +1922,7 @@ class PropertyController {
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
+          areaUnidade,
           numericAreaTerreno,
           numericGarageSpots,
           hasWifiFlag,
@@ -3130,9 +3194,13 @@ class PropertyController {
       eh_mobiliada,
       sortBy,
       order,
-      searchTerm,
       status,
     } = req.query;
+    const searchTermRaw = req.query.searchTerm ?? req.query.search;
+    const searchTerm =
+      typeof searchTermRaw === 'string' && searchTermRaw.trim().length > 0
+        ? searchTermRaw
+        : undefined;
 
     const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
     const numericPage = Math.max(Number(page) || 1, 1);
@@ -3195,6 +3263,23 @@ class PropertyController {
       const value = Number(maxPrice);
       if (!Number.isNaN(value)) {
         whereClauses.push(`${priceColumn} <= ?`);
+        params.push(value);
+      }
+    }
+
+    const minAreaConstruida = req.query.min_area_construida ?? req.query.minAreaConstruida;
+    const maxAreaConstruida = req.query.max_area_construida ?? req.query.maxAreaConstruida;
+    if (minAreaConstruida != null && String(minAreaConstruida).trim() !== '') {
+      const value = Number(minAreaConstruida);
+      if (!Number.isNaN(value) && value >= 0) {
+        whereClauses.push('p.area_construida >= ?');
+        params.push(value);
+      }
+    }
+    if (maxAreaConstruida != null && String(maxAreaConstruida).trim() !== '') {
+      const value = Number(maxAreaConstruida);
+      if (!Number.isNaN(value) && value >= 0) {
+        whereClauses.push('p.area_construida <= ?');
         params.push(value);
       }
     }
@@ -3267,6 +3352,14 @@ class PropertyController {
       whereClauses.push('(p.title LIKE ? OR p.city LIKE ? OR p.address LIKE ? OR p.bairro LIKE ? )');
       params.push(term, term, term, term);
     }
+
+    const negotiationPlaceholders = NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ');
+    whereClauses.push(`NOT EXISTS (
+      SELECT 1 FROM negotiations nx
+      WHERE nx.property_id = p.id
+        AND UPPER(TRIM(nx.status)) NOT IN (${negotiationPlaceholders})
+    )`);
+    params.push(...NEGOTIATION_TERMINAL_STATUSES);
 
     const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
@@ -3425,11 +3518,16 @@ class PropertyController {
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.status = 'approved'
             AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+            AND NOT EXISTS (
+              SELECT 1 FROM negotiations nx
+              WHERE nx.property_id = p.id
+                AND UPPER(TRIM(nx.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ')})
+            )
           GROUP BY p.id, fp.position
           ORDER BY fp.position ASC
           LIMIT ? OFFSET ?
         `,
-        [...NEGOTIATION_TERMINAL_STATUSES, limit, offset]
+        [...NEGOTIATION_TERMINAL_STATUSES, ...NEGOTIATION_TERMINAL_STATUSES, limit, offset]
       );
 
       const countRows = await runPropertyQuery<RowDataPacket[]>(
@@ -3439,9 +3537,14 @@ class PropertyController {
           JOIN properties p ON p.id = fp.property_id
           WHERE p.status = 'approved'
             AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+            AND NOT EXISTS (
+              SELECT 1 FROM negotiations nx
+              WHERE nx.property_id = p.id
+                AND UPPER(TRIM(nx.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ')})
+            )
         `
         ,
-        []
+        [...NEGOTIATION_TERMINAL_STATUSES]
       );
 
       const total = countRows[0]?.total ?? 0;

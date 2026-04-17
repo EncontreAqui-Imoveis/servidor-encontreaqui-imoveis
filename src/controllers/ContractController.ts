@@ -76,6 +76,7 @@ interface ContractRow extends RowDataPacket {
   updated_at: Date | string | null;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
+  buyer_client_id: number | null;
   property_title: string | null;
   property_purpose: string | null;
   property_code: string | null;
@@ -509,6 +510,16 @@ function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
         .filter((value) => Number.isFinite(value) && value > 0)
     )
   );
+}
+
+/** Corretores envolvidos + cliente comprador (quando existir), para notificações de contrato. */
+function resolveContractNotificationRecipientIds(contract: ContractRow): number[] {
+  const brokers = resolveNegotiationBrokerRecipientIds(contract);
+  const clientId = Number(contract.buyer_client_id ?? 0);
+  if (Number.isFinite(clientId) && clientId > 0) {
+    return Array.from(new Set([...brokers, clientId]));
+  }
+  return brokers;
 }
 
 function toDocumentCount(value: unknown): number {
@@ -1051,6 +1062,7 @@ const CONTRACT_SELECT_SQL = `
     c.updated_at,
     n.capturing_broker_id,
     n.selling_broker_id,
+    n.buyer_client_id,
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,
@@ -1485,22 +1497,26 @@ class ContractController {
           SELECT COUNT(*) AS total
           FROM contracts c
           JOIN negotiations n ON n.id = c.negotiation_id
-          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ?)
+          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
+            AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
+            AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
           ${statusClause}
         `,
-        [userId, userId, ...statusParams]
+        [userId, userId, userId, ...statusParams]
       );
       const total = Number(countRows[0]?.total ?? 0);
 
       const rows = await queryContractRows<ContractRow>(
         `
           ${CONTRACT_SELECT_SQL}
-          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ?)
+          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
+            AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
+            AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
           ${statusClause}
           ORDER BY c.updated_at DESC, c.created_at DESC
           LIMIT ? OFFSET ?
         `,
-        [userId, userId, ...statusParams, limit, offset]
+        [userId, userId, userId, ...statusParams, limit, offset]
       );
 
       return res.status(200).json({
@@ -1800,7 +1816,7 @@ class ContractController {
       await tx.commit();
 
       if (nextSideStatus === 'APPROVED_WITH_RES' && reasonText.length > 0) {
-        const recipientIds = resolveNegotiationBrokerRecipientIds(contract);
+        const recipientIds = resolveContractNotificationRecipientIds(contract);
         const propertyTitle = resolveContractPropertyTitle(contract);
         const sideLabel = resolveApprovalSideLabel(contract, side as 'seller' | 'buyer');
 
@@ -1822,7 +1838,37 @@ class ContractController {
             });
           } catch (notificationError) {
             console.error(
-              'Falha ao notificar corretor sobre aprovação com ressalvas do contrato:',
+              'Falha ao notificar sobre aprovação com ressalvas do contrato:',
+              notificationError
+            );
+          }
+        }
+      }
+
+      if (nextSideStatus === 'REJECTED' && reasonText.length > 0) {
+        const recipientIds = resolveContractNotificationRecipientIds(contract);
+        const propertyTitle = resolveContractPropertyTitle(contract);
+        const sideLabel = resolveApprovalSideLabel(contract, side as 'seller' | 'buyer');
+
+        for (const recipientId of recipientIds) {
+          try {
+            await createUserNotification({
+              type: 'negotiation',
+              title: 'Documentação rejeitada',
+              message: `A documentação (${sideLabel}) do contrato do imóvel "${propertyTitle}" foi rejeitada. Motivo: ${reasonText}. O contrato não aparecerá mais na sua lista até nova análise, se aplicável.`,
+              recipientId,
+              relatedEntityId: Number(contract.property_id),
+              metadata: {
+                contractId,
+                negotiationId: contract.negotiation_id,
+                side: isDoubleEndedDeal(contract) ? 'both' : side,
+                status: nextSideStatus,
+                reason: reasonText,
+              },
+            });
+          } catch (notificationError) {
+            console.error(
+              'Falha ao notificar sobre rejeição da documentação do contrato:',
               notificationError
             );
           }

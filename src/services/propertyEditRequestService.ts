@@ -107,7 +107,25 @@ const EDIT_FIELD_ALIASES = {
     'promoEndDate',
     'promo_end_date',
   ],
+  semQuadra: ['semQuadra', 'sem_quadra'],
+  semLote: ['semLote', 'sem_lote'],
+  areaConstruidaUnidade: [
+    'areaConstruidaUnidade',
+    'area_construida_unidade',
+    'areaConstruida_unidade',
+  ],
 } as const;
+
+type AreaConstruidaUnidadeValue = 'm2' | 'alqueire' | 'hectare';
+
+function normalizeAreaConstruidaUnidade(value: unknown): AreaConstruidaUnidadeValue {
+  const s = String(value ?? 'm2')
+    .trim()
+    .toLowerCase();
+  if (s === 'hectare' || s === 'ha') return 'hectare';
+  if (s === 'alqueire' || s === 'alq') return 'alqueire';
+  return 'm2';
+}
 
 export type EditablePropertyState = {
   title: string;
@@ -130,6 +148,10 @@ export type EditablePropertyState = {
   bedrooms: number | null;
   bathrooms: number | null;
   areaConstruida: number | null;
+  /** Unidade em que o usuário informou a área construída; `areaConstruida` permanece em m². */
+  areaConstruidaUnidade: AreaConstruidaUnidadeValue;
+  semQuadra: boolean;
+  semLote: boolean;
   areaTerreno: number | null;
   garageSpots: number | null;
   hasWifi: boolean;
@@ -464,6 +486,11 @@ export function buildEditablePropertyState(
     bedrooms: toNullableInteger(property.bedrooms),
     bathrooms: toNullableInteger(property.bathrooms),
     areaConstruida: toNullableNumber(property.area_construida),
+    areaConstruidaUnidade: normalizeAreaConstruidaUnidade(
+      (property as Record<string, unknown>).area_construida_unidade
+    ),
+    semQuadra: parseBoolean((property as Record<string, unknown>).sem_quadra),
+    semLote: parseBoolean((property as Record<string, unknown>).sem_lote),
     areaTerreno: toNullableNumber(property.area_terreno),
     garageSpots: toNullableInteger(property.garage_spots),
     hasWifi: parseBoolean(property.has_wifi),
@@ -666,6 +693,20 @@ function buildRequestedPatch(
     patch.areaTerreno = parseDecimal(areaTerreno.value, 'Area do terreno');
   }
 
+  const semQuadra = readAlias(payload, EDIT_FIELD_ALIASES.semQuadra);
+  if (semQuadra.found) patch.semQuadra = parseBoolean(semQuadra.value);
+
+  const semLote = readAlias(payload, EDIT_FIELD_ALIASES.semLote);
+  if (semLote.found) patch.semLote = parseBoolean(semLote.value);
+
+  const areaConstruidaUnidade = readAlias(
+    payload,
+    EDIT_FIELD_ALIASES.areaConstruidaUnidade
+  );
+  if (areaConstruidaUnidade.found) {
+    patch.areaConstruidaUnidade = normalizeAreaConstruidaUnidade(areaConstruidaUnidade.value);
+  }
+
   const garageSpots = readAlias(payload, EDIT_FIELD_ALIASES.garageSpots);
   if (garageSpots.found) {
     patch.garageSpots = parseInteger(garageSpots.value, 'Garagens');
@@ -776,6 +817,13 @@ function finalizePatch(
   rawPatch: EditablePropertyPatch
 ): EditablePropertyPatch {
   const merged: EditablePropertyState = { ...current, ...rawPatch };
+
+  if (rawPatch.semQuadra === true) {
+    merged.quadra = null;
+  }
+  if (rawPatch.semLote === true) {
+    merged.lote = null;
+  }
 
   const shouldEnablePromotion =
     rawPatch.isPromoted === true ||
@@ -908,6 +956,15 @@ export function buildPropertyEditDbPatch(
         break;
       case 'areaConstruida':
         dbPatch.area_construida = finalState.areaConstruida;
+        break;
+      case 'areaConstruidaUnidade':
+        dbPatch.area_construida_unidade = finalState.areaConstruidaUnidade;
+        break;
+      case 'semQuadra':
+        dbPatch.sem_quadra = finalState.semQuadra ? 1 : 0;
+        break;
+      case 'semLote':
+        dbPatch.sem_lote = finalState.semLote ? 1 : 0;
         break;
       case 'areaTerreno':
         dbPatch.area_terreno = finalState.areaTerreno;

@@ -108,6 +108,22 @@ describe('sanitizeAddressInput', () => {
     }
   });
 
+  it('accepts address without complement (optional)', () => {
+    const result = sanitizeAddressInput({
+      street: 'Rua A',
+      number: '10',
+      bairro: 'Centro',
+      city: 'Goiania',
+      state: 'GO',
+      cep: '74000000',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.complement).toBeNull();
+    }
+  });
+
   it('fails when without_number is false and number is missing', () => {
     const result = sanitizeAddressInput({
       street: 'Rua A',

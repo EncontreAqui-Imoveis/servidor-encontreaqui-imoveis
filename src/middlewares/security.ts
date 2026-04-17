@@ -5,6 +5,8 @@ const ONE_YEAR_IN_SECONDS = 31536000;
 const PRODUCTION_FALLBACK_ORIGINS = [
   'https://painel-adm-encontreaquiimoveis.vercel.app',
   'https://site-imobiliario-encoreaqui-7b52iuxz7-ctrshift-pms-projects.vercel.app',
+  'https://encontreaquiimoveis.com.br',
+  'https://www.encontreaquiimoveis.com.br',
 ];
 const SUPPLEMENTAL_CORS_ENV_KEYS = [
   'PAINELWEB_URL',
@@ -122,6 +124,9 @@ export function buildCorsOptions(): CorsOptions {
     new Set([
       ...configuredOrigins,
       ...supplementalOrigins,
+      // Sempre incluir origens de produção conhecidas quando CORS_ORIGINS estiver incompleto
+      // (evita painel/site bloqueados quando só uma URL foi configurada no Railway).
+      ...(nodeEnv === 'production' ? PRODUCTION_FALLBACK_ORIGINS : []),
       ...(nodeEnv === 'production' ? [] : defaultLocalOrigins),
     ]),
   );

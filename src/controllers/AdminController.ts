@@ -36,6 +36,7 @@ import {
 import type AuthRequest from '../middlewares/auth';
 import { readNegotiationDocumentObject } from '../services/negotiationDocumentStorageService';
 import { allocateNextPropertyCode } from '../utils/propertyCode';
+import { areaInputToSquareMeters, normalizeAreaUnidade } from '../utils/propertyAreaUnits';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
@@ -753,6 +754,7 @@ interface AdminNegotiationDecisionRow extends RowDataPacket {
   status: string;
   property_id: number;
   capturing_broker_id: number | null;
+  buyer_client_id: number | null;
   property_title: string | null;
   property_code: string | null;
   property_address: string | null;
@@ -1420,6 +1422,7 @@ class AdminController {
             n.status,
             n.property_id,
             n.capturing_broker_id,
+            n.buyer_client_id,
             p.title AS property_title,
             p.code AS property_code,
             CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
@@ -1458,37 +1461,10 @@ class AdminController {
       );
       const pendingProposalCount = Number(pendingBeforeRows[0]?.cnt ?? 0);
 
-      await tx.query(
-        `
-          UPDATE negotiations
-          SET status = 'CANCELLED', version = version + 1
-          WHERE id = ?
-        `,
-        [negotiationId]
-      );
-
-      await tx.query(
-        `
-          INSERT INTO negotiation_history (
-            id,
-            negotiation_id,
-            from_status,
-            to_status,
-            actor_id,
-            metadata_json,
-            created_at
-          ) VALUES (UUID(), ?, ?, 'CANCELLED', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
-        `,
-        [
-          negotiationId,
-          currentStatus,
-          actorId,
-          JSON.stringify({
-            action: 'admin_rejected',
-            reason,
-          }),
-        ]
-      );
+      await tx.query(`DELETE FROM negotiation_proposal_idempotency WHERE negotiation_id = ?`, [
+        negotiationId,
+      ]);
+      await tx.query(`DELETE FROM negotiations WHERE id = ?`, [negotiationId]);
 
       if (pendingProposalCount <= 1) {
         await tx.query(
@@ -1505,15 +1481,25 @@ class AdminController {
 
       await tx.commit();
 
+      const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
       const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+      const recipientClientId = Number(negotiation.buyer_client_id ?? 0);
+
+      const notifyIds = new Set<number>();
       if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
-        const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
+        notifyIds.add(recipientBrokerId);
+      }
+      if (Number.isFinite(recipientClientId) && recipientClientId > 0) {
+        notifyIds.add(recipientClientId);
+      }
+
+      for (const recipientId of notifyIds) {
         try {
           await createUserNotification({
             type: 'negotiation',
-            title: 'Proposta Rejeitada.',
+            title: 'Proposta rejeitada',
             message: `Sua proposta para o imóvel ${propertyTitle} foi rejeitada. Motivo: ${reason}.`,
-            recipientId: recipientBrokerId,
+            recipientId,
             relatedEntityId: Number(negotiation.property_id),
             metadata: {
               negotiationId,
@@ -1523,7 +1509,7 @@ class AdminController {
             },
           });
         } catch (notifyError) {
-          console.error('Erro ao notificar corretor sobre rejeição da proposta:', notifyError);
+          console.error('Erro ao notificar sobre rejeição da proposta:', notifyError);
         }
       }
 
@@ -3579,8 +3565,6 @@ class AdminController {
         'purpose',
         'address',
         'bairro',
-        'quadra',
-        'lote',
         'tipo_lote',
         'city',
         'state',
@@ -3648,8 +3632,20 @@ class AdminController {
         valor_iptu,
         video_url,
         broker_id,
+        sem_quadra,
+        sem_lote,
+        area_construida_unidade,
       } = body;
       const semNumeroFlag = parseBoolean(sem_numero);
+      const semQuadraFlag = parseBoolean(sem_quadra);
+      const semLoteFlag = parseBoolean(sem_lote);
+
+      if (!semQuadraFlag && !String(quadra ?? '').trim()) {
+        return res.status(400).json({ error: 'Informe a quadra ou marque a opção sem quadra.' });
+      }
+      if (!semLoteFlag && !String(lote ?? '').trim()) {
+        return res.status(400).json({ error: 'Informe o lote ou marque a opção sem lote.' });
+      }
 
       const normalizedType = normalizePropertyType(type);
       if (!normalizedType) {
@@ -3671,8 +3667,8 @@ class AdminController {
         validateMaxTextLength(bairro, 'Bairro'),
         validateMaxTextLength(complemento, 'Complemento'),
         validateMaxTextLength(city, 'Cidade'),
-        validateMaxTextLength(quadra, 'Quadra', 25),
-        validateMaxTextLength(lote, 'Lote', 25),
+        ...(semQuadraFlag ? [] : [validateMaxTextLength(quadra, 'Quadra', 25)]),
+        ...(semLoteFlag ? [] : [validateMaxTextLength(lote, 'Lote', 25)]),
         validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
         validateMaxTextLength(code, 'Código'),
       ].find(Boolean);
@@ -3778,7 +3774,18 @@ class AdminController {
       const numericBedrooms = parseInteger(bedrooms);
       const numericBathrooms = parseInteger(bathrooms);
       const numericGarageSpots = parseInteger(garage_spots);
-      const numericAreaConstruida = parseDecimal(area_construida);
+      const areaUnidade = normalizeAreaUnidade(
+        typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
+      );
+      const rawAreaInput = parseDecimal(area_construida);
+      let numericAreaConstruida: number | null = null;
+      if (rawAreaInput != null) {
+        const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
+        if (Number.isNaN(converted)) {
+          return res.status(400).json({ error: 'Área construída inválida.' });
+        }
+        numericAreaConstruida = converted;
+      }
       const numericAreaTerreno = parseDecimal(area_terreno);
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
@@ -3850,6 +3857,9 @@ class AdminController {
         return res.status(400).json({ error: 'Campos numéricos obrigatórios inválidos.' });
       }
 
+      const effectiveQuadra = semQuadraFlag ? null : stringOrNull(quadra);
+      const effectiveLote = semLoteFlag ? null : stringOrNull(lote);
+
       const [duplicateRows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT id FROM properties
@@ -3860,7 +3870,7 @@ class AdminController {
             AND COALESCE(bairro, '') = COALESCE(?, '')
           LIMIT 1
         `,
-        [address, quadra ?? null, lote ?? null, normalizedNumero, bairro ?? null]
+        [address, effectiveQuadra, effectiveLote, normalizedNumero, bairro ?? null]
       );
 
       if (duplicateRows.length > 0) {
@@ -3921,7 +3931,9 @@ class AdminController {
             owner_phone,
             address,
             quadra,
+            sem_quadra,
             lote,
+            sem_lote,
             numero,
             bairro,
             complemento,
@@ -3932,6 +3944,7 @@ class AdminController {
             bedrooms,
             bathrooms,
             area_construida,
+            area_construida_unidade,
             area_terreno,
             garage_spots,
             has_wifi,
@@ -3943,7 +3956,7 @@ class AdminController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerIdValue,
@@ -3966,8 +3979,10 @@ class AdminController {
             stringOrNull(owner_name),
             owner_phone ? normalizePhone(owner_phone) : null,
             address,
-            stringOrNull(quadra),
-            stringOrNull(lote),
+            effectiveQuadra,
+            semQuadraFlag,
+            effectiveLote,
+            semLoteFlag,
           normalizedNumero,
           stringOrNull(bairro),
           stringOrNull(complemento),
@@ -3978,6 +3993,7 @@ class AdminController {
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
+          areaUnidade,
           numericAreaTerreno,
           numericGarageSpots,
           hasWifiFlag,

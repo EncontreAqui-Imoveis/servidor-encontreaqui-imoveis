@@ -511,7 +511,8 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
       LEFT JOIN property_images pi ON pi.property_id = p.id
-      WHERE n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?
+      WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
+        AND UPPER(TRIM(n.status)) NOT IN ('CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED')
       GROUP BY
         n.id,
         n.property_id,

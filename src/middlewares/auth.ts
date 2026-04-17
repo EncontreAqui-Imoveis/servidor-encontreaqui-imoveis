@@ -84,16 +84,37 @@ async function validateAdminAccount(
     }
 
     // Backward compatibility with legacy schema where admins.is_active does not exist.
-    const [adminRows] = await connection.query<RowDataPacket[]>(
-      'SELECT id FROM admins WHERE id = ? LIMIT 1',
-      [adminId]
-    );
+    try {
+      const [adminRows] = await connection.query<AdminFromDB[]>(
+        'SELECT id, token_version FROM admins WHERE id = ? LIMIT 1',
+        [adminId],
+      );
 
-    if (adminRows.length === 0) {
-      return { exists: false, isActive: false, tokenVersion: 0 };
+      if (adminRows.length === 0) {
+        return { exists: false, isActive: false, tokenVersion: 0 };
+      }
+
+      return {
+        exists: true,
+        isActive: true,
+        tokenVersion: normalizeTokenVersion(adminRows[0].token_version),
+      };
+    } catch (fallbackError: any) {
+      if (fallbackError?.code !== 'ER_BAD_FIELD_ERROR') {
+        throw fallbackError;
+      }
+
+      const [adminRows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM admins WHERE id = ? LIMIT 1',
+        [adminId],
+      );
+
+      if (adminRows.length === 0) {
+        return { exists: false, isActive: false, tokenVersion: 0 };
+      }
+
+      return { exists: true, isActive: true, tokenVersion: 1 };
     }
-
-    return { exists: true, isActive: true, tokenVersion: 1 };
   }
 }
 

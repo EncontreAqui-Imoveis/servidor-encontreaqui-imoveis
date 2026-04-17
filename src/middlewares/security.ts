@@ -119,7 +119,11 @@ export function buildCorsOptions(): CorsOptions {
     'http://127.0.0.1:4173',
   ];
   const mergedConfiguredOrigins = Array.from(
-    new Set([...configuredOrigins, ...supplementalOrigins]),
+    new Set([
+      ...configuredOrigins,
+      ...supplementalOrigins,
+      ...(nodeEnv === 'production' ? [] : defaultLocalOrigins),
+    ]),
   );
   const allowedOrigins =
     mergedConfiguredOrigins.length > 0

@@ -1,0 +1,4 @@
+
+> imobiliaria-backend@1.0.0 dev
+> ts-node-dev --exit-child --transpile-only --ignore-watch node_modules src/server.ts
+

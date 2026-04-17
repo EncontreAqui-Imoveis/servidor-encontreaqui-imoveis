@@ -224,6 +224,29 @@ class AuthController {
     }
   }
 
+  async checkCreci(req: Request, res: Response) {
+    const creci = normalizeCreci(String(req.query.creci ?? req.body?.creci ?? ''));
+    if (!creci) {
+      return res.status(400).json({ error: 'CRECI e obrigatorio.' });
+    }
+    if (!hasValidCreci(creci)) {
+      return res.status(400).json({
+        error: 'CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A).',
+      });
+    }
+
+    try {
+      const [rows] = await authDb.query<RowDataPacket[]>(
+        'SELECT id FROM brokers WHERE creci = ? LIMIT 1',
+        [creci],
+      );
+      return res.status(200).json({ exists: rows.length > 0 });
+    } catch (error) {
+      console.error('Erro ao verificar CRECI:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
   async sendEmailVerification(req: Request, res: Response) {
     const email = String(req.body?.email ?? '').trim().toLowerCase();
     if (!email) {
@@ -753,6 +776,16 @@ class AuthController {
 
       if (existingUserRows.length > 0) {
         return res.status(409).json({ error: 'Este email ja esta em uso.' });
+      }
+
+      if (normalizedProfile === 'broker') {
+        const [existingCreciRows] = await authDb.query<RowDataPacket[]>(
+          'SELECT id FROM brokers WHERE creci = ? LIMIT 1',
+          [brokerCreci],
+        );
+        if (existingCreciRows.length > 0) {
+          return res.status(409).json({ error: 'Este CRECI ja esta em uso.' });
+        }
       }
 
       const addressResult = sanitizeAddressInput({

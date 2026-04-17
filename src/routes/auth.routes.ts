@@ -48,6 +48,9 @@ authRoutes.post('/email-verification/verify-code', authSensitiveLimiter, (req, r
 authRoutes.get('/check-email', authSensitiveLimiter, (req, res) =>
   authController.checkEmail(req, res)
 );
+authRoutes.get('/check-creci', authSensitiveLimiter, (req, res) =>
+  authController.checkCreci(req, res)
+);
 authRoutes.post('/password-reset/request', authSensitiveLimiter, (req, res) =>
   authController.requestPasswordReset(req, res)
 );

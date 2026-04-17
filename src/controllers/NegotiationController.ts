@@ -132,6 +132,8 @@ interface ProposalWizardBody {
   clientCpf?: unknown;
   validadeDias?: unknown;
   sellerBrokerId?: unknown;
+  proposalValue?: unknown;
+  valorProposta?: unknown;
   pagamento?: {
     dinheiro?: unknown;
     permuta?: unknown;
@@ -1009,10 +1011,23 @@ class NegotiationController {
         });
       }
 
-      const propertyValue = resolvePropertyValue(property);
-      if (propertyValue <= 0) {
+      const listingValue = resolvePropertyValue(property);
+      if (listingValue <= 0) {
         await tx.rollback();
         return res.status(400).json({ error: 'Imovel sem valor valido para gerar proposta.' });
+      }
+
+      const body = req.body as ProposalWizardBody;
+      const rawDeclared =
+        body.proposalValue ?? body.valorProposta ?? (req.body as { proposal_value?: unknown }).proposal_value;
+      let proposalValue = listingValue;
+      if (rawDeclared !== undefined && rawDeclared !== null && String(rawDeclared).trim() !== '') {
+        const parsedDeclared = Number(rawDeclared);
+        if (!Number.isFinite(parsedDeclared) || parsedDeclared <= 0) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'proposalValue invalido.' });
+        }
+        proposalValue = Number(parsedDeclared.toFixed(2));
       }
 
       const paymentTotal =
@@ -1021,11 +1036,11 @@ class NegotiationController {
         payload.pagamento.financiamento +
         payload.pagamento.outros;
 
-      if (toCents(paymentTotal) !== toCents(propertyValue)) {
+      if (toCents(paymentTotal) !== toCents(proposalValue)) {
         await tx.rollback();
         return res.status(400).json({
-          error: 'A soma dos pagamentos deve ser exatamente igual ao valor do imovel.',
-          propertyValue,
+          error: 'A soma dos pagamentos deve ser exatamente igual ao valor total informado na proposta.',
+          propertyValue: proposalValue,
           paymentTotal,
         });
       }
@@ -1074,11 +1089,12 @@ class NegotiationController {
 
       const paymentDetails = JSON.stringify({
         method: 'OTHER',
-        amount: Number(propertyValue.toFixed(2)),
+        amount: Number(proposalValue.toFixed(2)),
         details: {
           ...payload.pagamento,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
+          listingValue: Number(listingValue.toFixed(2)),
         },
       });
       const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
@@ -1111,7 +1127,7 @@ class NegotiationController {
             payload.clientName,
             payload.clientCpf,
             DEFAULT_WIZARD_STATUS,
-            propertyValue,
+            proposalValue,
             paymentDetails,
             proposalValidityDate,
             negotiationId,
@@ -1144,7 +1160,7 @@ class NegotiationController {
             payload.clientName,
             payload.clientCpf,
             DEFAULT_WIZARD_STATUS,
-            propertyValue,
+            proposalValue,
             paymentDetails,
             proposalValidityDate,
           ]
@@ -1184,7 +1200,7 @@ class NegotiationController {
         propertyAddress: resolvePropertyAddress(property),
         brokerName,
         sellingBrokerName,
-        value: propertyValue,
+        value: proposalValue,
         payment: {
           cash: payload.pagamento.dinheiro,
           tradeIn: payload.pagamento.permuta,

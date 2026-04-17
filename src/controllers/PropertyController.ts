@@ -21,6 +21,7 @@ import {
   type EditablePropertyPatch,
 } from "../services/propertyEditRequestService";
 import { normalizePropertyType } from "../utils/propertyTypes";
+import { allocateNextPropertyCode } from "../utils/propertyCode";
 
 interface MulterFiles {
   [fieldname: string]: Express.Multer.File[];
@@ -1250,6 +1251,12 @@ class PropertyController {
         videoUrl = uploadedVideo.url;
       }
 
+      const trimmedBrokerPropertyCode = String(code ?? '').trim();
+      const resolvedBrokerPropertyCode =
+        trimmedBrokerPropertyCode.length > 0
+          ? trimmedBrokerPropertyCode
+          : await allocateNextPropertyCode();
+
       const result = await runPropertyQuery<ResultSetHeader>(
         `
           INSERT INTO properties (
@@ -1323,7 +1330,7 @@ class PropertyController {
           numericPromotionPrice,
           numericPromotionalRentPrice,
           promotionalRentPercentage,
-          stringOrNull(code),
+          resolvedBrokerPropertyCode,
           stringOrNull(owner_name),
           stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
           address,
@@ -1757,6 +1764,12 @@ class PropertyController {
         videoUrl = uploadedVideo.url;
       }
 
+      const trimmedClientPropertyCode = String(code ?? '').trim();
+      const resolvedClientPropertyCode =
+        trimmedClientPropertyCode.length > 0
+          ? trimmedClientPropertyCode
+          : await allocateNextPropertyCode();
+
       const result = await runPropertyQuery<ResultSetHeader>(
         `
           INSERT INTO properties (
@@ -1830,7 +1843,7 @@ class PropertyController {
           numericPromotionPrice,
           numericPromotionalRentPrice,
           promotionalRentPercentage,
-          stringOrNull(code),
+          resolvedClientPropertyCode,
           stringOrNull(owner_name),
           stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
           address,

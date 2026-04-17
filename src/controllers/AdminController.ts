@@ -35,6 +35,7 @@ import {
 } from '../services/propertyEditRequestService';
 import type AuthRequest from '../middlewares/auth';
 import { readNegotiationDocumentObject } from '../services/negotiationDocumentStorageService';
+import { allocateNextPropertyCode } from '../utils/propertyCode';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
@@ -1725,7 +1726,7 @@ class AdminController {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const searchTerm = String(req.query.search ?? '').trim();
-      const searchColumn = String(req.query.searchColumn ?? 'p.title');
+      const requestedSearchColumn = String(req.query.searchColumn ?? '').trim();
       const status = normalizeStatus(req.query.status);
       const city = String(req.query.city ?? '').trim();
       const sortBy = String(req.query.sortBy ?? 'p.created_at');
@@ -1753,15 +1754,40 @@ class AdminController {
         'p.status',
       ]);
 
-      const safeSearchColumn = allowedSearchColumns.has(searchColumn) ? searchColumn : 'p.title';
+      const narrowSearchColumn = allowedSearchColumns.has(requestedSearchColumn)
+        ? requestedSearchColumn
+        : null;
       const safeSortBy = allowedSortColumns.has(sortBy) ? sortBy : 'p.created_at';
 
       const whereClauses: string[] = [];
       const params: any[] = [];
 
       if (searchTerm) {
-        whereClauses.push(`${safeSearchColumn} LIKE ?`);
-        params.push(`%${searchTerm}%`);
+        if (narrowSearchColumn) {
+          whereClauses.push(`${narrowSearchColumn} LIKE ?`);
+          params.push(`%${searchTerm}%`);
+        } else {
+          const like = `%${searchTerm}%`;
+          const parts = [
+            'p.title LIKE ?',
+            'p.city LIKE ?',
+            'CAST(p.id AS CHAR) LIKE ?',
+            "COALESCE(p.code,'') LIKE ?",
+            'p.type LIKE ?',
+            "COALESCE(u.name,'') LIKE ?",
+            "COALESCE(u_owner.name,'') LIKE ?",
+          ];
+          const searchParams: unknown[] = [like, like, like, like, like, like, like];
+          if (/^\d+$/.test(searchTerm)) {
+            const idNum = Number(searchTerm);
+            if (Number.isFinite(idNum)) {
+              parts.push('p.id = ?');
+              searchParams.push(idNum);
+            }
+          }
+          whereClauses.push(`(${parts.join(' OR ')})`);
+          params.push(...searchParams);
+        }
       }
 
       if (status) {
@@ -2168,9 +2194,23 @@ class AdminController {
       const params: Array<string | number> = [];
 
       if (search) {
-        whereClauses.push('(p.code LIKE ? OR p.title LIKE ? OR COALESCE(u.name, u_owner.name) LIKE ?)');
-        const searchLike = `%${search}%`;
-        params.push(searchLike, searchLike, searchLike);
+        const like = `%${search}%`;
+        const parts = [
+          'p.code LIKE ?',
+          'p.title LIKE ?',
+          'COALESCE(u.name, u_owner.name) LIKE ?',
+          'CAST(p.id AS CHAR) LIKE ?',
+        ];
+        const searchParams: Array<string | number> = [like, like, like, like];
+        if (/^\d+$/.test(search)) {
+          const idNum = Number(search);
+          if (Number.isFinite(idNum)) {
+            parts.push('p.id = ?');
+            searchParams.push(idNum);
+          }
+        }
+        whereClauses.push(`(${parts.join(' OR ')})`);
+        params.push(...searchParams);
       }
 
       const where = `WHERE ${whereClauses.join(' AND ')}`;
@@ -3817,6 +3857,10 @@ class AdminController {
         finalVideoUrl = String(video_url);
       }
 
+      const trimmedPropertyCode = String(code ?? '').trim();
+      const resolvedPropertyCode =
+        trimmedPropertyCode.length > 0 ? trimmedPropertyCode : await allocateNextPropertyCode();
+
       const [result] = await adminDb.query<ResultSetHeader>(
         `
           INSERT INTO properties (
@@ -3882,7 +3926,7 @@ class AdminController {
             resolvedPromotionPrice,
             resolvedPromotionalRentPrice,
             promotionalRentPercentage,
-            stringOrNull(code),
+            resolvedPropertyCode,
             stringOrNull(owner_name),
             owner_phone ? normalizePhone(owner_phone) : null,
             address,

@@ -926,7 +926,12 @@ class AuthController {
       }
 
       const user = rows[0];
-      const isPasswordCorrect = await bcrypt.compare(password, String(user.password_hash));
+      const passwordHash = user.password_hash != null ? String(user.password_hash) : '';
+      if (!passwordHash) {
+        return res.status(401).json({ error: 'Credenciais inválidas.' });
+      }
+
+      const isPasswordCorrect = await bcrypt.compare(password, passwordHash);
 
       if (!isPasswordCorrect) {
         return res.status(401).json({ error: 'Credenciais inválidas.' });

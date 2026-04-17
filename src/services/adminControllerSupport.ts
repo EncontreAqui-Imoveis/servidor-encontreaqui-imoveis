@@ -1,6 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { requireEnv } from '../config/env';
-import { sanitizeAddressInput as sanitizeAddress } from '../utils/address';
+import {
+  sanitizeAddressInput as sanitizeAddress,
+  sanitizePartialAddressInput as sanitizePartialAddress,
+} from '../utils/address';
 import {
   hasValidCreci as hasValidBrokerCreci,
   normalizeCreci as normalizeBrokerCreci,
@@ -8,6 +11,7 @@ import {
 import { normalizePropertyType as normalizePropertyTypeValue } from '../utils/propertyTypes';
 
 const jwtSecret = requireEnv('JWT_SECRET');
+const ADMIN_REAUTH_PURPOSE = 'destructive_action';
 
 function normalizeTokenVersion(value: unknown): number {
   const parsed = Number(value);
@@ -25,8 +29,38 @@ export function signAdminToken(id: number, tokenVersion: unknown) {
   );
 }
 
+export type AdminReauthTokenPayload = {
+  id: number;
+  role: 'admin';
+  token_version: number;
+  purpose: typeof ADMIN_REAUTH_PURPOSE;
+};
+
+export function signAdminReauthToken(id: number, tokenVersion: unknown) {
+  return jwt.sign(
+    {
+      id,
+      role: 'admin',
+      token_version: normalizeTokenVersion(tokenVersion),
+      purpose: ADMIN_REAUTH_PURPOSE,
+    },
+    jwtSecret,
+    { expiresIn: '10m' },
+  );
+}
+
+export function verifyAdminReauthToken(token: string): AdminReauthTokenPayload {
+  return jwt.verify(token, jwtSecret) as AdminReauthTokenPayload;
+}
+
 export function sanitizeAddressInput(input: Parameters<typeof sanitizeAddress>[0]) {
   return sanitizeAddress(input);
+}
+
+export function sanitizePartialAddressInput(
+  input: Parameters<typeof sanitizePartialAddress>[0],
+) {
+  return sanitizePartialAddress(input);
 }
 
 export function hasValidCreci(value: unknown) {

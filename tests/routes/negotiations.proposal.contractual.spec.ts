@@ -40,6 +40,9 @@ vi.mock('../../src/middlewares/auth', () => ({
     req.userRole = 'broker';
     next();
   },
+  isBroker: (_req: any, _res: any, next: any) => next(),
+  isClient: (_req: any, _res: any, next: any) => next(),
+  isAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../../src/modules/negotiations/infra/ExternalPdfService', () => ({
@@ -92,6 +95,8 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
         [
           {
             id: 101,
+            broker_id: 30003,
+            status: 'approved',
             address: 'Av. Paulista, 1000',
             numero: '1000',
             quadra: 'Q1',

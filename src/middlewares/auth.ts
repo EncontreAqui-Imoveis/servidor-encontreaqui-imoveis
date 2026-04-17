@@ -267,17 +267,6 @@ export async function isBroker(
     const brokers = brokerRows as any[];
 
     if (brokers.length === 0) {
-      const roleFromToken = String(req.userRole ?? '').trim().toLowerCase();
-      if (roleFromToken === 'broker') {
-        // Mantem compatibilidade com tokens antigos quando a linha de broker ainda nao existe.
-        await connection.query(
-          'INSERT IGNORE INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-          [req.userId, null, 'approved']
-        );
-        req.userRole = 'broker';
-        return next();
-      }
-
       return res.status(403).json({
         error: 'Acesso negado. Rota exclusiva para corretores.',
       });

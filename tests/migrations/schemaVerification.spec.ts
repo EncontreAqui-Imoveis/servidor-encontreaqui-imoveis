@@ -51,6 +51,13 @@ describe('verifyCriticalSchemaState', () => {
           }]];
         }
 
+        if (tableName === 'property_edit_requests' && columnName === 'status') {
+          return [[{
+            column_type:
+              "enum('PENDING','APPROVED','REJECTED','PARTIALLY_APPROVED')",
+          }]];
+        }
+
         return [[{ column_type: 'varchar(255)' }]];
       }
 
@@ -61,9 +68,9 @@ describe('verifyCriticalSchemaState', () => {
     const result = await verifyCriticalSchemaState();
 
     expect(result).toEqual({
-      checkedTables: 5,
-      checkedColumns: 14,
-      checkedEnums: 3,
+      checkedTables: 6,
+      checkedColumns: 20,
+      checkedEnums: 4,
     });
   });
 

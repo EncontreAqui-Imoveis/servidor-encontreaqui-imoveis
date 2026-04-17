@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { adminController, sendNotification, getDashboardStats } from '../controllers/AdminController';
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
+import { requireAdminReauth } from '../middlewares/adminReauth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 import { contractDraftUpload } from '../middlewares/uploadMiddleware';
@@ -33,6 +34,7 @@ adminRoutes.post('/login', adminAuthLimiter, adminController.login);
 
 adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
 adminRoutes.post('/logout', adminController.logout);
+adminRoutes.post('/reauth', adminController.reauth);
 
 adminRoutes.post('/notifications/send', sendNotification);
 adminRoutes.delete('/notifications/:id', adminController.deleteNotification);
@@ -100,11 +102,12 @@ adminRoutes.post(
 );
 adminRoutes.get('/users', adminController.getAllUsers);
 adminRoutes.post('/users', adminController.createUser);
-adminRoutes.delete('/users/:id', adminController.deleteUser);
+adminRoutes.delete('/users/:id', requireAdminReauth, adminController.deleteUser);
 
 adminRoutes.get('/clients', adminController.getAllClients);
 adminRoutes.get('/clients/:id', adminController.getClientById);
 adminRoutes.put('/clients/:id', adminController.updateClient);
+adminRoutes.delete('/clients/:id', requireAdminReauth, adminController.deleteClient);
 adminRoutes.get('/clients/:id/properties', adminController.getClientProperties);
 
 adminRoutes.post(
@@ -123,7 +126,7 @@ adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
 adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);
 adminRoutes.put('/brokers/:id', adminController.updateBroker);
-adminRoutes.delete('/brokers/:id', adminController.deleteBroker);
+adminRoutes.delete('/brokers/:id', requireAdminReauth, adminController.deleteBroker);
 adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
 
 adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
@@ -136,7 +139,7 @@ adminRoutes.get('/properties/archive', adminController.listArchivedProperties);
 adminRoutes.put('/properties/:id/relist', adminController.relistProperty);
 adminRoutes.get('/properties/:id', adminController.getPropertyDetails);
 adminRoutes.put('/properties/:id', adminController.updateProperty);
-adminRoutes.delete('/properties/:id', adminController.deleteProperty);
+adminRoutes.delete('/properties/:id', requireAdminReauth, adminController.deleteProperty);
 adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
 adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
 adminRoutes.patch('/properties/:id/status', adminController.updatePropertyStatus);

@@ -7,6 +7,8 @@ import {
   normalizeCreci,
   normalizePropertyType,
   sanitizeAddressInput,
+  sanitizePartialAddressInput,
+  signAdminReauthToken,
   signAdminToken,
 } from '../services/adminControllerSupport';
 import cloudinary, { deleteCloudinaryAsset, uploadToCloudinary } from '../config/cloudinary';
@@ -17,6 +19,13 @@ import {
   notifyPromotionStarted,
 } from '../services/priceDropNotificationService';
 import { notifyUsers, resolveUserNotificationRole, splitRecipientsByRole } from '../services/userNotificationService';
+import {
+  approveBrokerAccount,
+  deleteUserAccount,
+  isActiveBrokerStatus,
+  loadUserLifecycleSnapshot,
+  rejectBrokerAccount,
+} from '../services/adminAccountLifecycleService';
 import {
   buildEditablePropertyState,
   buildPropertyEditDbPatch,
@@ -926,6 +935,49 @@ async function fetchPropertyOwner(propertyId: number): Promise<{ ownerId: number
   return { ownerId: resolvedOwner, title };
 }
 
+async function notifyBrokerApprovedChange(brokerId: number): Promise<void> {
+  try {
+    await notifyAdmins(`Corretor #${brokerId} aprovado pelo admin.`, 'broker', brokerId);
+  } catch (notifyError) {
+    console.error('Erro ao notificar admins sobre aprovacao de corretor:', notifyError);
+  }
+
+  try {
+    const role = await resolveUserNotificationRole(brokerId);
+    if (role === 'broker') {
+      await notifyUsers({
+        message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
+        recipientIds: [brokerId],
+        recipientRole: 'broker',
+        relatedEntityType: 'broker',
+        relatedEntityId: brokerId,
+      });
+    }
+  } catch (notifyError) {
+    console.error('Erro ao notificar corretor aprovado:', notifyError);
+  }
+}
+
+async function notifyBrokerRejectedChange(brokerId: number): Promise<void> {
+  try {
+    await notifyAdmins(`Corretor #${brokerId} rejeitado pelo admin.`, 'broker', brokerId);
+  } catch (notifyError) {
+    console.error('Erro ao notificar admins sobre rejeicao de corretor:', notifyError);
+  }
+
+  try {
+    await notifyUsers({
+      message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
+      recipientIds: [brokerId],
+      recipientRole: 'client',
+      relatedEntityType: 'broker',
+      relatedEntityId: brokerId,
+    });
+  } catch (notifyError) {
+    console.error('Erro ao notificar rejeicao de corretor:', notifyError);
+  }
+}
+
 class AdminController {
   async login(req: Request, res: Response) {
     const { email, password } = req.body;
@@ -981,6 +1033,45 @@ class AdminController {
       return res.status(200).json({ message: 'Logout realizado com sucesso.' });
     } catch (error) {
       console.error('Erro no logout do admin:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async reauth(req: AuthRequest, res: Response) {
+    const adminId = Number(req.userId);
+    const password = String((req.body as { password?: unknown })?.password ?? '').trim();
+
+    if (!Number.isFinite(adminId) || adminId <= 0) {
+      return res.status(401).json({ error: 'Administrador nao autenticado.' });
+    }
+
+    if (!password) {
+      return res.status(400).json({ error: 'Senha atual do administrador e obrigatoria.' });
+    }
+
+    try {
+      const [rows] = await adminDb.query<RowDataPacket[]>(
+        'SELECT id, password_hash, token_version FROM admins WHERE id = ? LIMIT 1',
+        [adminId],
+      );
+
+      if (!rows || rows.length === 0) {
+        return res.status(404).json({ error: 'Administrador nao encontrado.' });
+      }
+
+      const admin = rows[0];
+      const isPasswordCorrect = await bcrypt.compare(password, String(admin.password_hash ?? ''));
+      if (!isPasswordCorrect) {
+        return res.status(401).json({ error: 'Senha administrativa incorreta.' });
+      }
+
+      const reauthToken = signAdminReauthToken(adminId, admin.token_version);
+      return res.status(200).json({
+        reauthToken,
+        expiresInSeconds: 600,
+      });
+    } catch (error) {
+      console.error('Erro ao reautenticar administrador:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -2312,55 +2403,15 @@ class AdminController {
   }
 
   async updateBroker(req: Request, res: Response) {
-    const { id } = req.params;
-    const { name, email, phone, creci, status, agencyId, agency_id } = req.body;
-    const resolvedAgencyId = agencyId ?? agency_id;
-
-    try {
-      await adminDb.query(
-        'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',
-        [stringOrNull(name), stringOrNull(email), stringOrNull(phone), id]
-      );
-
-      const updates: string[] = [];
-      const params: any[] = [];
-
-      if (creci !== undefined) {
-        updates.push('creci = ?');
-        params.push(stringOrNull(creci));
-      }
-
-      if (status !== undefined) {
-        const normalized = normalizeStatus(status);
-        if (!normalized) {
-          return res.status(400).json({ error: 'Status de corretor inválido.' });
-        }
-        updates.push('status = ?');
-        params.push(normalized);
-      }
-
-      if (resolvedAgencyId !== undefined) {
-        updates.push('agency_id = ?');
-        params.push(resolvedAgencyId ? Number(resolvedAgencyId) : null);
-      }
-
-      if (updates.length > 0) {
-        params.push(id);
-        await adminDb.query(`UPDATE brokers SET ${updates.join(', ')} WHERE id = ?`, params);
-      }
-
-      return res.status(200).json({ message: 'Corretor atualizado com sucesso.' });
-    } catch (error) {
-      console.error('Erro ao atualizar corretor:', error);
-      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
-    }
-  }
-
-  async updateClient(req: Request, res: Response) {
-    const { id } = req.params;
-    const { name, email, phone, street, number, complement, bairro, city, state, cep } = req.body;
-
-    const addressResult = sanitizeAddressInput({
+    const brokerId = Number(req.params.id);
+    const {
+      name,
+      email,
+      phone,
+      creci,
+      status,
+      agencyId,
+      agency_id,
       street,
       number,
       complement,
@@ -2368,8 +2419,243 @@ class AdminController {
       city,
       state,
       cep,
-    });
-    if (!addressResult.ok) {
+    } = req.body ?? {};
+    const resolvedAgencyId = agencyId ?? agency_id;
+
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    const allowedBrokerStatuses = new Set(['pending_verification', 'approved', 'rejected']);
+    const normalizedStatus =
+      status === undefined ? undefined : String(status).trim().toLowerCase();
+    if (normalizedStatus !== undefined && !allowedBrokerStatuses.has(normalizedStatus)) {
+      return res.status(400).json({ error: 'Status de corretor inválido.' });
+    }
+
+    const partialAddressInput: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    })) {
+      if (value !== undefined) {
+        partialAddressInput[key] = value;
+      }
+    }
+
+    const addressResult =
+      Object.keys(partialAddressInput).length > 0
+        ? sanitizePartialAddressInput(partialAddressInput)
+        : null;
+    if (addressResult && !addressResult.ok) {
+      return res.status(400).json({
+        error: 'Endereco incompleto ou invalido.',
+        fields: addressResult.errors,
+      });
+    }
+
+    const tx = await adminDb.getConnection();
+    try {
+      await tx.beginTransaction();
+
+      const snapshot = await loadUserLifecycleSnapshot(tx, brokerId, { forUpdate: true });
+      if (!snapshot || snapshot.broker_id == null) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
+      }
+
+      const userSetParts: string[] = [];
+      const userParams: unknown[] = [];
+
+      if (name !== undefined) {
+        const normalizedName = stringOrNull(name);
+        if (!normalizedName || normalizedName.length > 120) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Nome inválido.' });
+        }
+        userSetParts.push('name = ?');
+        userParams.push(normalizedName);
+      }
+
+      if (email !== undefined) {
+        const normalizedEmail = stringOrNull(email)?.toLowerCase() ?? null;
+        if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Email inválido.' });
+        }
+        const [duplicateRows] = await tx.query<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
+          [normalizedEmail, brokerId],
+        );
+        if (duplicateRows.length > 0) {
+          await tx.rollback();
+          return res.status(409).json({ error: 'Email ja cadastrado.' });
+        }
+        userSetParts.push('email = ?');
+        userParams.push(normalizedEmail);
+      }
+
+      if (phone !== undefined) {
+        if (!hasValidPhone(phone)) {
+          await tx.rollback();
+          return res.status(400).json({
+            error: 'Telefone inválido. Use entre 10 e 13 dígitos com DDD.',
+          });
+        }
+        userSetParts.push('phone = ?');
+        userParams.push(normalizePhone(phone));
+      }
+
+      if (addressResult?.ok) {
+        for (const [key, value] of Object.entries(addressResult.value)) {
+          userSetParts.push(`${key} = ?`);
+          userParams.push(value);
+        }
+      }
+
+      if (userSetParts.length > 0) {
+        userParams.push(brokerId);
+        await tx.query(
+          `UPDATE users SET ${userSetParts.join(', ')} WHERE id = ?`,
+          userParams,
+        );
+      }
+
+      const brokerSetParts: string[] = [];
+      const brokerParams: unknown[] = [];
+
+      if (creci !== undefined) {
+        const normalizedCreciValue = normalizeCreci(creci);
+        if (!normalizedCreciValue || !hasValidCreci(normalizedCreciValue)) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'CRECI inválido.' });
+        }
+        const [duplicateBrokerRows] = await tx.query<RowDataPacket[]>(
+          'SELECT id FROM brokers WHERE creci = ? AND id <> ? LIMIT 1',
+          [normalizedCreciValue, brokerId],
+        );
+        if (duplicateBrokerRows.length > 0) {
+          await tx.rollback();
+          return res.status(409).json({ error: 'CRECI ja cadastrado.' });
+        }
+        brokerSetParts.push('creci = ?');
+        brokerParams.push(normalizedCreciValue);
+      }
+
+      if (resolvedAgencyId !== undefined) {
+        const agencyValue =
+          resolvedAgencyId === null ||
+          resolvedAgencyId === '' ||
+          resolvedAgencyId === 0 ||
+          resolvedAgencyId === '0'
+            ? null
+            : Number(resolvedAgencyId);
+        if (agencyValue !== null && (!Number.isFinite(agencyValue) || agencyValue <= 0)) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Agencia inválida.' });
+        }
+        brokerSetParts.push('agency_id = ?');
+        brokerParams.push(agencyValue);
+      }
+
+      if (normalizedStatus === 'pending_verification') {
+        brokerSetParts.push('status = ?');
+        brokerParams.push(normalizedStatus);
+      }
+
+      if (brokerSetParts.length > 0) {
+        brokerParams.push(brokerId);
+        await tx.query(
+          `UPDATE brokers SET ${brokerSetParts.join(', ')} WHERE id = ?`,
+          brokerParams,
+        );
+      }
+
+      let finalRole: 'broker' | 'client' = isActiveBrokerStatus(snapshot.broker_status)
+        ? 'broker'
+        : 'client';
+      let finalStatus = snapshot.broker_status ?? 'rejected';
+
+      if (normalizedStatus === 'approved') {
+        const result = await approveBrokerAccount(tx, brokerId);
+        if (!result.affected) {
+          await tx.rollback();
+          return res.status(404).json({ error: 'Corretor nao encontrado.' });
+        }
+        finalRole = 'broker';
+        finalStatus = 'approved';
+      } else if (normalizedStatus === 'rejected') {
+        const result = await rejectBrokerAccount(tx, brokerId);
+        if (!result.affected) {
+          await tx.rollback();
+          return res.status(404).json({ error: 'Corretor nao encontrado.' });
+        }
+        finalRole = 'client';
+        finalStatus = 'rejected';
+      } else if (normalizedStatus === 'pending_verification') {
+        finalRole = 'broker';
+        finalStatus = 'pending_verification';
+      } else if (brokerSetParts.length > 0 || userSetParts.length > 0) {
+        const refreshed = await loadUserLifecycleSnapshot(tx, brokerId, { forUpdate: true });
+        finalRole = refreshed && isActiveBrokerStatus(refreshed.broker_status) ? 'broker' : 'client';
+        finalStatus = refreshed?.broker_status ?? finalStatus;
+      }
+
+      await tx.commit();
+
+      if (normalizedStatus === 'approved') {
+        await notifyBrokerApprovedChange(brokerId);
+      } else if (normalizedStatus === 'rejected') {
+        await notifyBrokerRejectedChange(brokerId);
+      }
+
+      return res.status(200).json({
+        message: 'Corretor atualizado com sucesso.',
+        status: finalStatus,
+        role: finalRole,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao atualizar corretor:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async updateClient(req: Request, res: Response) {
+    const clientId = Number(req.params.id);
+    const { name, email, phone, street, number, complement, bairro, city, state, cep } = req.body ?? {};
+
+    if (Number.isNaN(clientId)) {
+      return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+    }
+
+    const partialAddressInput: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries({
+      street,
+      number,
+      complement,
+      bairro,
+      city,
+      state,
+      cep,
+    })) {
+      if (value !== undefined) {
+        partialAddressInput[key] = value;
+      }
+    }
+
+    const addressResult =
+      Object.keys(partialAddressInput).length > 0
+        ? sanitizePartialAddressInput(partialAddressInput)
+        : null;
+    if (addressResult && !addressResult.ok) {
       return res.status(400).json({
         error: 'Endereco incompleto ou invalido.',
         fields: addressResult.errors,
@@ -2377,24 +2663,77 @@ class AdminController {
     }
 
     try {
+      const snapshot = await loadUserLifecycleSnapshot(adminDb, clientId);
+      if (!snapshot) {
+        return res.status(404).json({ error: 'Cliente nao encontrado.' });
+      }
+      if (snapshot.broker_id != null && isActiveBrokerStatus(snapshot.broker_status)) {
+        return res.status(400).json({
+          error: 'Use a rota de corretores para editar uma conta ativa de corretor.',
+        });
+      }
+
+      const setParts: string[] = [];
+      const params: unknown[] = [];
+
+      if (name !== undefined) {
+        const normalizedName = stringOrNull(name);
+        if (!normalizedName || normalizedName.length > 120) {
+          return res.status(400).json({ error: 'Nome inválido.' });
+        }
+        setParts.push('name = ?');
+        params.push(normalizedName);
+      }
+
+      if (email !== undefined) {
+        const normalizedEmail = stringOrNull(email)?.toLowerCase() ?? null;
+        if (!normalizedEmail || !isValidEmail(normalizedEmail)) {
+          return res.status(400).json({ error: 'Email inválido.' });
+        }
+        const [duplicateRows] = await adminDb.query<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
+          [normalizedEmail, clientId],
+        );
+        if (duplicateRows.length > 0) {
+          return res.status(409).json({ error: 'Email ja cadastrado.' });
+        }
+        setParts.push('email = ?');
+        params.push(normalizedEmail);
+      }
+
+      if (phone !== undefined) {
+        if (!hasValidPhone(phone)) {
+          return res.status(400).json({
+            error: 'Telefone inválido. Use entre 10 e 13 dígitos com DDD.',
+          });
+        }
+        setParts.push('phone = ?');
+        params.push(normalizePhone(phone));
+      }
+
+      if (addressResult?.ok) {
+        for (const [key, value] of Object.entries(addressResult.value)) {
+          setParts.push(`${key} = ?`);
+          params.push(value);
+        }
+      }
+
+      if (setParts.length === 0) {
+        return res.status(400).json({
+          error: 'Nenhum campo valido foi enviado para atualização.',
+        });
+      }
+
+      params.push(clientId);
       await adminDb.query(
-        'UPDATE users SET name = ?, email = ?, phone = ?, street = ?, number = ?, complement = ?, bairro = ?, city = ?, state = ?, cep = ? WHERE id = ?',
-        [
-          stringOrNull(name),
-          stringOrNull(email),
-          stringOrNull(phone),
-          addressResult.value.street,
-          addressResult.value.number,
-          addressResult.value.complement,
-          addressResult.value.bairro,
-          addressResult.value.city,
-          addressResult.value.state,
-          addressResult.value.cep,
-          id,
-        ]
+        `UPDATE users SET ${setParts.join(', ')} WHERE id = ?`,
+        params,
       );
 
-      return res.status(200).json({ message: 'Cliente atualizado com sucesso.' });
+      return res.status(200).json({
+        message: 'Cliente atualizado com sucesso.',
+        role: 'client',
+      });
     } catch (error) {
       console.error('Erro ao atualizar cliente:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
@@ -2477,23 +2816,8 @@ class AdminController {
     try {
       await tx.beginTransaction();
 
-      try {
-        await tx.query('UPDATE negotiation_history SET actor_id = NULL WHERE actor_id = ?', [
-          userId,
-        ]);
-      } catch (historyError) {
-        console.warn(
-          'Falha ao anonimizar actor_id em negotiation_history; removendo historico vinculado ao usuario.',
-          historyError
-        );
-        await tx.query('DELETE FROM negotiation_history WHERE actor_id = ?', [userId]);
-      }
-
-      const [result] = await tx.query<ResultSetHeader>('DELETE FROM users WHERE id = ?', [
-        userId,
-      ]);
-
-      if (result.affectedRows === 0) {
+      const result = await deleteUserAccount(tx, userId);
+      if (!result.affected) {
         await tx.rollback();
         return res.status(404).json({ error: 'Usuario nao encontrado.' });
       }
@@ -2509,15 +2833,77 @@ class AdminController {
     }
   }
 
-  async deleteBroker(req: Request, res: Response) {
-    const { id } = req.params;
+  async deleteClient(req: Request, res: Response) {
+    const clientId = Number(req.params.id);
 
+    if (Number.isNaN(clientId)) {
+      return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+    }
+
+    const tx = await adminDb.getConnection();
     try {
-      await adminDb.query('DELETE FROM brokers WHERE id = ?', [id]);
+      await tx.beginTransaction();
+
+      const snapshot = await loadUserLifecycleSnapshot(tx, clientId, { forUpdate: true });
+      if (!snapshot) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Cliente nao encontrado.' });
+      }
+      if (snapshot.broker_id != null && isActiveBrokerStatus(snapshot.broker_status)) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Use a rota de corretores para excluir uma conta ativa de corretor.',
+        });
+      }
+
+      const result = await deleteUserAccount(tx, clientId);
+      if (!result.affected) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Cliente nao encontrado.' });
+      }
+
+      await tx.commit();
+      return res.status(200).json({ message: 'Cliente deletado com sucesso.' });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao deletar cliente:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async deleteBroker(req: Request, res: Response) {
+    const brokerId = Number(req.params.id);
+
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    const tx = await adminDb.getConnection();
+    try {
+      await tx.beginTransaction();
+
+      const snapshot = await loadUserLifecycleSnapshot(tx, brokerId, { forUpdate: true });
+      if (!snapshot || snapshot.broker_id == null) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
+      }
+
+      const result = await deleteUserAccount(tx, brokerId);
+      if (!result.affected) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
+      }
+
+      await tx.commit();
       return res.status(200).json({ message: 'Corretor deletado com sucesso.' });
     } catch (error) {
+      await tx.rollback();
       console.error('Erro ao deletar corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 
@@ -3838,7 +4224,7 @@ class AdminController {
           SELECT u.id, u.name, u.email, u.phone, u.created_at
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
-          WHERE b.id IS NULL
+          WHERE b.id IS NULL OR b.status = 'rejected'
         `
       );
 
@@ -3874,7 +4260,7 @@ class AdminController {
             u.created_at
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id
-          WHERE u.id = ? AND b.id IS NULL
+          WHERE u.id = ? AND (b.id IS NULL OR b.status = 'rejected')
           LIMIT 1
         `,
         [clientId],
@@ -3892,57 +4278,66 @@ class AdminController {
   }
 
   async approveBroker(req: Request, res: Response) {
-    const { id } = req.params;
+    const brokerId = Number(req.params.id);
 
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    const tx = await adminDb.getConnection();
     try {
-      await adminDb.query('UPDATE brokers SET status = ?, creci = IFNULL(creci, NULL) WHERE id = ?', ['approved', id]);
-      await adminDb.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', ['approved', id]);
+      await tx.beginTransaction();
+      const result = await approveBrokerAccount(tx, brokerId);
+      if (!result.affected) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
+      }
+      await tx.commit();
 
-      try {
-        await notifyAdmins(`Corretor #${id} aprovado pelo admin.`, 'broker', Number(id));
-      } catch (notifyError) {
-        console.error('Erro ao notificar admins sobre aprovacao de corretor:', notifyError);
-      }
-      try {
-        const brokerId = Number(id);
-        if (Number.isFinite(brokerId)) {
-          const role = await resolveUserNotificationRole(brokerId);
-          if (role === 'broker') {
-            await notifyUsers({
-              message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
-              recipientIds: [brokerId],
-              recipientRole: 'broker',
-              relatedEntityType: 'broker',
-              relatedEntityId: brokerId,
-            });
-          }
-        }
-      } catch (notifyError) {
-        console.error('Erro ao notificar corretor aprovado:', notifyError);
-      }
-      return res.status(200).json({ message: 'Corretor aprovado com sucesso.' });
+      await notifyBrokerApprovedChange(brokerId);
+      return res.status(200).json({
+        message: 'Corretor aprovado com sucesso.',
+        status: 'approved',
+        role: 'broker',
+      });
     } catch (error) {
+      await tx.rollback();
       console.error('Erro ao aprovar corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 
   async rejectBroker(req: Request, res: Response) {
-    const { id } = req.params;
+    const brokerId = Number(req.params.id);
 
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+    }
+
+    const tx = await adminDb.getConnection();
     try {
-      await adminDb.query('DELETE FROM broker_documents WHERE broker_id = ?', [id]);
-      await adminDb.query('DELETE FROM brokers WHERE id = ?', [id]);
-
-      try {
-        await notifyAdmins(`Corretor #${id} rejeitado pelo admin.`, 'broker', Number(id));
-      } catch (notifyError) {
-        console.error('Erro ao notificar admins sobre rejeicao de corretor:', notifyError);
+      await tx.beginTransaction();
+      const result = await rejectBrokerAccount(tx, brokerId);
+      if (!result.affected) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
       }
-      return res.status(200).json({ message: 'Corretor rejeitado com sucesso.' });
+      await tx.commit();
+
+      await notifyBrokerRejectedChange(brokerId);
+      return res.status(200).json({
+        message: 'Corretor rejeitado com sucesso.',
+        status: 'rejected',
+        role: 'client',
+      });
     } catch (error) {
+      await tx.rollback();
       console.error('Erro ao rejeitar corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 
@@ -3953,26 +4348,28 @@ class AdminController {
       return res.status(400).json({ error: 'Identificador de corretor invalido.' });
     }
 
+    const tx = await adminDb.getConnection();
     try {
-      await adminDb.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
-      await adminDb.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
-      await adminDb.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
-      try {
-        await notifyUsers({
-          message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
-          recipientIds: [brokerId],
-          recipientRole: 'client',
-          relatedEntityType: 'broker',
-          relatedEntityId: brokerId,
-        });
-      } catch (notifyError) {
-        console.error('Erro ao notificar rejeição de corretor:', notifyError);
+      await tx.beginTransaction();
+      const result = await rejectBrokerAccount(tx, brokerId);
+      if (!result.affected) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Corretor nao encontrado.' });
       }
+      await tx.commit();
 
-      return res.status(200).json({ message: 'Corretor removido do sistema com sucesso.' });
+      await notifyBrokerRejectedChange(brokerId);
+      return res.status(200).json({
+        message: 'Corretor rebaixado para cliente com sucesso.',
+        status: 'rejected',
+        role: 'client',
+      });
     } catch (error) {
+      await tx.rollback();
       console.error('Erro ao limpar corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 
@@ -3995,61 +4392,71 @@ class AdminController {
       return res.status(400).json({ error: 'Status de corretor não suportado.' });
     }
 
+    const tx = await adminDb.getConnection();
     try {
-      const [result] = await adminDb.query<ResultSetHeader>(
-        'UPDATE brokers SET status = ? WHERE id = ?',
-        [normalizedStatus, brokerId],
-      );
+      await tx.beginTransaction();
 
-      if (result.affectedRows === 0) {
+      const snapshot = await loadUserLifecycleSnapshot(tx, brokerId, { forUpdate: true });
+      if (!snapshot || snapshot.broker_id == null) {
+        await tx.rollback();
         return res.status(404).json({ error: 'Corretor não encontrado.' });
       }
 
+      let role: 'broker' | 'client' = isActiveBrokerStatus(snapshot.broker_status)
+        ? 'broker'
+        : 'client';
+
       if (normalizedStatus === 'approved') {
-        await adminDb.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
-          normalizedStatus,
-          brokerId,
-        ]);
+        const result = await approveBrokerAccount(tx, brokerId);
+        if (!result.affected) {
+          await tx.rollback();
+          return res.status(404).json({ error: 'Corretor não encontrado.' });
+        }
+        role = 'broker';
+      } else if (normalizedStatus === 'rejected') {
+        const result = await rejectBrokerAccount(tx, brokerId);
+        if (!result.affected) {
+          await tx.rollback();
+          return res.status(404).json({ error: 'Corretor não encontrado.' });
+        }
+        role = 'client';
+      } else {
+        await tx.query(
+          'UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [normalizedStatus, brokerId],
+        );
+        role = 'broker';
       }
 
-      if (normalizedStatus === 'rejected') {
-        await adminDb.query('DELETE FROM broker_documents WHERE broker_id = ?', [brokerId]);
-        await adminDb.query('DELETE FROM brokers WHERE id = ?', [brokerId]);
-        return res.status(200).json({
-          message: 'Status do corretor atualizado com sucesso.',
-          status: normalizedStatus,
-        });
-      }
+      await tx.commit();
 
-      try {
-        await notifyAdmins(`Status do corretor #${brokerId} atualizado para ${normalizedStatus}.`, 'broker', brokerId);
-      } catch (notifyError) {
-        console.error('Erro ao notificar admins sobre status do corretor:', notifyError);
-      }
       if (normalizedStatus === 'approved') {
+        await notifyBrokerApprovedChange(brokerId);
+      } else if (normalizedStatus === 'rejected') {
+        await notifyBrokerRejectedChange(brokerId);
+      } else {
         try {
-          const role = await resolveUserNotificationRole(brokerId);
-          if (role === 'broker') {
-            await notifyUsers({
-              message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
-              recipientIds: [brokerId],
-              recipientRole: 'broker',
-              relatedEntityType: 'broker',
-              relatedEntityId: brokerId,
-            });
-          }
+          await notifyAdmins(
+            `Status do corretor #${brokerId} atualizado para ${normalizedStatus}.`,
+            'broker',
+            brokerId,
+          );
         } catch (notifyError) {
-          console.error('Erro ao notificar corretor aprovado:', notifyError);
+          console.error('Erro ao notificar admins sobre status do corretor:', notifyError);
         }
       }
 
       return res.status(200).json({
         message: 'Status do corretor atualizado com sucesso.',
         status: normalizedStatus,
+        role,
       });
     } catch (error) {
+      await tx.rollback();
       console.error('Erro ao atualizar status do corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 

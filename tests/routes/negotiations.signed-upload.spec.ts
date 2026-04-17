@@ -42,6 +42,9 @@ vi.mock('../../src/middlewares/auth', () => ({
     req.userRole = 'broker';
     next();
   },
+  isBroker: (_req: any, _res: any, next: any) => next(),
+  isClient: (_req: any, _res: any, next: any) => next(),
+  isAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 
 vi.mock('../../src/services/notificationService', () => ({

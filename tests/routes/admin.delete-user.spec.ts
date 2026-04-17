@@ -86,8 +86,16 @@ describe('DELETE /admin/users/:id', () => {
 
   it('nulls actor_id in negotiation_history before deleting the user', async () => {
     txMock.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM users u') && sql.includes('LEFT JOIN brokers')) {
+        return [[{ id: 150002, name: 'Usuário', email: 'user@test.com', broker_id: null, broker_status: null }]];
+      }
+
       if (sql.includes('UPDATE negotiation_history SET actor_id = NULL')) {
         return [{ affectedRows: 2 }];
+      }
+
+      if (sql.includes('DELETE FROM notifications')) {
+        return [{ affectedRows: 3 }];
       }
 
       if (sql.includes('DELETE FROM users')) {
@@ -110,12 +118,20 @@ describe('DELETE /admin/users/:id', () => {
 
   it('falls back to deleting negotiation_history rows if actor_id cannot be nulled', async () => {
     txMock.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM users u') && sql.includes('LEFT JOIN brokers')) {
+        return [[{ id: 150002, name: 'Usuário', email: 'user@test.com', broker_id: null, broker_status: null }]];
+      }
+
       if (sql.includes('UPDATE negotiation_history SET actor_id = NULL')) {
         throw new Error('ER_BAD_NULL_ERROR');
       }
 
       if (sql.includes('DELETE FROM negotiation_history WHERE actor_id = ?')) {
         return [{ affectedRows: 2 }];
+      }
+
+      if (sql.includes('DELETE FROM notifications')) {
+        return [{ affectedRows: 3 }];
       }
 
       if (sql.includes('DELETE FROM users')) {

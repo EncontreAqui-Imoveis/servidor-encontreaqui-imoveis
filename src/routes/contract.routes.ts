@@ -22,6 +22,12 @@ contractRoutes.get('/contracts/negotiation/:negotiationId', authMiddleware, (req
   contractController.getByNegotiationId(req, res)
 );
 
+contractRoutes.patch(
+  '/contracts/negotiation/:negotiationId/selling-broker',
+  authMiddleware,
+  (req, res) => contractController.updateSellingBrokerByNegotiation(req, res)
+);
+
 contractRoutes.put('/contracts/:id/data', authMiddleware, (req, res) =>
   contractController.updateData(req, res)
 );

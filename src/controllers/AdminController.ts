@@ -760,6 +760,10 @@ interface AdminNegotiationDecisionRow extends RowDataPacket {
   lifecycle_status: string | null;
 }
 
+interface PendingProposalCountRow extends RowDataPacket {
+  cnt: number;
+}
+
 interface ExistingContractByNegotiationRow extends RowDataPacket {
   id: string;
 }
@@ -1338,6 +1342,17 @@ class AdminController {
         );
       }
 
+      await tx.query(
+        `
+          UPDATE negotiations
+          SET status = 'CANCELLED', version = version + 1
+          WHERE property_id = ?
+            AND id <> ?
+            AND UPPER(TRIM(status)) IN ('PROPOSAL_SENT', 'PROPOSAL_DRAFT')
+        `,
+        [negotiation.property_id, negotiationId]
+      );
+
       await tx.commit();
 
       const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
@@ -1432,6 +1447,17 @@ class AdminController {
         return res.status(400).json({ error: 'Negociação já finalizada, rejeição não permitida.' });
       }
 
+      const [pendingBeforeRows] = await tx.query<PendingProposalCountRow[]>(
+        `
+          SELECT COUNT(*) AS cnt
+          FROM negotiations
+          WHERE property_id = ?
+            AND UPPER(TRIM(status)) IN ('PROPOSAL_SENT', 'PROPOSAL_DRAFT')
+        `,
+        [negotiation.property_id]
+      );
+      const pendingProposalCount = Number(pendingBeforeRows[0]?.cnt ?? 0);
+
       await tx.query(
         `
           UPDATE negotiations
@@ -1464,16 +1490,18 @@ class AdminController {
         ]
       );
 
-      await tx.query(
-        `
-          UPDATE properties
-          SET status = 'approved', visibility = 'PUBLIC', lifecycle_status = 'AVAILABLE'
-          WHERE id = ?
-            AND lifecycle_status NOT IN ('SOLD', 'RENTED')
-            AND status NOT IN ('sold', 'rented')
-        `,
-        [negotiation.property_id]
-      );
+      if (pendingProposalCount <= 1) {
+        await tx.query(
+          `
+            UPDATE properties
+            SET status = 'approved', visibility = 'PUBLIC', lifecycle_status = 'AVAILABLE'
+            WHERE id = ?
+              AND lifecycle_status NOT IN ('SOLD', 'RENTED')
+              AND status NOT IN ('sold', 'rented')
+          `,
+          [negotiation.property_id]
+        );
+      }
 
       await tx.commit();
 
@@ -2189,9 +2217,17 @@ class AdminController {
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const search = String(req.query.search ?? '').trim();
+      const statusFilter = String(req.query.status ?? '').trim().toLowerCase();
 
-      const whereClauses = ["p.status IN ('sold', 'rented')"];
+      const whereClauses: string[] = [];
       const params: Array<string | number> = [];
+
+      if (statusFilter === 'sold' || statusFilter === 'rented') {
+        whereClauses.push('p.status = ?');
+        params.push(statusFilter);
+      } else {
+        whereClauses.push("p.status IN ('sold', 'rented')");
+      }
 
       if (search) {
         const like = `%${search}%`;
@@ -4437,6 +4473,8 @@ class AdminController {
     }
 
     const tx = await adminDb.getConnection();
+    let committed = false;
+    let role: 'broker' | 'client' = 'client';
     try {
       await tx.beginTransaction();
 
@@ -4446,9 +4484,7 @@ class AdminController {
         return res.status(404).json({ error: 'Corretor não encontrado.' });
       }
 
-      let role: 'broker' | 'client' = isActiveBrokerStatus(snapshot.broker_status)
-        ? 'broker'
-        : 'client';
+      role = isActiveBrokerStatus(snapshot.broker_status) ? 'broker' : 'client';
 
       if (normalizedStatus === 'approved') {
         const result = await approveBrokerAccount(tx, brokerId);
@@ -4473,6 +4509,7 @@ class AdminController {
       }
 
       await tx.commit();
+      committed = true;
 
       if (normalizedStatus === 'approved') {
         await notifyBrokerApprovedChange(brokerId);
@@ -4496,7 +4533,13 @@ class AdminController {
         role,
       });
     } catch (error) {
-      await tx.rollback();
+      if (!committed) {
+        try {
+          await tx.rollback();
+        } catch (rollbackError) {
+          console.error('Erro ao reverter transação (status corretor):', rollbackError);
+        }
+      }
       console.error('Erro ao atualizar status do corretor:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     } finally {

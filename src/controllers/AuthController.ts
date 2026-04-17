@@ -705,6 +705,7 @@ class AuthController {
     const city = body.city;
     const state = body.state;
     const cep = body.cep;
+    const withoutNumberRaw = body.without_number ?? body.withoutNumber;
     const profileType = String(body.profileType ?? '');
     const creci = body.creci;
     const googleIdToken =
@@ -796,6 +797,7 @@ class AuthController {
         city,
         state,
         cep,
+        without_number: withoutNumberRaw,
       });
       if (!addressResult.ok) {
         return res.status(400).json({

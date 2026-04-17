@@ -184,6 +184,10 @@ function parsePositiveNumber(input: unknown, fieldName: string): number {
   return parsed;
 }
 
+function normalizeProposalCpfKey(raw: string): string {
+  return String(raw ?? '').replace(/\D/g, '');
+}
+
 function parseProposalData(body: ProposalBody): ProposalData {
   const clientName = String(body.clientName ?? body.client_name ?? '').trim();
   const clientCpf = String(body.clientCpf ?? body.client_cpf ?? '').trim();
@@ -994,15 +998,29 @@ class NegotiationController {
         await tx.rollback();
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
-      if (String(req.userRole ?? '').trim().toLowerCase() !== 'broker') {
+      const userRole = String(req.userRole ?? '').trim().toLowerCase();
+      const isClientUser = userRole === 'client';
+      const isBrokerUser = userRole === 'broker';
+      if (!isClientUser && !isBrokerUser) {
         await tx.rollback();
-        return res.status(403).json({ error: 'Apenas corretores aprovados podem gerar proposta.' });
+        return res.status(403).json({ error: 'Apenas clientes ou corretores podem enviar proposta.' });
       }
-      if (Number(property.broker_id ?? 0) !== Number(req.userId ?? 0)) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o corretor captador deste imóvel pode gerar proposta.',
-        });
+      if (isBrokerUser) {
+        if (Number(property.broker_id ?? 0) !== Number(req.userId ?? 0)) {
+          await tx.rollback();
+          return res.status(403).json({
+            error: 'Somente o corretor captador deste imóvel pode gerar proposta.',
+          });
+        }
+      } else {
+        if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
+          await tx.rollback();
+          return res.status(403).json({ error: 'Nao e possivel enviar proposta no proprio anuncio.' });
+        }
+        if (!property.broker_id) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Imovel sem corretor responsavel.' });
+        }
       }
       if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
         await tx.rollback();
@@ -1045,46 +1063,53 @@ class NegotiationController {
         });
       }
 
-      const [brokerRows] = await tx.query<BrokerRow[]>(
+      const capturingBrokerId = isClientUser ? Number(property.broker_id ?? 0) : Number(req.userId ?? 0);
+      if (!Number.isFinite(capturingBrokerId) || capturingBrokerId <= 0) {
+        await tx.rollback();
+        return res.status(400).json({ error: 'Corretor captador invalido para esta proposta.' });
+      }
+
+      const [capturingBrokerRows] = await tx.query<BrokerRow[]>(
         'SELECT name FROM users WHERE id = ? LIMIT 1',
-        [req.userId]
+        [capturingBrokerId]
       );
-      const brokerName = String(brokerRows[0]?.name ?? '').trim();
+      const brokerName = String(capturingBrokerRows[0]?.name ?? '').trim();
       if (!brokerName) {
         await tx.rollback();
         return res.status(400).json({ error: 'Corretor nao encontrado para gerar proposta.' });
       }
 
-      const sellerBrokerId = payload.sellerBrokerId ?? req.userId;
-      let sellingBrokerName = brokerName;
-      if (sellerBrokerId !== req.userId) {
-        const [sellerRows] = await tx.query<BrokerRow[]>(
-          `
-            SELECT u.name
-            FROM brokers b
-            JOIN users u ON u.id = b.id
-            WHERE b.id = ? AND b.status = 'approved'
-            LIMIT 1
-          `,
-          [sellerBrokerId]
-        );
-        sellingBrokerName = String(sellerRows[0]?.name ?? '').trim();
-        if (!sellingBrokerName) {
-          await tx.rollback();
-          return res.status(400).json({ error: 'Corretor vendedor invalido ou nao aprovado.' });
-        }
+      const cpfKey = normalizeProposalCpfKey(payload.clientCpf);
+      if (cpfKey.length !== 11) {
+        await tx.rollback();
+        return res.status(400).json({ error: 'CPF do cliente invalido na proposta.' });
       }
+
+      const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
+
+      const sellerBrokerId = capturingBrokerId;
+      const sellingBrokerName = brokerName;
+
+      const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
 
       const [existingRows] = await tx.query<NegotiationRow[]>(
         `
           SELECT id, status
           FROM negotiations
           WHERE property_id = ?
+            AND capturing_broker_id = ?
             AND status IN (${ACTIVE_NEGOTIATION_STATUSES.map(() => '?').join(', ')})
+            AND (
+              (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
+              OR (
+                buyer_client_id IS NULL
+                AND ${normalizedCpfExpr} = ?
+              )
+            )
           LIMIT 1
           FOR UPDATE
         `,
-        [payload.propertyId, ...ACTIVE_NEGOTIATION_STATUSES]
+        [payload.propertyId, capturingBrokerId, ...ACTIVE_NEGOTIATION_STATUSES, buyerClientId, cpfKey]
       );
 
       const paymentDetails = JSON.stringify({
@@ -1111,7 +1136,7 @@ class NegotiationController {
             SET
               capturing_broker_id = ?,
               selling_broker_id = ?,
-              buyer_client_id = NULL,
+              buyer_client_id = ?,
               client_name = ?,
               client_cpf = ?,
               status = ?,
@@ -1122,8 +1147,9 @@ class NegotiationController {
             WHERE id = ?
           `,
           [
-            req.userId,
+            capturingBrokerId,
             sellerBrokerId,
+            buyerClientId,
             payload.clientName,
             payload.clientCpf,
             DEFAULT_WIZARD_STATUS,
@@ -1150,13 +1176,14 @@ class NegotiationController {
               payment_details,
               proposal_validity_date,
               version
-            ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
           `,
           [
             negotiationId,
             payload.propertyId,
-            req.userId,
+            capturingBrokerId,
             sellerBrokerId,
+            buyerClientId,
             payload.clientName,
             payload.clientCpf,
             DEFAULT_WIZARD_STATUS,
@@ -1188,6 +1215,8 @@ class NegotiationController {
             source: 'mobile_proposal_wizard',
             payment: payload.pagamento,
             sellerBrokerId,
+            capturingBrokerId,
+            buyerClientId,
             clientName: payload.clientName,
             clientCpf: payload.clientCpf,
           }),

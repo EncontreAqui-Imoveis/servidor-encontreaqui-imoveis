@@ -668,6 +668,16 @@ function isProposalDocument(document: {
   return normalizedDocumentType === 'proposal' || normalizedType === 'proposal';
 }
 
+function isRejectedNegotiationDocumentRow(row: ContractDocumentRow): boolean {
+  const metadata = parseStoredJsonObject(row.metadata_json);
+  const status = String(
+    metadata.status ?? metadata.reviewStatus ?? metadata.validationStatus ?? 'APPROVED'
+  )
+    .trim()
+    .toUpperCase();
+  return status === 'REJECTED';
+}
+
 type AdminContractDocument = ReturnType<typeof mapDocument> & {
   downloadUrl: string;
 };
@@ -1076,6 +1086,23 @@ async function fetchContractByNegotiationId(negotiationId: string): Promise<Cont
       ${CONTRACT_SELECT_SQL}
       WHERE c.negotiation_id = ?
       LIMIT 1
+    `,
+    [negotiationId]
+  );
+
+  return rows[0] ?? null;
+}
+
+async function fetchContractByNegotiationIdForUpdate(
+  tx: PoolConnection,
+  negotiationId: string
+): Promise<ContractRow | null> {
+  const [rows] = await tx.query<ContractRow[]>(
+    `
+      ${CONTRACT_SELECT_SQL}
+      WHERE c.negotiation_id = ?
+      LIMIT 1
+      FOR UPDATE
     `,
     [negotiationId]
   );
@@ -2732,6 +2759,7 @@ class ContractController {
         contract: mapContract(contract),
         documents: documents
           .filter((document) => !isProposalDocument(document))
+          .filter((document) => !isRejectedNegotiationDocumentRow(document))
           .map((document) => ({
             ...mapDocument(document),
             downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
@@ -2845,6 +2873,7 @@ class ContractController {
         contract: mapContract(contract),
         documents: documents
           .filter((document) => !isProposalDocument(document))
+          .filter((document) => !isRejectedNegotiationDocumentRow(document))
           .map((document) => ({
             ...mapDocument(document),
             downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
@@ -2854,6 +2883,112 @@ class ContractController {
       console.error('Erro ao buscar contrato por negociação:', error);
       return res.status(500).json({ error: 'Falha ao buscar contrato.' });
     }
+  }
+
+  async updateSellingBrokerByNegotiation(req: AuthRequest, res: Response): Promise<Response> {
+    const negotiationId = String(req.params.negotiationId ?? '').trim();
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID da negociação inválido.' });
+    }
+
+    const body = (req.body ?? {}) as {
+      sameAsCapturing?: unknown;
+      sellingBrokerId?: unknown;
+    };
+    const sameAsCapturing =
+      body.sameAsCapturing === true || String(body.sameAsCapturing ?? '').toLowerCase() === 'true';
+    const sellingBrokerIdRaw = body.sellingBrokerId;
+    const userId = Number(req.userId ?? 0);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const contract = await fetchContractByNegotiationIdForUpdate(tx, negotiationId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado para esta negociação.' });
+      }
+
+      if (!canAccessContract(req, contract)) {
+        await tx.rollback();
+        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
+      }
+
+      const capturingId = Number(contract.capturing_broker_id ?? 0);
+      if (userId !== capturingId) {
+        await tx.rollback();
+        return res.status(403).json({
+          error: 'Somente o corretor captador pode definir o corretor vendedor.',
+        });
+      }
+
+      const contractStatus = resolveContractStatus(contract.status);
+      if (contractStatus !== 'AWAITING_DOCS' && contractStatus !== 'IN_DRAFT') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'O corretor vendedor só pode ser alterado na fase de documentação.',
+        });
+      }
+
+      let newSellerId = capturingId;
+      if (!sameAsCapturing) {
+        const parsed = Number(sellingBrokerIdRaw);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'ID do corretor vendedor inválido.' });
+        }
+        newSellerId = parsed;
+      }
+
+      if (newSellerId !== capturingId) {
+        const [sellerRows] = await tx.query<RowDataPacket[]>(
+          `
+            SELECT u.name
+            FROM brokers b
+            JOIN users u ON u.id = b.id
+            WHERE b.id = ? AND b.status = 'approved'
+            LIMIT 1
+          `,
+          [newSellerId]
+        );
+        const sellerName = String(sellerRows[0]?.name ?? '').trim();
+        if (!sellerName) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Corretor vendedor inválido ou não aprovado.' });
+        }
+      }
+
+      await tx.query(
+        `
+          UPDATE negotiations
+          SET selling_broker_id = ?, version = version + 1
+          WHERE id = ?
+        `,
+        [newSellerId, negotiationId]
+      );
+
+      await tx.commit();
+    } catch (error) {
+      try {
+        await tx.rollback();
+      } catch (rollbackError) {
+        console.error('Erro ao reverter transação (corretor vendedor):', rollbackError);
+      }
+      console.error('Erro ao atualizar corretor vendedor:', error);
+      return res.status(500).json({ error: 'Falha ao atualizar corretor vendedor.' });
+    } finally {
+      tx.release();
+    }
+
+    const updated = await fetchContractByNegotiationId(negotiationId);
+    return res.status(200).json({
+      message: 'Corretor vendedor atualizado.',
+      contract: updated ? mapContract(updated) : null,
+    });
   }
 
   async setSignatureMethod(req: AuthRequest, res: Response): Promise<Response> {

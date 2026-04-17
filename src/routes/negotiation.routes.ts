@@ -10,7 +10,7 @@ negotiationRoutes.get('/mine', authMiddleware, (req, res) =>
   negotiationController.listMine(req as any, res)
 );
 
-negotiationRoutes.post('/proposal', authMiddleware, isBroker, (req, res) =>
+negotiationRoutes.post('/proposal', authMiddleware, (req, res) =>
   negotiationController.generateProposalFromProperty(req as any, res)
 );
 

@@ -378,25 +378,32 @@ class BrokerController {
 
     async requestUpgrade(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
-        const creci = normalizeCreci((req.body as any)?.creci);
+        const body = (req.body ?? {}) as { creci?: unknown; pendingCreciFromCard?: unknown };
+        const creci = normalizeCreci(body.creci);
+        const pendingFromCard =
+            body.pendingCreciFromCard === true || String(body.pendingCreciFromCard ?? '').toLowerCase() === 'true';
 
         if (!brokerId) {
             return res.status(401).json({ error: "Usuario nao autenticado." });
         }
 
-        if (!hasValidCreci(creci)) {
+        if (!pendingFromCard && !hasValidCreci(creci)) {
             return res.status(400).json({
                 error: "CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A).",
             });
         }
 
+        const creciToStore = pendingFromCard && !hasValidCreci(creci) ? null : creci;
+
         try {
-            const [creciRows] = await brokerDb.query<RowDataPacket[]>(
-                'SELECT id FROM brokers WHERE creci = ? AND id <> ?',
-                [creci, brokerId]
-            );
-            if (creciRows.length > 0) {
-                return res.status(409).json({ error: "Este CRECI ja esta em uso." });
+            if (creciToStore) {
+                const [creciRows] = await brokerDb.query<RowDataPacket[]>(
+                    'SELECT id FROM brokers WHERE creci = ? AND id <> ?',
+                    [creciToStore, brokerId]
+                );
+                if (creciRows.length > 0) {
+                    return res.status(409).json({ error: "Este CRECI ja esta em uso." });
+                }
             }
 
             const [brokerRows] = await brokerDb.query<RowDataPacket[]>(
@@ -407,7 +414,7 @@ class BrokerController {
             if (brokerRows.length === 0) {
                 await brokerDb.query(
                     'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-                    [brokerId, creci, 'pending_verification']
+                    [brokerId, creciToStore, 'pending_verification']
                 );
                 return res.status(201).json({ status: 'pending_verification', role: 'broker' });
             }
@@ -419,7 +426,7 @@ class BrokerController {
                 });
             }
 
-            await brokerDb.query('UPDATE brokers SET creci = ? WHERE id = ?', [creci, brokerId]);
+            await brokerDb.query('UPDATE brokers SET creci = ? WHERE id = ?', [creciToStore, brokerId]);
             return res.status(200).json({ status: currentStatus, role: 'broker' });
         } catch (error) {
             console.error("Erro ao solicitar upgrade de corretor:", error);
@@ -814,14 +821,19 @@ class BrokerController {
         }
 
         const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        const creci = normalizeCreci((req.body as any)?.creci);
+        const body = (req.body ?? {}) as { creci?: unknown; pendingCreciFromCard?: unknown };
+        const creci = normalizeCreci(body.creci);
+        const pendingFromCard =
+            body.pendingCreciFromCard === true || String(body.pendingCreciFromCard ?? '').toLowerCase() === 'true';
 
-        if (!hasValidCreci(creci)) {
+        if (!pendingFromCard && !hasValidCreci(creci)) {
             return res.status(400).json({
                 success: false,
                 error: "CRECI invalido. Use 4 a 8 numeros com sufixo opcional (ex: 12345678-A)."
             });
         }
+
+        const creciToStore = pendingFromCard && !hasValidCreci(creci) ? null : creci;
 
         if (!files.creciFront || !files.creciBack || !files.selfie) {
             return res.status(400).json({
@@ -856,17 +868,17 @@ class BrokerController {
             if (brokerStatusRows.length === 0) {
                 await brokerDb.query(
                     'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
-                    [brokerId, creci, 'pending_verification']
+                    [brokerId, creciToStore, 'pending_verification']
                 );
             } else if (currentStatus !== 'approved') {
                 await brokerDb.query(
                     'UPDATE brokers SET creci = ?, status = ? WHERE id = ?',
-                    [creci, 'pending_verification', brokerId]
+                    [creciToStore, 'pending_verification', brokerId]
                 );
             } else {
                 await brokerDb.query(
                     'UPDATE brokers SET creci = ? WHERE id = ?',
-                    [creci, brokerId]
+                    [creciToStore, brokerId]
                 );
             }
 

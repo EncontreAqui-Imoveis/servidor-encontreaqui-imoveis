@@ -124,9 +124,8 @@ export function buildCorsOptions(): CorsOptions {
     new Set([
       ...configuredOrigins,
       ...supplementalOrigins,
-      // Sempre incluir origens de produção conhecidas quando CORS_ORIGINS estiver incompleto
-      // (evita painel/site bloqueados quando só uma URL foi configurada no Railway).
-      ...(nodeEnv === 'production' ? PRODUCTION_FALLBACK_ORIGINS : []),
+      // Sempre incluir domínios de produção do site/painel (evita CORS se NODE_ENV ou CORS_ORIGINS no Railway estiverem incompletos).
+      ...PRODUCTION_FALLBACK_ORIGINS,
       ...(nodeEnv === 'production' ? [] : defaultLocalOrigins),
     ]),
   );

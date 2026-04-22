@@ -852,6 +852,20 @@ function parseNegotiationStatusFilter(value: unknown): string | null {
   return null;
 }
 
+function isInvalidNegotiationStatusFilter(value: unknown): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value !== 'string') {
+    return true;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return false;
+  }
+  return parseNegotiationStatusFilter(value) === null;
+}
+
 function buildNegotiationStatusClause(
   statusFilter: string | null
 ): { clause: string; params: string[] } {
@@ -878,6 +892,75 @@ function buildNegotiationStatusClause(
     clause: ' AND n.status = ?',
     params: [statusFilter],
   };
+}
+
+type NegotiationClientSqlFragments = {
+  clientName: string;
+  clientCpf: string;
+};
+
+async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClientSqlFragments> {
+  try {
+    const [rows] = await adminDb.query<RowDataPacket[]>(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'negotiations'
+          AND column_name IN ('client_name', 'client_cpf')
+      `
+    );
+
+    const available = new Set(rows.map((row) => String(row.column_name ?? '').toLowerCase()));
+    const hasClientName = available.has('client_name');
+    const hasClientCpf = available.has('client_cpf');
+
+    return {
+      clientName: hasClientName
+        ? `COALESCE(
+            NULLIF(n.client_name, ''),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+          )`
+        : `COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+          )`,
+      clientCpf: hasClientCpf
+        ? `COALESCE(
+            NULLIF(n.client_cpf, ''),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+          )`
+        : `COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+          )`,
+    };
+  } catch {
+    return {
+      clientName: `COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+      )`,
+      clientCpf: `COALESCE(
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+      )`,
+    };
+  }
 }
 
 function toNegotiationMoney(value: unknown): number {
@@ -1109,11 +1192,16 @@ class AdminController {
 
   async listNegotiations(req: Request, res: Response) {
     try {
+      if (isInvalidNegotiationStatusFilter(req.query.status)) {
+        return res.status(400).json({ error: 'status inválido.' });
+      }
+
       const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '20'), 10) || 20, 1), 100);
       const offset = (page - 1) * limit;
       const statusFilter = parseNegotiationStatusFilter(req.query.status);
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
+      const clientSql = await resolveNegotiationClientSqlFragments();
 
       const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
@@ -1141,20 +1229,8 @@ class AdminController {
             n.proposal_validity_date,
             capture_user.name AS capturing_broker_name,
             seller_user.name AS selling_broker_name,
-            COALESCE(
-              NULLIF(n.client_name, ''),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-            ) AS client_name,
-            COALESCE(
-              NULLIF(n.client_cpf, ''),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
-            ) AS client_cpf,
+            ${clientSql.clientName} AS client_name,
+            ${clientSql.clientCpf} AS client_cpf,
             COALESCE(
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
@@ -1242,11 +1318,16 @@ class AdminController {
 
   async listNegotiationRequestSummary(req: Request, res: Response) {
     try {
+      if (isInvalidNegotiationStatusFilter(req.query.status)) {
+        return res.status(400).json({ error: 'status inválido.' });
+      }
+
       const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const statusFilter = parseNegotiationStatusFilter(req.query.status) ?? 'UNDER_REVIEW';
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
+      const clientSql = await resolveNegotiationClientSqlFragments();
 
       const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
@@ -1272,13 +1353,7 @@ class AdminController {
               COALESCE(n.final_value, 0) AS final_value,
               COALESCE(n.updated_at, n.created_at) AS updated_at,
               n.created_at,
-              COALESCE(
-                NULLIF(n.client_name, ''),
-                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-              ) AS client_name
+              ${clientSql.clientName} AS client_name
             FROM negotiations n
             JOIN properties p ON p.id = n.property_id
             WHERE 1 = 1
@@ -1343,7 +1418,14 @@ class AdminController {
         total,
       });
     } catch (error) {
-      console.error('Erro ao listar resumo de solicitações por imóvel:', error);
+      console.error('Erro ao listar resumo de solicitações por imóvel:', {
+        status: req.query.status,
+        page: req.query.page,
+        limit: req.query.limit,
+        code: (error as { code?: unknown })?.code ?? null,
+        errno: (error as { errno?: unknown })?.errno ?? null,
+        sqlMessage: (error as { sqlMessage?: unknown })?.sqlMessage ?? null,
+      });
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -1355,11 +1437,16 @@ class AdminController {
         return res.status(400).json({ error: 'propertyId inválido.' });
       }
 
+      if (isInvalidNegotiationStatusFilter(req.query.status)) {
+        return res.status(400).json({ error: 'status inválido.' });
+      }
+
       const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
       const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
       const offset = (page - 1) * limit;
       const statusFilter = parseNegotiationStatusFilter(req.query.status) ?? 'UNDER_REVIEW';
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
+      const clientSql = await resolveNegotiationClientSqlFragments();
 
       const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
@@ -1387,20 +1474,8 @@ class AdminController {
             n.proposal_validity_date,
             capture_user.name AS capturing_broker_name,
             seller_user.name AS selling_broker_name,
-            COALESCE(
-              NULLIF(n.client_name, ''),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-            ) AS client_name,
-            COALESCE(
-              NULLIF(n.client_cpf, ''),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
-            ) AS client_cpf,
+            ${clientSql.clientName} AS client_name,
+            ${clientSql.clientCpf} AS client_cpf,
             COALESCE(
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
@@ -1460,7 +1535,15 @@ class AdminController {
         propertyId,
       });
     } catch (error) {
-      console.error('Erro ao listar solicitações por imóvel:', error);
+      console.error('Erro ao listar solicitações por imóvel:', {
+        propertyId: req.params.propertyId,
+        status: req.query.status,
+        page: req.query.page,
+        limit: req.query.limit,
+        code: (error as { code?: unknown })?.code ?? null,
+        errno: (error as { errno?: unknown })?.errno ?? null,
+        sqlMessage: (error as { sqlMessage?: unknown })?.sqlMessage ?? null,
+      });
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

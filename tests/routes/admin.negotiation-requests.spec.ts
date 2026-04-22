@@ -66,6 +66,7 @@ describe('admin negotiation request views', () => {
 
   it('returns property grouped summary with top proposal', async () => {
     queryMock
+      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
       .mockResolvedValueOnce([[{ total: 1 }]])
       .mockResolvedValueOnce([
         [
@@ -107,6 +108,7 @@ describe('admin negotiation request views', () => {
 
   it('returns paginated requests for a single property', async () => {
     queryMock
+      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
       .mockResolvedValueOnce([[{ total: 2 }]])
       .mockResolvedValueOnce([
         [
@@ -153,5 +155,26 @@ describe('admin negotiation request views', () => {
       value: 850000,
       status: 'UNDER_REVIEW',
     });
+  });
+
+  it('returns 400 when summary status is invalid', async () => {
+    const response = await request(app)
+      .get('/admin/negotiations/requests/summary?status=INVALID_STATUS');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: 'status inválido.' });
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when summary query fails', async () => {
+    queryMock
+      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
+      .mockResolvedValueOnce([[{ total: 1 }]])
+      .mockRejectedValueOnce(Object.assign(new Error('Unknown column'), { code: 'ER_BAD_FIELD_ERROR' }));
+
+    const response = await request(app).get('/admin/negotiations/requests/summary');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({ error: 'Ocorreu um erro inesperado no servidor.' });
   });
 });

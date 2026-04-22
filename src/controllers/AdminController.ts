@@ -4704,6 +4704,78 @@ class AdminController {
     }
   }
 
+  async promoteClientToBroker(req: Request, res: Response) {
+    const clientId = Number(req.params.id);
+    const { creci } = req.body ?? {};
+
+    if (Number.isNaN(clientId) || clientId <= 0) {
+      return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+    }
+    if (creci == null || String(creci).trim() === '') {
+      return res.status(400).json({ error: 'CRECI e obrigatorio.' });
+    }
+    if (!hasValidCreci(creci)) {
+      return res.status(400).json({
+        error: 'CRECI inválido. Use 4 a 8 números com sufixo opcional (ex: 12345678-A).',
+      });
+    }
+
+    const normalizedCreci = normalizeCreci(creci);
+    const tx = await adminDb.getConnection();
+    try {
+      await tx.beginTransaction();
+
+      const [dupCreci] = await tx.query<RowDataPacket[]>(
+        'SELECT id FROM brokers WHERE creci = ? AND id <> ? LIMIT 1',
+        [normalizedCreci, clientId],
+      );
+      if (dupCreci.length > 0) {
+        await tx.rollback();
+        return res.status(409).json({ error: 'CRECI ja vinculado a outro corretor.' });
+      }
+
+      const snapshot = await loadUserLifecycleSnapshot(tx, clientId, { forUpdate: true });
+      if (!snapshot) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Usuario nao encontrado.' });
+      }
+
+      if (snapshot.broker_id != null && isActiveBrokerStatus(snapshot.broker_status)) {
+        await tx.rollback();
+        return res.status(400).json({ error: 'Usuario ja e corretor ativo. Use a gestao de corretores.' });
+      }
+
+      if (snapshot.broker_id != null) {
+        await tx.query(
+          `UPDATE brokers SET creci = ?, status = 'approved', agency_id = NULL, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [normalizedCreci, clientId],
+        );
+      } else {
+        await tx.query(
+          `INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, 'approved', NULL)`,
+          [clientId, normalizedCreci],
+        );
+      }
+
+      await tx.commit();
+
+      await notifyBrokerApprovedChange(clientId);
+      return res.status(200).json({
+        message: 'Usuario promovido a corretor com sucesso.',
+        role: 'broker',
+        status: 'approved',
+        creci: normalizedCreci,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao promover cliente a corretor:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
+    }
+  }
+
   async approveBroker(req: Request, res: Response) {
     const brokerId = Number(req.params.id);
 

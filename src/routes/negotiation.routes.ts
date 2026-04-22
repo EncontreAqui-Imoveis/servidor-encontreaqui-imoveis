@@ -10,8 +10,20 @@ negotiationRoutes.get('/mine', authMiddleware, (req, res) =>
   negotiationController.listMine(req as any, res)
 );
 
+negotiationRoutes.get('/client-lookup', authMiddleware, (req, res) =>
+  negotiationController.lookupClientByCpf(req as any, res)
+);
+
 negotiationRoutes.post('/proposal', authMiddleware, (req, res) =>
   negotiationController.generateProposalFromProperty(req as any, res)
+);
+
+negotiationRoutes.put('/:id/draft', authMiddleware, (req, res) =>
+  negotiationController.updateProposalFromWizard(req as any, res)
+);
+
+negotiationRoutes.delete('/:id', authMiddleware, (req, res) =>
+  negotiationController.deleteMyProposal(req as any, res)
 );
 
 negotiationRoutes.post('/:id/proposals', authMiddleware, isBroker, (req, res) =>

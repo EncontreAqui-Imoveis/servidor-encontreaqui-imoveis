@@ -749,6 +749,19 @@ interface AdminNegotiationListRow extends RowDataPacket {
   signed_document_id: number | null;
 }
 
+interface AdminNegotiationRequestSummaryRow extends RowDataPacket {
+  property_id: number;
+  property_code: string | null;
+  property_title: string | null;
+  property_address: string | null;
+  proposal_count: number;
+  latest_updated_at: Date | string | null;
+  top_negotiation_id: string | null;
+  top_proposal_value: number | string | null;
+  top_client_name: string | null;
+  top_created_at: Date | string | null;
+}
+
 interface AdminNegotiationDecisionRow extends RowDataPacket {
   id: string;
   status: string;
@@ -873,6 +886,17 @@ function toNegotiationMoney(value: unknown): number {
     return 0;
   }
   return Number(parsed.toFixed(2));
+}
+
+function toNullableIsoDate(value: unknown): string | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+  return parsed.toISOString();
 }
 
 function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
@@ -1212,6 +1236,231 @@ class AdminController {
       });
     } catch (error) {
       console.error('Erro ao listar negociações para admin:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async listNegotiationRequestSummary(req: Request, res: Response) {
+    try {
+      const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
+      const offset = (page - 1) * limit;
+      const statusFilter = parseNegotiationStatusFilter(req.query.status) ?? 'UNDER_REVIEW';
+      const { clause, params } = buildNegotiationStatusClause(statusFilter);
+
+      const [countRows] = await adminDb.query<RowDataPacket[]>(
+        `
+          SELECT COUNT(DISTINCT n.property_id) AS total
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          WHERE 1 = 1
+          ${clause}
+        `,
+        params
+      );
+      const total = Number(countRows[0]?.total ?? 0);
+
+      const [rows] = await adminDb.query<AdminNegotiationRequestSummaryRow[]>(
+        `
+          WITH filtered AS (
+            SELECT
+              n.id AS negotiation_id,
+              n.property_id,
+              p.code AS property_code,
+              p.title AS property_title,
+              CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
+              COALESCE(n.final_value, 0) AS final_value,
+              COALESCE(n.updated_at, n.created_at) AS updated_at,
+              n.created_at,
+              COALESCE(
+                NULLIF(n.client_name, ''),
+                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+                JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+              ) AS client_name
+            FROM negotiations n
+            JOIN properties p ON p.id = n.property_id
+            WHERE 1 = 1
+            ${clause}
+          ),
+          grouped AS (
+            SELECT
+              f.property_id,
+              MAX(f.property_code) AS property_code,
+              MAX(f.property_title) AS property_title,
+              MAX(f.property_address) AS property_address,
+              COUNT(*) AS proposal_count,
+              MAX(f.updated_at) AS latest_updated_at
+            FROM filtered f
+            GROUP BY f.property_id
+          ),
+          ranked AS (
+            SELECT
+              f.*,
+              ROW_NUMBER() OVER (
+                PARTITION BY f.property_id
+                ORDER BY f.final_value DESC, f.updated_at DESC, f.negotiation_id DESC
+              ) AS rn
+            FROM filtered f
+          )
+          SELECT
+            g.property_id,
+            g.property_code,
+            g.property_title,
+            g.property_address,
+            g.proposal_count,
+            g.latest_updated_at,
+            r.negotiation_id AS top_negotiation_id,
+            r.final_value AS top_proposal_value,
+            r.client_name AS top_client_name,
+            r.created_at AS top_created_at
+          FROM grouped g
+          JOIN ranked r ON r.property_id = g.property_id AND r.rn = 1
+          ORDER BY g.latest_updated_at DESC, g.property_id DESC
+          LIMIT ? OFFSET ?
+        `,
+        [...params, limit, offset]
+      );
+
+      return res.status(200).json({
+        data: rows.map((row) => ({
+          propertyId: Number(row.property_id),
+          propertyCode: row.property_code ?? null,
+          propertyTitle: row.property_title ?? null,
+          propertyAddress: row.property_address ?? null,
+          proposalCount: Number(row.proposal_count ?? 0),
+          updatedAt: toNullableIsoDate(row.latest_updated_at),
+          topProposal: {
+            negotiationId: row.top_negotiation_id ?? null,
+            value: toNullableNumber(row.top_proposal_value),
+            clientName: row.top_client_name ?? null,
+            createdAt: toNullableIsoDate(row.top_created_at),
+          },
+        })),
+        page,
+        limit,
+        total,
+      });
+    } catch (error) {
+      console.error('Erro ao listar resumo de solicitações por imóvel:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async listNegotiationRequestsByProperty(req: Request, res: Response) {
+    try {
+      const propertyId = Number(req.params.propertyId);
+      if (!Number.isInteger(propertyId) || propertyId <= 0) {
+        return res.status(400).json({ error: 'propertyId inválido.' });
+      }
+
+      const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1), 100);
+      const offset = (page - 1) * limit;
+      const statusFilter = parseNegotiationStatusFilter(req.query.status) ?? 'UNDER_REVIEW';
+      const { clause, params } = buildNegotiationStatusClause(statusFilter);
+
+      const [countRows] = await adminDb.query<RowDataPacket[]>(
+        `
+          SELECT COUNT(*) AS total
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          WHERE n.property_id = ?
+          ${clause}
+        `,
+        [propertyId, ...params]
+      );
+      const total = Number(countRows[0]?.total ?? 0);
+
+      const [rows] = await adminDb.query<AdminNegotiationListRow[]>(
+        `
+          SELECT
+            n.id,
+            n.status AS negotiation_status,
+            n.property_id,
+            p.status AS property_status,
+            p.code AS property_code,
+            p.title AS property_title,
+            CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
+            n.final_value,
+            n.proposal_validity_date,
+            capture_user.name AS capturing_broker_name,
+            seller_user.name AS selling_broker_name,
+            COALESCE(
+              NULLIF(n.client_name, ''),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+            ) AS client_name,
+            COALESCE(
+              NULLIF(n.client_cpf, ''),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+              JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+            ) AS client_cpf,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_dinheiro,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.permuta')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.trade_in')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.tradeIn')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_permuta,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financiamento')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financing')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_financiamento,
+            COALESCE(
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.outros')) AS DECIMAL(12,2)),
+              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.others')) AS DECIMAL(12,2)),
+              0
+            ) AS payment_outros,
+            COALESCE(n.updated_at, n.created_at) AS last_event_at,
+            NULL AS approved_at,
+            signed_doc.id AS signed_document_id
+          FROM negotiations n
+          JOIN properties p ON p.id = n.property_id
+          LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
+          LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
+          LEFT JOIN (
+            SELECT ranked.negotiation_id, ranked.id
+            FROM (
+              SELECT
+                d.negotiation_id,
+                d.id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY d.negotiation_id
+                  ORDER BY d.created_at DESC, d.id DESC
+                ) AS rn
+              FROM negotiation_documents d
+              WHERE d.type = 'other'
+            ) ranked
+            WHERE ranked.rn = 1
+          ) signed_doc ON signed_doc.negotiation_id = n.id
+          WHERE n.property_id = ?
+          ${clause}
+          ORDER BY COALESCE(n.final_value, 0) DESC, COALESCE(n.updated_at, n.created_at) DESC, n.id DESC
+          LIMIT ? OFFSET ?
+        `,
+        [propertyId, ...params, limit, offset]
+      );
+
+      return res.status(200).json({
+        data: rows.map(mapAdminNegotiation),
+        page,
+        limit,
+        total,
+        propertyId,
+      });
+    } catch (error) {
+      console.error('Erro ao listar solicitações por imóvel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }
@@ -3531,7 +3780,6 @@ class AdminController {
       const paramsToSign: Record<string, string | number> = {
         folder,
         timestamp,
-        max_file_size: maxFileSize,
         allowed_formats: allowedFormats.join(','),
       };
 

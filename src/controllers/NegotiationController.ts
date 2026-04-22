@@ -1006,14 +1006,7 @@ class NegotiationController {
         await tx.rollback();
         return res.status(403).json({ error: 'Apenas clientes ou corretores podem enviar proposta.' });
       }
-      if (isBrokerUser) {
-        if (Number(property.broker_id ?? 0) !== Number(req.userId ?? 0)) {
-          await tx.rollback();
-          return res.status(403).json({
-            error: 'Somente o corretor captador deste imóvel pode gerar proposta.',
-          });
-        }
-      } else {
+      if (!isBrokerUser) {
         if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
           await tx.rollback();
           return res.status(403).json({ error: 'Nao e possivel enviar proposta no proprio anuncio.' });

@@ -7,6 +7,7 @@ const {
   getConnectionMock,
   generateProposalMock,
   storeNegotiationDocumentToR2Mock,
+  authState,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -22,6 +23,10 @@ const {
     getConnectionMock: vi.fn(),
     generateProposalMock: vi.fn(),
     storeNegotiationDocumentToR2Mock: vi.fn(),
+    authState: {
+      userId: 30003,
+      userRole: 'broker',
+    },
   };
 });
 
@@ -36,8 +41,8 @@ vi.mock('../../src/database/connection', () => ({
 
 vi.mock('../../src/middlewares/auth', () => ({
   authMiddleware: (req: any, _res: any, next: any) => {
-    req.userId = 30003;
-    req.userRole = 'broker';
+    req.userId = authState.userId;
+    req.userRole = authState.userRole;
     next();
   },
   isBroker: (_req: any, _res: any, next: any) => next(),
@@ -68,6 +73,8 @@ describe('POST /negotiations/proposal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.userId = 30003;
+    authState.userRole = 'broker';
     getConnectionMock.mockResolvedValue(txMock);
     txMock.beginTransaction.mockResolvedValue(undefined);
     txMock.commit.mockResolvedValue(undefined);
@@ -177,7 +184,7 @@ describe('POST /negotiations/proposal', () => {
     expect(generateProposalMock).not.toHaveBeenCalled();
   });
 
-  it('uses sellerBrokerId when partnership broker is informed', async () => {
+  it('creates proposal even when sellerBrokerId is provided', async () => {
     txMock.query
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
@@ -200,7 +207,6 @@ describe('POST /negotiations/proposal', () => {
         ],
       ])
       .mockResolvedValueOnce([[{ name: 'Broker Captador' }]])
-      .mockResolvedValueOnce([[{ name: 'Broker Vendedor' }]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -221,12 +227,12 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30004, 'PROPOSAL_SENT'])
+      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         brokerName: 'Broker Captador',
-        sellingBrokerName: 'Broker Vendedor',
+        sellingBrokerName: 'Broker Captador',
       })
     );
   });
@@ -248,6 +254,98 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('PROPOSAL_VALIDATION_FAILED');
     expect(response.body.error).toContain('idempotency_key');
+  });
+
+  it('allows broker who is not the capturing broker to create proposal', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 45555,
+            owner_id: 50001,
+            status: 'approved',
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: 'Q1',
+            lote: 'L2',
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ name: 'Broker Independente' }]])
+      .mockResolvedValueOnce([[]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-005',
+      propertyId: 101,
+      clientName: 'Comprador Externo',
+      clientCpf: '222.333.444-55',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 150000,
+        permuta: 0,
+        financiamento: 350000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(201);
+    expect(txMock.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO negotiations'),
+      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'PROPOSAL_SENT'])
+    );
+  });
+
+  it('blocks client from proposing on own listing', async () => {
+    authState.userId = 90001;
+    authState.userRole = 'client';
+
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 90001,
+            status: 'approved',
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: null,
+            lote: null,
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-006',
+      propertyId: 101,
+      clientName: 'Cliente Proprietario',
+      clientCpf: '999.888.777-66',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(403);
+    expect(String(response.body.error ?? '')).toContain('proprio anuncio');
   });
 
   it('maps PDF dependency failures to DEPENDENCY_UNAVAILABLE', async () => {

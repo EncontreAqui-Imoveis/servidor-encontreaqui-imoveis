@@ -943,6 +943,10 @@ function buildNegotiationStatusClause(
 type NegotiationClientSqlFragments = {
   clientName: string;
   clientCpf: string;
+  paymentDinheiro: string;
+  paymentPermuta: string;
+  paymentFinanciamento: string;
+  paymentOutros: string;
 };
 
 type NegotiationTimeSqlFragments = {
@@ -986,58 +990,83 @@ async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClient
         FROM information_schema.columns
         WHERE table_schema = DATABASE()
           AND table_name = 'negotiations'
-          AND column_name IN ('client_name', 'client_cpf')
+          AND column_name IN ('client_name', 'client_cpf', 'payment_details')
       `
     );
 
     const available = new Set(rows.map((row) => String(row.column_name ?? '').toLowerCase()));
     const hasClientName = available.has('client_name');
     const hasClientCpf = available.has('client_cpf');
+    const hasPaymentDetails = available.has('payment_details');
+
+    const paymentDetailsClientNameExpr = hasPaymentDetails
+      ? `COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+          )`
+      : 'NULL';
+    const paymentDetailsClientCpfExpr = hasPaymentDetails
+      ? `COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+          )`
+      : 'NULL';
 
     return {
       clientName: hasClientName
         ? `COALESCE(
             NULLIF(n.client_name, ''),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
+            ${paymentDetailsClientNameExpr}
           )`
-        : `COALESCE(
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-          )`,
+        : paymentDetailsClientNameExpr,
       clientCpf: hasClientCpf
         ? `COALESCE(
             NULLIF(n.client_cpf, ''),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+            ${paymentDetailsClientCpfExpr}
           )`
-        : `COALESCE(
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
-          )`,
+        : paymentDetailsClientCpfExpr,
+      paymentDinheiro: hasPaymentDetails
+        ? `COALESCE(
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
+            0
+          )`
+        : '0',
+      paymentPermuta: hasPaymentDetails
+        ? `COALESCE(
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.permuta')) AS DECIMAL(12,2)),
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.trade_in')) AS DECIMAL(12,2)),
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.tradeIn')) AS DECIMAL(12,2)),
+            0
+          )`
+        : '0',
+      paymentFinanciamento: hasPaymentDetails
+        ? `COALESCE(
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financiamento')) AS DECIMAL(12,2)),
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financing')) AS DECIMAL(12,2)),
+            0
+          )`
+        : '0',
+      paymentOutros: hasPaymentDetails
+        ? `COALESCE(
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.outros')) AS DECIMAL(12,2)),
+            CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.others')) AS DECIMAL(12,2)),
+            0
+          )`
+        : '0',
     };
   } catch {
     return {
-      clientName: `COALESCE(
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientName')),
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_name')),
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientName')),
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
-      )`,
-      clientCpf: `COALESCE(
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
-      )`,
+      clientName: 'NULL',
+      clientCpf: 'NULL',
+      paymentDinheiro: '0',
+      paymentPermuta: '0',
+      paymentFinanciamento: '0',
+      paymentOutros: '0',
     };
   }
 }
@@ -1310,27 +1339,10 @@ class AdminController {
             seller_user.name AS selling_broker_name,
             ${clientSql.clientName} AS client_name,
             ${clientSql.clientCpf} AS client_cpf,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_dinheiro,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.permuta')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.trade_in')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.tradeIn')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_permuta,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financiamento')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financing')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_financiamento,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.outros')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.others')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_outros,
+            ${clientSql.paymentDinheiro} AS payment_dinheiro,
+            ${clientSql.paymentPermuta} AS payment_permuta,
+            ${clientSql.paymentFinanciamento} AS payment_financiamento,
+            ${clientSql.paymentOutros} AS payment_outros,
             latest_history.created_at AS last_event_at,
             approved_history.approved_at AS approved_at,
             signed_doc.id AS signed_document_id
@@ -1573,27 +1585,10 @@ class AdminController {
             seller_user.name AS selling_broker_name,
             ${clientSql.clientName} AS client_name,
             ${clientSql.clientCpf} AS client_cpf,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.cash')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_dinheiro,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.permuta')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.trade_in')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.tradeIn')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_permuta,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financiamento')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.financing')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_financiamento,
-            COALESCE(
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.outros')) AS DECIMAL(12,2)),
-              CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.others')) AS DECIMAL(12,2)),
-              0
-            ) AS payment_outros,
+            ${clientSql.paymentDinheiro} AS payment_dinheiro,
+            ${clientSql.paymentPermuta} AS payment_permuta,
+            ${clientSql.paymentFinanciamento} AS payment_financiamento,
+            ${clientSql.paymentOutros} AS payment_outros,
             ${timeSql.nUpdatedAtOrCreatedAt} AS last_event_at,
             NULL AS approved_at,
             signed_doc.id AS signed_document_id

@@ -126,12 +126,8 @@ export class SreStatsService {
                         const data = await railwayRes.json() as { page?: { status?: string } };
                         this.railwayStatus = data?.page?.status || 'UP';
                     } else {
-                        const textBody = await railwayRes.text();
-                        console.warn('Resposta não-JSON ao consultar status do Railway:', {
-                            status: railwayRes.status,
-                            contentType,
-                            sample: textBody.slice(0, 120),
-                        });
+                        // Alguns proxies retornam HTML 200 para esse endpoint; tratamos como indisponível sem poluir logs.
+                        this.railwayStatus = 'UNKNOWN';
                     }
                 }
             } catch (e) {

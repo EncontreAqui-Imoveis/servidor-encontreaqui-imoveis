@@ -950,8 +950,10 @@ type NegotiationClientSqlFragments = {
 };
 
 type NegotiationTimeSqlFragments = {
-  nUpdatedAtOrCreatedAt: string;
-  n2UpdatedAtOrCreatedAt: string;
+  nEventAtSelect: string;
+  n2EventAtSelect: string;
+  nEventSort: string;
+  n2EventSort: string;
 };
 
 async function resolveNegotiationTimeSqlFragments(): Promise<NegotiationTimeSqlFragments> {
@@ -962,22 +964,47 @@ async function resolveNegotiationTimeSqlFragments(): Promise<NegotiationTimeSqlF
         FROM information_schema.columns
         WHERE table_schema = DATABASE()
           AND table_name = 'negotiations'
-          AND column_name = 'updated_at'
+          AND column_name IN ('updated_at', 'created_at')
       `
     );
-    const hasUpdatedAt = rows.length > 0;
+    const available = new Set(rows.map((row) => String(row.column_name ?? '').toLowerCase()));
+    const hasUpdatedAt = available.has('updated_at');
+    const hasCreatedAt = available.has('created_at');
+
+    const nEventAtSelect = hasUpdatedAt
+      ? 'COALESCE(n.updated_at, n.created_at)'
+      : hasCreatedAt
+      ? 'n.created_at'
+      : 'NULL';
+    const n2EventAtSelect = hasUpdatedAt
+      ? 'COALESCE(n2.updated_at, n2.created_at)'
+      : hasCreatedAt
+      ? 'n2.created_at'
+      : 'NULL';
+
+    const nEventSort = hasUpdatedAt
+      ? 'COALESCE(n.updated_at, n.created_at)'
+      : hasCreatedAt
+      ? 'n.created_at'
+      : 'n.id';
+    const n2EventSort = hasUpdatedAt
+      ? 'COALESCE(n2.updated_at, n2.created_at)'
+      : hasCreatedAt
+      ? 'n2.created_at'
+      : 'n2.id';
+
     return {
-      nUpdatedAtOrCreatedAt: hasUpdatedAt
-        ? 'COALESCE(n.updated_at, n.created_at)'
-        : 'n.created_at',
-      n2UpdatedAtOrCreatedAt: hasUpdatedAt
-        ? 'COALESCE(n2.updated_at, n2.created_at)'
-        : 'n2.created_at',
+      nEventAtSelect,
+      n2EventAtSelect,
+      nEventSort,
+      n2EventSort,
     };
   } catch {
     return {
-      nUpdatedAtOrCreatedAt: 'n.created_at',
-      n2UpdatedAtOrCreatedAt: 'n2.created_at',
+      nEventAtSelect: 'NULL',
+      n2EventAtSelect: 'NULL',
+      nEventSort: 'n.id',
+      n2EventSort: 'n2.id',
     };
   }
 }
@@ -1455,7 +1482,7 @@ class AdminController {
               MAX(p.title) AS property_title,
               MAX(CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state)) AS property_address,
               COUNT(*) AS proposal_count,
-              MAX(${timeSql.nUpdatedAtOrCreatedAt}) AS latest_updated_at
+              MAX(${timeSql.nEventAtSelect}) AS latest_updated_at
             FROM negotiations n
             JOIN properties p ON p.id = n.property_id
             WHERE 1 = 1
@@ -1467,8 +1494,9 @@ class AdminController {
               n.id AS negotiation_id,
               n.property_id,
               COALESCE(n.final_value, 0) AS final_value,
-              ${timeSql.nUpdatedAtOrCreatedAt} AS updated_at,
-              n.created_at,
+              ${timeSql.nEventAtSelect} AS updated_at,
+              ${timeSql.nEventSort} AS sort_value,
+              ${timeSql.nEventAtSelect} AS created_at,
               ${clientSql.clientName} AS client_name
             FROM negotiations n
             JOIN properties p ON p.id = n.property_id
@@ -1482,7 +1510,8 @@ class AdminController {
                 n2.id AS negotiation_id,
                 n2.property_id,
                 COALESCE(n2.final_value, 0) AS final_value,
-                ${timeSql.n2UpdatedAtOrCreatedAt} AS updated_at
+                ${timeSql.n2EventAtSelect} AS updated_at,
+                ${timeSql.n2EventSort} AS sort_value
               FROM negotiations n2
               JOIN properties p2 ON p2.id = n2.property_id
               WHERE 1 = 1
@@ -1491,10 +1520,10 @@ class AdminController {
             WHERE r2.property_id = r.property_id
               AND (
                 r2.final_value > r.final_value
-                OR (r2.final_value = r.final_value AND r2.updated_at > r.updated_at)
+                OR (r2.final_value = r.final_value AND r2.sort_value > r.sort_value)
                 OR (
                   r2.final_value = r.final_value
-                  AND r2.updated_at = r.updated_at
+                  AND r2.sort_value = r.sort_value
                   AND r2.negotiation_id > r.negotiation_id
                 )
               )
@@ -1589,7 +1618,7 @@ class AdminController {
             ${clientSql.paymentPermuta} AS payment_permuta,
             ${clientSql.paymentFinanciamento} AS payment_financiamento,
             ${clientSql.paymentOutros} AS payment_outros,
-            ${timeSql.nUpdatedAtOrCreatedAt} AS last_event_at,
+            ${timeSql.nEventAtSelect} AS last_event_at,
             NULL AS approved_at,
             signed_doc.id AS signed_document_id
           FROM negotiations n
@@ -1610,7 +1639,7 @@ class AdminController {
           ) signed_doc ON signed_doc.negotiation_id = n.id
           WHERE n.property_id = ?
           ${clause}
-          ORDER BY COALESCE(n.final_value, 0) DESC, ${timeSql.nUpdatedAtOrCreatedAt} DESC, n.id DESC
+          ORDER BY COALESCE(n.final_value, 0) DESC, ${timeSql.nEventSort} DESC, n.id DESC
           LIMIT ? OFFSET ?
         `,
         [propertyId, ...params, limit, offset]

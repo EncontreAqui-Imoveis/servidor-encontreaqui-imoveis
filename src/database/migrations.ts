@@ -310,18 +310,6 @@ async function ensureNotificationsType(): Promise<void> {
   }
 }
 
-async function ensureNegotiationsLastDraftEditAtColumn(): Promise<void> {
-  if (!(await tableExists('negotiations'))) {
-    return;
-  }
-
-  if (!(await columnExists('negotiations', 'last_draft_edit_at'))) {
-    await connection.query(
-      'ALTER TABLE negotiations ADD COLUMN last_draft_edit_at DATETIME(3) NULL'
-    );
-  }
-}
-
 async function ensureNegotiationsClientColumns(): Promise<void> {
   if (!(await tableExists('negotiations'))) {
     return;
@@ -675,7 +663,6 @@ export async function applyMigrations(): Promise<void> {
     await ensureFeaturedPropertiesTable();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();
-    await ensureNegotiationsLastDraftEditAtColumn();
     await ensureUserAddressColumns();
     await ensureSupportRequestsTable();
     await ensurePasswordResetTokensTable();

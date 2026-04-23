@@ -2304,6 +2304,13 @@ class AdminController {
             p.owner_id,
             p.owner_name,
             p.owner_phone,
+            (
+              SELECT pi.image_url
+              FROM property_images pi
+              WHERE pi.property_id = p.id
+              ORDER BY pi.id ASC
+              LIMIT 1
+            ) AS property_image_url,
             COALESCE(u.name, u_owner.name) AS broker_name,
             COALESCE(u.phone, u_owner.phone) AS broker_phone,
             b.status AS broker_status,

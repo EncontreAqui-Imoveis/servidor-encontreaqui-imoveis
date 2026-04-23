@@ -922,7 +922,7 @@ function buildNegotiationStatusClause(
   if (statusFilter === 'UNDER_REVIEW') {
     return {
       clause:
-        " AND (n.status = 'DOCUMENTATION_PHASE' OR (n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') <> 'negociacao'))",
+        " AND (n.status IN ('PROPOSAL_SENT', 'DOCUMENTATION_PHASE') OR (n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') <> 'negociacao'))",
       params: [],
     };
   }
@@ -1122,6 +1122,7 @@ function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
   const propertyStatus = String(row.property_status ?? '').toLowerCase();
 
   if (
+    negotiationStatus === 'PROPOSAL_SENT' ||
     negotiationStatus === 'DOCUMENTATION_PHASE' ||
     (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus !== 'negociacao')
   ) {

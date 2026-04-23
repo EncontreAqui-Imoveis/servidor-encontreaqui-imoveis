@@ -110,6 +110,8 @@ propertyRoutes.get('/featured', (req, res) => propertyController.listFeaturedPro
 propertyRoutes.get('/public', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/public/list', (req, res) => propertyController.listPublicProperties(req, res));
 propertyRoutes.get('/cities', (req, res) => propertyController.getAvailableCities(req, res));
+propertyRoutes.get('/cities-with-count', (req, res) => propertyController.getAvailableCitiesWithCount(req, res));
+propertyRoutes.get('/bairros', (req, res) => propertyController.getAvailableBairrosWithCount(req, res));
 propertyRoutes.get('/public/cities', (req, res) => propertyController.getAvailableCities(req, res));
 propertyRoutes.get('/:id', authMiddleware, (req, res) =>
   propertyController.show(req as any, res)

@@ -151,6 +151,10 @@ interface ProposalWizardBody {
   clientName?: unknown;
   clientCpf?: unknown;
   validadeDias?: unknown;
+  proposalValidityDate?: unknown;
+  proposal_validity_date?: unknown;
+  proposalValidUntil?: unknown;
+  proposal_valid_until?: unknown;
   sellerBrokerId?: unknown;
   proposalValue?: unknown;
   valorProposta?: unknown;
@@ -327,6 +331,28 @@ function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposalWizard
     throw new Error('validadeDias deve ser um inteiro maior que zero.');
   }
 
+  const explicitValidityDateRaw =
+    body.proposalValidityDate ??
+    body.proposal_validity_date ??
+    body.proposalValidUntil ??
+    body.proposal_valid_until;
+  if (
+    explicitValidityDateRaw !== undefined &&
+    explicitValidityDateRaw !== null &&
+    String(explicitValidityDateRaw).trim() !== ''
+  ) {
+    const explicitValidityDate = new Date(String(explicitValidityDateRaw).trim());
+    if (Number.isNaN(explicitValidityDate.getTime())) {
+      throw new Error('proposal_validity_date invalida.');
+    }
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    explicitValidityDate.setHours(0, 0, 0, 0);
+    if (explicitValidityDate.getTime() < startOfToday.getTime()) {
+      throw new Error('proposal_validity_date nao pode ser anterior a hoje.');
+    }
+  }
+
   if (sellerBrokerId !== null && (!Number.isInteger(sellerBrokerId) || sellerBrokerId <= 0)) {
     throw new Error('sellerBrokerId invalido.');
   }
@@ -377,6 +403,19 @@ function buildProposalValidityDate(days: number): string {
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function assertProposalValidityDateNotPast(value: string): void {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error('proposal_validity_date invalida.');
+  }
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  parsed.setHours(0, 0, 0, 0);
+  if (parsed.getTime() < startOfToday.getTime()) {
+    throw new Error('proposal_validity_date nao pode ser anterior a hoje.');
+  }
 }
 
 function toIsoString(value: Date | string | null | undefined): string | null {
@@ -1292,6 +1331,7 @@ class NegotiationController {
         },
       });
       const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
+      assertProposalValidityDateNotPast(proposalValidityDate);
 
       let negotiationId = '';
       let fromStatus = 'PROPOSAL_DRAFT';
@@ -1449,6 +1489,19 @@ class NegotiationController {
           'PROPOSAL_IN_PROGRESS',
           'Uma proposta com essa chave de idempotencia ja esta em processamento.',
           true
+        );
+      }
+      if (
+        error instanceof Error &&
+        error.message.toLowerCase().includes('proposal_validity_date')
+      ) {
+        return this.respondWithCode(
+          req,
+          res,
+          400,
+          'PROPOSAL_VALIDATION_FAILED',
+          error.message,
+          false
         );
       }
       if (isDependencyUnavailableError(error)) {
@@ -2154,6 +2207,7 @@ class NegotiationController {
         },
       });
       const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
+      assertProposalValidityDateNotPast(proposalValidityDate);
       const fromStatus = st;
 
       await tx.execute(
@@ -2258,6 +2312,19 @@ class NegotiationController {
         await tx.rollback();
       }
       console.error('Erro ao editar proposta (wizard):', error);
+      if (
+        error instanceof Error &&
+        error.message.toLowerCase().includes('proposal_validity_date')
+      ) {
+        return this.respondWithCode(
+          req,
+          res,
+          400,
+          'PROPOSAL_VALIDATION_FAILED',
+          error.message,
+          false
+        );
+      }
       if (isDependencyUnavailableError(error)) {
         return this.respondWithCode(
           req,

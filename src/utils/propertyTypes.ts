@@ -11,9 +11,14 @@ export const PROPERTY_TYPES = [
   'Imóvel comercial',
   'Área comercial',
   'Cobertura / Penthouse',
+  'Cobertura',
   'Sobrado',
   'Kitnet',
   'Sala comercial',
+  'Sala Comercial',
+  'Loja',
+  'Fazenda',
+  'Galpão',
   'Empresa',
   'Prédio',
 ] as const;
@@ -27,12 +32,17 @@ const LEGACY_TYPE_MAP: Record<string, PropertyType> = {
   areacomercial: 'Área comercial',
   imovelcomercial: 'Imóvel comercial',
   condominiofechado: 'Condomínio Fechado',
-  galpao: 'Galpão / Barracão',
+  galpao: 'Galpão',
   barracao: 'Galpão / Barracão',
   galpaobarracao: 'Galpão / Barracão',
   chacara: 'Chácara',
   coberturapenthouse: 'Cobertura / Penthouse',
   penthouse: 'Cobertura / Penthouse',
+  cobertura: 'Cobertura',
+  salacomercial: 'Sala Comercial',
+  loja: 'Loja',
+  fazenda: 'Fazenda',
+  predio: 'Prédio',
 };
 
 function normalizeTypeKey(value: string): string {

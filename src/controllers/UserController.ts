@@ -10,12 +10,10 @@ import { runUserQuery } from '../services/userPersistenceService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
 import {
   sanitizeAddressInput,
-  sanitizePartialAddressInput,
   signUserToken,
 } from '../services/userSessionService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ADDRESS_FIELDS = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep'] as const;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
 
 interface FavoriteRow extends RowDataPacket {
@@ -261,7 +259,7 @@ class UserController {
 
     try {
       const userRows = await runUserQuery<RowDataPacket[]>(
-          'SELECT id, name, email, email_verified_at, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
+          'SELECT id, name, email, email_verified_at, phone FROM users WHERE id = ?',
         [userId]
       );
 
@@ -300,13 +298,6 @@ class UserController {
                 email_verified: user.email_verified_at != null,
                 email_verified_at: user.email_verified_at ?? null,
                 phone: user.phone,
-              street: user.street,
-              number: user.number,
-              complement: user.complement,
-              bairro: user.bairro,
-              city: user.city,
-              state: user.state,
-              cep: user.cep,
             },
           });
         }
@@ -322,13 +313,6 @@ class UserController {
             email_verified: user.email_verified_at != null,
             email_verified_at: user.email_verified_at ?? null,
             phone: user.phone,
-          street: user.street,
-          number: user.number,
-          complement: user.complement,
-          bairro: user.bairro,
-          city: user.city,
-          state: user.state,
-          cep: user.cep,
         },
       });
     } catch (error) {
@@ -397,24 +381,6 @@ class UserController {
         updates.phone = normalizedPhone;
       }
 
-      const partialAddressInput: Record<string, unknown> = {};
-      for (const field of ADDRESS_FIELDS) {
-        if (hasField(field)) {
-          partialAddressInput[field] = payload[field];
-        }
-      }
-      if (Object.keys(partialAddressInput).length > 0) {
-        const partialAddressResult = sanitizePartialAddressInput(partialAddressInput);
-        if (!partialAddressResult.ok) {
-          return res.status(400).json({
-            message: 'Endereco invalido.',
-            error: 'Endereco invalido.',
-            fields: partialAddressResult.errors,
-          });
-        }
-        Object.assign(updates, partialAddressResult.value);
-      }
-
       const fieldsToUpdate = Object.keys(updates);
       if (fieldsToUpdate.length === 0) {
         return res.status(400).json({
@@ -433,7 +399,7 @@ class UserController {
       );
 
       const userRows = await runUserQuery<RowDataPacket[]>(
-        'SELECT id, name, email, phone, street, number, complement, bairro, city, state, cep FROM users WHERE id = ?',
+        'SELECT id, name, email, phone FROM users WHERE id = ?',
         [userId]
       );
 
@@ -467,13 +433,6 @@ class UserController {
           name: user.name,
           email: user.email,
           phone: user.phone,
-          street: user.street,
-          number: user.number,
-          complement: user.complement,
-          bairro: user.bairro,
-          city: user.city,
-          state: user.state,
-          cep: user.cep,
         },
       });
     } catch (error: any) {
@@ -752,13 +711,6 @@ class UserController {
           email: user.email,
           role: effectiveRole,
           phone: user.phone ?? null,
-          street: user.street ?? null,
-          number: user.number ?? null,
-          complement: user.complement ?? null,
-          bairro: user.bairro ?? null,
-          city: user.city ?? null,
-          state: user.state ?? null,
-          cep: user.cep ?? null,
           broker_status: user.broker_status,
         },
         token,
@@ -959,13 +911,6 @@ class UserController {
           email: user.email ?? fallbackEmail,
           role: effectiveRole,
           phone: user.phone ?? phoneOverride ?? phone ?? null,
-          street: user.street ?? street ?? null,
-          number: user.number ?? number ?? null,
-          complement: user.complement ?? complement ?? null,
-          bairro: user.bairro ?? bairro ?? null,
-          city: user.city ?? city ?? null,
-          state: user.state ?? state ?? null,
-          cep: user.cep ?? cep ?? null,
           broker_status: brokerStatus,
         },
         token,

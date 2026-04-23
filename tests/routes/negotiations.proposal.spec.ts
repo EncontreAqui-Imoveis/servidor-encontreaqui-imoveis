@@ -256,6 +256,34 @@ describe('POST /negotiations/proposal', () => {
     expect(response.body.error).toContain('idempotency_key');
   });
 
+  it('rejects retroactive explicit proposal validity date', async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yyyy = yesterday.getFullYear().toString().padStart(4, '0');
+    const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+    const dd = String(yesterday.getDate()).padStart(2, '0');
+    const retroDate = `${yyyy}-${mm}-${dd}`;
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-retro-date',
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '111.222.333-44',
+      validadeDias: 10,
+      proposal_validity_date: retroDate,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('PROPOSAL_VALIDATION_FAILED');
+    expect(String(response.body.error ?? '')).toContain('proposal_validity_date');
+  });
+
   it('allows broker who is not the capturing broker to create proposal', async () => {
     txMock.query
       .mockResolvedValueOnce([[]])

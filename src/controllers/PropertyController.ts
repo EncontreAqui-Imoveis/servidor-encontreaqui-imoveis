@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { RowDataPacket, ResultSetHeader } from "mysql2";
 import { deleteCloudinaryAsset, uploadToCloudinary } from "../config/cloudinary";
 import AuthRequest from "../middlewares/auth";
-import { notifyAdmins } from "../services/notificationService";
+import { createAdminNotification, notifyAdmins } from "../services/notificationService";
 import {
   getPropertyDbConnection,
   propertyQueryExecutor,
@@ -97,6 +97,15 @@ const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
 
 const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
+// Regras de vitrine: o imóvel só deve sair da listagem pública após envio da proposta assinada.
+const NEGOTIATION_PUBLIC_BLOCKING_STATUSES = [
+  'DOCUMENTATION_PHASE',
+  'IN_NEGOTIATION',
+  'CONTRACT_DRAFTING',
+  'AWAITING_SIGNATURES',
+  'SOLD',
+  'RENTED',
+];
 
 const DEAL_TYPE_MAP: Record<string, DealType> = {
   sale: "sale",
@@ -1960,11 +1969,33 @@ class PropertyController {
       }
 
       try {
-        await notifyAdmins(
-          `Novo imovel enviado por cliente: '${title}'.`,
-          'property',
-          propertyId
-        );
+        const ownerPhoneDigits = String(owner_phone ?? '').replace(/\D/g, '');
+        const localPhoneDigits =
+          ownerPhoneDigits.length >= 10 && ownerPhoneDigits.length <= 13 ? ownerPhoneDigits : null;
+        const whatsappDigits = localPhoneDigits
+          ? localPhoneDigits.startsWith('55')
+            ? localPhoneDigits
+            : `55${localPhoneDigits}`
+          : null;
+        const whatsappUrl = whatsappDigits
+          ? `https://wa.me/${whatsappDigits}`
+          : null;
+
+        await createAdminNotification({
+          type: 'announcement',
+          title: 'Aviso: cliente tentou anunciar imóvel',
+          message: `Novo imóvel enviado por cliente: '${title}'.`,
+          relatedEntityId: propertyId,
+          metadata: {
+            source: 'client_property_create',
+            propertyId,
+            propertyTitle: title,
+            clientId: userId,
+            clientName: owner_name ?? null,
+            clientPhone: localPhoneDigits,
+            whatsappUrl,
+          },
+        });
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre imovel de cliente:', notifyError);
       }
@@ -3095,6 +3126,90 @@ class PropertyController {
     }
   }
 
+  async getAvailableCitiesWithCount(req: Request, res: Response) {
+    try {
+      const placeholders = NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ');
+      const rows = await runPropertyQuery<RowDataPacket[]>(
+        `
+          SELECT
+            p.city,
+            COUNT(*) AS total
+          FROM properties p
+          WHERE p.city IS NOT NULL
+            AND p.city <> ''
+            AND p.status = 'approved'
+            AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM negotiations nx
+              WHERE nx.property_id = p.id
+                AND UPPER(TRIM(nx.status)) IN (${placeholders})
+            )
+          GROUP BY p.city
+          ORDER BY p.city ASC
+        `,
+        [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES]
+      );
+      return res.status(200).json(
+        rows.map((row) => ({
+          city: String(row.city ?? '').trim(),
+          total: Number(row.total ?? 0),
+        }))
+      );
+    } catch (error) {
+      console.error('Erro ao buscar cidades disponíveis com contagem:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async getAvailableBairrosWithCount(req: Request, res: Response) {
+    const city = String(req.query.city ?? '').trim();
+    try {
+      const placeholders = NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ');
+      const whereParams: Array<string> = [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES];
+      let cityClause = '';
+      if (city.length > 0) {
+        cityClause = ' AND p.city = ?';
+        whereParams.push(city);
+      }
+
+      const rows = await runPropertyQuery<RowDataPacket[]>(
+        `
+          SELECT
+            p.bairro,
+            p.city,
+            COUNT(*) AS total
+          FROM properties p
+          WHERE p.bairro IS NOT NULL
+            AND p.bairro <> ''
+            AND p.status = 'approved'
+            AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+            ${cityClause}
+            AND NOT EXISTS (
+              SELECT 1
+              FROM negotiations nx
+              WHERE nx.property_id = p.id
+                AND UPPER(TRIM(nx.status)) IN (${placeholders})
+            )
+          GROUP BY p.bairro, p.city
+          ORDER BY p.bairro ASC
+        `,
+        whereParams
+      );
+
+      return res.status(200).json(
+        rows.map((row) => ({
+          bairro: String(row.bairro ?? '').trim(),
+          city: String(row.city ?? '').trim(),
+          total: Number(row.total ?? 0),
+        }))
+      );
+    } catch (error) {
+      console.error('Erro ao buscar bairros disponíveis com contagem:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
   async listUserProperties(req: AuthRequest, res: Response) {
     const userId = req.userId;
 
@@ -3377,13 +3492,13 @@ class PropertyController {
       }
     }
 
-    const negotiationPlaceholders = NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ');
+    const negotiationPlaceholders = NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ');
     whereClauses.push(`NOT EXISTS (
       SELECT 1 FROM negotiations nx
       WHERE nx.property_id = p.id
-        AND UPPER(TRIM(nx.status)) NOT IN (${negotiationPlaceholders})
+        AND UPPER(TRIM(nx.status)) IN (${negotiationPlaceholders})
     )`);
-    params.push(...NEGOTIATION_TERMINAL_STATUSES);
+    params.push(...NEGOTIATION_PUBLIC_BLOCKING_STATUSES);
 
     const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
@@ -3545,13 +3660,13 @@ class PropertyController {
             AND NOT EXISTS (
               SELECT 1 FROM negotiations nx
               WHERE nx.property_id = p.id
-                AND UPPER(TRIM(nx.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ')})
+                AND UPPER(TRIM(nx.status)) IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
             )
           GROUP BY p.id, fp.position
           ORDER BY fp.position ASC
           LIMIT ? OFFSET ?
         `,
-        [...NEGOTIATION_TERMINAL_STATUSES, ...NEGOTIATION_TERMINAL_STATUSES, limit, offset]
+        [...NEGOTIATION_TERMINAL_STATUSES, ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, limit, offset]
       );
 
       const countRows = await runPropertyQuery<RowDataPacket[]>(
@@ -3564,11 +3679,11 @@ class PropertyController {
             AND NOT EXISTS (
               SELECT 1 FROM negotiations nx
               WHERE nx.property_id = p.id
-                AND UPPER(TRIM(nx.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUSES.map(() => '?').join(', ')})
+                AND UPPER(TRIM(nx.status)) IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
             )
         `
         ,
-        [...NEGOTIATION_TERMINAL_STATUSES]
+        [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES]
       );
 
       const total = countRows[0]?.total ?? 0;

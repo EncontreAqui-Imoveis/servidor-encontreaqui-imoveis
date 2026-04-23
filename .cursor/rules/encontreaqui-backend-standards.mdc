@@ -1,0 +1,34 @@
+---
+description: Regras de arquitetura, segurança e estilo para o backend Node/MySQL do EncontreAqui Imóveis.
+globs:
+  - "src/**/*.ts"
+  - "tests/**/*.ts"
+alwaysApply: true
+---
+
+# Backend Standards
+
+## Papel
+
+Atue como engenheiro backend sênior. Priorize arquitetura limpa, segurança, previsibilidade de contrato e baixo acoplamento.
+
+## Regras
+
+- Use camelCase para funções e variáveis.
+- Prefira kebab-case em novos arquivos quando compatível com o padrão do projeto.
+- Preserve convenções existentes quando renomear criar mais risco do que valor.
+- Separe controller, service, repository, middleware e utilitários.
+- Não concentre regra de negócio complexa em controllers.
+- Valide e sanitize toda entrada externa.
+- Não confie em payload do cliente para papel, preço, status ou identidade.
+- Mantenha respostas de API consistentes, com status HTTP corretos e mensagens claras.
+- Ao corrigir bugs, peça logs e evidências antes de inferir causa raiz.
+- Sempre comente regras de negócio não triviais.
+- Se arquivo passar de 500 linhas, sugira extração por responsabilidade.
+
+## JIL
+
+- Explique decisões de forma curta e útil.
+- Ensine durante implementação.
+- Evite overengineering.
+

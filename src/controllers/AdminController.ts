@@ -756,6 +756,7 @@ interface AdminNegotiationRequestSummaryRow extends RowDataPacket {
   property_address: string | null;
   proposal_count: number;
   latest_updated_at: Date | string | null;
+  property_image_url: string | null;
   top_negotiation_id: string | null;
   top_proposal_value: number | string | null;
   top_client_name: string | null;
@@ -1260,18 +1261,15 @@ class AdminController {
           LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
           LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
           LEFT JOIN (
-            SELECT ranked.negotiation_id, ranked.created_at
-            FROM (
-              SELECT
-                h.negotiation_id,
-                h.created_at,
-                ROW_NUMBER() OVER (
-                  PARTITION BY h.negotiation_id
-                  ORDER BY h.created_at DESC
-                ) AS rn
-              FROM negotiation_history h
-            ) ranked
-            WHERE ranked.rn = 1
+            SELECT
+              h.negotiation_id,
+              h.created_at
+            FROM negotiation_history h
+            INNER JOIN (
+              SELECT negotiation_id, MAX(id) AS max_id
+              FROM negotiation_history
+              GROUP BY negotiation_id
+            ) hm ON hm.negotiation_id = h.negotiation_id AND h.id = hm.max_id
           ) latest_history ON latest_history.negotiation_id = n.id
           LEFT JOIN (
             SELECT
@@ -1282,19 +1280,16 @@ class AdminController {
             GROUP BY h.negotiation_id
           ) approved_history ON approved_history.negotiation_id = n.id
           LEFT JOIN (
-            SELECT ranked.negotiation_id, ranked.id
-            FROM (
-              SELECT
-                d.negotiation_id,
-                d.id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY d.negotiation_id
-                  ORDER BY d.created_at DESC, d.id DESC
-                ) AS rn
-              FROM negotiation_documents d
-              WHERE d.type = 'other'
-            ) ranked
-            WHERE ranked.rn = 1
+            SELECT
+              d.negotiation_id,
+              d.id
+            FROM negotiation_documents d
+            INNER JOIN (
+              SELECT negotiation_id, MAX(id) AS max_id
+              FROM negotiation_documents
+              WHERE type = 'other'
+              GROUP BY negotiation_id
+            ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
           ) signed_doc ON signed_doc.negotiation_id = n.id
           WHERE 1 = 1
           ${clause}
@@ -1327,6 +1322,7 @@ class AdminController {
       const offset = (page - 1) * limit;
       const statusFilter = parseNegotiationStatusFilter(req.query.status) ?? 'UNDER_REVIEW';
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
+      const clauseForN2 = clause.replace(/n\./g, 'n2.').replace(/p\./g, 'p2.');
       const clientSql = await resolveNegotiationClientSqlFragments();
 
       const [countRows] = await adminDb.query<RowDataPacket[]>(
@@ -1343,13 +1339,42 @@ class AdminController {
 
       const [rows] = await adminDb.query<AdminNegotiationRequestSummaryRow[]>(
         `
-          WITH filtered AS (
+          SELECT
+            g.property_id,
+            g.property_code,
+            g.property_title,
+            g.property_address,
+            g.proposal_count,
+            g.latest_updated_at,
+            (
+              SELECT pi.image_url
+              FROM property_images pi
+              WHERE pi.property_id = g.property_id
+              ORDER BY pi.id ASC
+              LIMIT 1
+            ) AS property_image_url,
+            r.negotiation_id AS top_negotiation_id,
+            r.final_value AS top_proposal_value,
+            r.client_name AS top_client_name,
+            r.created_at AS top_created_at
+          FROM (
+            SELECT
+              n.property_id,
+              MAX(p.code) AS property_code,
+              MAX(p.title) AS property_title,
+              MAX(CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state)) AS property_address,
+              COUNT(*) AS proposal_count,
+              MAX(COALESCE(n.updated_at, n.created_at)) AS latest_updated_at
+            FROM negotiations n
+            JOIN properties p ON p.id = n.property_id
+            WHERE 1 = 1
+            ${clause}
+            GROUP BY n.property_id
+          ) g
+          JOIN (
             SELECT
               n.id AS negotiation_id,
               n.property_id,
-              p.code AS property_code,
-              p.title AS property_title,
-              CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
               COALESCE(n.final_value, 0) AS final_value,
               COALESCE(n.updated_at, n.created_at) AS updated_at,
               n.created_at,
@@ -1358,44 +1383,35 @@ class AdminController {
             JOIN properties p ON p.id = n.property_id
             WHERE 1 = 1
             ${clause}
-          ),
-          grouped AS (
-            SELECT
-              f.property_id,
-              MAX(f.property_code) AS property_code,
-              MAX(f.property_title) AS property_title,
-              MAX(f.property_address) AS property_address,
-              COUNT(*) AS proposal_count,
-              MAX(f.updated_at) AS latest_updated_at
-            FROM filtered f
-            GROUP BY f.property_id
-          ),
-          ranked AS (
-            SELECT
-              f.*,
-              ROW_NUMBER() OVER (
-                PARTITION BY f.property_id
-                ORDER BY f.final_value DESC, f.updated_at DESC, f.negotiation_id DESC
-              ) AS rn
-            FROM filtered f
+          ) r ON r.property_id = g.property_id
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM (
+              SELECT
+                n2.id AS negotiation_id,
+                n2.property_id,
+                COALESCE(n2.final_value, 0) AS final_value,
+                COALESCE(n2.updated_at, n2.created_at) AS updated_at
+              FROM negotiations n2
+              JOIN properties p2 ON p2.id = n2.property_id
+              WHERE 1 = 1
+              ${clauseForN2}
+            ) r2
+            WHERE r2.property_id = r.property_id
+              AND (
+                r2.final_value > r.final_value
+                OR (r2.final_value = r.final_value AND r2.updated_at > r.updated_at)
+                OR (
+                  r2.final_value = r.final_value
+                  AND r2.updated_at = r.updated_at
+                  AND r2.negotiation_id > r.negotiation_id
+                )
+              )
           )
-          SELECT
-            g.property_id,
-            g.property_code,
-            g.property_title,
-            g.property_address,
-            g.proposal_count,
-            g.latest_updated_at,
-            r.negotiation_id AS top_negotiation_id,
-            r.final_value AS top_proposal_value,
-            r.client_name AS top_client_name,
-            r.created_at AS top_created_at
-          FROM grouped g
-          JOIN ranked r ON r.property_id = g.property_id AND r.rn = 1
           ORDER BY g.latest_updated_at DESC, g.property_id DESC
           LIMIT ? OFFSET ?
         `,
-        [...params, limit, offset]
+        [...params, ...params, ...params, limit, offset]
       );
 
       return res.status(200).json({
@@ -1404,6 +1420,7 @@ class AdminController {
           propertyCode: row.property_code ?? null,
           propertyTitle: row.property_title ?? null,
           propertyAddress: row.property_address ?? null,
+          propertyImageUrl: row.property_image_url ?? null,
           proposalCount: Number(row.proposal_count ?? 0),
           updatedAt: toNullableIsoDate(row.latest_updated_at),
           topProposal: {
@@ -1505,19 +1522,16 @@ class AdminController {
           LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
           LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
           LEFT JOIN (
-            SELECT ranked.negotiation_id, ranked.id
-            FROM (
-              SELECT
-                d.negotiation_id,
-                d.id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY d.negotiation_id
-                  ORDER BY d.created_at DESC, d.id DESC
-                ) AS rn
-              FROM negotiation_documents d
-              WHERE d.type = 'other'
-            ) ranked
-            WHERE ranked.rn = 1
+            SELECT
+              d.negotiation_id,
+              d.id
+            FROM negotiation_documents d
+            INNER JOIN (
+              SELECT negotiation_id, MAX(id) AS max_id
+              FROM negotiation_documents
+              WHERE type = 'other'
+              GROUP BY negotiation_id
+            ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
           ) signed_doc ON signed_doc.negotiation_id = n.id
           WHERE n.property_id = ?
           ${clause}

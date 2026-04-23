@@ -55,6 +55,52 @@ export async function revokeUserSessions(db: Queryable, userId: number): Promise
   );
 }
 
+async function updateBrokerStatusWithLegacyFallback(
+  db: Queryable,
+  brokerId: number,
+  status: string
+): Promise<void> {
+  try {
+    await db.query(
+      'UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [status, brokerId],
+    );
+  } catch (error) {
+    const code = String((error as { code?: unknown })?.code ?? '').toUpperCase();
+    const message = String((error as { message?: unknown })?.message ?? '');
+    const isMissingUpdatedAt =
+      code === 'ER_BAD_FIELD_ERROR' &&
+      message.toLowerCase().includes("unknown column 'updated_at'");
+    if (!isMissingUpdatedAt) {
+      throw error;
+    }
+    await db.query('UPDATE brokers SET status = ? WHERE id = ?', [status, brokerId]);
+  }
+}
+
+async function updateBrokerDocumentsStatusWithLegacyFallback(
+  db: Queryable,
+  brokerId: number,
+  status: string
+): Promise<void> {
+  try {
+    await db.query(
+      'UPDATE broker_documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?',
+      [status, brokerId],
+    );
+  } catch (error) {
+    const code = String((error as { code?: unknown })?.code ?? '').toUpperCase();
+    const message = String((error as { message?: unknown })?.message ?? '');
+    const isMissingUpdatedAt =
+      code === 'ER_BAD_FIELD_ERROR' &&
+      message.toLowerCase().includes("unknown column 'updated_at'");
+    if (!isMissingUpdatedAt) {
+      throw error;
+    }
+    await db.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [status, brokerId]);
+  }
+}
+
 export async function rejectBrokerAccount(
   db: Queryable,
   brokerId: number,
@@ -64,14 +110,8 @@ export async function rejectBrokerAccount(
     return { snapshot, affected: false };
   }
 
-  await db.query(
-    'UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['rejected', brokerId],
-  );
-  await db.query(
-    'UPDATE broker_documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?',
-    ['rejected', brokerId],
-  );
+  await updateBrokerStatusWithLegacyFallback(db, brokerId, 'rejected');
+  await updateBrokerDocumentsStatusWithLegacyFallback(db, brokerId, 'rejected');
   await db.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
   await revokeUserSessions(db, brokerId);
 
@@ -87,14 +127,8 @@ export async function approveBrokerAccount(
     return { snapshot, affected: false };
   }
 
-  await db.query(
-    'UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    ['approved', brokerId],
-  );
-  await db.query(
-    'UPDATE broker_documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?',
-    ['approved', brokerId],
-  );
+  await updateBrokerStatusWithLegacyFallback(db, brokerId, 'approved');
+  await updateBrokerDocumentsStatusWithLegacyFallback(db, brokerId, 'approved');
 
   return { snapshot, affected: true };
 }

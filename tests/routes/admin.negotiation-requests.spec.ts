@@ -67,6 +67,7 @@ describe('admin negotiation request views', () => {
   it('returns property grouped summary with top proposal', async () => {
     queryMock
       .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
+      .mockResolvedValueOnce([[{ column_name: 'updated_at' }]])
       .mockResolvedValueOnce([[{ total: 1 }]])
       .mockResolvedValueOnce([
         [
@@ -109,6 +110,7 @@ describe('admin negotiation request views', () => {
   it('returns paginated requests for a single property', async () => {
     queryMock
       .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
+      .mockResolvedValueOnce([[{ column_name: 'updated_at' }]])
       .mockResolvedValueOnce([[{ total: 2 }]])
       .mockResolvedValueOnce([
         [
@@ -169,6 +171,7 @@ describe('admin negotiation request views', () => {
   it('returns 500 when summary query fails', async () => {
     queryMock
       .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
+      .mockResolvedValueOnce([[{ column_name: 'updated_at' }]])
       .mockResolvedValueOnce([[{ total: 1 }]])
       .mockRejectedValueOnce(Object.assign(new Error('Unknown column'), { code: 'ER_BAD_FIELD_ERROR' }));
 

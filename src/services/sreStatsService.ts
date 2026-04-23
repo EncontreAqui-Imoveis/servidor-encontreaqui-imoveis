@@ -121,8 +121,18 @@ export class SreStatsService {
             try {
                 const railwayRes = await fetch('https://status.railway.com/api/v2/summary.json', { signal: AbortSignal.timeout(5000) });
                 if (railwayRes.ok) {
-                    const data = await railwayRes.json();
-                    this.railwayStatus = data?.page?.status || 'UP';
+                    const contentType = railwayRes.headers.get('content-type') || '';
+                    if (contentType.includes('application/json')) {
+                        const data = await railwayRes.json() as { page?: { status?: string } };
+                        this.railwayStatus = data?.page?.status || 'UP';
+                    } else {
+                        const textBody = await railwayRes.text();
+                        console.warn('Resposta não-JSON ao consultar status do Railway:', {
+                            status: railwayRes.status,
+                            contentType,
+                            sample: textBody.slice(0, 120),
+                        });
+                    }
                 }
             } catch (e) {
                 console.error('Falha ao buscar status do Railway:', e);

@@ -60,6 +60,51 @@ const STATUS_MAP: Record<string, PropertyStatus> = {
   sold: 'sold',
 };
 
+async function updateBrokerRecordWithLegacyUpdatedAtFallback(
+  db: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  brokerId: number,
+  status: string
+): Promise<void> {
+  try {
+    await db.query('UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
+      status,
+      brokerId,
+    ]);
+  } catch (error) {
+    const code = String((error as { code?: unknown })?.code ?? '').toUpperCase();
+    const message = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+    if (code !== 'ER_BAD_FIELD_ERROR' || !message.includes("unknown column 'updated_at'")) {
+      throw error;
+    }
+    await db.query('UPDATE brokers SET status = ? WHERE id = ?', [status, brokerId]);
+  }
+}
+
+async function promoteBrokerRecordWithLegacyUpdatedAtFallback(
+  db: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  brokerId: number,
+  creci: string
+): Promise<void> {
+  try {
+    await db.query(
+      `UPDATE brokers SET creci = ?, status = 'approved', agency_id = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [creci, brokerId],
+    );
+  } catch (error) {
+    const code = String((error as { code?: unknown })?.code ?? '').toUpperCase();
+    const message = String((error as { message?: unknown })?.message ?? '').toLowerCase();
+    if (code !== 'ER_BAD_FIELD_ERROR' || !message.includes("unknown column 'updated_at'")) {
+      throw error;
+    }
+    await db.query(
+      `UPDATE brokers SET creci = ?, status = 'approved', agency_id = NULL
+       WHERE id = ?`,
+      [creci, brokerId],
+    );
+  }
+}
+
 const ALLOWED_STATUS = new Set<PropertyStatus>([
   'pending_approval',
   'approved',
@@ -900,6 +945,39 @@ type NegotiationClientSqlFragments = {
   clientCpf: string;
 };
 
+type NegotiationTimeSqlFragments = {
+  nUpdatedAtOrCreatedAt: string;
+  n2UpdatedAtOrCreatedAt: string;
+};
+
+async function resolveNegotiationTimeSqlFragments(): Promise<NegotiationTimeSqlFragments> {
+  try {
+    const [rows] = await adminDb.query<RowDataPacket[]>(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'negotiations'
+          AND column_name = 'updated_at'
+      `
+    );
+    const hasUpdatedAt = rows.length > 0;
+    return {
+      nUpdatedAtOrCreatedAt: hasUpdatedAt
+        ? 'COALESCE(n.updated_at, n.created_at)'
+        : 'n.created_at',
+      n2UpdatedAtOrCreatedAt: hasUpdatedAt
+        ? 'COALESCE(n2.updated_at, n2.created_at)'
+        : 'n2.created_at',
+    };
+  } catch {
+    return {
+      nUpdatedAtOrCreatedAt: 'n.created_at',
+      n2UpdatedAtOrCreatedAt: 'n2.created_at',
+    };
+  }
+}
+
 async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClientSqlFragments> {
   try {
     const [rows] = await adminDb.query<RowDataPacket[]>(
@@ -1324,6 +1402,7 @@ class AdminController {
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
       const clauseForN2 = clause.replace(/n\./g, 'n2.').replace(/p\./g, 'p2.');
       const clientSql = await resolveNegotiationClientSqlFragments();
+      const timeSql = await resolveNegotiationTimeSqlFragments();
 
       const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
@@ -1364,7 +1443,7 @@ class AdminController {
               MAX(p.title) AS property_title,
               MAX(CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state)) AS property_address,
               COUNT(*) AS proposal_count,
-              MAX(COALESCE(n.updated_at, n.created_at)) AS latest_updated_at
+              MAX(${timeSql.nUpdatedAtOrCreatedAt}) AS latest_updated_at
             FROM negotiations n
             JOIN properties p ON p.id = n.property_id
             WHERE 1 = 1
@@ -1376,7 +1455,7 @@ class AdminController {
               n.id AS negotiation_id,
               n.property_id,
               COALESCE(n.final_value, 0) AS final_value,
-              COALESCE(n.updated_at, n.created_at) AS updated_at,
+              ${timeSql.nUpdatedAtOrCreatedAt} AS updated_at,
               n.created_at,
               ${clientSql.clientName} AS client_name
             FROM negotiations n
@@ -1391,7 +1470,7 @@ class AdminController {
                 n2.id AS negotiation_id,
                 n2.property_id,
                 COALESCE(n2.final_value, 0) AS final_value,
-                COALESCE(n2.updated_at, n2.created_at) AS updated_at
+                ${timeSql.n2UpdatedAtOrCreatedAt} AS updated_at
               FROM negotiations n2
               JOIN properties p2 ON p2.id = n2.property_id
               WHERE 1 = 1
@@ -1464,6 +1543,7 @@ class AdminController {
       const statusFilter = parseNegotiationStatusFilter(req.query.status) ?? 'UNDER_REVIEW';
       const { clause, params } = buildNegotiationStatusClause(statusFilter);
       const clientSql = await resolveNegotiationClientSqlFragments();
+      const timeSql = await resolveNegotiationTimeSqlFragments();
 
       const [countRows] = await adminDb.query<RowDataPacket[]>(
         `
@@ -1514,7 +1594,7 @@ class AdminController {
               CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.others')) AS DECIMAL(12,2)),
               0
             ) AS payment_outros,
-            COALESCE(n.updated_at, n.created_at) AS last_event_at,
+            ${timeSql.nUpdatedAtOrCreatedAt} AS last_event_at,
             NULL AS approved_at,
             signed_doc.id AS signed_document_id
           FROM negotiations n
@@ -1535,7 +1615,7 @@ class AdminController {
           ) signed_doc ON signed_doc.negotiation_id = n.id
           WHERE n.property_id = ?
           ${clause}
-          ORDER BY COALESCE(n.final_value, 0) DESC, COALESCE(n.updated_at, n.created_at) DESC, n.id DESC
+          ORDER BY COALESCE(n.final_value, 0) DESC, ${timeSql.nUpdatedAtOrCreatedAt} DESC, n.id DESC
           LIMIT ? OFFSET ?
         `,
         [propertyId, ...params, limit, offset]
@@ -4760,11 +4840,7 @@ class AdminController {
       }
 
       if (snapshot.broker_id != null) {
-        await tx.query(
-          `UPDATE brokers SET creci = ?, status = 'approved', agency_id = NULL, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [normalizedCreci, clientId],
-        );
+        await promoteBrokerRecordWithLegacyUpdatedAtFallback(tx, clientId, normalizedCreci);
       } else {
         await tx.query(
           `INSERT INTO brokers (id, creci, status, agency_id) VALUES (?, ?, 'approved', NULL)`,
@@ -4934,10 +5010,7 @@ class AdminController {
         }
         role = 'client';
       } else {
-        await tx.query(
-          'UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-          [normalizedStatus, brokerId],
-        );
+        await updateBrokerRecordWithLegacyUpdatedAtFallback(tx, brokerId, normalizedStatus);
         role = 'broker';
       }
 

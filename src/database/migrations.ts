@@ -773,6 +773,34 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
   }
 }
 
+/**
+ * ENUMs estreitos em negotiation_history / negotiations geram
+ * "Data truncated" ao gravar transições (ex.: from_status=DOCUMENTATION_PHASE, to_status=REFUSED).
+ * Normaliza colunas de status para VARCHAR quando ainda forem ENUM legado.
+ */
+async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
+  if (await tableExists('negotiation_history')) {
+    for (const col of ['from_status', 'to_status'] as const) {
+      if (!(await columnExists('negotiation_history', col))) continue;
+      const t = (await getColumnType('negotiation_history', col)) ?? '';
+      if (t.toLowerCase().startsWith('enum(')) {
+        await connection.query(
+          `ALTER TABLE negotiation_history MODIFY COLUMN \`${col}\` VARCHAR(64) NOT NULL`
+        );
+      }
+    }
+  }
+
+  if (await tableExists('negotiations') && (await columnExists('negotiations', 'status'))) {
+    const t = (await getColumnType('negotiations', 'status')) ?? '';
+    if (t.toLowerCase().startsWith('enum(') && !t.includes('REFUSED')) {
+      await connection.query(
+        `ALTER TABLE negotiations MODIFY COLUMN status VARCHAR(64) NOT NULL`
+      );
+    }
+  }
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -793,6 +821,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureAdminsTokenVersionColumn();
     await ensureUsersTokenVersionColumn();
     await ensureNegotiationResponsiblesAndBrokerProfileType();
+    await ensureNegotiationStatusHistoryColumnsFreetext();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

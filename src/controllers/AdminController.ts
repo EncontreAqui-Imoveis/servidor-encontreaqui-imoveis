@@ -767,6 +767,7 @@ function buildRejectedReviewSummary(
 const NEGOTIATION_INTERNAL_STATUSES = new Set([
   'PROPOSAL_DRAFT',
   'PROPOSAL_SENT',
+  'PROPOSAL_SIGNED',
   'IN_NEGOTIATION',
   'DOCUMENTATION_PHASE',
   'CONTRACT_DRAFTING',
@@ -1967,9 +1968,15 @@ class AdminController {
         const valuesClause = competingRows.map(() => '(UUID(), ?, ?, ?, ?, CAST(? AS JSON), CURRENT_TIMESTAMP)').join(', ');
         const historyParams: Array<string | number> = [];
         for (const row of competingRows) {
+          const rawComp = String(row.status ?? '')
+            .trim()
+            .toUpperCase();
+          const fromCompeting = NEGOTIATION_INTERNAL_STATUSES.has(rawComp)
+            ? rawComp
+            : 'PROPOSAL_SENT';
           historyParams.push(
             String(row.id ?? ''),
-            String(row.status ?? ''),
+            fromCompeting,
             'REFUSED',
             actorId,
             JSON.stringify({
@@ -2084,6 +2091,9 @@ class AdminController {
 
       const negotiation = rows[0];
       const currentStatus = String(negotiation.status ?? '').toUpperCase();
+      const fromStatusForHistory = NEGOTIATION_INTERNAL_STATUSES.has(currentStatus)
+        ? currentStatus
+        : 'PROPOSAL_SENT';
 
       if (currentStatus === 'SOLD' || currentStatus === 'RENTED') {
         await tx.rollback();
@@ -2127,7 +2137,7 @@ class AdminController {
         `,
         [
           negotiationId,
-          currentStatus,
+          fromStatusForHistory,
           actorId,
           JSON.stringify({
             action: 'admin_rejected',

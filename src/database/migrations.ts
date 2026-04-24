@@ -307,7 +307,7 @@ function isSafeMySqlIdentifier(name: string): boolean {
 }
 
 /** Tabelas antigas: PK só em property_id; evolui para (property_id, scope) e posição única por escopo. */
-async function migrateFeaturedPropertiesScope(): Promise<void> {
+async function migrateFeaturedPropertiesScopeImpl(): Promise<void> {
   if (!(await tableExists('featured_properties'))) {
     return;
   }
@@ -358,6 +358,65 @@ async function migrateFeaturedPropertiesScope(): Promise<void> {
   } catch {
     // idempotente se migração parcial
   }
+}
+
+/**
+ * Idempotente: garante a coluna `scope` (e PK composta) em `featured_properties`.
+ * Pode ser chamada no boot (`applyMigrations`) e antes dos endpoints de destaques
+ * (auto-reparo se alguma instalação não aplicou a migração).
+ */
+export async function runFeaturedPropertiesScopeMigration(): Promise<void> {
+  if (!(await tableExists('featured_properties'))) {
+    return;
+  }
+  if (await columnExists('featured_properties', 'scope')) {
+    return;
+  }
+  try {
+    await migrateFeaturedPropertiesScopeImpl();
+  } catch (e) {
+    console.error(
+      '[featured_properties] Migração scope (tabela legada) falhou, tentando reparo mínimo:',
+      e
+    );
+    const scopeNow = await columnExists('featured_properties', 'scope');
+    if (!scopeNow) {
+      try {
+        await connection.query(`
+          ALTER TABLE featured_properties
+            ADD COLUMN scope ENUM('sale', 'rent') NOT NULL DEFAULT 'sale' AFTER property_id
+        `);
+      } catch (addColErr) {
+        console.error(
+          '[featured_properties] Não foi possível ADD COLUMN scope (verifique o schema no MySQL):',
+          addColErr
+        );
+      }
+    }
+    try {
+      await connection.query(
+        'ALTER TABLE featured_properties DROP PRIMARY KEY, ADD PRIMARY KEY (property_id, scope)'
+      );
+    } catch (pkErr) {
+      console.error(
+        '[featured_properties] Ajuste de chave primária (property_id, scope):',
+        pkErr
+      );
+    }
+    try {
+      await connection.query(
+        'ALTER TABLE featured_properties ADD UNIQUE KEY idx_featured_scope_position (scope, position)'
+      );
+    } catch {
+      /* idempotente */
+    }
+  }
+  if (await columnExists('featured_properties', 'scope')) {
+    return;
+  }
+  console.error(
+    "[featured_properties] Coluna 'scope' ainda inexistente após migração; listagem/edição de destaques irá falhar até o banco ser corrigido."
+  );
 }
 
 async function ensureNotificationsType(): Promise<void> {
@@ -806,7 +865,7 @@ export async function applyMigrations(): Promise<void> {
     await ensurePropertiesColumns();
     await ensurePropertyEditRequestsTable();
     await ensureFeaturedPropertiesTable();
-    await migrateFeaturedPropertiesScope();
+    await runFeaturedPropertiesScopeMigration();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();
     await ensureUserAddressColumns();

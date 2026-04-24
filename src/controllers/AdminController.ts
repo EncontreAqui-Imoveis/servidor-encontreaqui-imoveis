@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { adminDb } from '../services/adminPersistenceService';
+import { runFeaturedPropertiesScopeMigration } from '../database/migrations';
 import {
   hasValidCreci,
   normalizeCreci,
@@ -3530,6 +3531,7 @@ class AdminController {
 
   async listFeaturedProperties(req: Request, res: Response) {
     try {
+      await runFeaturedPropertiesScopeMigration();
       const [rows] = await adminDb.query<RowDataPacket[]>(
         `
           SELECT
@@ -3619,6 +3621,7 @@ class AdminController {
     };
 
     try {
+      await runFeaturedPropertiesScopeMigration();
       const allCheck = [...new Set([...saleIds, ...rentIds])];
       if (allCheck.length > 0) {
         const [approvedRows] = await adminDb.query<RowDataPacket[]>(

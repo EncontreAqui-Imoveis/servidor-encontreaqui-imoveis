@@ -85,6 +85,7 @@ type NegotiationSummaryPayload = {
     outros: number;
   } | null;
   propertyBrokerId: number | null;
+  sellerBrokerId: number | null;
   contractId: string | null;
   contractStatus: string | null;
   buyerApprovalStatus: string | null;
@@ -577,6 +578,7 @@ function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPa
     proposalValue: null,
     paymentBreakdown: null,
     propertyBrokerId: null,
+    sellerBrokerId: null,
     contractId: null,
     contractStatus: null,
     buyerApprovalStatus: null,
@@ -667,6 +669,10 @@ function buildMineNegotiationSummary(
     propertyBrokerId:
       row.property_broker_id != null && Number.isFinite(Number(row.property_broker_id))
         ? Number(row.property_broker_id)
+        : null,
+    sellerBrokerId:
+      row.selling_broker_id != null && Number.isFinite(Number(row.selling_broker_id))
+        ? Number(row.selling_broker_id)
         : null,
     contractId:
       row.contract_id != null && String(row.contract_id).trim().length > 0

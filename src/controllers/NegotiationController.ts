@@ -785,6 +785,7 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
           SELECT COUNT(*)
           FROM negotiation_documents nd
           WHERE nd.negotiation_id = n.id
+            AND nd.type = 'other'
             AND nd.document_type = 'contrato_assinado'
         ) AS signed_proposal_count
       FROM negotiations n
@@ -899,6 +900,7 @@ async function queryMineNegotiationsSchemaAware(
     SELECT COUNT(*)
     FROM negotiation_documents nd
     WHERE nd.negotiation_id = n.id
+      AND nd.type = 'other'
       AND nd.document_type = 'contrato_assinado'
   )`;
   const visiblePlaceholders = PROPOSAL_LIST_VISIBLE_STATUSES.map(() => '?').join(', ');
@@ -2072,6 +2074,7 @@ class NegotiationController {
           SELECT COUNT(*) AS c
           FROM negotiation_documents
           WHERE negotiation_id = ?
+            AND type = 'other'
             AND document_type = 'contrato_assinado'
         `,
         [negotiationId],
@@ -2496,6 +2499,7 @@ class NegotiationController {
           SELECT COUNT(*) AS c
           FROM negotiation_documents
           WHERE negotiation_id = ?
+            AND type = 'other'
             AND document_type = 'contrato_assinado'
         `,
         [negotiationId],

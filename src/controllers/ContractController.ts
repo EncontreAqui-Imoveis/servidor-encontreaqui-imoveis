@@ -145,6 +145,7 @@ interface CommissionContractRow extends RowDataPacket {
   property_purpose: string | null;
   updated_at: Date | string | null;
   commission_data: unknown;
+  signed_proposal_document_id: number | null;
 }
 
 interface ExistingContractRow extends RowDataPacket {
@@ -1507,7 +1508,16 @@ class ContractController {
             c.updated_at,
             p.title AS property_title,
             p.code AS property_code,
-            p.purpose AS property_purpose
+            p.purpose AS property_purpose,
+            (
+              SELECT nd.id
+              FROM negotiation_documents nd
+              WHERE nd.negotiation_id = c.negotiation_id
+                AND nd.type = 'other'
+                AND nd.document_type = 'contrato_assinado'
+              ORDER BY nd.created_at DESC, nd.id DESC
+              LIMIT 1
+            ) AS signed_proposal_document_id
           FROM contracts c
           JOIN properties p ON p.id = c.property_id
           WHERE c.status = 'FINALIZED'
@@ -1548,6 +1558,7 @@ class ContractController {
         totalVendedores += comissaoVendedor;
         totalPlataforma += taxaPlataforma;
 
+        const signedId = row.signed_proposal_document_id;
         return [{
           contractId: row.id,
           negotiationId: row.negotiation_id,
@@ -1556,6 +1567,12 @@ class ContractController {
           propertyCode: row.property_code ?? null,
           propertyPurpose: row.property_purpose ?? null,
           finalizedAt: toIsoString(row.updated_at),
+          signedProposalDocumentId:
+            signedId != null && Number.isFinite(Number(signedId)) ? Number(signedId) : null,
+          signedProposalDocumentSource:
+            signedId != null && Number.isFinite(Number(signedId))
+              ? 'negotiation_documents'
+              : null,
           commissionData: {
             valorVenda,
             comissaoCaptador,

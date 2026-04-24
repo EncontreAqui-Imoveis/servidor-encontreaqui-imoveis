@@ -1740,7 +1740,9 @@ class AdminController {
         `
           SELECT id
           FROM negotiation_documents
-          WHERE negotiation_id = ? AND type = 'other'
+          WHERE negotiation_id = ?
+            AND type = 'other'
+            AND document_type = 'contrato_assinado'
           ORDER BY created_at DESC, id DESC
           LIMIT 1
           FOR UPDATE
@@ -2314,7 +2316,9 @@ class AdminController {
             storage_size_bytes,
             storage_etag
           FROM negotiation_documents
-          WHERE negotiation_id = ? AND type = 'other'
+          WHERE negotiation_id = ?
+            AND type = 'other'
+            AND document_type = 'contrato_assinado'
           ORDER BY created_at DESC, id DESC
           LIMIT 1
         `,
@@ -2449,7 +2453,9 @@ class AdminController {
             storage_size_bytes,
             storage_etag
           FROM negotiation_documents
-          WHERE negotiation_id = ? AND type = 'other'
+          WHERE negotiation_id = ?
+            AND type = 'other'
+            AND document_type = 'contrato_assinado'
           ORDER BY created_at DESC, id DESC
           LIMIT 1
           FOR UPDATE
@@ -3082,10 +3088,10 @@ class AdminController {
 
       const property = rows[0];
       const currentStatus = String(property.status ?? '').toLowerCase();
-      if (currentStatus !== 'rented') {
+      if (currentStatus !== 'rented' && currentStatus !== 'sold') {
         await db.rollback();
         return res.status(400).json({
-          error: 'Apenas imóveis alugados podem ser disponibilizados novamente.',
+          error: 'Apenas imóveis vendidos ou alugados podem ser disponibilizados novamente.',
         });
       }
 
@@ -3102,13 +3108,14 @@ class AdminController {
         [propertyId]
       );
 
+      const dealType = currentStatus === 'rented' ? 'rent' : 'sale';
       await db.query(
         `
           DELETE FROM sales
           WHERE property_id = ?
-            AND deal_type = 'rent'
+            AND deal_type = ?
         `,
-        [propertyId]
+        [propertyId, dealType]
       );
 
       await db.commit();

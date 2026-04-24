@@ -58,8 +58,8 @@ describe('emailService', () => {
     process.env.EMAIL_PROVIDER = 'brevo';
     process.env.BREVO_API_KEY = 'brevo-key';
     process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
-    process.env.EMAIL_FROM_NAME = 'EncontreAqui Imoveis';
-    process.env.EMAIL_BRAND_NAME = 'EncontreAqui Imóveis';
+    process.env.EMAIL_FROM_NAME = 'Encontre Aqui Imóveis';
+    process.env.EMAIL_BRAND_NAME = 'Encontre Aqui Imóveis';
     fetchMock.mockResolvedValue({
       ok: true,
       text: vi.fn().mockResolvedValue(JSON.stringify({ messageId: 'brevo-123' })),
@@ -84,11 +84,11 @@ describe('emailService', () => {
     const payload = JSON.parse(String(options.body));
     expect(payload.sender).toEqual({
       email: 'no-reply@encontreaquiimoveis.com',
-      name: 'EncontreAqui Imoveis',
+      name: 'Encontre Aqui Imóveis',
     });
     expect(payload.to).toEqual([{ email: 'user@test.com' }]);
     expect(payload.subject).toBe(
-      'Seu código de verificação do app EncontreAqui Imóveis',
+      'Seu código de verificação do app Encontre Aqui Imóveis',
     );
     expect(payload.headers).toEqual({
       idempotencyKey: 'email-verification-42',
@@ -96,7 +96,7 @@ describe('emailService', () => {
     expect(payload.htmlContent).toContain('<!DOCTYPE html>');
     expect(payload.htmlContent).toContain('charset=UTF-8');
     expect(payload.htmlContent).toContain('role="presentation"');
-    expect(payload.htmlContent).toContain('EncontreAqui Imóveis');
+    expect(payload.htmlContent).toContain('Encontre Aqui Imóveis');
     expect(payload.htmlContent).toContain('background-color:#F4F4F5');
     expect(payload.htmlContent).toContain('Código de segurança');
     expect(payload.htmlContent).toContain('194492');
@@ -120,7 +120,7 @@ describe('emailService', () => {
     process.env.EMAIL_PROVIDER = 'brevo';
     process.env.BREVO_API_KEY = 'brevo-key';
     process.env.EMAIL_FROM = 'no-reply@encontreaquiimoveis.com';
-    process.env.EMAIL_BRAND_NAME = 'EncontreAqui Imóveis';
+    process.env.EMAIL_BRAND_NAME = 'Encontre Aqui Imóveis';
     process.env.EMAIL_LOGO_URL_2X = 'https://res.cloudinary.com/demo/image/upload/v1/logo.png';
     fetchMock.mockResolvedValue({
       ok: true,
@@ -145,7 +145,7 @@ describe('emailService', () => {
     expect(payload.htmlContent).toContain(
       'https://res.cloudinary.com/demo/image/upload/v1/logo.png',
     );
-    expect(payload.htmlContent).toContain('alt="EncontreAqui Imóveis"');
+    expect(payload.htmlContent).toContain('alt="Encontre Aqui Imóveis"');
   });
 
   it('sends verification email through Resend HTTP API with idempotency key', async () => {
@@ -177,7 +177,7 @@ describe('emailService', () => {
     const payload = JSON.parse(String(options.body));
     expect(payload.from).toBe('no-reply@encontreaquiimoveis.com');
     expect(payload.to).toEqual(['user@test.com']);
-    expect(payload.subject).toBe('Confirme seu e-mail no EncontreAqui Imóveis');
+    expect(payload.subject).toBe('Confirme seu e-mail no Encontre Aqui Imóveis');
     expect(payload.html).toContain('Toque no botão abaixo para confirmar seu e-mail');
     expect(createTransportMock).not.toHaveBeenCalled();
   });
@@ -257,7 +257,7 @@ describe('emailService', () => {
     const [, options] = fetchMock.mock.calls[0];
     const payload = JSON.parse(String(options.body));
     expect(payload.subject).toBe(
-      'Seu código para redefinir a senha do app EncontreAqui Imóveis',
+      'Seu código para redefinir a senha do app Encontre Aqui Imóveis',
     );
     expect(payload.htmlContent).toContain('Redefina sua senha');
     expect(payload.htmlContent).toContain(

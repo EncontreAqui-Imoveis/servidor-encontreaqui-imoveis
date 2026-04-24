@@ -867,6 +867,31 @@ interface NegotiationResponsibleRow extends RowDataPacket {
   profile_type: string | null;
 }
 
+let negotiationResponsiblesTableCache: boolean | null = null;
+
+async function hasNegotiationResponsiblesTable(): Promise<boolean> {
+  if (negotiationResponsiblesTableCache != null) {
+    return negotiationResponsiblesTableCache;
+  }
+
+  try {
+    const [rows] = await adminDb.query<RowDataPacket[]>(
+      `
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = 'negotiation_responsibles'
+        LIMIT 1
+      `
+    );
+    negotiationResponsiblesTableCache = rows.length > 0;
+  } catch {
+    negotiationResponsiblesTableCache = false;
+  }
+
+  return negotiationResponsiblesTableCache;
+}
+
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
   if (!value) {
     return {};
@@ -1903,6 +1928,24 @@ class AdminController {
         );
       }
 
+      const [competingRows] = await tx.query<RowDataPacket[]>(
+        `
+          SELECT id, status
+          FROM negotiations
+          WHERE property_id = ?
+            AND id <> ?
+            AND UPPER(TRIM(status)) IN (
+              'PROPOSAL_SENT',
+              'PROPOSAL_DRAFT',
+              'DOCUMENTATION_PHASE',
+              'CONTRACT_DRAFTING',
+              'AWAITING_SIGNATURES'
+            )
+          FOR UPDATE
+        `,
+        [negotiation.property_id, negotiationId]
+      );
+
       await tx.query(
         `
           UPDATE negotiations
@@ -1919,6 +1962,38 @@ class AdminController {
         `,
         [negotiation.property_id, negotiationId]
       );
+
+      if (competingRows.length > 0) {
+        const valuesClause = competingRows.map(() => '(UUID(), ?, ?, ?, ?, CAST(? AS JSON), CURRENT_TIMESTAMP)').join(', ');
+        const historyParams: Array<string | number> = [];
+        for (const row of competingRows) {
+          historyParams.push(
+            String(row.id ?? ''),
+            String(row.status ?? ''),
+            'REFUSED',
+            actorId,
+            JSON.stringify({
+              action: 'admin_approved_other_negotiation',
+              approvedNegotiationId: negotiationId,
+              propertyId: Number(negotiation.property_id),
+            })
+          );
+        }
+        await tx.query(
+          `
+            INSERT INTO negotiation_history (
+              id,
+              negotiation_id,
+              from_status,
+              to_status,
+              actor_id,
+              metadata_json,
+              created_at
+            ) VALUES ${valuesClause}
+          `,
+          historyParams
+        );
+      }
 
       await tx.commit();
 
@@ -2405,6 +2480,15 @@ class AdminController {
     }
 
     try {
+      const hasTable = await hasNegotiationResponsiblesTable();
+      if (!hasTable) {
+        return res.status(200).json({
+          negotiationId,
+          responsibles: [],
+          schemaFallback: true,
+        });
+      }
+
       const [rows] = await adminDb.query<NegotiationResponsibleRow[]>(
         `
           SELECT
@@ -2462,6 +2546,14 @@ class AdminController {
 
     if (normalizedIds.length > 5) {
       return res.status(400).json({ error: 'Máximo de 5 responsáveis por negociação.' });
+    }
+
+    const hasTable = await hasNegotiationResponsiblesTable();
+    if (!hasTable) {
+      return res.status(503).json({
+        error: 'Estrutura de banco desatualizada para responsáveis da negociação.',
+        code: 'SCHEMA_OUTDATED',
+      });
     }
 
     const tx = await adminDb.getConnection();

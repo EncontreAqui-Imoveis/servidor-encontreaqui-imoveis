@@ -1,4 +1,4 @@
-# Backend - EncontreAqui Imoveis
+# Backend - Encontre Aqui Imóveis
 
 API Node/Express para o sistema.
 

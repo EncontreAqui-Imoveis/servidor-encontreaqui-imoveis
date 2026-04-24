@@ -102,7 +102,6 @@ const NOTIFY_ON_STATUS: Set<PropertyStatus> = new Set(["sold", "rented"]);
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
 // Regras de vitrine: o imóvel só deve sair da listagem pública após envio da proposta assinada.
 const NEGOTIATION_PUBLIC_BLOCKING_STATUSES = [
-  'DOCUMENTATION_PHASE',
   'IN_NEGOTIATION',
   'CONTRACT_DRAFTING',
   'AWAITING_SIGNATURES',

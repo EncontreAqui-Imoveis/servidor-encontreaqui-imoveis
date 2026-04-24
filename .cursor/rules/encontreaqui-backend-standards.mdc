@@ -1,5 +1,5 @@
 ---
-description: Regras de arquitetura, segurança e estilo para o backend Node/MySQL do EncontreAqui Imóveis.
+description: Regras de arquitetura, segurança e estilo para o backend Node/MySQL do Encontre Aqui Imóveis.
 globs:
   - "src/**/*.ts"
   - "tests/**/*.ts"

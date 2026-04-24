@@ -23,7 +23,7 @@ function escapeHtml(value: string) {
 }
 
 function resolveBrandName() {
-  return String(process.env.EMAIL_BRAND_NAME ?? 'EncontreAqui Imóveis').trim() || 'EncontreAqui Imóveis';
+  return String(process.env.EMAIL_BRAND_NAME ?? 'Encontre Aqui Imóveis').trim() || 'Encontre Aqui Imóveis';
 }
 
 function resolveLogoUrl() {
@@ -610,8 +610,8 @@ export async function sendEmailCodeEmail(params: {
       : 'para redefinir sua senha';
   const subject =
     params.purpose === 'verify_email'
-      ? 'Seu código de verificação do app EncontreAqui Imóveis'
-      : 'Seu código para redefinir a senha do app EncontreAqui Imóveis';
+      ? 'Seu código de verificação do app Encontre Aqui Imóveis'
+      : 'Seu código para redefinir a senha do app Encontre Aqui Imóveis';
   const title =
     params.purpose === 'verify_email'
       ? 'Confirme seu e-mail'

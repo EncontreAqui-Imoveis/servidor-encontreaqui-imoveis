@@ -785,6 +785,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   property_code: string | null;
   property_title: string | null;
   property_address: string | null;
+  property_image_url: string | null;
   final_value: number | string | null;
   proposal_validity_date: Date | string | null;
   capturing_broker_name: string | null;
@@ -1162,6 +1163,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyCode: row.property_code ?? null,
     propertyTitle: row.property_title ?? null,
     propertyAddress: row.property_address ?? null,
+    propertyImageUrl: row.property_image_url ?? null,
     capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
     brokerName: row.capturing_broker_name ?? row.selling_broker_name ?? null,
@@ -1384,6 +1386,13 @@ class AdminController {
             p.code AS property_code,
             p.title AS property_title,
             CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
+            (
+              SELECT pi.image_url
+              FROM property_images pi
+              WHERE pi.property_id = n.property_id
+              ORDER BY pi.id ASC
+              LIMIT 1
+            ) AS property_image_url,
             n.final_value,
             n.proposal_validity_date,
             capture_user.name AS capturing_broker_name,

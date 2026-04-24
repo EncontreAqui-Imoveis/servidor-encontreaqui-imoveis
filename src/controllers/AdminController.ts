@@ -3525,6 +3525,7 @@ class AdminController {
           SELECT
             fp.property_id AS id,
             fp.position,
+            fp.scope,
             p.title,
             p.city,
             p.state,
@@ -3538,10 +3539,28 @@ class AdminController {
             p.purpose
           FROM featured_properties fp
           JOIN properties p ON p.id = fp.property_id
-          ORDER BY fp.position ASC
+          ORDER BY fp.scope ASC, fp.position ASC
         `
       );
-      return res.status(200).json({ data: rows });
+      const list = (rows as RowDataPacket[]).map((row) => ({
+        id: Number(row.id),
+        position: Number(row.position),
+        scope: String(row.scope ?? 'sale') === 'rent' ? 'rent' : 'sale',
+        title: row.title,
+        city: row.city,
+        state: row.state,
+        status: row.status,
+        price: row.price,
+        price_sale: row.price_sale,
+        price_rent: row.price_rent,
+        promotion_price: row.promotion_price,
+        promotional_rent_price: row.promotional_rent_price,
+        promotional_rent_percentage: row.promotional_rent_percentage,
+        purpose: row.purpose,
+      }));
+      const sale = list.filter((r) => r.scope === 'sale');
+      const rent = list.filter((r) => r.scope === 'rent');
+      return res.status(200).json({ data: { sale, rent } });
     } catch (error) {
       console.error('Erro ao listar destaques:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
@@ -3549,37 +3568,77 @@ class AdminController {
   }
 
   async updateFeaturedProperties(req: Request, res: Response) {
-    const rawList = (req.body as { propertyIds?: unknown })?.propertyIds;
-    const input = Array.isArray(rawList) ? rawList : [];
-    const seen = new Set<number>();
-    const ids: number[] = [];
+    const body = req.body as {
+      propertyIds?: unknown;
+      salePropertyIds?: unknown;
+      rentPropertyIds?: unknown;
+    };
+    const MAX_PER_SCOPE = 20;
 
-    for (const value of input) {
-      const id = Number(value);
-      if (!Number.isFinite(id) || id <= 0) continue;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      ids.push(id);
+    const toIdList = (raw: unknown): number[] => {
+      if (!Array.isArray(raw)) return [];
+      const seen = new Set<number>();
+      const out: number[] = [];
+      for (const value of raw) {
+        const id = Number(value);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push(id);
+      }
+      return out;
+    };
+
+    let saleIds: number[] = toIdList(body.salePropertyIds);
+    let rentIds: number[] = toIdList(body.rentPropertyIds);
+
+    if (saleIds.length === 0 && rentIds.length === 0 && Array.isArray(body.propertyIds)) {
+      saleIds = toIdList(body.propertyIds);
     }
 
-    if (ids.length > 20) {
-      return res.status(400).json({ error: 'Limite máximo de 20 destaques.' });
+    if (saleIds.length > MAX_PER_SCOPE || rentIds.length > MAX_PER_SCOPE) {
+      return res.status(400).json({ error: `Limite maximo de ${MAX_PER_SCOPE} destaques por vitrine (venda ou aluguel).` });
     }
+
+    const purposeKey = (p: string | null | undefined): { sale: boolean; rent: boolean } => {
+      const t = String(p ?? '').trim();
+      return {
+        sale: t === 'Venda' || t === 'Venda e Aluguel',
+        rent: t === 'Aluguel' || t === 'Venda e Aluguel',
+      };
+    };
 
     try {
-      if (ids.length > 0) {
+      const allCheck = [...new Set([...saleIds, ...rentIds])];
+      if (allCheck.length > 0) {
         const [approvedRows] = await adminDb.query<RowDataPacket[]>(
-          'SELECT id FROM properties WHERE status = ? AND id IN (?)',
-          ['approved', ids]
+          'SELECT id, purpose FROM properties WHERE status = ? AND id IN (?)',
+          ['approved', allCheck]
         );
-        const approvedIds = new Set<number>(
-          approvedRows.map((row) => Number(row.id)).filter((id) => Number.isFinite(id))
-        );
-        const invalidIds = ids.filter((id) => !approvedIds.has(id));
-        if (invalidIds.length > 0) {
+        const byId = new Map<number, { purpose: string | null }>();
+        for (const row of approvedRows) {
+          byId.set(Number(row.id), { purpose: row.purpose != null ? String(row.purpose) : null });
+        }
+        const notApproved: number[] = allCheck.filter((id) => !byId.has(id));
+        if (notApproved.length > 0) {
           return res.status(400).json({
             error: 'Alguns imoveis não estão aprovados.',
-            invalidIds,
+            invalidIds: notApproved,
+          });
+        }
+        const wrongScope: { id: number; scope: string }[] = [];
+        for (const id of saleIds) {
+          const pr = byId.get(id)?.purpose;
+          if (!purposeKey(pr).sale) wrongScope.push({ id, scope: 'sale' });
+        }
+        for (const id of rentIds) {
+          const pr = byId.get(id)?.purpose;
+          if (!purposeKey(pr).rent) wrongScope.push({ id, scope: 'rent' });
+        }
+        if (wrongScope.length > 0) {
+          return res.status(400).json({
+            error: 'Finalidade do imóvel não compatível com a vitrine selecionada (venda ou aluguel).',
+            invalidScope: wrongScope,
           });
         }
       }
@@ -3588,10 +3647,13 @@ class AdminController {
       try {
         await db.beginTransaction();
         await db.query('DELETE FROM featured_properties');
-        if (ids.length > 0) {
-          const values = ids.map((id, index) => [id, index + 1]);
+        const values: [number, string, number][] = [
+          ...saleIds.map((id, index) => [id, 'sale', index + 1] as [number, string, number]),
+          ...rentIds.map((id, index) => [id, 'rent', index + 1] as [number, string, number]),
+        ];
+        if (values.length > 0) {
           await db.query(
-            'INSERT INTO featured_properties (property_id, position) VALUES ?',
+            'INSERT INTO featured_properties (property_id, scope, position) VALUES ?',
             [values]
           );
         }
@@ -3603,7 +3665,7 @@ class AdminController {
         db.release();
       }
 
-      return res.status(200).json({ data: ids });
+      return res.status(200).json({ data: { sale: saleIds, rent: rentIds } });
     } catch (error) {
       console.error('Erro ao atualizar destaques:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
@@ -4120,7 +4182,7 @@ class AdminController {
 
     try {
       const [propertyRows] = await adminDb.query<RowDataPacket[]>(
-        'SELECT id, video_url FROM properties WHERE id = ?',
+        'SELECT id FROM properties WHERE id = ?',
         [id]
       );
 
@@ -4128,20 +4190,26 @@ class AdminController {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
-      const [imageRows] = await adminDb.query<RowDataPacket[]>(
-        'SELECT image_url FROM property_images WHERE property_id = ?',
+      await adminDb.query(
+        `UPDATE properties
+         SET
+           status = 'sold',
+           visibility = 'HIDDEN',
+           lifecycle_status = 'SOLD',
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
         [id]
       );
-      const mediaUrls = [
-        ...imageRows.map((row) =>
-          typeof row.image_url === 'string' ? row.image_url : null
-        ),
-        typeof propertyRows[0]?.video_url === 'string' ? propertyRows[0].video_url : null,
-      ];
+      try {
+        await adminDb.query('DELETE FROM featured_properties WHERE property_id = ?', [id]);
+      } catch {
+        /* legado */
+      }
 
-      await adminDb.query('DELETE FROM properties WHERE id = ?', [id]);
-      await cleanupPropertyMediaAssets(mediaUrls, 'admin_delete_property');
-      return res.status(200).json({ message: 'Imovel deletado com sucesso.' });
+      return res.status(200).json({
+        message: 'Imovel marcado como vendido e retirado da vitrine.',
+        status: 'sold',
+      });
     } catch (error) {
       console.error('Erro ao deletar imovel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
@@ -6083,10 +6151,16 @@ class AdminController {
     }
 
     try {
-      const [result] = await adminDb.query<ResultSetHeader>('UPDATE properties SET status = ? WHERE id = ?', [
-        'approved',
-        propertyId,
-      ]);
+      const [result] = await adminDb.query<ResultSetHeader>(
+        `UPDATE properties
+         SET
+           status = 'approved',
+           visibility = 'PUBLIC',
+           lifecycle_status = 'AVAILABLE',
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [propertyId]
+      );
 
       if (result.affectedRows === 0) {
         return res.status(404).json({ error: 'Imovel não encontrado.' });
@@ -6124,9 +6198,16 @@ class AdminController {
 
   async rejectProperty(req: Request, res: Response) {
     const propertyId = Number(req.params.id);
+    const reason =
+      req.body && typeof (req.body as { reason?: unknown }).reason === 'string'
+        ? String((req.body as { reason: string }).reason).trim()
+        : '';
 
     if (Number.isNaN(propertyId)) {
       return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+    }
+    if (!reason) {
+      return res.status(400).json({ error: 'Informe o motivo da rejeicao.' });
     }
 
     try {
@@ -6136,22 +6217,35 @@ class AdminController {
       }
 
       const [result] = await adminDb.query<ResultSetHeader>(
-        'DELETE FROM properties WHERE id = ?',
-        [propertyId],
+        `UPDATE properties
+         SET
+           status = 'rejected',
+           visibility = 'HIDDEN',
+           rejection_reason = ?,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [reason, propertyId]
       );
 
       if (result.affectedRows === 0) {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
+      try {
+        await adminDb.query('DELETE FROM featured_properties WHERE property_id = ?', [propertyId]);
+      } catch {
+        // tabela ausente / legado
+      }
 
       const propertyLabel =
         title && title.trim().length > 0 ? title.trim() : 'sem titulo';
+      const reasonPreview =
+        reason.length > 200 ? `${reason.slice(0, 197).trimEnd()}...` : reason;
 
       try {
         await notifyAdmins(
-          `Imovel #${propertyId} rejeitado e removido pelo admin.`,
+          `Imovel #${propertyId} rejeitado. Motivo (resumo): ${reasonPreview}`,
           'property',
-          propertyId,
+          propertyId
         );
       } catch (notifyError) {
         console.error('Erro ao notificar admins sobre rejeicao de imovel:', notifyError);
@@ -6160,18 +6254,22 @@ class AdminController {
         if (ownerId) {
           const role = await resolveUserNotificationRole(ownerId);
           await notifyUsers({
-            message: `Seu imovel "${propertyLabel}" foi rejeitado e removido. Voce pode cadastrar novamente com as informacoes corrigidas.`,
+            message: `Seu anuncio "${propertyLabel}" foi rejeitado. Resumo: ${reasonPreview} — edite e reenvie para analise em Meus imoveis.`,
             recipientIds: [ownerId],
             recipientRole: role,
             relatedEntityType: 'property',
             relatedEntityId: propertyId,
+            pushAction: 'edit_rejected',
           });
         }
       } catch (notifyError) {
         console.error('Erro ao notificar usuario sobre rejeicao do imovel:', notifyError);
       }
 
-      return res.status(200).json({ message: 'Imóvel rejeitado e removido com sucesso.' });
+      return res.status(200).json({
+        message: 'Imovel rejeitado. O anunciante pode corrigir e reenviar.',
+        status: 'rejected',
+      });
     } catch (error) {
       console.error('Erro ao rejeitar imovel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });

@@ -65,6 +65,13 @@ propertyRoutes.patch(
 );
 
 propertyRoutes.post(
+  '/:id/resubmit-approval',
+  authMiddleware,
+  isBroker,
+  (req, res) => propertyController.resubmitApproval(req as any, res)
+);
+
+propertyRoutes.post(
   '/:id/close',
   authMiddleware,
   isBroker,

@@ -220,6 +220,20 @@ async function ensurePropertiesColumns(): Promise<void> {
       [to, from]
     );
   }
+
+  if (!(await columnExists('properties', 'visibility'))) {
+    await connection.query(
+      "ALTER TABLE properties ADD COLUMN visibility VARCHAR(32) NULL DEFAULT 'PUBLIC'"
+    );
+  }
+  if (!(await columnExists('properties', 'lifecycle_status'))) {
+    await connection.query(
+      "ALTER TABLE properties ADD COLUMN lifecycle_status VARCHAR(32) NULL DEFAULT 'AVAILABLE'"
+    );
+  }
+  if (!(await columnExists('properties', 'rejection_reason'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN rejection_reason TEXT NULL');
+  }
 }
 
 async function ensurePropertyEditRequestsTable(): Promise<void> {
@@ -278,13 +292,37 @@ async function ensureFeaturedPropertiesTable(): Promise<void> {
   await connection.query(`
     CREATE TABLE featured_properties (
       property_id INT NOT NULL,
+      scope ENUM('sale', 'rent') NOT NULL DEFAULT 'sale',
       position INT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (property_id),
-      UNIQUE KEY idx_featured_position (position),
+      PRIMARY KEY (property_id, scope),
+      UNIQUE KEY idx_featured_scope_position (scope, position),
       FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
     )
   `);
+}
+
+/** Tabelas antigas: PK só em property_id; evolui para (property_id, scope) e posição única por escopo. */
+async function migrateFeaturedPropertiesScope(): Promise<void> {
+  if (!(await tableExists('featured_properties'))) {
+    return;
+  }
+  if (await columnExists('featured_properties', 'scope')) {
+    return;
+  }
+
+  await connection.query('ALTER TABLE featured_properties DROP INDEX idx_featured_position');
+  await connection.query('ALTER TABLE featured_properties DROP PRIMARY KEY');
+  await connection.query(`
+    ALTER TABLE featured_properties
+      ADD COLUMN scope ENUM('sale', 'rent') NOT NULL DEFAULT 'sale' AFTER property_id
+  `);
+  await connection.query(
+    'ALTER TABLE featured_properties ADD PRIMARY KEY (property_id, scope)'
+  );
+  await connection.query(
+    'ALTER TABLE featured_properties ADD UNIQUE KEY idx_featured_scope_position (scope, position)'
+  );
 }
 
 async function ensureNotificationsType(): Promise<void> {
@@ -705,6 +743,7 @@ export async function applyMigrations(): Promise<void> {
     await ensurePropertiesColumns();
     await ensurePropertyEditRequestsTable();
     await ensureFeaturedPropertiesTable();
+    await migrateFeaturedPropertiesScope();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();
     await ensureUserAddressColumns();

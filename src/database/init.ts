@@ -191,10 +191,11 @@ const DDL_STATEMENTS: DDLStatement[] = [
     sql: `
       CREATE TABLE IF NOT EXISTS featured_properties (
         property_id INT NOT NULL,
+        scope ENUM('sale', 'rent') NOT NULL DEFAULT 'sale',
         position INT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (property_id),
-        UNIQUE KEY idx_featured_position (position),
+        PRIMARY KEY (property_id, scope),
+        UNIQUE KEY idx_featured_scope_position (scope, position),
         FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
       );
     `,

@@ -27,6 +27,8 @@ interface NotifyUsersInput {
   relatedEntityType: RelatedEntityType;
   relatedEntityId?: number | null;
   sendPush?: boolean;
+  /** Repassado ao FCM `data.action` (ex.: `edit_rejected`). */
+  pushAction?: string | null;
 }
 
 function normalizeOutgoingMessage(input: string): string {
@@ -46,6 +48,7 @@ export async function notifyUsers({
   relatedEntityType,
   relatedEntityId = null,
   sendPush = true,
+  pushAction = null,
 }: NotifyUsersInput): Promise<PushNotificationResult | null> {
   const trimmed = normalizeOutgoingMessage(message);
   if (!trimmed) {
@@ -80,6 +83,7 @@ export async function notifyUsers({
     recipientRole,
     requestedRecipients: uniqueRecipients.length,
     sendPush,
+    pushAction: pushAction ?? null,
   });
   for (let i = 0; i < values.length; i += batchSize) {
     const chunk = values.slice(i, i + batchSize);
@@ -111,6 +115,7 @@ export async function notifyUsers({
     recipientIds: uniqueRecipients,
     relatedEntityType,
     relatedEntityId,
+    action: pushAction,
   });
   console.info('notify_users_dispatch_finished', {
     relatedEntityType,

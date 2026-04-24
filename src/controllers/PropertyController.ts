@@ -30,6 +30,7 @@ import {
   normalizeAreaUnidade,
   type AreaConstruidaUnidade,
 } from "../utils/propertyAreaUnits";
+import { stripExpiredPromotionFromPublicPayload } from "../utils/promotionPublicWindow";
 
 interface MulterFiles {
   [fieldname: string]: Express.Multer.File[];
@@ -197,6 +198,7 @@ interface PropertyRow extends RowDataPacket {
   type: string;
   purpose: string;
   status: PropertyStatus;
+  rejection_reason?: string | null;
   visibility?: string | null;
   lifecycle_status?: string | null;
   is_promoted?: number | boolean | null;
@@ -512,7 +514,7 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     }
     : null;
 
-  return {
+  const mapped = {
     id: row.id,
     title: row.title,
     description: row.description,
@@ -631,9 +633,12 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
       row.pending_edit_request_id != null
         ? Number(row.pending_edit_request_id)
         : null,
+    rejection_reason: row.rejection_reason != null ? String(row.rejection_reason) : null,
+    rejectionReason: row.rejection_reason != null ? String(row.rejection_reason) : null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+  return stripExpiredPromotionFromPublicPayload(mapped, includeOwnerInfo);
 }
 
 function hasValidPropertyDescription(value: unknown): boolean {
@@ -2178,6 +2183,18 @@ class PropertyController {
         ]
       );
 
+      if (property.status === 'rejected') {
+        await db.query(
+          `UPDATE properties SET
+            status = 'pending_approval',
+            rejection_reason = NULL,
+            visibility = 'HIDDEN',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+          [propertyId]
+        );
+      }
+
       await db.commit();
 
       try {
@@ -2193,6 +2210,7 @@ class PropertyController {
       return res.status(202).json({
         message: 'Solicitação de edição enviada para aprovação.',
         requestId: insertResult.insertId,
+        ...(property.status === 'rejected' ? { status: 'pending_approval' as const } : {}),
       });
     } catch (error) {
       await db.rollback();
@@ -2744,6 +2762,26 @@ class PropertyController {
         values.push(nextPromotionFlag);
       }
 
+      // Após rejeição admin, qualquer alteração reenvia para análise (ou POST dedicado resubmit-approval).
+      const wasRejected = property.status === 'rejected';
+      let resubmittedToPending = false;
+      if (wasRejected) {
+        for (let i = fields.length - 1; i >= 0; i--) {
+          if (fields[i] === 'status = ?') {
+            fields.splice(i, 1);
+            values.splice(i, 1);
+          }
+        }
+        nextStatus = null;
+      }
+      const hasImageListUpdate = Array.isArray((body as { images?: unknown }).images);
+      if (wasRejected && (fields.length > 0 || hasImageListUpdate)) {
+        // Mantém fora da vitrine até nova aprovação; approveProperty repõe visibility.
+        fields.push('status = ?', 'rejection_reason = ?', 'visibility = ?');
+        values.push('pending_approval', null, 'HIDDEN');
+        resubmittedToPending = true;
+      }
+
       if (fields.length === 0) {
         return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });
       }
@@ -2771,7 +2809,9 @@ class PropertyController {
         }
       }
 
-      const effectiveStatus = nextStatus ?? property.status;
+      const effectiveStatus = resubmittedToPending
+        ? 'pending_approval'
+        : (nextStatus ?? property.status);
       if (effectiveStatus === 'approved' && (saleTouched || rentTouched)) {
         try {
           await notifyPriceDropIfNeeded({
@@ -2892,6 +2932,74 @@ class PropertyController {
       return res.status(200).json({ message: 'Imóvel atualizado com sucesso!' });
     } catch (error) {
       console.error('Erro ao atualizar imóvel:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    }
+  }
+
+  /**
+   * Reenvia imóvel rejeitado para fila de análise sem outras alterações de payload.
+   * Mesmo efeito de status / rejection_reason / visibility que o PATCH com dados ou imagens.
+   */
+  async resubmitApproval(req: AuthRequest, res: Response) {
+    const propertyId = Number(req.params.id);
+    const userId = req.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+    if (req.userRole === 'client') {
+      return res.status(403).json({ error: 'Apenas corretores podem reenviar anuncios.' });
+    }
+    if (Number.isNaN(propertyId)) {
+      return res.status(400).json({ error: 'Identificador de imovel invalido.' });
+    }
+
+    try {
+      const propertyRows = await runPropertyQuery<PropertyRow[]>(
+        'SELECT * FROM properties WHERE id = ?',
+        [propertyId]
+      );
+      if (!propertyRows || propertyRows.length === 0) {
+        return res.status(404).json({ error: 'Imovel nao encontrado.' });
+      }
+      const property = propertyRows[0];
+      const isOwner =
+        (property.broker_id != null && property.broker_id === userId) ||
+        (property.owner_id != null && property.owner_id === userId);
+      if (!isOwner) {
+        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+      }
+      if (property.status === 'pending_approval') {
+        return res.status(409).json({ error: 'Imovel ja esta em analise.' });
+      }
+      if (property.status !== 'rejected') {
+        return res.status(409).json({
+          error: 'Somente imoveis rejeitados podem ser reenviados desta forma.',
+        });
+      }
+
+      await runPropertyQuery(
+        `UPDATE properties SET
+          status = 'pending_approval',
+          rejection_reason = NULL,
+          visibility = 'HIDDEN',
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+        [propertyId]
+      );
+
+      try {
+        await notifyAdmins(`Imovel #${propertyId} reenviado para analise apos rejeicao.`, 'property', propertyId);
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre reenvio de imovel:', notifyError);
+      }
+
+      return res.status(200).json({
+        message: 'Imovel reenviado para analise.',
+        status: 'pending_approval',
+      });
+    } catch (error) {
+      console.error('Erro ao reenviar imovel:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
   }
@@ -3147,21 +3255,27 @@ class PropertyController {
         return res.status(403).json({ error: 'Voce nao tem permissao para deletar este imovel.' });
       }
 
-      const imageRows = await runPropertyQuery<RowDataPacket[]>(
-        'SELECT image_url FROM property_images WHERE property_id = ?',
+      // LGPD: não apagar ficha. Encerrar anúncio = marcar como vendido, ocultar da vitrine, manter mídia no storage.
+      await runPropertyQuery(
+        `UPDATE properties
+         SET
+           status = 'sold',
+           visibility = 'HIDDEN',
+           lifecycle_status = 'SOLD',
+           updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
         [propertyId]
       );
-      const mediaUrls = [
-        ...imageRows.map((row) =>
-          typeof row.image_url === 'string' ? row.image_url : null
-        ),
-        typeof property.video_url === 'string' ? property.video_url : null,
-      ];
+      try {
+        await runPropertyQuery('DELETE FROM featured_properties WHERE property_id = ?', [propertyId]);
+      } catch {
+        /* tabela/caso legacy */
+      }
 
-      await runPropertyQuery('DELETE FROM properties WHERE id = ?', [propertyId]);
-      await cleanupPropertyMediaAssets(mediaUrls, 'delete_property');
-
-      return res.status(200).json({ message: 'Imóvel deletado com sucesso!' });
+      return res.status(200).json({
+        message: 'Imóvel marcado como vendido e removido da vitrine pública.',
+        status: 'sold',
+      });
     } catch (error) {
       console.error('Erro ao deletar imóvel:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
@@ -3659,6 +3773,8 @@ class PropertyController {
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 20);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const offset = (page - 1) * limit;
+    const scopeParam = String(req.query.scope ?? "sale").toLowerCase();
+    const scope: "sale" | "rent" = scopeParam === "rent" ? "rent" : "sale";
 
     try {
       const rows = await runPropertyQuery<PropertyAggregateRow[]>(
@@ -3716,16 +3832,21 @@ class PropertyController {
           LEFT JOIN property_images pi ON pi.property_id = p.id
           WHERE p.status = 'approved'
             AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+            AND fp.scope = ?
+            AND (
+              (fp.scope = 'sale' AND p.purpose IN ('Venda', 'Venda e Aluguel'))
+              OR (fp.scope = 'rent' AND p.purpose IN ('Aluguel', 'Venda e Aluguel'))
+            )
             AND NOT EXISTS (
               SELECT 1 FROM negotiations nx
               WHERE nx.property_id = p.id
                 AND UPPER(TRIM(nx.status)) IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
             )
-          GROUP BY p.id, fp.position
+          GROUP BY p.id, fp.scope, fp.position
           ORDER BY fp.position ASC
           LIMIT ? OFFSET ?
         `,
-        [...NEGOTIATION_TERMINAL_STATUSES, ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, limit, offset]
+        [...NEGOTIATION_TERMINAL_STATUSES, scope, ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, limit, offset]
       );
 
       const countRows = await runPropertyQuery<RowDataPacket[]>(
@@ -3735,6 +3856,11 @@ class PropertyController {
           JOIN properties p ON p.id = fp.property_id
           WHERE p.status = 'approved'
             AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+            AND fp.scope = ?
+            AND (
+              (fp.scope = 'sale' AND p.purpose IN ('Venda', 'Venda e Aluguel'))
+              OR (fp.scope = 'rent' AND p.purpose IN ('Aluguel', 'Venda e Aluguel'))
+            )
             AND NOT EXISTS (
               SELECT 1 FROM negotiations nx
               WHERE nx.property_id = p.id
@@ -3742,7 +3868,7 @@ class PropertyController {
             )
         `
         ,
-        [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES]
+        [scope, ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES]
       );
 
       const total = countRows[0]?.total ?? 0;

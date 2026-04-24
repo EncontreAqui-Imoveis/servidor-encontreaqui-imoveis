@@ -983,14 +983,15 @@ function buildNegotiationStatusClause(
   if (statusFilter === 'UNDER_REVIEW') {
     return {
       clause:
-        " AND (n.status IN ('PROPOSAL_SENT', 'DOCUMENTATION_PHASE') OR (n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') <> 'negociacao'))",
+        " AND (n.status = 'PROPOSAL_SENT' OR (n.status = 'DOCUMENTATION_PHASE' AND COALESCE(p.status, '') <> 'negociacao') OR (n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') <> 'negociacao'))",
       params: [],
     };
   }
 
   if (statusFilter === 'APPROVED' || statusFilter === 'IN_NEGOTIATION') {
     return {
-      clause: " AND n.status = 'IN_NEGOTIATION' AND COALESCE(p.status, '') = 'negociacao'",
+      clause:
+        " AND n.status IN ('IN_NEGOTIATION', 'DOCUMENTATION_PHASE') AND COALESCE(p.status, '') = 'negociacao'",
       params: [],
     };
   }
@@ -1205,11 +1206,19 @@ function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
   const negotiationStatus = String(row.negotiation_status ?? '').toUpperCase();
   const propertyStatus = String(row.property_status ?? '').toLowerCase();
 
-  if (
-    negotiationStatus === 'PROPOSAL_SENT' ||
-    negotiationStatus === 'DOCUMENTATION_PHASE' ||
-    (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus !== 'negociacao')
-  ) {
+  if (negotiationStatus === 'PROPOSAL_SENT') {
+    return 'UNDER_REVIEW';
+  }
+
+  if (negotiationStatus === 'DOCUMENTATION_PHASE' && propertyStatus === 'negociacao') {
+    return 'APPROVED';
+  }
+
+  if (negotiationStatus === 'DOCUMENTATION_PHASE') {
+    return 'UNDER_REVIEW';
+  }
+
+  if (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus !== 'negociacao') {
     return 'UNDER_REVIEW';
   }
 
@@ -2124,6 +2133,7 @@ class AdminController {
         [negotiationId]
       );
 
+      // actor_id referencia users.id; JWT admin usa id da tabela admins — gravar NULL e registrar admin em metadata.
       await tx.query(
         `
           INSERT INTO negotiation_history (
@@ -2134,15 +2144,15 @@ class AdminController {
             actor_id,
             metadata_json,
             created_at
-          ) VALUES (UUID(), ?, ?, 'REFUSED', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+          ) VALUES (UUID(), ?, ?, 'REFUSED', NULL, CAST(? AS JSON), CURRENT_TIMESTAMP)
         `,
         [
           negotiationId,
           fromStatusForHistory,
-          actorId,
           JSON.stringify({
             action: 'admin_rejected',
             reason,
+            adminId: actorId,
           }),
         ]
       );
@@ -2927,8 +2937,20 @@ class AdminController {
 
       if (searchTerm) {
         if (narrowSearchColumn) {
-          whereClauses.push(`${narrowSearchColumn} LIKE ?`);
-          params.push(`%${searchTerm}%`);
+          if (
+            narrowSearchColumn === 'p.code' &&
+            /^\d+$/.test(searchTerm) &&
+            Number.isFinite(Number(searchTerm))
+          ) {
+            const codeNum = Number(searchTerm);
+            whereClauses.push(
+              `(${narrowSearchColumn} LIKE ? OR (COALESCE(p.code,'') REGEXP '^[0-9]+$' AND CAST(p.code AS UNSIGNED) = ?))`
+            );
+            params.push(`%${searchTerm}%`, codeNum);
+          } else {
+            whereClauses.push(`${narrowSearchColumn} LIKE ?`);
+            params.push(`%${searchTerm}%`);
+          }
         } else {
           const like = `%${searchTerm}%`;
           const parts = [
@@ -2945,6 +2967,10 @@ class AdminController {
             const idNum = Number(searchTerm);
             if (Number.isFinite(idNum)) {
               parts.push('p.id = ?');
+              searchParams.push(idNum);
+              parts.push(
+                "(COALESCE(p.code,'') REGEXP '^[0-9]+$' AND CAST(p.code AS UNSIGNED) = ?)"
+              );
               searchParams.push(idNum);
             }
           }

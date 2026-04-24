@@ -80,6 +80,7 @@ adminRoutes.put('/contracts/:id/evaluate-side', (req, res) =>
 adminRoutes.put('/contracts/:id/evaluate-category', (req, res) =>
   contractController.evaluateCategory(req, res)
 );
+adminRoutes.put('/contracts/:id/data', (req, res) => contractController.updateData(req, res));
 adminRoutes.post(
   '/contracts/:id/draft',
   contractDraftUpload.single('file'),

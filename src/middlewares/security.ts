@@ -21,6 +21,8 @@ const DEFAULT_ALLOWED_CORS_HEADERS = [
   'Content-Type',
   'X-Requested-With',
   'X-Request-Id',
+  /** Confirmação de senha em ações sensíveis (excluir cliente/corretor, etc.) — o browser envia no preflight. */
+  'X-Admin-Reauth',
   'Accept',
   'Origin',
   'Cache-Control',

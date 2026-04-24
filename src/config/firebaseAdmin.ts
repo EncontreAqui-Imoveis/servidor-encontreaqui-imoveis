@@ -9,6 +9,10 @@ type ServiceAccount = {
   clientEmail: string;
 };
 
+const isTestEnvironment =
+  String(process.env.NODE_ENV ?? '').toLowerCase() === 'test' ||
+  process.env.VITEST === 'true';
+
 function loadServiceAccountFromEnv(): ServiceAccount {
   const requiredEnvVars = [
     'FIREBASE_PROJECT_ID',
@@ -41,20 +45,38 @@ function loadServiceAccountFromFile(path: string): ServiceAccount {
   };
 }
 
-let serviceAccount: ServiceAccount;
+let serviceAccount: ServiceAccount | null = null;
 const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
 if (serviceAccountPath) {
   serviceAccount = loadServiceAccountFromFile(serviceAccountPath);
-} else {
+} else if (
+  process.env.FIREBASE_PROJECT_ID &&
+  process.env.FIREBASE_PRIVATE_KEY &&
+  process.env.FIREBASE_CLIENT_EMAIL
+) {
+  serviceAccount = loadServiceAccountFromEnv();
+} else if (!isTestEnvironment) {
+  // Keep strict behavior outside tests.
   serviceAccount = loadServiceAccountFromEnv();
 }
 
-const app: App =
-  getApps().length > 0
-    ? getApps()[0]
-    : initializeApp({
-        credential: cert(serviceAccount),
-      });
+const app: App = (() => {
+  if (getApps().length > 0) {
+    return getApps()[0];
+  }
+
+  if (serviceAccount) {
+    try {
+      return initializeApp({ credential: cert(serviceAccount) });
+    } catch (error) {
+      if (!isTestEnvironment) {
+        throw error;
+      }
+    }
+  }
+
+  return initializeApp({ projectId: 'test-project-id' });
+})();
 
 const firebaseAdmin = {
   app,

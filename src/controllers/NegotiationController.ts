@@ -202,6 +202,7 @@ const PROPOSAL_LIST_VISIBLE_STATUSES = [
   'PROPOSAL_DRAFT',
   'PROPOSAL_SENT',
   'DOCUMENTATION_PHASE',
+  'REFUSED',
 ] as const;
 
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
@@ -1443,7 +1444,6 @@ class NegotiationController {
           SELECT id, status
           FROM negotiations
           WHERE property_id = ?
-            AND capturing_broker_id = ?
             AND status IN (${ACTIVE_NEGOTIATION_STATUSES.map(() => '?').join(', ')})
             AND (
               (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
@@ -1455,7 +1455,7 @@ class NegotiationController {
           LIMIT 1
           FOR UPDATE
         `,
-        [payload.propertyId, capturingBrokerId, ...ACTIVE_NEGOTIATION_STATUSES, buyerClientId, cpfKey]
+        [payload.propertyId, ...ACTIVE_NEGOTIATION_STATUSES, buyerClientId, cpfKey]
       );
       if (existingRows.length > 0) {
         await tx.rollback();

@@ -654,6 +654,52 @@ async function ensureUsersTokenVersionColumn(): Promise<void> {
   );
 }
 
+async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void> {
+  if (await tableExists('brokers')) {
+    if (!(await columnExists('brokers', 'profile_type'))) {
+      await connection.query(
+        "ALTER TABLE brokers ADD COLUMN profile_type ENUM('BROKER','AUXILIARY_ADMINISTRATIVE') NOT NULL DEFAULT 'BROKER' AFTER status"
+      );
+    }
+
+    const profileType = await getColumnType('brokers', 'profile_type');
+    if (profileType && !profileType.includes('AUXILIARY_ADMINISTRATIVE')) {
+      await connection.query(
+        "ALTER TABLE brokers MODIFY COLUMN profile_type ENUM('BROKER','AUXILIARY_ADMINISTRATIVE') NOT NULL DEFAULT 'BROKER'"
+      );
+    }
+  }
+
+  if (
+    !(await tableExists('negotiations')) ||
+    !(await tableExists('users')) ||
+    !(await tableExists('admins'))
+  ) {
+    return;
+  }
+
+  if (!(await tableExists('negotiation_responsibles'))) {
+    await connection.query(`
+      CREATE TABLE negotiation_responsibles (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        negotiation_id CHAR(36) NOT NULL,
+        user_id INT NOT NULL,
+        assigned_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_negotiation_responsibles_pair (negotiation_id, user_id),
+        KEY idx_negotiation_responsibles_negotiation (negotiation_id),
+        KEY idx_negotiation_responsibles_user (user_id),
+        CONSTRAINT fk_negotiation_responsibles_negotiation
+          FOREIGN KEY (negotiation_id) REFERENCES negotiations(id) ON DELETE CASCADE,
+        CONSTRAINT fk_negotiation_responsibles_user
+          FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_negotiation_responsibles_assigned_by
+          FOREIGN KEY (assigned_by) REFERENCES admins(id) ON DELETE SET NULL
+      )
+    `);
+  }
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -672,6 +718,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureNegotiationDocumentStorageColumns();
     await ensureAdminsTokenVersionColumn();
     await ensureUsersTokenVersionColumn();
+    await ensureNegotiationResponsiblesAndBrokerProfileType();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

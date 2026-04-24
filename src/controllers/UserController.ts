@@ -631,7 +631,11 @@ class UserController {
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
-                 CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
+                 CASE
+                   WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
+                   WHEN b.id IS NOT NULL THEN 'broker'
+                   ELSE 'client'
+                 END AS role,
                  b.status AS broker_status,
                  bd.status AS broker_documents_status
           FROM users u
@@ -824,7 +828,11 @@ class UserController {
         `
           SELECT u.id, u.name, u.email, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
-                 CASE WHEN b.id IS NOT NULL THEN 'broker' ELSE 'client' END AS role,
+                 CASE
+                   WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
+                   WHEN b.id IS NOT NULL THEN 'broker'
+                   ELSE 'client'
+                 END AS role,
                  b.status AS broker_status
           FROM users u
           LEFT JOIN brokers b ON u.id = b.id

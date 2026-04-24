@@ -17,7 +17,7 @@ function normalizeTokenVersion(value: unknown): number {
 
 export function signUserToken(
   userId: number,
-  role: 'client' | 'broker',
+  role: 'client' | 'broker' | 'auxiliary_administrative',
   tokenVersion: unknown,
   expiresIn: '1d' | '7d',
 ): string {

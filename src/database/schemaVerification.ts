@@ -101,7 +101,9 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'properties',
     'admins',
     'users',
+    'brokers',
     'property_edit_requests',
+    'negotiation_responsibles',
   ] as const;
 
   for (const tableName of requiredTables) {
@@ -129,6 +131,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['negotiations', 'last_draft_edit_at'],
     ['admins', 'token_version'],
     ['users', 'token_version'],
+    ['brokers', 'profile_type'],
     ['properties', 'updated_at'],
     ['properties', 'sem_cep'],
     ['property_edit_requests', 'updated_at'],
@@ -136,6 +139,8 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['property_edit_requests', 'after_json'],
     ['property_edit_requests', 'diff_json'],
     ['property_edit_requests', 'field_reviews_json'],
+    ['negotiation_responsibles', 'negotiation_id'],
+    ['negotiation_responsibles', 'user_id'],
   ] as const;
 
   for (const [tableName, columnName] of requiredColumns) {
@@ -167,10 +172,15 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'PARTIALLY_APPROVED',
   ]);
 
+  await assertEnumContains('brokers', 'profile_type', [
+    'BROKER',
+    'AUXILIARY_ADMINISTRATIVE',
+  ]);
+
   return {
     checkedTables: requiredTables.length,
     checkedColumns: requiredColumns.length,
-    checkedEnums: 4,
+    checkedEnums: 5,
   };
 }
 

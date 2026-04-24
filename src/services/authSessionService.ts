@@ -3,7 +3,7 @@ import { requireEnv } from '../config/env';
 
 const jwtSecret = requireEnv('JWT_SECRET');
 
-export type ProfileType = 'client' | 'broker';
+export type ProfileType = 'client' | 'broker' | 'auxiliary_administrative';
 
 function buildBrokerPayload(row: any) {
   const hasBrokerData =

@@ -68,6 +68,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
         id INT PRIMARY KEY,
         creci VARCHAR(50) NULL UNIQUE,
         status ENUM('pending_verification', 'approved', 'rejected') NOT NULL DEFAULT 'pending_verification',
+        profile_type ENUM('BROKER', 'AUXILIARY_ADMINISTRATIVE') NOT NULL DEFAULT 'BROKER',
         agency_id INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

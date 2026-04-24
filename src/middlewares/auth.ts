@@ -11,6 +11,11 @@ interface UserFromDB extends RowDataPacket {
   token_version?: number | string | null;
 }
 
+interface BrokerRoleRow extends RowDataPacket {
+  status: string;
+  profile_type?: string | null;
+}
+
 interface AdminFromDB extends RowDataPacket {
   id: number;
   is_active?: number | boolean | null;
@@ -250,17 +255,25 @@ export async function authMiddleware(
       });
     }
 
-    if (decodedRole === 'broker') {
-      const [brokerRows] = await connection.query(
-        'SELECT status FROM brokers WHERE id = ?',
+    if (decodedRole === 'broker' || decodedRole === 'auxiliary_administrative') {
+      const [brokerRows] = await connection.query<BrokerRoleRow[]>(
+        'SELECT status, profile_type FROM brokers WHERE id = ?',
         [decodedId]
       );
-      const brokers = brokerRows as any[];
+      const brokers = brokerRows;
       if (brokers.length > 0 && brokers[0].status === 'rejected') {
         return res.status(403).json({
           error:
             'Sua conta de corretor foi rejeitada. Para se registrar como cliente, use um email diferente.',
         });
+      }
+      if (brokers.length > 0) {
+        const profileType = String(brokers[0].profile_type ?? 'BROKER').toUpperCase();
+        if (profileType === 'AUXILIARY_ADMINISTRATIVE') {
+          req.userRole = 'auxiliary_administrative';
+        } else {
+          req.userRole = 'broker';
+        }
       }
     }
 
@@ -281,11 +294,11 @@ export async function isBroker(
       return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
-    const [brokerRows] = await connection.query(
-      'SELECT status FROM brokers WHERE id = ?',
+    const [brokerRows] = await connection.query<BrokerRoleRow[]>(
+      'SELECT status, profile_type FROM brokers WHERE id = ?',
       [req.userId]
     );
-    const brokers = brokerRows as any[];
+    const brokers = brokerRows;
 
     if (brokers.length === 0) {
       return res.status(403).json({
@@ -300,7 +313,8 @@ export async function isBroker(
       });
     }
 
-    req.userRole = 'broker';
+    const profileType = String(brokers[0].profile_type ?? 'BROKER').toUpperCase();
+    req.userRole = profileType === 'AUXILIARY_ADMINISTRATIVE' ? 'auxiliary_administrative' : 'broker';
     return next();
   } catch (error) {
     console.error('Erro ao verificar status do corretor:', error);

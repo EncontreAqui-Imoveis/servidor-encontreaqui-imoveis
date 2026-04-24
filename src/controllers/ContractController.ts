@@ -100,6 +100,7 @@ interface ContractRow extends RowDataPacket {
   selling_broker_name: string | null;
   capturing_agency_name: string | null;
   capturing_agency_address: string | null;
+  responsible_user_ids: string | null;
 }
 
 interface ContractDocumentRow extends RowDataPacket {
@@ -1317,18 +1318,41 @@ async function cleanupContractDocumentAssets(
   return { attempted, failed };
 }
 
+function isNegotiationResponsibleUser(contract: ContractRow, userId: number): boolean {
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return false;
+  }
+  const raw = String(contract.responsible_user_ids ?? '').trim();
+  if (!raw) {
+    return false;
+  }
+  return raw
+    .split(',')
+    .map((value) => Number(value))
+    .some((value) => Number.isInteger(value) && value === userId);
+}
+
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   const role = String(req.userRole ?? '').toLowerCase();
   if (role === 'admin') {
     return true;
   }
 
-  if (role !== 'broker') {
+  const userId = Number(req.userId);
+  if (!Number.isFinite(userId) || userId <= 0) {
     return false;
   }
 
-  const userId = Number(req.userId);
-  if (!Number.isFinite(userId) || userId <= 0) {
+  const isResponsible = isNegotiationResponsibleUser(contract, userId);
+  if (isResponsible && (role === 'broker' || role === 'auxiliary_administrative')) {
+    return true;
+  }
+
+  if (role === 'client') {
+    return userId === Number(contract.buyer_client_id ?? 0);
+  }
+
+  if (role !== 'broker' && role !== 'auxiliary_administrative') {
     return false;
   }
 
@@ -1345,6 +1369,9 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   const userId = Number(req.userId);
+  if (isNegotiationResponsibleUser(contract, userId)) {
+    return true;
+  }
   return Number.isFinite(userId) && userId > 0 && userId === Number(contract.capturing_broker_id ?? 0);
 }
 
@@ -1355,6 +1382,9 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   const userId = Number(req.userId);
+  if (isNegotiationResponsibleUser(contract, userId)) {
+    return true;
+  }
   return Number.isFinite(userId) && userId > 0 && userId === Number(contract.selling_broker_id ?? 0);
 }
 
@@ -1410,7 +1440,12 @@ const CONTRACT_SELECT_SQL = `
     capture_user.name AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
     capture_agency.name AS capturing_agency_name,
-    NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address
+    NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address,
+    (
+      SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
+      FROM negotiation_responsibles nr
+      WHERE nr.negotiation_id = c.negotiation_id
+    ) AS responsible_user_ids
   FROM contracts c
   JOIN negotiations n ON n.id = c.negotiation_id
   JOIN properties p ON p.id = c.property_id

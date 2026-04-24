@@ -908,11 +908,13 @@ class AuthController {
           SELECT u.id, u.name, u.email, u.email_verified_at, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  u.token_version,
                  CASE
+                   WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
                    WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
                    ELSE 'client'
                  END AS role,
                  b.id AS broker_id,
                  b.status AS broker_status,
+                 b.profile_type AS broker_profile_type,
                  b.creci AS creci,
                  bd.status AS broker_documents_status
           FROM users u
@@ -939,7 +941,12 @@ class AuthController {
         return res.status(401).json({ error: 'Credenciais inválidas.' });
       }
 
-      const profile: ProfileType = user.role === 'broker' ? 'broker' : 'client';
+      const profile: ProfileType =
+        user.role === 'auxiliary_administrative'
+          ? 'auxiliary_administrative'
+          : user.role === 'broker'
+          ? 'broker'
+          : 'client';
       const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
       const requiresDocuments =
         profile === 'broker' && (brokerDocsStatus.length === 0 || brokerDocsStatus == 'rejected');
@@ -992,7 +999,7 @@ class AuthController {
 
       const [existingRows] = await authDb.query<RowDataPacket[]>(
         `SELECT u.id, u.name, u.email, u.email_verified_at, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
-                b.id AS broker_id, b.status AS broker_status, b.creci AS creci,
+                b.id AS broker_id, b.status AS broker_status, b.profile_type AS broker_profile_type, b.creci AS creci,
                 bd.status AS broker_documents_status
            FROM users u
            LEFT JOIN brokers b ON u.id = b.id
@@ -1038,7 +1045,12 @@ class AuthController {
         row.broker_id != null &&
         !blockedBrokerRequest &&
         (brokerStatus === 'approved' || brokerStatus === 'pending_verification');
-      const effectiveProfile: ProfileType = isBroker ? 'broker' : 'client';
+      const brokerProfileType = String(row.broker_profile_type ?? 'BROKER').toUpperCase();
+      const effectiveProfile: ProfileType = isBroker
+        ? brokerProfileType === 'AUXILIARY_ADMINISTRATIVE'
+          ? 'auxiliary_administrative'
+          : 'broker'
+        : 'client';
       const requiresDocuments =
         effectiveProfile === 'broker' &&
         (brokerDocsStatus.length === 0 || brokerDocsStatus === 'rejected');

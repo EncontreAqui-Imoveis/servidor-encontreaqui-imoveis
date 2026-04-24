@@ -51,6 +51,12 @@ adminRoutes.put('/negotiations/:id/cancel', adminController.cancelNegotiation);
 adminRoutes.put('/negotiations/:id/selling-broker', (req, res) =>
   (adminController as any).updateNegotiationSellingBroker(req, res)
 );
+adminRoutes.get('/negotiations/:id/responsibles', (req, res) =>
+  (adminController as any).listNegotiationResponsibles(req, res)
+);
+adminRoutes.put('/negotiations/:id/responsibles', (req, res) =>
+  (adminController as any).updateNegotiationResponsibles(req, res)
+);
 adminRoutes.get('/negotiations/:id/signed-proposal/download', adminController.downloadSignedProposal);
 adminRoutes.post(
   '/negotiations/:id/signed-proposal',

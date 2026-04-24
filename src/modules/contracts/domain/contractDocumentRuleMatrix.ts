@@ -28,29 +28,6 @@ function stripDiacritics(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-function propertyPurposeFlags(purpose: string | null | undefined): {
-  isSale: boolean;
-  isRent: boolean;
-  isUnknown: boolean;
-} {
-  const raw = (purpose ?? '').trim().toLowerCase();
-  if (!raw) {
-    return { isSale: true, isRent: true, isUnknown: true };
-  }
-  const isRent = raw.includes('alug') || raw.includes('rent');
-  const isSale = raw.includes('venda') || raw.includes('sale');
-  if (isSale && isRent) {
-    return { isSale: true, isRent: true, isUnknown: false };
-  }
-  if (isRent) {
-    return { isSale: false, isRent: true, isUnknown: false };
-  }
-  if (isSale) {
-    return { isSale: true, isRent: false, isUnknown: false };
-  }
-  return { isSale: true, isRent: true, isUnknown: true };
-}
-
 /**
  * Lê estado civil a partir de `estado_civil` / `estadoCivil`.
  * `unknown`: preencher estado civil e/ou certidão antes de exigir documentos do cônjuge.
@@ -115,7 +92,6 @@ export function resolveDocumentRequirements(input: {
   sellerInfo: Record<string, unknown>;
   buyerInfo: Record<string, unknown>;
 }): CategoryRequirement[] {
-  const flags = propertyPurposeFlags(input.propertyPurpose);
   const sellerMarital = resolveMaritalBucket(input.sellerInfo);
   const buyerMarital = resolveMaritalBucket(input.buyerInfo);
   const marital = input.side === 'seller' ? sellerMarital : buyerMarital;
@@ -123,21 +99,6 @@ export function resolveDocumentRequirements(input: {
   const conjuge = conjugeRequirementForMarital(marital);
 
   if (input.side === 'seller') {
-    const docsImovel: CategoryRequirement =
-      flags.isSale || flags.isUnknown
-        ? {
-            category: 'docs_imovel',
-            applicability: 'required',
-            required: true,
-            reasonCode: 'DOCS_IMOVEL_REQUIRED_SALE_OR_UNKNOWN',
-          }
-        : {
-            category: 'docs_imovel',
-            applicability: 'not_applicable',
-            required: false,
-            reasonCode: 'DOCS_IMOVEL_NA_RENTAL',
-          };
-
     return [
       {
         category: 'identidade',
@@ -164,24 +125,14 @@ export function resolveDocumentRequirements(input: {
         reasonCode: 'ESTADO_CIVIL_REQUIRED',
       },
       conjuge,
-      docsImovel,
+      {
+        category: 'docs_imovel',
+        applicability: 'required',
+        required: true,
+        reasonCode: 'DOCS_IMOVEL_REQUIRED',
+      },
     ];
   }
-
-  const comprovanteRenda: CategoryRequirement =
-    flags.isRent || flags.isUnknown
-      ? {
-          category: 'comprovante_renda',
-          applicability: 'required',
-          required: true,
-          reasonCode: 'COMPROVANTE_RENDA_REQUIRED_RENT_OR_UNKNOWN',
-        }
-      : {
-          category: 'comprovante_renda',
-          applicability: 'not_applicable',
-          required: false,
-          reasonCode: 'COMPROVANTE_RENDA_NA_SALE',
-        };
 
   return [
     {
@@ -203,7 +154,12 @@ export function resolveDocumentRequirements(input: {
       reasonCode: 'ESTADO_CIVIL_REQUIRED',
     },
     conjuge,
-    comprovanteRenda,
+    {
+      category: 'comprovante_renda',
+      applicability: 'required',
+      required: true,
+      reasonCode: 'COMPROVANTE_RENDA_REQUIRED',
+    },
   ];
 }
 

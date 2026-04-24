@@ -16,7 +16,7 @@ describe('contractDocumentRuleMatrix', () => {
     expect(resolveMaritalBucket({})).toBe('unknown');
   });
 
-  it('comprovante de renda: obrigatório aluguel, N/A venda (comprador)', () => {
+  it('comprovante de renda: obrigatório no comprador em venda e aluguel', () => {
     const sale = resolveDocumentRequirements({
       side: 'buyer',
       propertyPurpose: 'Venda de imóvel',
@@ -31,11 +31,11 @@ describe('contractDocumentRuleMatrix', () => {
     });
     const crSale = sale.find((r) => r.category === 'comprovante_renda');
     const crRent = rent.find((r) => r.category === 'comprovante_renda');
-    expect(crSale?.applicability).toBe('not_applicable');
+    expect(crSale?.applicability).toBe('required');
     expect(crRent?.applicability).toBe('required');
   });
 
-  it('docs_imovel: venda exige, aluguel N/A (vendedor)', () => {
+  it('docs_imovel: obrigatório no vendedor em venda e aluguel', () => {
     const sale = resolveDocumentRequirements({
       side: 'seller',
       propertyPurpose: 'Venda',
@@ -49,7 +49,7 @@ describe('contractDocumentRuleMatrix', () => {
       buyerInfo: {},
     });
     expect(sale.find((r) => r.category === 'docs_imovel')?.applicability).toBe('required');
-    expect(rent.find((r) => r.category === 'docs_imovel')?.applicability).toBe('not_applicable');
+    expect(rent.find((r) => r.category === 'docs_imovel')?.applicability).toBe('required');
   });
 
   it('cônjuge: obrigatório só casado/união; solteiro N/A; unknown N/A cônjuge', () => {
@@ -79,7 +79,7 @@ describe('contractDocumentRuleMatrix', () => {
     expect(u?.applicability).toBe('not_applicable');
   });
 
-  it('bloqueia upload em categoria N/A', () => {
+  it('não bloqueia upload em comprovante_renda para comprador solteiro', () => {
     const ctx = {
       propertyPurpose: 'Venda',
       sellerInfo: { estado_civil: 'Solteiro' },
@@ -91,7 +91,7 @@ describe('contractDocumentRuleMatrix', () => {
       ctx
     );
     expect(blocked).toEqual(
-      expect.objectContaining({ blocked: true, reasonCode: expect.any(String) })
+      expect.objectContaining({ blocked: false })
     );
   });
 

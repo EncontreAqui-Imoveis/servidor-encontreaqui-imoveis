@@ -53,7 +53,6 @@ const CATEGORY_DOCUMENT_TYPES: Record<
     'doc_identidade',
     'cliente_cnh',
     'cliente_identidade',
-    'cliente_cpf',
   ]),
   comprovante_endereco: new Set(['comprovante_endereco']),
   estado_civil: new Set(['certidao_casamento_nascimento']),

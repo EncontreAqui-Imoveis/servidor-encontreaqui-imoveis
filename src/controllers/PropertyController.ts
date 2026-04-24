@@ -3186,12 +3186,13 @@ class PropertyController {
     const city = String(req.query.city ?? '').trim();
     try {
       const placeholders = NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ');
-      const whereParams: Array<string> = [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES];
+      const whereParams: Array<string> = [];
       let cityClause = '';
       if (city.length > 0) {
-        cityClause = ' AND p.city = ?';
-        whereParams.push(city);
+        cityClause = ' AND p.city LIKE ?';
+        whereParams.push(`%${city}%`);
       }
+      whereParams.push(...NEGOTIATION_PUBLIC_BLOCKING_STATUSES);
 
       const rows = await runPropertyQuery<RowDataPacket[]>(
         `

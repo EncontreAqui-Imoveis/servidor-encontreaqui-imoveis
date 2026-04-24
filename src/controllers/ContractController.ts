@@ -1415,7 +1415,7 @@ function shouldMoveToDraft(
   );
 }
 
-const CONTRACT_SELECT_SQL = `
+const CONTRACT_SELECT_BASE_SQL = `
   SELECT
     c.id,
     c.negotiation_id,
@@ -1441,11 +1441,7 @@ const CONTRACT_SELECT_SQL = `
     seller_user.name AS selling_broker_name,
     capture_agency.name AS capturing_agency_name,
     NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address,
-    (
-      SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
-      FROM negotiation_responsibles nr
-      WHERE nr.negotiation_id = c.negotiation_id
-    ) AS responsible_user_ids
+    __RESPONSIBLE_USERS_SELECT__
   FROM contracts c
   JOIN negotiations n ON n.id = c.negotiation_id
   JOIN properties p ON p.id = c.property_id
@@ -1455,10 +1451,50 @@ const CONTRACT_SELECT_SQL = `
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;
 
+let negotiationResponsiblesTableCache: boolean | null = null;
+
+async function hasNegotiationResponsiblesTable(): Promise<boolean> {
+  if (negotiationResponsiblesTableCache != null) {
+    return negotiationResponsiblesTableCache;
+  }
+
+  try {
+    const rows = await queryContractRows<RowDataPacket>(
+      `
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = 'negotiation_responsibles'
+        LIMIT 1
+      `,
+      []
+    );
+    negotiationResponsiblesTableCache = rows.length > 0;
+  } catch {
+    negotiationResponsiblesTableCache = false;
+  }
+
+  return negotiationResponsiblesTableCache;
+}
+
+async function getContractSelectSql(): Promise<string> {
+  const includeResponsibles = await hasNegotiationResponsiblesTable();
+  const responsibleUsersSelect = includeResponsibles
+    ? `(
+      SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
+      FROM negotiation_responsibles nr
+      WHERE nr.negotiation_id = c.negotiation_id
+    ) AS responsible_user_ids`
+    : 'NULL AS responsible_user_ids';
+
+  return CONTRACT_SELECT_BASE_SQL.replace('__RESPONSIBLE_USERS_SELECT__', responsibleUsersSelect);
+}
+
 async function fetchContractById(contractId: string): Promise<ContractRow | null> {
+  const contractSelectSql = await getContractSelectSql();
   const rows = await queryContractRows<ContractRow>(
     `
-      ${CONTRACT_SELECT_SQL}
+      ${contractSelectSql}
       WHERE c.id = ?
       LIMIT 1
     `,
@@ -1469,9 +1505,10 @@ async function fetchContractById(contractId: string): Promise<ContractRow | null
 }
 
 async function fetchContractByNegotiationId(negotiationId: string): Promise<ContractRow | null> {
+  const contractSelectSql = await getContractSelectSql();
   const rows = await queryContractRows<ContractRow>(
     `
-      ${CONTRACT_SELECT_SQL}
+      ${contractSelectSql}
       WHERE c.negotiation_id = ?
       LIMIT 1
     `,
@@ -1485,9 +1522,10 @@ async function fetchContractByNegotiationIdForUpdate(
   tx: PoolConnection,
   negotiationId: string
 ): Promise<ContractRow | null> {
+  const contractSelectSql = await getContractSelectSql();
   const [rows] = await tx.query<ContractRow[]>(
     `
-      ${CONTRACT_SELECT_SQL}
+      ${contractSelectSql}
       WHERE c.negotiation_id = ?
       LIMIT 1
       FOR UPDATE
@@ -1502,9 +1540,10 @@ async function fetchContractForUpdate(
   tx: PoolConnection,
   contractId: string
 ): Promise<ContractRow | null> {
+  const contractSelectSql = await getContractSelectSql();
   const [rows] = await tx.query<ContractRow[]>(
     `
-      ${CONTRACT_SELECT_SQL}
+      ${contractSelectSql}
       WHERE c.id = ?
       LIMIT 1
       FOR UPDATE
@@ -1793,6 +1832,7 @@ class ContractController {
     const whereParams = statusFilter ? [statusFilter] : [];
 
     try {
+      const contractSelectSql = await getContractSelectSql();
       const countRows = await queryContractRows<RowDataPacket>(
         `
           SELECT COUNT(*) AS total
@@ -1805,7 +1845,7 @@ class ContractController {
 
       const rows = await queryContractRows<ContractRow>(
         `
-          ${CONTRACT_SELECT_SQL}
+          ${contractSelectSql}
           ${whereClause}
           ORDER BY c.updated_at DESC, c.created_at DESC
           LIMIT ? OFFSET ?
@@ -1884,6 +1924,7 @@ class ContractController {
     const statusParams = statusFilter ? [statusFilter] : [];
 
     try {
+      const contractSelectSql = await getContractSelectSql();
       const countRows = await queryContractRows<RowDataPacket>(
         `
           SELECT COUNT(*) AS total
@@ -1900,7 +1941,7 @@ class ContractController {
 
       const rows = await queryContractRows<ContractRow>(
         `
-          ${CONTRACT_SELECT_SQL}
+          ${contractSelectSql}
           WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
             AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
             AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'

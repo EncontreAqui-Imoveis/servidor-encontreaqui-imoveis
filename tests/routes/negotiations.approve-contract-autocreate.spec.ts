@@ -124,6 +124,13 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
         ]];
       }
 
+      if (
+        sql.includes('FROM negotiation_documents') &&
+        sql.includes("type = 'other'")
+      ) {
+        return [[{ id: 501 }]];
+      }
+
       if (sql.includes('UPDATE negotiations') && sql.includes("SET status = 'IN_NEGOTIATION'")) {
         negotiationStatus = 'IN_NEGOTIATION';
         return [{ affectedRows: 1 }];

@@ -21,11 +21,27 @@ import {
 } from '../services/negotiationDocumentStorageService';
 import {
   isContractApprovalStatus,
+  isContractDocumentCategoryStatus,
   isContractDocumentType,
   isContractStatus,
   type ContractApprovalStatus,
+  type ContractDocumentType,
+  type ContractDocumentCategoryCode,
+  type ContractDocumentCategoryStatus,
   type ContractStatus,
 } from '../modules/contracts/domain/contract.types';
+import {
+  findCategoryRequirement,
+  isUploadBlockedForNotApplicableCategory,
+  resolveDocumentRequirementsForContract,
+  type ContractDocumentRuleContext,
+} from '../modules/contracts/domain/contractDocumentRuleMatrix';
+import {
+  resolveDocumentCategoryFromType,
+  resolveFallbackDocumentTypeByCategory,
+  type ContractDocumentSide,
+  validateContractDocumentUpload,
+} from '../modules/contracts/domain/contractDocumentValidation';
 
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
   'IN_NEGOTIATION',
@@ -146,6 +162,8 @@ interface ContractDataBody {
 interface UploadContractDocumentBody {
   documentType?: unknown;
   document_type?: unknown;
+  documentCategory?: unknown;
+  document_category?: unknown;
   side?: unknown;
 }
 
@@ -157,6 +175,14 @@ interface EvaluateSideBody {
   side?: unknown;
   status?: unknown;
   reason?: unknown;
+}
+
+interface EvaluateCategoryBody {
+  side?: unknown;
+  category?: unknown;
+  status?: unknown;
+  reason?: unknown;
+  reasonCode?: unknown;
 }
 
 interface FinalizeBody {
@@ -185,6 +211,38 @@ interface ContractDocumentGateCounts {
   signedContractTotal: number;
   paymentReceiptTotal: number;
   inspectionBoletoTotal: number;
+}
+
+interface ContractDocumentCategoryProgressItem {
+  category: ContractDocumentCategoryCode;
+  status: ContractDocumentCategoryStatus;
+  uploadedCount: number;
+  required: boolean;
+  latestDocumentId: number | null;
+  latestUploadedAt: string | null;
+}
+
+interface ContractDocumentProgressSide {
+  side: ContractDocumentSide;
+  categories: ContractDocumentCategoryProgressItem[];
+  totals: {
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+}
+
+interface ContractDocumentProgressSummary {
+  seller: ContractDocumentProgressSide;
+  buyer: ContractDocumentProgressSide;
+}
+
+interface ContractAuditEvent {
+  action: string;
+  at: string;
+  by: number | null;
+  role: string | null;
+  details?: Record<string, unknown>;
 }
 
 type ContractDocumentDeleteScope = 'linked_only' | 'linked_or_legacy';
@@ -254,6 +312,16 @@ function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
+function buildContractDocumentRuleContextFromRow(
+  row: ContractRow
+): ContractDocumentRuleContext {
+  return {
+    propertyPurpose: row.property_purpose,
+    sellerInfo: parseStoredJsonObject(row.seller_info),
+    buyerInfo: parseStoredJsonObject(row.buyer_info),
+  };
+}
+
 function readMetadataText(
   metadata: Record<string, unknown>,
   keys: string[]
@@ -274,6 +342,32 @@ function mergeStoredJsonObject(
   return {
     ...parseStoredJsonObject(originalValue),
     ...patch,
+  };
+}
+
+function appendAuditTrailEvent(
+  source: unknown,
+  event: ContractAuditEvent
+): Record<string, unknown> {
+  const metadata = parseStoredJsonObject(source);
+  const current = Array.isArray(metadata.auditTrail) ? metadata.auditTrail : [];
+  return {
+    ...metadata,
+    auditTrail: [...current, event],
+  };
+}
+
+function appendContractWorkflowAuditEvent(
+  source: unknown,
+  event: ContractAuditEvent
+): Record<string, unknown> {
+  const metadata = parseStoredJsonObject(source);
+  const current = Array.isArray(metadata.contractAuditTrail)
+    ? metadata.contractAuditTrail
+    : [];
+  return {
+    ...metadata,
+    contractAuditTrail: [...current, event],
   };
 }
 
@@ -371,6 +465,49 @@ function parseDocumentSide(value: unknown): 'seller' | 'buyer' | null {
     return normalized;
   }
   return null;
+}
+
+function normalizeContractDocumentCategory(
+  value: unknown
+): ContractDocumentCategoryCode | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  const allowed = new Set<ContractDocumentCategoryCode>([
+    'identidade',
+    'comprovante_endereco',
+    'estado_civil',
+    'conjuge_documentos',
+    'comprovante_renda',
+    'dados_bancarios',
+    'docs_imovel',
+  ]);
+  return allowed.has(normalized as ContractDocumentCategoryCode)
+    ? (normalized as ContractDocumentCategoryCode)
+    : null;
+}
+
+function resolveCategoryStatus(value: unknown): ContractDocumentCategoryStatus {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (isContractDocumentCategoryStatus(normalized)) return normalized;
+  return 'PENDING';
+}
+
+function resolveSideApprovalFromCategoryProgress(
+  sideProgress: ContractDocumentProgressSide
+): ContractApprovalStatus {
+  const required = sideProgress.categories.filter((item) => item.required);
+  if (required.some((item) => item.status === 'REJECTED')) {
+    return 'REJECTED';
+  }
+  if (required.length > 0 && required.every((item) => item.status === 'APPROVED')) {
+    return 'APPROVED';
+  }
+  if (required.some((item) => item.status === 'APPROVED')) {
+    return 'APPROVED_WITH_RES';
+  }
+  return 'PENDING';
 }
 
 function parseNonNegativeNumber(value: unknown, fieldName: string): number {
@@ -615,7 +752,57 @@ async function fetchContractDocumentGateCounts(
   };
 }
 
+async function fetchContractCategoryValidationRows(
+  tx: PoolConnection,
+  contract: Pick<ContractRow, 'id' | 'negotiation_id'>
+): Promise<ContractDocumentRow[]> {
+  const [rows] = await tx.query<ContractDocumentRow[]>(
+    `
+      SELECT id, type, document_type, metadata_json, created_at
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND COALESCE(document_type, '') <> 'proposal'
+        AND COALESCE(type, '') <> 'proposal'
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+      ORDER BY created_at DESC, id DESC
+    `,
+    [contract.negotiation_id, contract.id]
+  );
+  return rows;
+}
+
+function hasRequiredCategoryGateApproval(input: {
+  rows: ContractDocumentRow[];
+  doubleEnded: boolean;
+  contract: ContractRow;
+}): boolean {
+  const mapped = input.rows.map((row) => mapDocument(row));
+  const matrixContext = buildContractDocumentRuleContextFromRow(input.contract);
+  const progress = buildContractDocumentProgress(
+    mapped.map((document) => ({
+      ...document,
+      metadata: document.metadata as Record<string, unknown>,
+    })),
+    matrixContext
+  );
+  const sideReady = (side: ContractDocumentProgressSide) =>
+    side.categories.every(
+      (item) =>
+        !item.required ||
+        item.status === 'APPROVED' ||
+        item.status === 'NOT_APPLICABLE'
+    );
+  const sellerReady = sideReady(progress.seller);
+  if (input.doubleEnded) {
+    return sellerReady;
+  }
+  return sellerReady && sideReady(progress.buyer);
+}
+
 function mapContract(row: ContractRow) {
+  const documentRequirements = resolveDocumentRequirementsForContract(
+    buildContractDocumentRuleContextFromRow(row)
+  );
   return {
     id: row.id,
     negotiationId: row.negotiation_id,
@@ -640,6 +827,7 @@ function mapContract(row: ContractRow) {
     propertyPurpose: row.property_purpose ?? null,
     agencyName: row.capturing_agency_name ?? null,
     agencyAddress: row.capturing_agency_address ?? null,
+    documentRequirements,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };
@@ -653,15 +841,167 @@ function mapDocument(row: ContractDocumentRow) {
       ? sideValue
       : null;
   const originalFileNameRaw = String(metadata.originalFileName ?? '').trim();
+  const normalizedRowDocumentType = String(row.document_type ?? '').trim().toLowerCase();
+  const rowCategory =
+    isContractDocumentType(normalizedRowDocumentType)
+      ? resolveDocumentCategoryFromType(normalizedRowDocumentType)
+      : null;
+  const documentCategory =
+    normalizeContractDocumentCategory(metadata.documentCategory) ?? rowCategory;
+  const categoryStatus = resolveCategoryStatus(
+    metadata.categoryStatus ?? metadata.reviewStatus ?? metadata.status
+  );
+  const reviewReason = String(
+    metadata.reviewReason ??
+      metadata.reason ??
+      metadata.validationReason ??
+      ''
+  ).trim();
+  const validationResult =
+    metadata.validationResult &&
+    typeof metadata.validationResult === 'object' &&
+    !Array.isArray(metadata.validationResult)
+      ? (metadata.validationResult as Record<string, unknown>)
+      : null;
 
   return {
     id: Number(row.id),
     type: row.type,
     documentType: row.document_type,
     side,
+    documentCategory,
+    categoryStatus,
+    reviewReason: reviewReason || null,
+    validationResult,
     originalFileName: originalFileNameRaw || null,
     metadata,
     createdAt: toIsoString(row.created_at),
+  };
+}
+
+function buildInitialCategoryProgress(
+  side: ContractDocumentSide,
+  matrixContext: ContractDocumentRuleContext
+): Map<ContractDocumentCategoryCode, ContractDocumentCategoryProgressItem> {
+  const { seller, buyer } = resolveDocumentRequirementsForContract(matrixContext);
+  const requirements = side === 'seller' ? seller : buyer;
+  return new Map(
+    requirements.map((req) => {
+      const isNotApplicable = req.applicability === 'not_applicable';
+      return [
+        req.category,
+        {
+          category: req.category,
+          status: (isNotApplicable
+            ? 'NOT_APPLICABLE'
+            : 'PENDING') as ContractDocumentCategoryStatus,
+          uploadedCount: 0,
+          required: req.required,
+          latestDocumentId: null,
+          latestUploadedAt: null,
+        },
+      ];
+    })
+  );
+}
+
+function summarizeCategorySide(
+  side: ContractDocumentSide,
+  mappedDocuments: Array<
+    ReturnType<typeof mapDocument> & { metadata: Record<string, unknown> }
+  >,
+  matrixContext: ContractDocumentRuleContext
+): ContractDocumentProgressSide {
+  const categoryMap = buildInitialCategoryProgress(side, matrixContext);
+  for (const document of mappedDocuments) {
+    if (document.side !== side) continue;
+    const category =
+      document.documentCategory ??
+      normalizeContractDocumentCategory(document.metadata.documentCategory);
+    if (!category) continue;
+    const previous = categoryMap.get(category);
+    if (!previous) continue;
+    if (previous.status === 'NOT_APPLICABLE' && previous.required === false) {
+      continue;
+    }
+    const previousTime = previous?.latestUploadedAt
+      ? new Date(previous.latestUploadedAt).getTime()
+      : 0;
+    const currentTime = document.createdAt ? new Date(document.createdAt).getTime() : 0;
+    const isLatest = currentTime >= previousTime;
+    const nextStatus = isLatest
+      ? resolveCategoryStatus(document.categoryStatus)
+      : (previous?.status ?? 'PENDING');
+    categoryMap.set(category, {
+      category,
+      status: nextStatus,
+      uploadedCount: Number(previous?.uploadedCount ?? 0) + 1,
+      required: previous?.required ?? true,
+      latestDocumentId: isLatest ? document.id : previous?.latestDocumentId ?? null,
+      latestUploadedAt: isLatest
+        ? document.createdAt
+        : (previous?.latestUploadedAt ?? null),
+    });
+  }
+
+  const categories = Array.from(categoryMap.values());
+  return {
+    side,
+    categories,
+    totals: {
+      pending: categories.filter(
+        (item) => item.required && item.status === 'PENDING'
+      ).length,
+      approved: categories.filter(
+        (item) => item.required && item.status === 'APPROVED'
+      ).length,
+      rejected: categories.filter(
+        (item) => item.required && item.status === 'REJECTED'
+      ).length,
+    },
+  };
+}
+
+function buildContractDocumentProgress(
+  mappedDocuments: Array<
+    ReturnType<typeof mapDocument> & { metadata: Record<string, unknown> }
+  >,
+  matrixContext: ContractDocumentRuleContext
+): ContractDocumentProgressSummary {
+  return {
+    seller: summarizeCategorySide('seller', mappedDocuments, matrixContext),
+    buyer: summarizeCategorySide('buyer', mappedDocuments, matrixContext),
+  };
+}
+
+function mapContractWithDocumentProgress(
+  row: ContractRow,
+  documentRows: ContractDocumentRow[]
+): ReturnType<typeof mapContract> & {
+  documentProgress: ContractDocumentProgressSummary;
+  documents: Array<ReturnType<typeof mapDocument> & { downloadUrl: string }>;
+} {
+  const documents = documentRows
+    .filter((document) => !isProposalDocument(document))
+    .filter((document) => !isRejectedNegotiationDocumentRow(document))
+    .map((document) => ({
+      ...mapDocument(document),
+      downloadUrl: `/negotiations/${row.negotiation_id}/documents/${document.id}/download`,
+    }));
+
+  const matrixContext = buildContractDocumentRuleContextFromRow(row);
+  const progress = buildContractDocumentProgress(
+    documents.map((document) => ({
+      ...document,
+      metadata: parseStoredJsonObject(document.metadata),
+    })),
+    matrixContext
+  );
+
+  return {
+    ...mapContract(row),
+    documentProgress: progress,
+    documents,
   };
 }
 
@@ -1519,8 +1859,51 @@ class ContractController {
         [userId, userId, userId, ...statusParams, limit, offset]
       );
 
+      if (rows.length === 0) {
+        return res.status(200).json({
+          data: [],
+          total,
+          page,
+          limit,
+        });
+      }
+
+      const negotiationIds = rows.map((row) => row.negotiation_id);
+      const placeholders = negotiationIds.map(() => '?').join(', ');
+      const documentRows = await queryContractRows<ContractDocumentListRow>(
+        `
+          SELECT id, negotiation_id, type, document_type, metadata_json, created_at
+          FROM negotiation_documents
+          WHERE negotiation_id IN (${placeholders})
+            AND COALESCE(document_type, '') <> 'proposal'
+            AND COALESCE(type, '') <> 'proposal'
+          ORDER BY created_at DESC, id DESC
+        `,
+        negotiationIds
+      );
+
+      const documentsByNegotiation = new Map<string, ContractDocumentRow[]>();
+      for (const row of documentRows) {
+        const negotiationId = String(row.negotiation_id);
+        const docs = documentsByNegotiation.get(negotiationId) ?? [];
+        docs.push(row);
+        documentsByNegotiation.set(negotiationId, docs);
+      }
+
       return res.status(200).json({
-        data: rows.map(mapContract),
+        data: rows.map((row) => ({
+          ...mapContract(row),
+          documentProgress: buildContractDocumentProgress(
+            (documentsByNegotiation.get(row.negotiation_id) ?? []).map((doc) => {
+              const mapped = mapDocument(doc);
+              return {
+                ...mapped,
+                metadata: mapped.metadata as Record<string, unknown>,
+              };
+            }),
+            buildContractDocumentRuleContextFromRow(row)
+          ),
+        })),
         total,
         page,
         limit,
@@ -1781,14 +2164,77 @@ class ContractController {
         nextBuyerReason = sideReason;
       }
 
-      const mustMoveToDraft = shouldMoveToDraft(
+      const targetSides: ContractDocumentSide[] = isDoubleEndedDeal(contract)
+        ? ['seller', 'buyer']
+        : [side as ContractDocumentSide];
+      const normalizedCategoryStatus: ContractDocumentCategoryStatus =
+        nextSideStatus === 'REJECTED'
+          ? 'REJECTED'
+          : nextSideStatus === 'PENDING'
+            ? 'PENDING'
+            : 'APPROVED';
+      const reviewAuditEvent: ContractAuditEvent = {
+        action: 'admin_side_review',
+        at: new Date().toISOString(),
+        by: Number.isFinite(evaluatedBy) ? evaluatedBy : null,
+        role: String(req.userRole ?? '').trim().toLowerCase() || null,
+        details: {
+          side,
+          status: nextSideStatus,
+          reason: reasonText || null,
+        },
+      };
+      for (const targetSide of targetSides) {
+        const [docRows] = await tx.query<ContractDocumentRow[]>(
+          `
+            SELECT id, type, document_type, metadata_json, created_at
+            FROM negotiation_documents
+            WHERE negotiation_id = ?
+              AND COALESCE(document_type, '') <> 'proposal'
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.side')) = ?
+            ORDER BY id DESC
+          `,
+          [contract.negotiation_id, contractId, targetSide]
+        );
+        for (const docRow of docRows) {
+          const metadata = parseStoredJsonObject(docRow.metadata_json);
+          const nextMetadata = appendAuditTrailEvent(metadata, reviewAuditEvent);
+          nextMetadata.categoryStatus = normalizedCategoryStatus;
+          nextMetadata.reviewStatus = nextSideStatus;
+          nextMetadata.reviewReason = reasonText || null;
+          nextMetadata.reviewedAt = reviewAuditEvent.at;
+          nextMetadata.reviewedBy = reviewAuditEvent.by;
+          await tx.query(
+            `
+              UPDATE negotiation_documents
+              SET metadata_json = CAST(? AS JSON)
+              WHERE id = ?
+            `,
+            [JSON.stringify(nextMetadata), Number(docRow.id)]
+          );
+        }
+      }
+
+      const mustMoveToDraftBySide = shouldMoveToDraft(
         contract,
         nextSellerStatus,
         nextBuyerStatus
       );
+      const categoryRows = await fetchContractCategoryValidationRows(tx, contract);
+      const mustMoveToDraftByCategories = hasRequiredCategoryGateApproval({
+        rows: categoryRows,
+        doubleEnded: isDoubleEndedDeal(contract),
+        contract,
+      });
+      const mustMoveToDraft = mustMoveToDraftBySide && mustMoveToDraftByCategories;
       const nextContractStatus: ContractStatus = mustMoveToDraft
         ? 'IN_DRAFT'
         : 'AWAITING_DOCS';
+      const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
+        contract.workflow_metadata,
+        reviewAuditEvent
+      );
 
       await tx.query(
         `
@@ -1798,6 +2244,7 @@ class ContractController {
             buyer_approval_status = ?,
             seller_approval_reason = CAST(? AS JSON),
             buyer_approval_reason = CAST(? AS JSON),
+            workflow_metadata = CAST(? AS JSON),
             status = ?,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
@@ -1807,6 +2254,7 @@ class ContractController {
           nextBuyerStatus,
           JSON.stringify(nextSellerReason),
           JSON.stringify(nextBuyerReason),
+          JSON.stringify(nextWorkflowMetadata),
           nextContractStatus,
           contractId,
         ]
@@ -1889,6 +2337,212 @@ class ContractController {
     }
   }
 
+  async evaluateCategory(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const body = (req.body ?? {}) as EvaluateCategoryBody;
+    const side = parseDocumentSide(body.side);
+    const category = normalizeContractDocumentCategory(body.category);
+    const status = resolveCategoryStatus(body.status);
+    const reasonText = String(body.reason ?? '').trim();
+    const reasonCode = String(body.reasonCode ?? '').trim().toUpperCase();
+    if (!side) {
+      return res.status(400).json({ error: "Lado inválido. Use 'seller' ou 'buyer'." });
+    }
+    if (!category) {
+      return res.status(400).json({ error: 'Categoria documental inválida.' });
+    }
+    if (!isContractDocumentCategoryStatus(status)) {
+      return res.status(400).json({ error: 'Status categorial inválido.' });
+    }
+    if (status === 'REJECTED' && reasonText.length < 3) {
+      return res.status(400).json({
+        error: 'Motivo obrigatório para rejeição por categoria.',
+      });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+      if (resolveContractStatus(contract.status) !== 'AWAITING_DOCS') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Revisão por categoria só é permitida em AWAITING_DOCS.',
+        });
+      }
+
+      const ruleContext = buildContractDocumentRuleContextFromRow(contract);
+      const categoryRule = findCategoryRequirement(side, category, ruleContext);
+      if (!categoryRule) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Categoria inválida para o lado informado.',
+        });
+      }
+      if (categoryRule.applicability === 'not_applicable') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Esta categoria não se aplica ao contrato atual (perfil/finalidade).',
+        });
+      }
+
+      const rows = await fetchContractCategoryValidationRows(tx, contract);
+      const targetDocs = rows.filter((row) => {
+        const mapped = mapDocument(row);
+        return mapped.side === side && mapped.documentCategory === category;
+      });
+      if (targetDocs.length === 0) {
+        await tx.rollback();
+        return res.status(404).json({
+          error: 'Nenhum documento encontrado para a categoria e lado informados.',
+        });
+      }
+
+      const actorId = Number(req.userId ?? 0);
+      const actorRole = String(req.userRole ?? '').trim().toLowerCase() || null;
+      const auditEvent: ContractAuditEvent = {
+        action: 'admin_category_review',
+        at: new Date().toISOString(),
+        by: Number.isFinite(actorId) && actorId > 0 ? actorId : null,
+        role: actorRole,
+        details: {
+          side,
+          category,
+          status,
+          reason: reasonText || null,
+          reasonCode: reasonCode || null,
+        },
+      };
+
+      for (const row of targetDocs) {
+        const metadata = parseStoredJsonObject(row.metadata_json);
+        const nextMetadata = appendAuditTrailEvent(metadata, auditEvent);
+        nextMetadata.categoryStatus = status;
+        nextMetadata.reviewStatus = status;
+        nextMetadata.reviewReason = reasonText || null;
+        nextMetadata.reviewReasonCode = reasonCode || null;
+        nextMetadata.reviewedAt = auditEvent.at;
+        nextMetadata.reviewedBy = auditEvent.by;
+        nextMetadata.validationResult = {
+          isValid: status !== 'REJECTED',
+          status,
+          issues:
+            status === 'REJECTED'
+              ? [
+                  {
+                    code: reasonCode || 'CATEGORY_INVALID',
+                    message: reasonText || 'Categoria rejeitada na revisão.',
+                  },
+                ]
+              : [],
+        };
+        await tx.query(
+          `
+            UPDATE negotiation_documents
+            SET metadata_json = CAST(? AS JSON)
+            WHERE id = ?
+          `,
+          [JSON.stringify(nextMetadata), Number(row.id)]
+        );
+      }
+
+      const updatedRows = await fetchContractCategoryValidationRows(tx, contract);
+      const matrixContext = buildContractDocumentRuleContextFromRow(contract);
+      const progress = buildContractDocumentProgress(
+        updatedRows.map((row) => {
+          const mapped = mapDocument(row);
+          return {
+            ...mapped,
+            metadata: mapped.metadata as Record<string, unknown>,
+          };
+        }),
+        matrixContext
+      );
+
+      const nextSellerStatus = resolveSideApprovalFromCategoryProgress(progress.seller);
+      const nextBuyerStatus = isDoubleEndedDeal(contract)
+        ? nextSellerStatus
+        : resolveSideApprovalFromCategoryProgress(progress.buyer);
+      const mustMoveBySide = shouldMoveToDraft(
+        contract,
+        nextSellerStatus,
+        nextBuyerStatus
+      );
+      const mustMoveByCategories = hasRequiredCategoryGateApproval({
+        rows: updatedRows,
+        doubleEnded: isDoubleEndedDeal(contract),
+        contract,
+      });
+      const nextContractStatus: ContractStatus =
+        mustMoveBySide && mustMoveByCategories ? 'IN_DRAFT' : 'AWAITING_DOCS';
+
+      const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
+        contract.workflow_metadata,
+        auditEvent
+      );
+      const sellerReason =
+        side === 'seller'
+          ? normalizeApprovalReason(reasonText, auditEvent.by)
+          : parseStoredJsonObject(contract.seller_approval_reason);
+      const buyerReason =
+        side === 'buyer'
+          ? normalizeApprovalReason(reasonText, auditEvent.by)
+          : parseStoredJsonObject(contract.buyer_approval_reason);
+
+      await tx.query(
+        `
+          UPDATE contracts
+          SET
+            seller_approval_status = ?,
+            buyer_approval_status = ?,
+            seller_approval_reason = CAST(? AS JSON),
+            buyer_approval_reason = CAST(? AS JSON),
+            workflow_metadata = CAST(? AS JSON),
+            status = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+        [
+          nextSellerStatus,
+          nextBuyerStatus,
+          JSON.stringify(sellerReason),
+          JSON.stringify(buyerReason),
+          JSON.stringify(nextWorkflowMetadata),
+          nextContractStatus,
+          contractId,
+        ]
+      );
+
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+      return res.status(200).json({
+        message: 'Revisão por categoria atualizada com sucesso.',
+        contract: updatedContract
+          ? {
+              ...mapContract(updatedContract),
+              documentProgress: progress,
+            }
+          : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao revisar categoria documental:', error);
+      return res.status(500).json({
+        error: 'Falha ao revisar categoria documental.',
+      });
+    } finally {
+      tx.release();
+    }
+  }
+
   async uploadSignedDocs(req: Request, res: Response): Promise<Response> {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
@@ -1896,6 +2550,9 @@ class ContractController {
     }
 
     const body = (req.body ?? {}) as UploadContractDocumentBody;
+    const documentCategoryInput = normalizeContractDocumentCategory(
+      body.documentCategory ?? body.document_category
+    );
     const documentTypeRaw = String(
       body.documentType ?? body.document_type ?? ''
     ).trim();
@@ -2497,10 +3154,18 @@ class ContractController {
     }
 
     const body = (req.body ?? {}) as UploadContractDocumentBody;
+    const documentCategoryInput = normalizeContractDocumentCategory(
+      body.documentCategory ?? body.document_category
+    );
     const documentTypeRaw = String(
       body.documentType ?? body.document_type ?? ''
     ).trim();
-    const normalizedDocumentType = documentTypeRaw.toLowerCase();
+    const normalizedDocumentType = (
+      documentTypeRaw ||
+      (documentCategoryInput
+        ? resolveFallbackDocumentTypeByCategory(documentCategoryInput)
+        : '')
+    ).toLowerCase();
     const requestedSide = parseDocumentSide(body.side);
     if (!isContractDocumentType(normalizedDocumentType)) {
       return res.status(400).json({ error: 'Tipo de documento inválido.' });
@@ -2801,15 +3466,26 @@ class ContractController {
         [contract.negotiation_id]
       );
 
+      const mappedDocuments = documents
+        .filter((document) => !isProposalDocument(document))
+        .filter((document) => !isRejectedNegotiationDocumentRow(document))
+        .map((document) => ({
+          ...mapDocument(document),
+          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
+        }));
+
       return res.status(200).json({
-        contract: mapContract(contract),
-        documents: documents
-          .filter((document) => !isProposalDocument(document))
-          .filter((document) => !isRejectedNegotiationDocumentRow(document))
-          .map((document) => ({
-            ...mapDocument(document),
-            downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
-          })),
+        contract: {
+          ...mapContract(contract),
+          documentProgress: buildContractDocumentProgress(
+            mappedDocuments.map((document) => ({
+              ...document,
+              metadata: document.metadata as Record<string, unknown>,
+            })),
+            buildContractDocumentRuleContextFromRow(contract)
+          ),
+        },
+        documents: mappedDocuments,
       });
     } catch (error) {
       console.error('Erro ao buscar contrato:', error);
@@ -2915,15 +3591,26 @@ class ContractController {
         [contract.negotiation_id]
       );
 
+      const mappedDocuments = documents
+        .filter((document) => !isProposalDocument(document))
+        .filter((document) => !isRejectedNegotiationDocumentRow(document))
+        .map((document) => ({
+          ...mapDocument(document),
+          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
+        }));
+
       return res.status(200).json({
-        contract: mapContract(contract),
-        documents: documents
-          .filter((document) => !isProposalDocument(document))
-          .filter((document) => !isRejectedNegotiationDocumentRow(document))
-          .map((document) => ({
-            ...mapDocument(document),
-            downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
-          })),
+        contract: {
+          ...mapContract(contract),
+          documentProgress: buildContractDocumentProgress(
+            mappedDocuments.map((document) => ({
+              ...document,
+              metadata: document.metadata as Record<string, unknown>,
+            })),
+            buildContractDocumentRuleContextFromRow(contract)
+          ),
+        },
+        documents: mappedDocuments,
       });
     } catch (error) {
       console.error('Erro ao buscar contrato por negociação:', error);
@@ -3146,10 +3833,18 @@ class ContractController {
     }
 
     const body = (req.body ?? {}) as UploadContractDocumentBody;
+    const documentCategoryInput = normalizeContractDocumentCategory(
+      body.documentCategory ?? body.document_category
+    );
     const documentTypeRaw = String(
       body.documentType ?? body.document_type ?? ''
     ).trim();
-    const normalizedDocumentType = documentTypeRaw.toLowerCase();
+    const normalizedDocumentType = (
+      documentTypeRaw ||
+      (documentCategoryInput
+        ? resolveFallbackDocumentTypeByCategory(documentCategoryInput)
+        : '')
+    ).toLowerCase();
     const requestedSide = parseDocumentSide(body.side);
     if (!isContractDocumentType(normalizedDocumentType)) {
       return res.status(400).json({ error: 'Tipo de documento inválido.' });
@@ -3185,6 +3880,25 @@ class ContractController {
           return res.status(400).json({
             error:
               'Documentos assinados, comprovantes e anexos complementares só podem ser enviados em AWAITING_SIGNATURES.',
+          });
+        }
+      }
+      const resolvedDocumentCategory =
+        documentCategoryInput ??
+        resolveDocumentCategoryFromType(normalizedDocumentType);
+      if (!isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental) {
+        if (currentStatus !== 'AWAITING_DOCS' && currentStatus !== 'IN_DRAFT') {
+          await tx.rollback();
+          return res.status(400).json({
+            error:
+              'Categorias documentais só podem ser enviadas na etapa de documentação.',
+          });
+        }
+        if (!resolvedDocumentCategory) {
+          await tx.rollback();
+          return res.status(400).json({
+            error:
+              'documentCategory é obrigatório para documentos da etapa AWAITING_DOCS.',
           });
         }
       }
@@ -3268,31 +3982,122 @@ class ContractController {
         }
       }
 
+      if (
+        resolvedDocumentCategory &&
+        resolvedSide &&
+        !isSignedDocumentType(normalizedDocumentType) &&
+        !isAdminSupplemental
+      ) {
+        const notApplicable = isUploadBlockedForNotApplicableCategory(
+          resolvedSide,
+          resolvedDocumentCategory,
+          buildContractDocumentRuleContextFromRow(contract)
+        );
+        if (notApplicable.blocked) {
+          await tx.rollback();
+          return res.status(422).json({
+            error: 'Categoria documental não se aplica a este contrato ou lado.',
+            code: 'CATEGORY_NOT_APPLICABLE',
+            reasonCode: notApplicable.reasonCode,
+            validationResult: {
+              isValid: false,
+              status: 'REJECTED',
+              issues: [
+                {
+                  code: 'CATEGORY_NOT_APPLICABLE' as const,
+                  field: 'documentCategory',
+                  message:
+                    'Esta categoria não é exigida para a finalidade e perfil atuais.',
+                },
+              ],
+            },
+          });
+        }
+      }
+
+      const uploadValidation = validateContractDocumentUpload({
+        file: {
+          mimetype: uploadedFile.mimetype ?? '',
+          originalname: uploadedFile.originalname ?? '',
+          size: Number(uploadedFile.size ?? uploadedFile.buffer.length ?? 0),
+        },
+        documentType: normalizedDocumentType as ContractDocumentType,
+        category: resolvedDocumentCategory,
+        side: resolvedSide,
+        requiresSide: !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental,
+        requiresCategory:
+          !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental,
+      });
+      if (!uploadValidation.isValid) {
+        await tx.rollback();
+        return res.status(422).json({
+          error: 'Documento inválido para a categoria informada.',
+          validationResult: uploadValidation,
+        });
+      }
+
+      const uploadEvent: ContractAuditEvent = {
+        action: 'document_upload',
+        at: new Date().toISOString(),
+        by: Number(req.userId ?? 0) || null,
+        role: role || null,
+        details: {
+          side: resolvedSide,
+          documentType: normalizedDocumentType,
+          category: resolvedDocumentCategory,
+        },
+      };
+      const metadataWithAudit = appendAuditTrailEvent({}, uploadEvent);
+      metadataWithAudit.contractId = contractId;
+      metadataWithAudit.side = resolvedSide;
+      metadataWithAudit.documentCategory = resolvedDocumentCategory;
+      metadataWithAudit.categoryStatus =
+        isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental
+          ? 'APPROVED'
+          : 'PENDING';
+      metadataWithAudit.validationResult = uploadValidation;
+      metadataWithAudit.originalFileName = uploadedFile.originalname ?? null;
+      metadataWithAudit.uploadedBy = Number(req.userId ?? 0) || null;
+      metadataWithAudit.uploadedAt = uploadEvent.at;
+
       const documentId = await storeNegotiationDocumentToR2({
         executor: tx,
         negotiationId: contract.negotiation_id,
         type: resolveDocumentStorageType(normalizedDocumentType),
         documentType: normalizedDocumentType,
         content: uploadedFile.buffer,
-        metadataJson: {
-          contractId,
-          side: resolvedSide,
-          originalFileName: uploadedFile.originalname ?? null,
-          uploadedBy: Number(req.userId ?? 0) || null,
-          uploadedAt: new Date().toISOString(),
-        },
+        metadataJson: metadataWithAudit,
       });
 
       const shouldMarkOnlineSignatureMethod =
         role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
 
-      if (shouldMarkOnlineSignatureMethod) {
-        const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
-          signatureMethod: 'online',
-          signedContractUploadedOnlineAt: new Date().toISOString(),
-          signedContractUploadedOnlineBy: Number(req.userId ?? 0) || null,
-        });
+      const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
+        contract.workflow_metadata,
+        uploadEvent
+      );
 
+      if (shouldMarkOnlineSignatureMethod) {
+        const signatureAwareWorkflowMetadata = mergeStoredJsonObject(
+          nextWorkflowMetadata,
+          {
+          signatureMethod: 'online',
+          signedContractUploadedOnlineAt: uploadEvent.at,
+          signedContractUploadedOnlineBy: Number(req.userId ?? 0) || null,
+          }
+        );
+
+        await tx.query(
+          `
+            UPDATE contracts
+            SET
+              workflow_metadata = CAST(? AS JSON),
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `,
+          [JSON.stringify(signatureAwareWorkflowMetadata), contractId]
+        );
+      } else {
         await tx.query(
           `
             UPDATE contracts
@@ -3303,15 +4108,6 @@ class ContractController {
           `,
           [JSON.stringify(nextWorkflowMetadata), contractId]
         );
-      } else {
-        await tx.query(
-          `
-            UPDATE contracts
-            SET updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `,
-          [contractId]
-        );
       }
 
       await tx.commit();
@@ -3321,6 +4117,7 @@ class ContractController {
         document: {
           id: documentId > 0 ? documentId : null,
           documentType: documentTypeRaw,
+          documentCategory: resolvedDocumentCategory,
           side: resolvedSide,
           originalFileName: uploadedFile.originalname ?? null,
           contractId,

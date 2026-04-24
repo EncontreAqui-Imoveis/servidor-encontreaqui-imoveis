@@ -53,6 +53,10 @@ interface NegotiationListRow extends RowDataPacket {
   final_value?: number | null;
   signed_proposal_count?: number | null;
   property_broker_id?: number | null;
+  contract_id?: string | null;
+  contract_status?: string | null;
+  buyer_approval_status?: string | null;
+  seller_approval_status?: string | null;
 }
 
 type NegotiationSummaryPayload = {
@@ -80,6 +84,10 @@ type NegotiationSummaryPayload = {
     outros: number;
   } | null;
   propertyBrokerId: number | null;
+  contractId: string | null;
+  contractStatus: string | null;
+  buyerApprovalStatus: string | null;
+  sellerApprovalStatus: string | null;
 };
 
 interface NegotiationAccessRow extends RowDataPacket {
@@ -189,6 +197,12 @@ const ACTIVE_NEGOTIATION_STATUSES = [
   'AWAITING_SIGNATURES',
 ] as const;
 
+const PROPOSAL_LIST_VISIBLE_STATUSES = [
+  'PROPOSAL_DRAFT',
+  'PROPOSAL_SENT',
+  'DOCUMENTATION_PHASE',
+] as const;
+
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
 const SIGNED_PROPOSAL_REVIEW_STATUS = 'DOCUMENTATION_PHASE';
 const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
@@ -204,6 +218,8 @@ const PRE_SIGNED_PROPOSAL_EDIT_STATUSES = new Set([
 ]);
 
 const PROPOSAL_EDIT_COOLDOWN_MS = 30_000;
+const DUPLICATE_PROPOSAL_CONFLICT_MESSAGE =
+  'Ja existe uma proposta ativa desta pessoa para este imovel.';
 
 function toCents(value: number): number {
   return Math.round(value * 100);
@@ -396,6 +412,61 @@ function resolvePropertyValue(row: PropertyRow): number {
   return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
 }
 
+async function resolveSellerBrokerContext(
+  tx: PoolConnection,
+  capturingBrokerId: number,
+  requestedSellerBrokerId: number | null
+): Promise<{
+  capturingBrokerName: string;
+  sellerBrokerId: number;
+  sellingBrokerName: string;
+}> {
+  if (!Number.isFinite(capturingBrokerId) || capturingBrokerId <= 0) {
+    throw new Error('Corretor captador inválido.');
+  }
+
+  const [capturingRows] = await tx.query<BrokerRow[]>(
+    'SELECT name FROM users WHERE id = ? LIMIT 1',
+    [capturingBrokerId]
+  );
+  const capturingBrokerName = String(capturingRows[0]?.name ?? '').trim();
+  if (!capturingBrokerName) {
+    throw new Error('Corretor captador inválido.');
+  }
+
+  if (
+    requestedSellerBrokerId == null ||
+    requestedSellerBrokerId === capturingBrokerId
+  ) {
+    return {
+      capturingBrokerName,
+      sellerBrokerId: capturingBrokerId,
+      sellingBrokerName: capturingBrokerName,
+    };
+  }
+
+  const [sellerRows] = await tx.query<BrokerRow[]>(
+    `
+      SELECT u.name
+      FROM brokers b
+      JOIN users u ON u.id = b.id
+      WHERE b.id = ? AND b.status = 'approved'
+      LIMIT 1
+    `,
+    [requestedSellerBrokerId]
+  );
+  const sellerName = String(sellerRows[0]?.name ?? '').trim();
+  if (!sellerName) {
+    throw new Error('Corretor vendedor inválido ou não aprovado.');
+  }
+
+  return {
+    capturingBrokerName,
+    sellerBrokerId: requestedSellerBrokerId,
+    sellingBrokerName: sellerName,
+  };
+}
+
 function buildProposalValidityDate(days: number): string {
   const now = new Date();
   now.setDate(now.getDate() + days);
@@ -504,6 +575,10 @@ function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPa
     proposalValue: null,
     paymentBreakdown: null,
     propertyBrokerId: null,
+    contractId: null,
+    contractStatus: null,
+    buyerApprovalStatus: null,
+    sellerApprovalStatus: null,
   };
 }
 
@@ -591,6 +666,24 @@ function buildMineNegotiationSummary(
       row.property_broker_id != null && Number.isFinite(Number(row.property_broker_id))
         ? Number(row.property_broker_id)
         : null,
+    contractId:
+      row.contract_id != null && String(row.contract_id).trim().length > 0
+        ? String(row.contract_id).trim()
+        : null,
+    contractStatus:
+      row.contract_status != null && String(row.contract_status).trim().length > 0
+        ? String(row.contract_status).trim().toUpperCase()
+        : null,
+    buyerApprovalStatus:
+      row.buyer_approval_status != null &&
+      String(row.buyer_approval_status).trim().length > 0
+        ? String(row.buyer_approval_status).trim().toUpperCase()
+        : null,
+    sellerApprovalStatus:
+      row.seller_approval_status != null &&
+      String(row.seller_approval_status).trim().length > 0
+        ? String(row.seller_approval_status).trim().toUpperCase()
+        : null,
   };
 }
 
@@ -649,6 +742,7 @@ async function getNegotiationColumnFlags(): Promise<NegotiationColumnFlags> {
 }
 
 async function queryMineNegotiationsCurrent(userId: number): Promise<NegotiationSummaryPayload[]> {
+  const visiblePlaceholders = PROPOSAL_LIST_VISIBLE_STATUSES.map(() => '?').join(', ');
   const rows = await queryNegotiationRows<NegotiationListRow>(
     `
       SELECT
@@ -683,6 +777,10 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
         n.last_draft_edit_at,
         n.final_value,
         n.payment_details,
+        c.id AS contract_id,
+        c.status AS contract_status,
+        c.buyer_approval_status,
+        c.seller_approval_status,
         (
           SELECT COUNT(*)
           FROM negotiation_documents nd
@@ -692,8 +790,9 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
       LEFT JOIN property_images pi ON pi.property_id = p.id
+      LEFT JOIN contracts c ON c.negotiation_id = n.id
       WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
-        AND UPPER(TRIM(n.status)) NOT IN ('CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED')
+        AND UPPER(TRIM(n.status)) IN (${visiblePlaceholders})
       GROUP BY
         n.id,
         n.property_id,
@@ -712,10 +811,14 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
         n.buyer_client_id,
         n.last_draft_edit_at,
         n.final_value,
-        n.payment_details
+        n.payment_details,
+        c.id,
+        c.status,
+        c.buyer_approval_status,
+        c.seller_approval_status
       ORDER BY n.updated_at DESC, n.created_at DESC
     `,
-    [userId, userId, userId]
+    [userId, userId, userId, ...PROPOSAL_LIST_VISIBLE_STATUSES]
   );
 
   return rows.map((row) => buildMineNegotiationSummary(userId, row));
@@ -725,6 +828,7 @@ async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationS
   const flags = await getNegotiationColumnFlags();
   const selectCreatedAt = flags.hasCreatedAt ? 'n.created_at' : 'NULL';
   const selectPaymentDetails = flags.hasPaymentDetails ? 'n.payment_details' : 'NULL';
+  const visiblePlaceholders = PROPOSAL_LIST_VISIBLE_STATUSES.map(() => '?').join(', ');
 
   const rows = await queryNegotiationRows<NegotiationListRow>(
     `
@@ -754,13 +858,19 @@ async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationS
         NULL AS buyer_client_id,
         NULL AS last_draft_edit_at,
         NULL AS final_value,
-        0 AS signed_proposal_count
+        0 AS signed_proposal_count,
+        c.id AS contract_id,
+        c.status AS contract_status,
+        c.buyer_approval_status,
+        c.seller_approval_status
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
+      LEFT JOIN contracts c ON c.negotiation_id = n.id
       WHERE n.capturing_broker_id = ?
+        AND UPPER(TRIM(n.status)) IN (${visiblePlaceholders})
       ORDER BY ${flags.hasCreatedAt ? 'n.created_at DESC,' : ''} n.id DESC
     `,
-    [userId]
+    [userId, ...PROPOSAL_LIST_VISIBLE_STATUSES]
   );
 
   return rows.map((row) => buildMineNegotiationSummary(userId, row));
@@ -791,6 +901,7 @@ async function queryMineNegotiationsSchemaAware(
     WHERE nd.negotiation_id = n.id
       AND nd.document_type = 'contrato_assinado'
   )`;
+  const visiblePlaceholders = PROPOSAL_LIST_VISIBLE_STATUSES.map(() => '?').join(', ');
 
   const whereClauses = ['n.capturing_broker_id = ?'];
   const params: number[] = [userId];
@@ -836,15 +947,21 @@ async function queryMineNegotiationsSchemaAware(
         ${selectBuyer} AS buyer_client_id,
         ${selectLastDraft} AS last_draft_edit_at,
         ${selectFinalValue} AS final_value,
-        ${selectSignedCount} AS signed_proposal_count
+        ${selectSignedCount} AS signed_proposal_count,
+        c.id AS contract_id,
+        c.status AS contract_status,
+        c.buyer_approval_status,
+        c.seller_approval_status
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
-      WHERE ${whereClauses.join(' OR ')}
+      LEFT JOIN contracts c ON c.negotiation_id = n.id
+      WHERE (${whereClauses.join(' OR ')})
+        AND UPPER(TRIM(n.status)) IN (${visiblePlaceholders})
       ORDER BY ${selectUpdatedAt !== 'NULL' ? `${selectUpdatedAt} DESC,` : ''} ${
         selectCreatedAt !== 'NULL' ? `${selectCreatedAt} DESC,` : ''
       } n.id DESC
     `,
-    params
+    [...params, ...PROPOSAL_LIST_VISIBLE_STATUSES]
   );
 
   return rows.map((row) => buildMineNegotiationSummary(userId, row));
@@ -1276,15 +1393,24 @@ class NegotiationController {
         return res.status(400).json({ error: 'Corretor captador invalido para esta proposta.' });
       }
 
-      const [capturingBrokerRows] = await tx.query<BrokerRow[]>(
-        'SELECT name FROM users WHERE id = ? LIMIT 1',
-        [capturingBrokerId]
-      );
-      const brokerName = String(capturingBrokerRows[0]?.name ?? '').trim();
-      if (!brokerName) {
+      let brokerContext: {
+        capturingBrokerName: string;
+        sellerBrokerId: number;
+        sellingBrokerName: string;
+      };
+      try {
+        brokerContext = await resolveSellerBrokerContext(
+          tx,
+          capturingBrokerId,
+          payload.sellerBrokerId
+        );
+      } catch (error) {
         await tx.rollback();
-        return res.status(400).json({ error: 'Corretor nao encontrado para gerar proposta.' });
+        return res.status(400).json({
+          error: error instanceof Error ? error.message : 'Corretor vendedor inválido.',
+        });
       }
+      const brokerName = brokerContext.capturingBrokerName;
 
       const cpfKey = normalizeProposalCpfKey(payload.clientCpf);
       if (cpfKey.length !== 11) {
@@ -1294,8 +1420,8 @@ class NegotiationController {
 
       const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
 
-      const sellerBrokerId = capturingBrokerId;
-      const sellingBrokerName = brokerName;
+      const sellerBrokerId = brokerContext.sellerBrokerId;
+      const sellingBrokerName = brokerContext.sellingBrokerName;
 
       const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
 
@@ -1318,6 +1444,17 @@ class NegotiationController {
         `,
         [payload.propertyId, capturingBrokerId, ...ACTIVE_NEGOTIATION_STATUSES, buyerClientId, cpfKey]
       );
+      if (existingRows.length > 0) {
+        await tx.rollback();
+        return this.respondWithCode(
+          req,
+          res,
+          409,
+          'PROPOSAL_ALREADY_EXISTS',
+          DUPLICATE_PROPOSAL_CONFLICT_MESSAGE,
+          false
+        );
+      }
 
       const paymentDetails = JSON.stringify({
         method: 'OTHER',
@@ -1333,75 +1470,39 @@ class NegotiationController {
       const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
       assertProposalValidityDateNotPast(proposalValidityDate);
 
-      let negotiationId = '';
-      let fromStatus = 'PROPOSAL_DRAFT';
-
-      if (existingRows.length > 0) {
-        negotiationId = existingRows[0].id;
-        fromStatus = existingRows[0].status;
-        await tx.execute(
-          `
-            UPDATE negotiations
-            SET
-              capturing_broker_id = ?,
-              selling_broker_id = ?,
-              buyer_client_id = ?,
-              client_name = ?,
-              client_cpf = ?,
-              status = ?,
-              final_value = ?,
-              payment_details = CAST(? AS JSON),
-              proposal_validity_date = ?,
-              version = version + 1
-            WHERE id = ?
-          `,
-          [
-            capturingBrokerId,
-            sellerBrokerId,
-            buyerClientId,
-            payload.clientName,
-            payload.clientCpf,
-            DEFAULT_WIZARD_STATUS,
-            proposalValue,
-            paymentDetails,
-            proposalValidityDate,
-            negotiationId,
-          ]
-        );
-      } else {
-        negotiationId = randomUUID();
-        await tx.execute(
-          `
-            INSERT INTO negotiations (
-              id,
-              property_id,
-              capturing_broker_id,
-              selling_broker_id,
-              buyer_client_id,
-              client_name,
-              client_cpf,
-              status,
-              final_value,
-              payment_details,
-              proposal_validity_date,
-              version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
-          `,
-          [
-            negotiationId,
-            payload.propertyId,
-            capturingBrokerId,
-            sellerBrokerId,
-            buyerClientId,
-            payload.clientName,
-            payload.clientCpf,
-            DEFAULT_WIZARD_STATUS,
-            proposalValue,
-            paymentDetails,
-            proposalValidityDate,
-          ]
-        );
-      }
+      const negotiationId = randomUUID();
+      const fromStatus = 'PROPOSAL_DRAFT';
+      await tx.execute(
+        `
+          INSERT INTO negotiations (
+            id,
+            property_id,
+            capturing_broker_id,
+            selling_broker_id,
+            buyer_client_id,
+            client_name,
+            client_cpf,
+            status,
+            final_value,
+            payment_details,
+            proposal_validity_date,
+            version
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
+        `,
+        [
+          negotiationId,
+          payload.propertyId,
+          capturingBrokerId,
+          sellerBrokerId,
+          buyerClientId,
+          payload.clientName,
+          payload.clientCpf,
+          DEFAULT_WIZARD_STATUS,
+          proposalValue,
+          paymentDetails,
+          proposalValidityDate,
+        ]
+      );
 
       await tx.execute(
         `
@@ -2163,22 +2264,29 @@ class NegotiationController {
         );
       }
 
-      const [capturingBrokerRows] = await tx.query<BrokerRow[]>(
-        'SELECT name FROM users WHERE id = ? LIMIT 1',
-        [capturingBrokerId]
-      );
-      const brokerName = String(capturingBrokerRows[0]?.name ?? '').trim();
-      if (!brokerName) {
+      let brokerContext: {
+        capturingBrokerName: string;
+        sellerBrokerId: number;
+        sellingBrokerName: string;
+      };
+      try {
+        brokerContext = await resolveSellerBrokerContext(
+          tx,
+          capturingBrokerId,
+          payload.sellerBrokerId
+        );
+      } catch (error) {
         await tx.rollback();
         return this.respondWithCode(
           req,
           res,
           400,
           'PROPOSAL_VALIDATION_FAILED',
-          'Corretor nao encontrado para gerar proposta.',
+          error instanceof Error ? error.message : 'Corretor vendedor inválido.',
           false
         );
       }
+      const brokerName = brokerContext.capturingBrokerName;
       const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
       if (
         nRow.buyer_client_id != null &&
@@ -2229,7 +2337,7 @@ class NegotiationController {
         `,
         [
           capturingBrokerId,
-          capturingBrokerId,
+          brokerContext.sellerBrokerId,
           buyerClientId,
           payload.clientName,
           payload.clientCpf,
@@ -2241,8 +2349,8 @@ class NegotiationController {
         ],
       );
 
-      const sellerBrokerId = capturingBrokerId;
-      const sellingBrokerName = brokerName;
+      const sellerBrokerId = brokerContext.sellerBrokerId;
+      const sellingBrokerName = brokerContext.sellingBrokerName;
 
       await tx.execute(
         `

@@ -142,7 +142,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       .post('/contracts/contract-1/documents')
       .field('documentType', 'doc_identidade')
       .field('side', 'seller')
-      .attach('file', Buffer.from('%PDF-1.4 test'), 'identidade.pdf');
+      .attach('file', Buffer.alloc(2048, 'a'), 'identidade.pdf');
 
     expect(response.status).toBe(201);
     expect(response.body.document).toMatchObject({
@@ -162,7 +162,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     const response = await request(app)
       .post('/contracts/contract-1/documents')
       .field('documentType', 'contrato_assinado')
-      .attach('file', Buffer.from('%PDF-1.4 signed'), 'contrato_assinado.pdf');
+      .attach('file', Buffer.alloc(2048, 'b'), 'contrato_assinado.pdf');
 
     expect(response.status).toBe(201);
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(

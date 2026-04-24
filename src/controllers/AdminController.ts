@@ -34,7 +34,11 @@ import {
   type EditablePropertyPatch,
 } from '../services/propertyEditRequestService';
 import type AuthRequest from '../middlewares/auth';
-import { readNegotiationDocumentObject } from '../services/negotiationDocumentStorageService';
+import {
+  deleteNegotiationDocumentObject,
+  readNegotiationDocumentObject,
+} from '../services/negotiationDocumentStorageService';
+import { saveNegotiationSignedProposalDocument } from '../services/negotiationPersistenceService';
 import { allocateNextPropertyCode } from '../utils/propertyCode';
 import { areaInputToSquareMeters, normalizeAreaUnidade } from '../utils/propertyAreaUnits';
 
@@ -775,6 +779,8 @@ interface AdminNegotiationListRow extends RowDataPacket {
   id: string;
   negotiation_status: string;
   property_id: number;
+  capturing_broker_id: number | null;
+  selling_broker_id: number | null;
   property_status: string | null;
   property_code: string | null;
   property_title: string | null;
@@ -827,6 +833,13 @@ interface PendingProposalCountRow extends RowDataPacket {
 
 interface ExistingContractByNegotiationRow extends RowDataPacket {
   id: string;
+}
+
+interface AdminNegotiationBrokerAssignmentRow extends RowDataPacket {
+  id: string;
+  status: string | null;
+  capturing_broker_id: number | null;
+  selling_broker_id: number | null;
 }
 
 interface AdminNegotiationDocumentRow extends RowDataPacket {
@@ -1145,6 +1158,8 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyCode: row.property_code ?? null,
     propertyTitle: row.property_title ?? null,
     propertyAddress: row.property_address ?? null,
+    capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
+    sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
     brokerName: row.capturing_broker_name ?? row.selling_broker_name ?? null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
@@ -1357,6 +1372,8 @@ class AdminController {
             n.id,
             n.status AS negotiation_status,
             n.property_id,
+            n.capturing_broker_id,
+            n.selling_broker_id,
             p.status AS property_status,
             p.code AS property_code,
             p.title AS property_title,
@@ -1605,6 +1622,8 @@ class AdminController {
             n.id,
             n.status AS negotiation_status,
             n.property_id,
+            n.capturing_broker_id,
+            n.selling_broker_id,
             p.status AS property_status,
             p.code AS property_code,
             p.title AS property_title,
@@ -1717,6 +1736,25 @@ class AdminController {
         return res.status(400).json({ error: 'Não é possível aprovar uma negociação encerrada.' });
       }
 
+      const [signedProposalRows] = await tx.query<RowDataPacket[]>(
+        `
+          SELECT id
+          FROM negotiation_documents
+          WHERE negotiation_id = ? AND type = 'other'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [negotiationId]
+      );
+      if (signedProposalRows.length === 0) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Não é possível aprovar sem PDF assinado. Envie a proposta assinada antes de aprovar.',
+          code: 'SIGNED_PROPOSAL_REQUIRED',
+        });
+      }
+
       await tx.query(
         `
           UPDATE negotiations
@@ -1801,7 +1839,13 @@ class AdminController {
           SET status = 'CANCELLED', version = version + 1
           WHERE property_id = ?
             AND id <> ?
-            AND UPPER(TRIM(status)) IN ('PROPOSAL_SENT', 'PROPOSAL_DRAFT')
+            AND UPPER(TRIM(status)) IN (
+              'PROPOSAL_SENT',
+              'PROPOSAL_DRAFT',
+              'DOCUMENTATION_PHASE',
+              'CONTRACT_DRAFTING',
+              'AWAITING_SIGNATURES'
+            )
         `,
         [negotiation.property_id, negotiationId]
       );
@@ -2130,6 +2174,125 @@ class AdminController {
     }
   }
 
+  async updateNegotiationSellingBroker(req: AuthRequest, res: Response) {
+    const negotiationId = String(req.params.id ?? '').trim();
+    const actorId = Number(req.userId);
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID de negociação inválido.' });
+    }
+    if (!actorId) {
+      return res.status(401).json({ error: 'Administrador não autenticado.' });
+    }
+
+    const sameAsCapturingInput = (req.body as { sameAsCapturing?: unknown })?.sameAsCapturing;
+    const sameAsCapturing =
+      sameAsCapturingInput === undefined ? true : Boolean(sameAsCapturingInput);
+    const sellerBrokerIdRaw = (req.body as { sellingBrokerId?: unknown })?.sellingBrokerId;
+    const parsedSellerBrokerId =
+      sellerBrokerIdRaw === undefined || sellerBrokerIdRaw === null || sellerBrokerIdRaw === ''
+        ? null
+        : Number(sellerBrokerIdRaw);
+    if (
+      parsedSellerBrokerId !== null &&
+      (!Number.isInteger(parsedSellerBrokerId) || parsedSellerBrokerId <= 0)
+    ) {
+      return res.status(400).json({ error: 'ID do corretor vendedor inválido.' });
+    }
+
+    const tx = await adminDb.getConnection();
+    try {
+      await tx.beginTransaction();
+      const [rows] = await tx.query<AdminNegotiationBrokerAssignmentRow[]>(
+        `
+          SELECT id, status, capturing_broker_id, selling_broker_id
+          FROM negotiations
+          WHERE id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [negotiationId]
+      );
+      const negotiation = rows[0];
+      if (!negotiation) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Negociação não encontrada.' });
+      }
+
+      const capturingBrokerId = Number(negotiation.capturing_broker_id ?? 0);
+      if (!Number.isInteger(capturingBrokerId) || capturingBrokerId <= 0) {
+        await tx.rollback();
+        return res.status(400).json({ error: 'Corretor captador inválido na negociação.' });
+      }
+
+      const currentStatus = String(negotiation.status ?? '').trim().toUpperCase();
+      if (currentStatus === 'CANCELLED' || currentStatus === 'SOLD' || currentStatus === 'RENTED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Não é possível alterar o corretor vendedor em uma negociação encerrada.',
+        });
+      }
+
+      let newSellerBrokerId = capturingBrokerId;
+      let newSellerBrokerName = '';
+      if (!sameAsCapturing) {
+        if (parsedSellerBrokerId === null) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Selecione um corretor vendedor.' });
+        }
+        newSellerBrokerId = parsedSellerBrokerId;
+      }
+
+      if (newSellerBrokerId !== capturingBrokerId) {
+        const [sellerRows] = await tx.query<RowDataPacket[]>(
+          `
+            SELECT u.name
+            FROM brokers b
+            JOIN users u ON u.id = b.id
+            WHERE b.id = ? AND b.status = 'approved'
+            LIMIT 1
+          `,
+          [newSellerBrokerId]
+        );
+        newSellerBrokerName = String(sellerRows[0]?.name ?? '').trim();
+        if (!newSellerBrokerName) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'Corretor vendedor inválido ou não aprovado.' });
+        }
+      } else {
+        const [capturingRows] = await tx.query<RowDataPacket[]>(
+          `SELECT name FROM users WHERE id = ? LIMIT 1`,
+          [capturingBrokerId]
+        );
+        newSellerBrokerName = String(capturingRows[0]?.name ?? '').trim() || '';
+      }
+
+      await tx.query(
+        `
+          UPDATE negotiations
+          SET selling_broker_id = ?, version = version + 1
+          WHERE id = ?
+        `,
+        [newSellerBrokerId, negotiationId]
+      );
+
+      await tx.commit();
+      return res.status(200).json({
+        message: 'Corretor vendedor atualizado com sucesso.',
+        negotiationId,
+        capturingBrokerId,
+        sellingBrokerId: newSellerBrokerId,
+        sameAsCapturing: newSellerBrokerId === capturingBrokerId,
+        sellingBrokerName: newSellerBrokerName || null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao atualizar corretor vendedor da negociação (admin):', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
+    }
+  }
+
   async downloadSignedProposal(req: Request, res: Response) {
     const negotiationId = String(req.params.id ?? '').trim();
     if (!negotiationId) {
@@ -2182,6 +2345,144 @@ class AdminController {
     } catch (error) {
       console.error('Erro ao baixar proposta assinada:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async uploadSignedProposal(req: AuthRequest, res: Response) {
+    const negotiationId = String(req.params.id ?? '').trim();
+    const actorId = Number(req.userId);
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID de negociação inválido.' });
+    }
+    if (!actorId) {
+      return res.status(401).json({ error: 'Administrador não autenticado.' });
+    }
+
+    const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
+    if (!uploadedFile || !uploadedFile.buffer || uploadedFile.buffer.length === 0) {
+      return res.status(400).json({ error: 'PDF assinado não enviado.' });
+    }
+    const mime = String(uploadedFile.mimetype ?? '').toLowerCase();
+    if (mime && mime !== 'application/pdf') {
+      return res.status(400).json({ error: 'Arquivo inválido. Envie apenas PDF assinado.' });
+    }
+
+    const tx = await adminDb.getConnection();
+    try {
+      await tx.beginTransaction();
+      const [negotiationRows] = await tx.query<RowDataPacket[]>(
+        `
+          SELECT id, status
+          FROM negotiations
+          WHERE id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [negotiationId]
+      );
+      if (negotiationRows.length === 0) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Negociação não encontrada.' });
+      }
+
+      const currentStatus = String(negotiationRows[0]?.status ?? '').trim().toUpperCase();
+      if (currentStatus === 'CANCELLED' || currentStatus === 'SOLD' || currentStatus === 'RENTED') {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Não é possível enviar PDF assinado para uma negociação encerrada.',
+        });
+      }
+
+      const documentId = await saveNegotiationSignedProposalDocument(
+        negotiationId,
+        uploadedFile.buffer,
+        tx,
+        {
+          originalFileName: uploadedFile.originalname ?? 'proposta_assinada_admin.pdf',
+          uploadedBy: actorId,
+          uploadedByRole: 'admin',
+          uploadedAt: new Date().toISOString(),
+          source: 'admin_panel',
+        }
+      );
+
+      await tx.commit();
+      return res.status(201).json({
+        message: 'PDF assinado enviado com sucesso.',
+        negotiationId,
+        documentId,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao enviar PDF assinado (admin):', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async deleteSignedProposal(req: AuthRequest, res: Response) {
+    const negotiationId = String(req.params.id ?? '').trim();
+    const actorId = Number(req.userId);
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID de negociação inválido.' });
+    }
+    if (!actorId) {
+      return res.status(401).json({ error: 'Administrador não autenticado.' });
+    }
+
+    const tx = await adminDb.getConnection();
+    let documentToDelete: AdminNegotiationDocumentRow | null = null;
+    try {
+      await tx.beginTransaction();
+      const [rows] = await tx.query<AdminNegotiationDocumentRow[]>(
+        `
+          SELECT
+            id,
+            type,
+            document_type,
+            metadata_json,
+            storage_provider,
+            storage_bucket,
+            storage_key,
+            storage_content_type,
+            storage_size_bytes,
+            storage_etag
+          FROM negotiation_documents
+          WHERE negotiation_id = ? AND type = 'other'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [negotiationId]
+      );
+      const document = rows[0];
+      if (!document) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Proposta assinada não encontrada.' });
+      }
+
+      await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [document.id]);
+      documentToDelete = document;
+
+      await tx.commit();
+
+      if (documentToDelete) {
+        await deleteNegotiationDocumentObject(documentToDelete).catch((storageError) => {
+          console.error('Falha ao excluir arquivo no storage da proposta assinada:', storageError);
+        });
+      }
+
+      return res.status(200).json({
+        message: 'PDF assinado removido com sucesso.',
+        negotiationId,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao remover PDF assinado (admin):', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    } finally {
+      tx.release();
     }
   }
 

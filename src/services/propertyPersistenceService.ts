@@ -20,8 +20,16 @@ export async function runPropertyQuery<T extends RowDataPacket[] | ResultSetHead
   sql: string,
   params: unknown[]
 ): Promise<T> {
-  const [rows] = await connection.query<T>(sql, params as unknown[]);
-  return rows;
+  const result = await (connection.query as unknown as (
+    querySql: string,
+    queryParams: unknown[]
+  ) => Promise<unknown>)(sql, params as unknown[]);
+
+  if (Array.isArray(result)) {
+    return result[0] as T;
+  }
+
+  return result as T;
 }
 
 export function getPropertyDbConnection(): Promise<PoolConnection> {

@@ -207,6 +207,7 @@ describe('POST /negotiations/proposal', () => {
         ],
       ])
       .mockResolvedValueOnce([[{ name: 'Broker Captador' }]])
+      .mockResolvedValueOnce([[{ name: 'Broker Vendedor' }]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -227,12 +228,12 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'PROPOSAL_SENT'])
+      expect.arrayContaining([expect.any(String), 101, 30003, 30004, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         brokerName: 'Broker Captador',
-        sellingBrokerName: 'Broker Captador',
+        sellingBrokerName: 'Broker Vendedor',
       })
     );
   });

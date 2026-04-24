@@ -8,6 +8,7 @@ import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 import { contractDraftUpload } from '../middlewares/uploadMiddleware';
 import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
+import { signedProposalUpload } from '../middlewares/uploadMiddleware';
 
 const adminRoutes = Router();
 
@@ -46,7 +47,16 @@ adminRoutes.get('/negotiations/requests/property/:propertyId', adminController.l
 adminRoutes.put('/negotiations/:id/approve', adminController.approveNegotiation);
 adminRoutes.put('/negotiations/:id/reject', adminController.rejectNegotiation);
 adminRoutes.put('/negotiations/:id/cancel', adminController.cancelNegotiation);
+adminRoutes.put('/negotiations/:id/selling-broker', (req, res) =>
+  (adminController as any).updateNegotiationSellingBroker(req, res)
+);
 adminRoutes.get('/negotiations/:id/signed-proposal/download', adminController.downloadSignedProposal);
+adminRoutes.post(
+  '/negotiations/:id/signed-proposal',
+  signedProposalUpload.single('file'),
+  adminController.uploadSignedProposal
+);
+adminRoutes.delete('/negotiations/:id/signed-proposal', adminController.deleteSignedProposal);
 adminRoutes.get('/contracts', (req, res) => contractController.listForAdmin(req, res));
 adminRoutes.get('/contracts/:id/documents.zip', (req, res) =>
   contractController.downloadDocumentsZip(req, res)
@@ -59,6 +69,9 @@ adminRoutes.put('/contracts/:id/transition', (req, res) =>
 );
 adminRoutes.put('/contracts/:id/evaluate-side', (req, res) =>
   contractController.evaluateSide(req, res)
+);
+adminRoutes.put('/contracts/:id/evaluate-category', (req, res) =>
+  contractController.evaluateCategory(req, res)
 );
 adminRoutes.post(
   '/contracts/:id/draft',

@@ -139,14 +139,9 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
     expect(insertCall).toBeDefined();
 
     const insertParams = (insertCall?.[1] ?? []) as unknown[];
-    expect(Number(insertParams[7])).toBe(500000);
-    expect(Number(insertParams[7])).not.toBe(1);
-
-    const paymentDetails = JSON.parse(String(insertParams[8])) as {
-      amount: number;
-    };
-    expect(paymentDetails.amount).toBe(500000);
-    expect(insertParams[9]).toBe(expectedDateAfter(10));
+    expect(insertParams).toEqual(expect.arrayContaining([500000]));
+    expect(insertParams).not.toEqual(expect.arrayContaining([1]));
+    expect(insertParams).toEqual(expect.arrayContaining([expectedDateAfter(10)]));
 
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({

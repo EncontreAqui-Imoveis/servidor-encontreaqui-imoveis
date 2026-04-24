@@ -62,6 +62,46 @@ export type ContractDocumentType = (typeof CONTRACT_DOCUMENT_TYPES)[number];
 
 export type ContractPartyInfo = Record<string, unknown>;
 
+export const CONTRACT_DOCUMENT_CATEGORY_CODES = [
+  'identidade',
+  'comprovante_endereco',
+  'estado_civil',
+  'conjuge_documentos',
+  'comprovante_renda',
+  'dados_bancarios',
+  'docs_imovel',
+] as const;
+
+export type ContractDocumentCategoryCode =
+  (typeof CONTRACT_DOCUMENT_CATEGORY_CODES)[number];
+
+export const CONTRACT_DOCUMENT_CATEGORY_STATUSES = [
+  'PENDING',
+  'APPROVED',
+  'REJECTED',
+  'NOT_APPLICABLE',
+] as const;
+
+export type ContractDocumentCategoryStatus =
+  (typeof CONTRACT_DOCUMENT_CATEGORY_STATUSES)[number];
+
+export const CONTRACT_DOCUMENT_VALIDATION_CODES = [
+  'CATEGORY_REQUIRED',
+  'CATEGORY_INVALID',
+  'SIDE_REQUIRED',
+  'SIDE_INVALID',
+  'EXTENSION_INVALID',
+  'MIME_INVALID',
+  'FILE_TOO_SMALL',
+  'FILE_TOO_LARGE',
+  'TYPE_CATEGORY_MISMATCH',
+  'STATUS_LOCKED',
+  'CATEGORY_NOT_APPLICABLE',
+] as const;
+
+export type ContractDocumentValidationCode =
+  (typeof CONTRACT_DOCUMENT_VALIDATION_CODES)[number];
+
 export function isContractStatus(value: unknown): value is ContractStatus {
   return typeof value === 'string' && CONTRACT_STATUSES.includes(value as ContractStatus);
 }
@@ -79,5 +119,25 @@ export function isContractDocumentType(value: unknown): value is ContractDocumen
   return (
     typeof value === 'string' &&
     CONTRACT_DOCUMENT_TYPES.includes(value as ContractDocumentType)
+  );
+}
+
+export function isContractDocumentCategoryCode(
+  value: unknown
+): value is ContractDocumentCategoryCode {
+  return (
+    typeof value === 'string' &&
+    CONTRACT_DOCUMENT_CATEGORY_CODES.includes(value as ContractDocumentCategoryCode)
+  );
+}
+
+export function isContractDocumentCategoryStatus(
+  value: unknown
+): value is ContractDocumentCategoryStatus {
+  return (
+    typeof value === 'string' &&
+    CONTRACT_DOCUMENT_CATEGORY_STATUSES.includes(
+      value as ContractDocumentCategoryStatus
+    )
   );
 }

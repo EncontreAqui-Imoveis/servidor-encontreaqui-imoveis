@@ -44,21 +44,7 @@ export class ExternalPdfService implements ProposalPdfService {
       );
     }
 
-    const payload = {
-      client_name: data.clientName,
-      client_cpf: data.clientCpf,
-      property_address: data.propertyAddress,
-      broker_name: data.brokerName,
-      selling_broker_name: data.sellingBrokerName ?? '',
-      value: data.value,
-      payment: {
-        cash: data.payment.cash,
-        trade_in: data.payment.tradeIn,
-        financing: data.payment.financing,
-        others: data.payment.others,
-      },
-      validity_days: data.validityDays,
-    };
+    const payload = this.buildProposalPayload(data);
 
     try {
       const response = await axios.post(this.endpointUrl, payload, {
@@ -108,5 +94,39 @@ export class ExternalPdfService implements ProposalPdfService {
 
       throw error;
     }
+  }
+
+  private buildProposalPayload(data: ProposalData): {
+    client_name: string;
+    client_cpf: string;
+    property_address: string;
+    broker_name: string;
+    selling_broker_name: string;
+    value: number;
+    payment: {
+      cash: number;
+      trade_in: number;
+      financing: number;
+      others: number;
+    };
+    validity_days: number;
+  } {
+    // Proponente no PDF deve sempre vir de client_name; corretor/captador
+    // permanecem em campos próprios para evitar troca acidental de papéis.
+    return {
+      client_name: String(data.clientName ?? '').trim(),
+      client_cpf: String(data.clientCpf ?? '').trim(),
+      property_address: String(data.propertyAddress ?? '').trim(),
+      broker_name: String(data.brokerName ?? '').trim(),
+      selling_broker_name: String(data.sellingBrokerName ?? '').trim(),
+      value: Number(data.value),
+      payment: {
+        cash: Number(data.payment.cash ?? 0),
+        trade_in: Number(data.payment.tradeIn ?? 0),
+        financing: Number(data.payment.financing ?? 0),
+        others: Number(data.payment.others ?? 0),
+      },
+      validity_days: Number(data.validityDays),
+    };
   }
 }

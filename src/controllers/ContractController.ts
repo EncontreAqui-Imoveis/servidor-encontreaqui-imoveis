@@ -96,6 +96,8 @@ interface ContractRow extends RowDataPacket {
   property_title: string | null;
   property_purpose: string | null;
   property_code: string | null;
+  property_owner_id: number | null;
+  property_owner_name: string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
   capturing_agency_name: string | null;
@@ -618,10 +620,6 @@ function resolveActingBrokerName(req: AuthRequest, contract: ContractRow): strin
     const name = String(contract.capturing_broker_name ?? '').trim();
     if (name) return name;
   }
-  if (userId > 0 && userId === Number(contract.selling_broker_id ?? 0)) {
-    const name = String(contract.selling_broker_name ?? '').trim();
-    if (name) return name;
-  }
   return userId > 0 ? `Corretor #${userId}` : 'Corretor';
 }
 
@@ -638,13 +636,13 @@ function resolveApprovalSideLabel(
     return 'documentação do contrato';
   }
 
-  return side === 'seller' ? 'documentação do captador' : 'documentação do vendedor';
+  return side === 'seller' ? 'documentação do proprietário' : 'documentação do comprador';
 }
 
 function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
   return Array.from(
     new Set(
-      [contract.capturing_broker_id, contract.selling_broker_id]
+      [contract.capturing_broker_id]
         .map((value) => Number(value))
         .filter((value) => Number.isFinite(value) && value > 0)
     )
@@ -655,10 +653,14 @@ function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
 function resolveContractNotificationRecipientIds(contract: ContractRow): number[] {
   const brokers = resolveNegotiationBrokerRecipientIds(contract);
   const clientId = Number(contract.buyer_client_id ?? 0);
-  if (Number.isFinite(clientId) && clientId > 0) {
-    return Array.from(new Set([...brokers, clientId]));
-  }
-  return brokers;
+  const ownerId = Number(contract.property_owner_id ?? 0);
+  return Array.from(
+    new Set(
+      [...brokers, clientId, ownerId].filter(
+        (value) => Number.isFinite(value) && value > 0
+      )
+    )
+  );
 }
 
 function toDocumentCount(value: unknown): number {
@@ -811,19 +813,25 @@ function mapContract(row: ContractRow) {
     propertyId: Number(row.property_id),
     status: resolveContractStatus(row.status),
     sellerInfo: parseStoredJsonObject(row.seller_info),
+    ownerInfo: parseStoredJsonObject(row.seller_info),
     buyerInfo: parseStoredJsonObject(row.buyer_info),
     commissionData: parseStoredJsonObject(row.commission_data),
     workflowMetadata: parseStoredJsonObject(row.workflow_metadata),
     sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
+    ownerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
     buyerApprovalStatus: resolveContractApprovalStatus(row.buyer_approval_status),
     sellerApprovalReason: parseStoredJsonObject(row.seller_approval_reason),
+    ownerApprovalReason: parseStoredJsonObject(row.seller_approval_reason),
     buyerApprovalReason: parseStoredJsonObject(row.buyer_approval_reason),
     capturingBrokerId:
       row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
-      row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
+      row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
+    buyerClientId: row.buyer_client_id !== null ? Number(row.buyer_client_id) : null,
     capturingBrokerName: row.capturing_broker_name ?? null,
-    sellingBrokerName: row.selling_broker_name ?? null,
+    sellingBrokerName: row.capturing_broker_name ?? null,
+    ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
+    ownerName: row.property_owner_name ?? null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
     propertyPurpose: row.property_purpose ?? null,
@@ -1349,7 +1357,10 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   if (role === 'client') {
-    return userId === Number(contract.buyer_client_id ?? 0);
+    return (
+      userId === Number(contract.buyer_client_id ?? 0) ||
+      userId === Number(contract.property_owner_id ?? 0)
+    );
   }
 
   if (role !== 'broker' && role !== 'auxiliary_administrative') {
@@ -1372,7 +1383,13 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   if (isNegotiationResponsibleUser(contract, userId)) {
     return true;
   }
-  return Number.isFinite(userId) && userId > 0 && userId === Number(contract.capturing_broker_id ?? 0);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return false;
+  }
+  if (role === 'client') {
+    return userId === Number(contract.property_owner_id ?? 0);
+  }
+  return userId === Number(contract.capturing_broker_id ?? 0);
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -1385,7 +1402,13 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
   if (isNegotiationResponsibleUser(contract, userId)) {
     return true;
   }
-  return Number.isFinite(userId) && userId > 0 && userId === Number(contract.selling_broker_id ?? 0);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return false;
+  }
+  if (role === 'client') {
+    return userId === Number(contract.buyer_client_id ?? 0);
+  }
+  return userId === Number(contract.capturing_broker_id ?? 0);
 }
 
 function isDoubleEndedDeal(contract: ContractRow): boolean {
@@ -1415,6 +1438,32 @@ function shouldMoveToDraft(
   );
 }
 
+function shouldTreatContractAsSingleClientFlow(contract: ContractRow): boolean {
+  const ownerId = Number(contract.property_owner_id ?? 0);
+  const buyerId = Number(contract.buyer_client_id ?? 0);
+  return ownerId > 0 && buyerId > 0 && ownerId !== buyerId;
+}
+
+function resolveApprovalStatusesForProgress(
+  contract: ContractRow,
+  input: {
+    sellerStatus: ContractApprovalStatus;
+    buyerStatus: ContractApprovalStatus;
+  }
+): {
+  sellerStatus: ContractApprovalStatus;
+  buyerStatus: ContractApprovalStatus;
+} {
+  if (isDoubleEndedDeal(contract) || !shouldTreatContractAsSingleClientFlow(contract)) {
+    return input;
+  }
+
+  return {
+    sellerStatus: input.sellerStatus,
+    buyerStatus: approvalStatusAllowsProgress(input.buyerStatus) ? input.buyerStatus : 'APPROVED',
+  };
+}
+
 const CONTRACT_SELECT_BASE_SQL = `
   SELECT
     c.id,
@@ -1437,6 +1486,8 @@ const CONTRACT_SELECT_BASE_SQL = `
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,
+    p.owner_id AS property_owner_id,
+    COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
     capture_user.name AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
     capture_agency.name AS capturing_agency_name,
@@ -1448,6 +1499,7 @@ const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN brokers capture_broker ON capture_broker.id = n.capturing_broker_id
   LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
+  LEFT JOIN users u_owner ON u_owner.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;
 
@@ -2309,10 +2361,14 @@ class ContractController {
         }
       }
 
+      const effectiveStatuses = resolveApprovalStatusesForProgress(contract, {
+        sellerStatus: nextSellerStatus,
+        buyerStatus: nextBuyerStatus,
+      });
       const mustMoveToDraftBySide = shouldMoveToDraft(
         contract,
-        nextSellerStatus,
-        nextBuyerStatus
+        effectiveStatuses.sellerStatus,
+        effectiveStatuses.buyerStatus
       );
       const categoryRows = await fetchContractCategoryValidationRows(tx, contract);
       const mustMoveToDraftByCategories = hasRequiredCategoryGateApproval({
@@ -2564,10 +2620,14 @@ class ContractController {
       const nextBuyerStatus = isDoubleEndedDeal(contract)
         ? nextSellerStatus
         : resolveSideApprovalFromCategoryProgress(progress.buyer);
+      const effectiveStatuses = resolveApprovalStatusesForProgress(contract, {
+        sellerStatus: nextSellerStatus,
+        buyerStatus: nextBuyerStatus,
+      });
       const mustMoveBySide = shouldMoveToDraft(
         contract,
-        nextSellerStatus,
-        nextBuyerStatus
+        effectiveStatuses.sellerStatus,
+        effectiveStatuses.buyerStatus
       );
       const mustMoveByCategories = hasRequiredCategoryGateApproval({
         rows: updatedRows,
@@ -3748,7 +3808,7 @@ class ContractController {
       if (userId !== capturingId) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor captador pode definir o corretor vendedor.',
+          error: 'Somente o corretor captador pode ajustar o responsável operacional.',
         });
       }
 
@@ -3756,36 +3816,16 @@ class ContractController {
       if (contractStatus !== 'AWAITING_DOCS' && contractStatus !== 'IN_DRAFT') {
         await tx.rollback();
         return res.status(400).json({
-          error: 'O corretor vendedor só pode ser alterado na fase de documentação.',
+          error: 'O responsável operacional só pode ser alterado na fase de documentação.',
         });
       }
 
-      let newSellerId = capturingId;
-      if (!sameAsCapturing) {
-        const parsed = Number(sellingBrokerIdRaw);
-        if (!Number.isInteger(parsed) || parsed <= 0) {
-          await tx.rollback();
-          return res.status(400).json({ error: 'ID do corretor vendedor inválido.' });
-        }
-        newSellerId = parsed;
-      }
-
-      if (newSellerId !== capturingId) {
-        const [sellerRows] = await tx.query<RowDataPacket[]>(
-          `
-            SELECT u.name
-            FROM brokers b
-            JOIN users u ON u.id = b.id
-            WHERE b.id = ? AND b.status = 'approved'
-            LIMIT 1
-          `,
-          [newSellerId]
-        );
-        const sellerName = String(sellerRows[0]?.name ?? '').trim();
-        if (!sellerName) {
-          await tx.rollback();
-          return res.status(400).json({ error: 'Corretor vendedor inválido ou não aprovado.' });
-        }
+      if (!sameAsCapturing || sellingBrokerIdRaw != null) {
+        console.warn('Ignorando configuração legada de papel secundário.', {
+          negotiationId,
+          userId,
+          requestedSellingBrokerId: sellingBrokerIdRaw ?? null,
+        });
       }
 
       await tx.query(
@@ -3794,7 +3834,7 @@ class ContractController {
           SET selling_broker_id = ?, version = version + 1
           WHERE id = ?
         `,
-        [newSellerId, negotiationId]
+        [capturingId, negotiationId]
       );
 
       await tx.commit();
@@ -3802,17 +3842,17 @@ class ContractController {
       try {
         await tx.rollback();
       } catch (rollbackError) {
-        console.error('Erro ao reverter transação (corretor vendedor):', rollbackError);
+        console.error('Erro ao reverter transação (responsável operacional):', rollbackError);
       }
-      console.error('Erro ao atualizar corretor vendedor:', error);
-      return res.status(500).json({ error: 'Falha ao atualizar corretor vendedor.' });
+      console.error('Erro ao atualizar responsável operacional:', error);
+      return res.status(500).json({ error: 'Falha ao atualizar responsável operacional.' });
     } finally {
       tx.release();
     }
 
     const updated = await fetchContractByNegotiationId(negotiationId);
     return res.status(200).json({
-      message: 'Corretor vendedor atualizado.',
+      message: 'Responsável operacional sincronizado com o captador.',
       contract: updated ? mapContract(updated) : null,
     });
   }
@@ -3965,6 +4005,7 @@ class ContractController {
 
       const currentStatus = resolveContractStatus(contract.status);
       const role = String(req.userRole ?? '').toLowerCase();
+      const isSupplementalOther = normalizedDocumentType === 'outro';
       const isAdminSupplemental =
         role === 'admin' && isAdminSupplementalDocumentType(normalizedDocumentType);
       if (isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental) {
@@ -4035,14 +4076,14 @@ class ContractController {
       if (resolvedSide === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor captador pode anexar documentos do lado seller.',
+          error: 'Somente o proprietário pode anexar documentos do lado owner.',
         });
       }
 
       if (resolvedSide === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor vendedor pode anexar documentos do lado buyer.',
+          error: 'Somente o comprador pode anexar documentos do lado buyer.',
         });
       }
 
@@ -4086,7 +4127,7 @@ class ContractController {
           resolvedDocumentCategory,
           buildContractDocumentRuleContextFromRow(contract)
         );
-        if (notApplicable.blocked) {
+        if (notApplicable.blocked && !isSupplementalOther) {
           await tx.rollback();
           return res.status(422).json({
             error: 'Categoria documental não se aplica a este contrato ou lado.',
@@ -4291,14 +4332,14 @@ class ContractController {
       if (side === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor captador pode remover documentos do lado seller.',
+          error: 'Somente o proprietário pode remover documentos do lado owner.',
         });
       }
 
       if (side === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor vendedor pode remover documentos do lado buyer.',
+          error: 'Somente o comprador pode remover documentos do lado buyer.',
         });
       }
 
@@ -4423,14 +4464,14 @@ class ContractController {
       if (sellerPatch && !canEditSeller && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor captador pode editar sellerInfo.',
+          error: 'Somente o proprietário pode editar ownerInfo.',
         });
       }
 
       if (buyerPatch && !canEditBuyer && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Somente o corretor vendedor pode editar buyerInfo.',
+          error: 'Somente o comprador pode editar buyerInfo.',
         });
       }
 

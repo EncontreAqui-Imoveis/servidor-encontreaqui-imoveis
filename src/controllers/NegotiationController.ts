@@ -245,8 +245,6 @@ function parseProposalData(body: ProposalBody): ProposalData {
   const clientCpf = String(body.clientCpf ?? body.client_cpf ?? '').trim();
   const propertyAddress = String(body.propertyAddress ?? body.property_address ?? '').trim();
   const brokerName = String(body.brokerName ?? body.broker_name ?? '').trim();
-  const rawSellingBrokerName = body.sellingBrokerName ?? body.selling_broker_name;
-  const sellingBrokerName = rawSellingBrokerName == null ? null : String(rawSellingBrokerName).trim();
   const numericValue = Number(body.value);
   const paymentMethod = String(body.paymentMethod ?? body.payment_method ?? '').trim();
   const validityDays = Number(body.validityDays ?? body.validity_days ?? 10);
@@ -301,7 +299,7 @@ function parseProposalData(body: ProposalBody): ProposalData {
     clientCpf,
     propertyAddress,
     brokerName,
-    sellingBrokerName: sellingBrokerName || null,
+    sellingBrokerName: brokerName,
     value: numericValue,
     payment: {
       cash,
@@ -320,11 +318,6 @@ function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposalWizard
   const clientCpfDigits = String(body.clientCpf ?? '').replace(/\D/g, '');
   const validadeDiasRaw = body.validadeDias ?? 10;
   const validadeDias = Number(validadeDiasRaw);
-  const sellerBrokerIdRaw = body.sellerBrokerId;
-  const sellerBrokerId =
-    sellerBrokerIdRaw === undefined || sellerBrokerIdRaw === null || sellerBrokerIdRaw === ''
-      ? null
-      : Number(sellerBrokerIdRaw);
   const pagamento = body.pagamento ?? {};
   const dinheiro = parsePositiveNumber(pagamento.dinheiro ?? 0, 'pagamento.dinheiro');
   const permuta = parsePositiveNumber(pagamento.permuta ?? 0, 'pagamento.permuta');
@@ -372,16 +365,12 @@ function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposalWizard
     }
   }
 
-  if (sellerBrokerId !== null && (!Number.isInteger(sellerBrokerId) || sellerBrokerId <= 0)) {
-    throw new Error('sellerBrokerId invalido.');
-  }
-
   return {
     propertyId,
     clientName,
     clientCpf: clientCpfDigits,
     validadeDias,
-    sellerBrokerId,
+    sellerBrokerId: null,
     pagamento: {
       dinheiro,
       permuta,
@@ -438,35 +427,19 @@ async function resolveSellerBrokerContext(
   }
 
   if (
-    requestedSellerBrokerId == null ||
-    requestedSellerBrokerId === capturingBrokerId
+    requestedSellerBrokerId != null &&
+    requestedSellerBrokerId !== capturingBrokerId
   ) {
-    return {
-      capturingBrokerName,
-      sellerBrokerId: capturingBrokerId,
-      sellingBrokerName: capturingBrokerName,
-    };
-  }
-
-  const [sellerRows] = await tx.query<BrokerRow[]>(
-    `
-      SELECT u.name
-      FROM brokers b
-      JOIN users u ON u.id = b.id
-      WHERE b.id = ? AND b.status = 'approved'
-      LIMIT 1
-    `,
-    [requestedSellerBrokerId]
-  );
-  const sellerName = String(sellerRows[0]?.name ?? '').trim();
-  if (!sellerName) {
-    throw new Error('Corretor vendedor inválido ou não aprovado.');
+    console.warn('Ignorando selling broker legado em proposta.', {
+      capturingBrokerId,
+      requestedSellerBrokerId,
+    });
   }
 
   return {
     capturingBrokerName,
-    sellerBrokerId: requestedSellerBrokerId,
-    sellingBrokerName: sellerName,
+    sellerBrokerId: capturingBrokerId,
+    sellingBrokerName: capturingBrokerName,
   };
 }
 

@@ -2380,9 +2380,6 @@ class AdminController {
       return res.status(401).json({ error: 'Administrador não autenticado.' });
     }
 
-    const sameAsCapturingInput = (req.body as { sameAsCapturing?: unknown })?.sameAsCapturing;
-    const sameAsCapturing =
-      sameAsCapturingInput === undefined ? true : Boolean(sameAsCapturingInput);
     const sellerBrokerIdRaw = (req.body as { sellingBrokerId?: unknown })?.sellingBrokerId;
     const parsedSellerBrokerId =
       sellerBrokerIdRaw === undefined || sellerBrokerIdRaw === null || sellerBrokerIdRaw === ''
@@ -2392,7 +2389,7 @@ class AdminController {
       parsedSellerBrokerId !== null &&
       (!Number.isInteger(parsedSellerBrokerId) || parsedSellerBrokerId <= 0)
     ) {
-      return res.status(400).json({ error: 'ID do corretor vendedor inválido.' });
+      return res.status(400).json({ error: 'ID do responsável operacional inválido.' });
     }
 
     const tx = await adminDb.getConnection();
@@ -2429,43 +2426,24 @@ class AdminController {
       ) {
         await tx.rollback();
         return res.status(400).json({
-          error: 'Não é possível alterar o corretor vendedor em uma negociação encerrada.',
+          error: 'Não é possível alterar o responsável operacional em uma negociação encerrada.',
         });
       }
 
-      let newSellerBrokerId = capturingBrokerId;
-      let newSellerBrokerName = '';
-      if (!sameAsCapturing) {
-        if (parsedSellerBrokerId === null) {
-          await tx.rollback();
-          return res.status(400).json({ error: 'Selecione um corretor vendedor.' });
-        }
-        newSellerBrokerId = parsedSellerBrokerId;
+      if (parsedSellerBrokerId != null && parsedSellerBrokerId !== capturingBrokerId) {
+        console.warn('Ignorando atualização legada de papel secundário no admin.', {
+          negotiationId,
+          actorId,
+          requestedSellingBrokerId: parsedSellerBrokerId,
+          capturingBrokerId,
+        });
       }
-
-      if (newSellerBrokerId !== capturingBrokerId) {
-        const [sellerRows] = await tx.query<RowDataPacket[]>(
-          `
-            SELECT u.name
-            FROM brokers b
-            JOIN users u ON u.id = b.id
-            WHERE b.id = ? AND b.status = 'approved'
-            LIMIT 1
-          `,
-          [newSellerBrokerId]
-        );
-        newSellerBrokerName = String(sellerRows[0]?.name ?? '').trim();
-        if (!newSellerBrokerName) {
-          await tx.rollback();
-          return res.status(400).json({ error: 'Corretor vendedor inválido ou não aprovado.' });
-        }
-      } else {
-        const [capturingRows] = await tx.query<RowDataPacket[]>(
-          `SELECT name FROM users WHERE id = ? LIMIT 1`,
-          [capturingBrokerId]
-        );
-        newSellerBrokerName = String(capturingRows[0]?.name ?? '').trim() || '';
-      }
+      const newSellerBrokerId = capturingBrokerId;
+      const [capturingRows] = await tx.query<RowDataPacket[]>(
+        `SELECT name FROM users WHERE id = ? LIMIT 1`,
+        [capturingBrokerId]
+      );
+      const newSellerBrokerName = String(capturingRows[0]?.name ?? '').trim() || '';
 
       await tx.query(
         `
@@ -2478,16 +2456,16 @@ class AdminController {
 
       await tx.commit();
       return res.status(200).json({
-        message: 'Corretor vendedor atualizado com sucesso.',
+        message: 'Responsável operacional sincronizado com o captador.',
         negotiationId,
         capturingBrokerId,
         sellingBrokerId: newSellerBrokerId,
-        sameAsCapturing: newSellerBrokerId === capturingBrokerId,
+        sameAsCapturing: true,
         sellingBrokerName: newSellerBrokerName || null,
       });
     } catch (error) {
       await tx.rollback();
-      console.error('Erro ao atualizar corretor vendedor da negociação (admin):', error);
+      console.error('Erro ao sincronizar responsável operacional da negociação (admin):', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     } finally {
       tx.release();

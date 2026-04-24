@@ -101,7 +101,6 @@ export class ExternalPdfService implements ProposalPdfService {
     client_cpf: string;
     property_address: string;
     broker_name: string;
-    selling_broker_name: string;
     value: number;
     payment: {
       cash: number;
@@ -118,7 +117,6 @@ export class ExternalPdfService implements ProposalPdfService {
       client_cpf: String(data.clientCpf ?? '').trim(),
       property_address: String(data.propertyAddress ?? '').trim(),
       broker_name: String(data.brokerName ?? '').trim(),
-      selling_broker_name: String(data.sellingBrokerName ?? '').trim(),
       value: Number(data.value),
       payment: {
         cash: Number(data.payment.cash ?? 0),

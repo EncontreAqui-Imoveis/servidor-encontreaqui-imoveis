@@ -135,6 +135,9 @@ describe('admin negotiation request views', () => {
             last_event_at: '2026-04-22T10:00:00.000Z',
             approved_at: null,
             signed_document_id: 33,
+            signed_document_metadata_json: JSON.stringify({
+              originalFileName: 'proposta-assinada-maria.pdf',
+            }),
           },
         ],
       ]);
@@ -156,6 +159,8 @@ describe('admin negotiation request views', () => {
       clientName: 'Maria Compradora',
       value: 850000,
       status: 'UNDER_REVIEW',
+      signedDocumentId: 33,
+      signedDocumentFileName: 'proposta-assinada-maria.pdf',
     });
   });
 

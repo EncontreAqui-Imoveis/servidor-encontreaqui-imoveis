@@ -798,6 +798,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   last_event_at: Date | string | null;
   approved_at: Date | string | null;
   signed_document_id: number | null;
+  signed_document_metadata_json: unknown;
 }
 
 interface AdminNegotiationRequestSummaryRow extends RowDataPacket {
@@ -1150,6 +1151,9 @@ function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
 }
 
 function mapAdminNegotiation(row: AdminNegotiationListRow) {
+  const signedDocumentMetadata = parseJsonObjectSafe(row.signed_document_metadata_json);
+  const signedDocumentFileName = String(signedDocumentMetadata.originalFileName ?? '').trim();
+
   return {
     id: row.id,
     status: toAdminNegotiationStatus(row),
@@ -1176,6 +1180,8 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     updatedAt: row.last_event_at ? String(row.last_event_at) : null,
     approvedAt: row.approved_at ? String(row.approved_at) : null,
     signedDocumentId: row.signed_document_id != null ? Number(row.signed_document_id) : null,
+    signedDocumentFileName:
+      row.signed_document_id != null ? signedDocumentFileName || 'proposta_assinada.pdf' : null,
   };
 }
 
@@ -1390,7 +1396,8 @@ class AdminController {
             ${clientSql.paymentOutros} AS payment_outros,
             latest_history.created_at AS last_event_at,
             approved_history.approved_at AS approved_at,
-            signed_doc.id AS signed_document_id
+            signed_doc.id AS signed_document_id,
+            signed_doc.metadata_json AS signed_document_metadata_json
           FROM negotiations n
           JOIN properties p ON p.id = n.property_id
           LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
@@ -1417,12 +1424,14 @@ class AdminController {
           LEFT JOIN (
             SELECT
               d.negotiation_id,
-              d.id
+              d.id,
+              d.metadata_json
             FROM negotiation_documents d
             INNER JOIN (
               SELECT negotiation_id, MAX(id) AS max_id
               FROM negotiation_documents
               WHERE type = 'other'
+                AND document_type = 'contrato_assinado'
               GROUP BY negotiation_id
             ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
           ) signed_doc ON signed_doc.negotiation_id = n.id
@@ -1640,7 +1649,8 @@ class AdminController {
             ${clientSql.paymentOutros} AS payment_outros,
             ${timeSql.nEventAtSelect} AS last_event_at,
             NULL AS approved_at,
-            signed_doc.id AS signed_document_id
+            signed_doc.id AS signed_document_id,
+            signed_doc.metadata_json AS signed_document_metadata_json
           FROM negotiations n
           JOIN properties p ON p.id = n.property_id
           LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
@@ -1648,12 +1658,14 @@ class AdminController {
           LEFT JOIN (
             SELECT
               d.negotiation_id,
-              d.id
+              d.id,
+              d.metadata_json
             FROM negotiation_documents d
             INNER JOIN (
               SELECT negotiation_id, MAX(id) AS max_id
               FROM negotiation_documents
               WHERE type = 'other'
+                AND document_type = 'contrato_assinado'
               GROUP BY negotiation_id
             ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
           ) signed_doc ON signed_doc.negotiation_id = n.id
@@ -2427,12 +2439,13 @@ class AdminController {
         previousDocumentToDelete = existingDocument;
       }
 
+      const originalFileName = uploadedFile.originalname ?? 'proposta_assinada_admin.pdf';
       const documentId = await saveNegotiationSignedProposalDocument(
         negotiationId,
         uploadedFile.buffer,
         tx,
         {
-          originalFileName: uploadedFile.originalname ?? 'proposta_assinada_admin.pdf',
+          originalFileName,
           uploadedBy: actorId,
           uploadedByRole: 'admin',
           uploadedAt: new Date().toISOString(),
@@ -2450,6 +2463,8 @@ class AdminController {
         message: 'PDF assinado enviado com sucesso.',
         negotiationId,
         documentId,
+        signedDocumentId: documentId,
+        signedDocumentFileName: originalFileName,
       });
     } catch (error) {
       await tx.rollback();

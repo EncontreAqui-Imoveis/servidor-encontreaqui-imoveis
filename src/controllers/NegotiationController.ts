@@ -28,6 +28,7 @@ interface NegotiationUploadRow extends RowDataPacket {
   status: string;
   capturing_broker_id: number;
   selling_broker_id: number | null;
+  buyer_client_id: number | null;
   property_title: string | null;
   broker_name: string | null;
 }
@@ -792,7 +793,7 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
       JOIN properties p ON p.id = n.property_id
       LEFT JOIN property_images pi ON pi.property_id = p.id
       LEFT JOIN contracts c ON c.negotiation_id = n.id
-      WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
+      WHERE (n.capturing_broker_id = ? OR n.buyer_client_id = ?)
         AND UPPER(TRIM(n.status)) IN (${visiblePlaceholders})
       GROUP BY
         n.id,
@@ -819,7 +820,7 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
         c.seller_approval_status
       ORDER BY n.updated_at DESC, n.created_at DESC
     `,
-    [userId, userId, userId, ...PROPOSAL_LIST_VISIBLE_STATUSES]
+    [userId, userId, ...PROPOSAL_LIST_VISIBLE_STATUSES]
   );
 
   return rows.map((row) => buildMineNegotiationSummary(userId, row));
@@ -907,11 +908,6 @@ async function queryMineNegotiationsSchemaAware(
 
   const whereClauses = ['n.capturing_broker_id = ?'];
   const params: number[] = [userId];
-
-  if (flags.hasSellingBrokerId) {
-    whereClauses.push('n.selling_broker_id = ?');
-    params.push(userId);
-  }
 
   if (flags.hasBuyerClientId) {
     whereClauses.push('n.buyer_client_id = ?');
@@ -1014,6 +1010,21 @@ function canAccessNegotiationByOwnership(
     userId === Number(negotiation.selling_broker_id ?? 0) ||
     userId === Number(negotiation.buyer_client_id ?? 0)
   );
+}
+
+function canManageOwnProposal(
+  userId: number,
+  role: string,
+  negotiation: NegotiationAccessRow
+): boolean {
+  const normalizedRole = String(role ?? '').trim().toLowerCase();
+  if (normalizedRole === 'client') {
+    return userId === Number(negotiation.buyer_client_id ?? 0);
+  }
+  if (normalizedRole === 'broker') {
+    return userId === Number(negotiation.capturing_broker_id ?? 0);
+  }
+  return canAccessNegotiationByOwnership(userId, negotiation);
 }
 
 function resolveIdempotencyKey(req: AuthRequest): string {
@@ -1663,6 +1674,7 @@ class NegotiationController {
             n.status,
             n.capturing_broker_id,
             n.selling_broker_id,
+            n.buyer_client_id,
             p.title AS property_title,
             u.name AS broker_name
           FROM negotiations n
@@ -1681,10 +1693,13 @@ class NegotiationController {
         return res.status(404).json({ error: 'Negociação não encontrada.' });
       }
 
-      const isAuthorizedBroker =
-        req.userId === Number(negotiation.capturing_broker_id) ||
-        req.userId === Number(negotiation.selling_broker_id ?? 0);
-      if (!isAuthorizedBroker) {
+      if (
+        !canManageOwnProposal(
+          Number(req.userId),
+          String(req.userRole ?? ''),
+          negotiation as NegotiationAccessRow
+        )
+      ) {
         await tx.rollback();
         return res.status(403).json({ error: 'Você não possui permissão para enviar esta proposta.' });
       }
@@ -1881,7 +1896,7 @@ class NegotiationController {
 
       if (
         role !== 'admin' &&
-        !canAccessNegotiationByOwnership(userId, negotiation)
+        !canManageOwnProposal(userId, role, negotiation)
       ) {
         return res.status(403).json({ error: 'Acesso negado à proposta.' });
       }
@@ -2043,7 +2058,7 @@ class NegotiationController {
       }
 
       if (
-        !canAccessNegotiationByOwnership(Number(req.userId), {
+        !canManageOwnProposal(Number(req.userId), String(req.userRole ?? ''), {
           id: nRow.id,
           capturing_broker_id: nRow.capturing_broker_id,
           selling_broker_id: nRow.selling_broker_id,
@@ -2481,7 +2496,7 @@ class NegotiationController {
         await tx.rollback();
         return res.status(404).json({ error: 'Negociação não encontrada.' });
       }
-      if (!canAccessNegotiationByOwnership(userId, row)) {
+      if (!canManageOwnProposal(userId, String(req.userRole ?? ''), row)) {
         await tx.rollback();
         return res.status(403).json({ error: 'Acesso negado a esta proposta.' });
       }

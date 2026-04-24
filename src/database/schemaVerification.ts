@@ -130,6 +130,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['admins', 'token_version'],
     ['users', 'token_version'],
     ['properties', 'updated_at'],
+    ['properties', 'sem_cep'],
     ['property_edit_requests', 'updated_at'],
     ['property_edit_requests', 'before_json'],
     ['property_edit_requests', 'after_json'],

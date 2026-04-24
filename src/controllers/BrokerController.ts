@@ -531,9 +531,9 @@ class BrokerController {
                     p.numero,
                     p.bairro,
                     p.complemento,
-                    p.tipo_lote,
                     p.city,
                     p.state,
+                    p.sem_cep,
                     p.bedrooms,
                     p.bathrooms,
                     p.area_construida,
@@ -587,8 +587,8 @@ class BrokerController {
                 WHERE p.broker_id = ?
                 GROUP BY
                     p.id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose, p.price, p.price_sale, p.price_rent, p.code,
-                    p.address, p.quadra, p.lote, p.numero, p.bairro, p.complemento, p.tipo_lote,
-                    p.city, p.state, p.bedrooms, p.bathrooms, p.area_construida, p.area_terreno,
+                    p.address, p.quadra, p.lote, p.numero, p.bairro, p.complemento,
+                    p.city, p.state, p.sem_cep, p.bedrooms, p.bathrooms, p.area_construida, p.area_terreno,
                     p.garage_spots, p.has_wifi, p.tem_piscina, p.tem_energia_solar, p.tem_automacao,
                     p.tem_ar_condicionado, p.eh_mobiliada, p.valor_condominio, p.valor_iptu,
                     p.video_url, p.created_at, u.name, u.phone, u.email,

@@ -20,7 +20,10 @@ import {
   preparePropertyEditPatch,
   type EditablePropertyPatch,
 } from "../services/propertyEditRequestService";
-import { normalizePropertyType } from "../utils/propertyTypes";
+import {
+  isOptionalBairroPropertyType,
+  normalizePropertyType,
+} from "../utils/propertyTypes";
 import { allocateNextPropertyCode } from "../utils/propertyCode";
 import {
   areaInputToSquareMeters,
@@ -220,10 +223,10 @@ interface PropertyRow extends RowDataPacket {
   numero?: string | null;
   bairro?: string | null;
   complemento?: string | null;
-  tipo_lote?: string | null;
   city: string;
   state: string;
   cep?: string | null;
+  sem_cep?: number | boolean | string | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
   area_construida?: number | string | null;
@@ -457,6 +460,26 @@ function toBoolean(value: unknown): boolean {
   return value === 1 || value === "1" || value === true;
 }
 
+function normalizeCepForPersistence(value: unknown, semCepFlag: 0 | 1): string | null {
+  if (semCepFlag === 1) {
+    return null;
+  }
+
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length > 0 ? digits : null;
+}
+
+function validateRequiredBairro(
+  bairro: unknown,
+  propertyType: unknown
+): string | null {
+  if (isOptionalBairroPropertyType(propertyType)) {
+    return null;
+  }
+
+  return stringOrNull(bairro) ? null : 'Bairro é obrigatório.';
+}
+
 function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
   const images = row.images ? row.images.split(",").filter(Boolean) : [];
   const activeNegotiationId = stringOrNull(row.active_negotiation_id);
@@ -567,9 +590,9 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     numero: row.numero ?? null,
     bairro: row.bairro ?? null,
     complemento: row.complemento ?? null,
-    tipo_lote: row.tipo_lote ?? null,
     city: row.city,
     state: row.state,
+    sem_cep: toBoolean((row as PropertyRow & { sem_cep?: unknown }).sem_cep),
     bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
     bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
     area_construida:
@@ -948,10 +971,10 @@ class PropertyController {
       sem_numero,
       bairro,
       complemento,
-      tipo_lote,
       city,
       state,
       cep,
+      sem_cep,
       bedrooms,
       bathrooms,
       area_construida,
@@ -973,6 +996,7 @@ class PropertyController {
     const semNumeroFlag = parseBoolean(sem_numero);
     const semQuadraFlag = parseBoolean(sem_quadra);
     const semLoteFlag = parseBoolean(sem_lote);
+    const semCepFlag = parseBoolean(sem_cep);
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
 
@@ -1009,8 +1033,9 @@ class PropertyController {
       return res.status(400).json({ error: "Finalidade do imóvel invalida." });
     }
 
-    if (!stringOrNull(tipo_lote)) {
-      return res.status(400).json({ error: "Tipo de lote é obrigatório." });
+    const requiredBairroError = validateRequiredBairro(bairro, normalizedType);
+    if (requiredBairroError) {
+      return res.status(400).json({ error: requiredBairroError });
     }
 
     const createTextValidationError = [
@@ -1023,7 +1048,6 @@ class PropertyController {
       validateMaxTextLength(city, 'Cidade'),
       ...(semQuadraFlag ? [] : [validateMaxTextLength(quadra, 'Quadra', 25)]),
       ...(semLoteFlag ? [] : [validateMaxTextLength(lote, 'Lote', 25)]),
-      validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
       validateMaxTextLength(code, 'Código'),
     ].find(Boolean);
 
@@ -1333,10 +1357,10 @@ class PropertyController {
             numero,
             bairro,
             complemento,
-            tipo_lote,
             city,
             state,
             cep,
+            sem_cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -1386,10 +1410,10 @@ class PropertyController {
           numeroNormalizado,
           stringOrNull(bairro),
           stringOrNull(complemento),
-          stringOrNull(tipo_lote),
           city,
           state,
-          stringOrNull(cep),
+          normalizeCepForPersistence(cep, semCepFlag),
+          semCepFlag,
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
@@ -1506,10 +1530,10 @@ class PropertyController {
       sem_numero,
       bairro,
       complemento,
-      tipo_lote,
       city,
       state,
       cep,
+      sem_cep,
       bedrooms,
       bathrooms,
       area_construida,
@@ -1531,6 +1555,7 @@ class PropertyController {
     const semNumeroFlag = parseBoolean(sem_numero);
     const semQuadraFlag = parseBoolean(sem_quadra);
     const semLoteFlag = parseBoolean(sem_lote);
+    const semCepFlag = parseBoolean(sem_cep);
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
 
@@ -1567,8 +1592,9 @@ class PropertyController {
       return res.status(400).json({ error: 'Finalidade do imovel invalida.' });
     }
 
-    if (!stringOrNull(tipo_lote)) {
-      return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
+    const requiredBairroError = validateRequiredBairro(bairro, normalizedType);
+    if (requiredBairroError) {
+      return res.status(400).json({ error: requiredBairroError });
     }
 
     const createClientTextValidationError = [
@@ -1581,7 +1607,6 @@ class PropertyController {
       validateMaxTextLength(city, 'Cidade'),
       ...(semQuadraFlag ? [] : [validateMaxTextLength(quadra, 'Quadra', 25)]),
       ...(semLoteFlag ? [] : [validateMaxTextLength(lote, 'Lote', 25)]),
-      validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
       validateMaxTextLength(code, 'Código'),
     ].find(Boolean);
 
@@ -1871,10 +1896,10 @@ class PropertyController {
             numero,
             bairro,
             complemento,
-            tipo_lote,
             city,
             state,
             cep,
+            sem_cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -1924,10 +1949,10 @@ class PropertyController {
           numeroNormalizado,
           stringOrNull(bairro),
           stringOrNull(complemento),
-          stringOrNull(tipo_lote),
           city,
           state,
-          stringOrNull(cep),
+          normalizeCepForPersistence(cep, semCepFlag),
+          semCepFlag,
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
@@ -2237,6 +2262,8 @@ class PropertyController {
       const bodyKeys = Object.keys(body);
       const semNumeroBody =
         body.sem_numero !== undefined ? parseBoolean(body.sem_numero) : null;
+      const semCepBody =
+        body.sem_cep !== undefined ? parseBoolean(body.sem_cep) : parseBoolean(property.sem_cep);
 
       const nextDescription = normalizePropertyDescription(
         String(body.description ?? property.description ?? '')
@@ -2247,9 +2274,13 @@ class PropertyController {
         });
       }
 
-      const nextTipoLote = stringOrNull(body.tipo_lote ?? property.tipo_lote);
-      if (!nextTipoLote) {
-        return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
+      const nextType = normalizePropertyType(body.type) ?? property.type;
+      const requiredBairroError = validateRequiredBairro(
+        body.bairro ?? property.bairro,
+        nextType
+      );
+      if (requiredBairroError) {
+        return res.status(400).json({ error: requiredBairroError });
       }
 
       const updateTextValidationError = [
@@ -2262,7 +2293,6 @@ class PropertyController {
         validateMaxTextLength(body.city ?? property.city, 'Cidade'),
         validateMaxTextLength(body.quadra ?? property.quadra, 'Quadra', 25),
         validateMaxTextLength(body.lote ?? property.lote, 'Lote', 25),
-        validateMaxTextLength(nextTipoLote, 'Tipo de lote', 25),
         validateMaxTextLength(body.code ?? property.code, 'Código'),
       ].find(Boolean);
 
@@ -2327,10 +2357,10 @@ class PropertyController {
         'sem_numero',
         'bairro',
         'complemento',
-        'tipo_lote',
         'city',
         'state',
         'cep',
+        'sem_cep',
         'bedrooms',
         'bathrooms',
         'area_construida',
@@ -2593,6 +2623,16 @@ class PropertyController {
             values.push(stringOrNull(numeroDigits));
             break;
           }
+          case 'sem_cep': {
+            fields.push('sem_cep = ?');
+            values.push(parseBoolean(body[key]));
+            break;
+          }
+          case 'cep': {
+            fields.push('cep = ?');
+            values.push(normalizeCepForPersistence(body[key], semCepBody));
+            break;
+          }
           default: {
             if (!ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS.has(key)) {
               continue;
@@ -2605,6 +2645,11 @@ class PropertyController {
 
       if (semNumeroBody === 1 && !bodyKeys.includes('numero')) {
         fields.push('numero = ?');
+        values.push(null);
+      }
+
+      if (semCepBody === 1 && !bodyKeys.includes('cep')) {
+        fields.push('cep = ?');
         values.push(null);
       }
 
@@ -3321,7 +3366,6 @@ class PropertyController {
       maxPrice,
       bedrooms,
       bathrooms,
-      tipo_lote,
       has_wifi,
       tem_piscina,
       tem_energia_solar,
@@ -3449,11 +3493,6 @@ class PropertyController {
           params.push(normalized);
         }
       }
-    }
-
-    if (tipo_lote) {
-      whereClauses.push('p.tipo_lote = ?');
-      params.push(tipo_lote);
     }
 
     if (has_wifi !== undefined) {

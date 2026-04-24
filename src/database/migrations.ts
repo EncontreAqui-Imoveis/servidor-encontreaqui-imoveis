@@ -81,6 +81,16 @@ async function ensurePropertiesColumns(): Promise<void> {
     await connection.query('ALTER TABLE properties ADD COLUMN cep VARCHAR(20) NULL');
   }
 
+  if (!(await columnExists('properties', 'sem_cep'))) {
+    await connection.query(
+      'ALTER TABLE properties ADD COLUMN sem_cep TINYINT(1) NOT NULL DEFAULT 0 AFTER cep'
+    );
+  }
+
+  if (await columnExists('properties', 'tipo_lote')) {
+    await connection.query('ALTER TABLE properties DROP COLUMN tipo_lote');
+  }
+
   if (!(await columnExists('properties', 'price_sale'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN price_sale DECIMAL(12, 2) NULL');
   }

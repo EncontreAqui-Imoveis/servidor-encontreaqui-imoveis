@@ -1,11 +1,12 @@
-import { normalizePropertyType } from '../utils/propertyTypes';
+import {
+  isOptionalBairroPropertyType,
+  normalizePropertyType,
+} from '../utils/propertyTypes';
 
 export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PropertyEditRequestRequesterRole = 'broker' | 'client';
 
 type PurposeValue = 'Venda' | 'Aluguel' | 'Venda e Aluguel';
-type TipoLoteValue = 'meio' | 'inteiro' | null;
-
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const MAX_PROPERTY_COUNT = 99;
@@ -35,7 +36,6 @@ const ALLOWED_TEXT_LENGTHS: Record<string, number> = {
   numero: 25,
   quadra: 25,
   lote: 25,
-  tipoLote: 25,
 };
 
 const EDIT_FIELD_ALIASES = {
@@ -53,10 +53,10 @@ const EDIT_FIELD_ALIASES = {
   semNumero: ['semNumero', 'sem_numero'],
   bairro: ['bairro'],
   complemento: ['complemento'],
-  tipoLote: ['tipoLote', 'tipo_lote'],
   city: ['city'],
   state: ['state'],
   cep: ['cep'],
+  semCep: ['semCep', 'sem_cep'],
   bedrooms: ['bedrooms'],
   bathrooms: ['bathrooms'],
   areaConstruida: ['areaConstruida', 'area_construida', 'area'],
@@ -141,10 +141,10 @@ export type EditablePropertyState = {
   numero: string | null;
   bairro: string | null;
   complemento: string | null;
-  tipoLote: TipoLoteValue;
   city: string;
   state: string;
   cep: string | null;
+  semCep: boolean;
   bedrooms: number | null;
   bathrooms: number | null;
   areaConstruida: number | null;
@@ -202,22 +202,21 @@ function normalizePurpose(value: unknown): PurposeValue | null {
   return PURPOSE_MAP[normalized] ?? null;
 }
 
-function normalizeTipoLote(value: unknown): TipoLoteValue {
-  if (value === undefined || value === null || value === '') {
-    return null;
-  }
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized === 'meio') return 'meio';
-  if (normalized === 'inteiro') return 'inteiro';
-  throw new Error('Tipo de lote invalido.');
-}
-
 function stringOrNull(value: unknown): string | null {
   if (value === undefined || value === null) {
     return null;
   }
   const normalized = String(value).trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeCepForPersistence(value: unknown, semCep: boolean): string | null {
+  if (semCep) {
+    return null;
+  }
+
+  const digits = normalizeDigits(value);
+  return digits.length > 0 ? digits : null;
 }
 
 function normalizeDigits(value: unknown): string {
@@ -341,7 +340,7 @@ function resolveFieldLabel(key: string): string {
     numero: 'Numero',
     quadra: 'Quadra',
     lote: 'Lote',
-    tipoLote: 'Tipo de lote',
+    semCep: 'Sem CEP',
     priceSale: 'Preco de venda',
     priceRent: 'Preco de aluguel',
     valorCondominio: 'Valor de condominio',
@@ -479,10 +478,10 @@ export function buildEditablePropertyState(
     numero: stringOrNull(property.numero),
     bairro: stringOrNull(property.bairro),
     complemento: stringOrNull(property.complemento),
-    tipoLote: normalizeTipoLote(property.tipo_lote),
     city: String(property.city ?? '').trim(),
     state: String(property.state ?? '').trim(),
     cep: stringOrNull(property.cep),
+    semCep: parseBoolean((property as Record<string, unknown>).sem_cep),
     bedrooms: toNullableInteger(property.bedrooms),
     bathrooms: toNullableInteger(property.bathrooms),
     areaConstruida: toNullableNumber(property.area_construida),
@@ -527,8 +526,8 @@ function validateCurrentState(state: EditablePropertyState): void {
   if (!state.address || !state.city || !state.state) {
     throw new Error('Endereco, cidade e estado sao obrigatorios.');
   }
-  if (!state.tipoLote) {
-    throw new Error('Tipo de lote e obrigatorio.');
+  if (!state.bairro && !isOptionalBairroPropertyType(state.type)) {
+    throw new Error('Bairro e obrigatorio.');
   }
 
   validateTextLength('title', state.title);
@@ -543,7 +542,6 @@ function validateCurrentState(state: EditablePropertyState): void {
   validateTextLength('numero', state.numero);
   validateTextLength('quadra', state.quadra);
   validateTextLength('lote', state.lote);
-  validateTextLength('tipoLote', state.tipoLote);
 
   if (state.ownerPhone != null) {
     const digits = normalizeDigits(state.ownerPhone);
@@ -657,9 +655,6 @@ function buildRequestedPatch(
   const complemento = readAlias(payload, EDIT_FIELD_ALIASES.complemento);
   if (complemento.found) patch.complemento = stringOrNull(complemento.value);
 
-  const tipoLote = readAlias(payload, EDIT_FIELD_ALIASES.tipoLote);
-  if (tipoLote.found) patch.tipoLote = normalizeTipoLote(tipoLote.value);
-
   const city = readAlias(payload, EDIT_FIELD_ALIASES.city);
   if (city.found) {
     const value = stringOrNull(city.value);
@@ -676,6 +671,9 @@ function buildRequestedPatch(
 
   const cep = readAlias(payload, EDIT_FIELD_ALIASES.cep);
   if (cep.found) patch.cep = stringOrNull(cep.value);
+
+  const semCep = readAlias(payload, EDIT_FIELD_ALIASES.semCep);
+  if (semCep.found) patch.semCep = parseBoolean(semCep.value);
 
   const bedrooms = readAlias(payload, EDIT_FIELD_ALIASES.bedrooms);
   if (bedrooms.found) patch.bedrooms = parseInteger(bedrooms.value, 'Quartos');
@@ -824,6 +822,11 @@ function finalizePatch(
   if (rawPatch.semLote === true) {
     merged.lote = null;
   }
+  if (rawPatch.semCep === true) {
+    merged.cep = null;
+  } else if (rawPatch.cep !== undefined || rawPatch.semCep !== undefined) {
+    merged.cep = normalizeCepForPersistence(merged.cep, merged.semCep);
+  }
 
   const shouldEnablePromotion =
     rawPatch.isPromoted === true ||
@@ -945,9 +948,6 @@ export function buildPropertyEditDbPatch(
       case 'numero':
         dbPatch.numero = finalState.numero;
         break;
-      case 'tipoLote':
-        dbPatch.tipo_lote = finalState.tipoLote;
-        break;
       case 'bedrooms':
         dbPatch.bedrooms = finalState.bedrooms;
         break;
@@ -965,6 +965,10 @@ export function buildPropertyEditDbPatch(
         break;
       case 'semLote':
         dbPatch.sem_lote = finalState.semLote ? 1 : 0;
+        break;
+      case 'semCep':
+        dbPatch.sem_cep = finalState.semCep ? 1 : 0;
+        dbPatch.cep = normalizeCepForPersistence(finalState.cep, finalState.semCep);
         break;
       case 'areaTerreno':
         dbPatch.area_terreno = finalState.areaTerreno;

@@ -232,14 +232,6 @@
     "Extra": ""
   },
   {
-    "Field": "tipo_lote",
-    "Type": "enum('meio','inteiro')",
-    "Null": "YES",
-    "Key": "",
-    "Default": null,
-    "Extra": ""
-  },
-  {
     "Field": "area_terreno",
     "Type": "decimal(12,2)",
     "Null": "YES",
@@ -349,6 +341,14 @@
     "Null": "YES",
     "Key": "",
     "Default": null,
+    "Extra": ""
+  },
+  {
+    "Field": "sem_cep",
+    "Type": "tinyint(1)",
+    "Null": "NO",
+    "Key": "",
+    "Default": "0",
     "Extra": ""
   },
   {

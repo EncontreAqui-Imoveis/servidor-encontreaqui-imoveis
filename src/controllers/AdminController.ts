@@ -41,6 +41,7 @@ import {
 import { saveNegotiationSignedProposalDocument } from '../services/negotiationPersistenceService';
 import { allocateNextPropertyCode } from '../utils/propertyCode';
 import { areaInputToSquareMeters, normalizeAreaUnidade } from '../utils/propertyAreaUnits';
+import { isOptionalBairroPropertyType } from '../utils/propertyTypes';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
@@ -270,29 +271,29 @@ function parsePromotionDateTime(value: unknown): Nullable<string> {
   return parsed.toISOString().slice(0, 19).replace('T', ' ');
 }
 
-function normalizeTipoLote(value: unknown): 'meio' | 'inteiro' | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized) {
-    return null;
-  }
-  if (normalized === 'meio') {
-    return 'meio';
-  }
-  if (normalized === 'inteiro') {
-    return 'inteiro';
-  }
-  return null;
-}
-
 function stringOrNull(value: unknown): string | null {
   if (value === undefined || value === null) {
     return null;
   }
   const textual = String(value).trim();
   return textual.length > 0 ? textual : null;
+}
+
+function normalizeCepForPersistence(value: unknown, semCepFlag: 0 | 1): string | null {
+  if (semCepFlag === 1) {
+    return null;
+  }
+
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length > 0 ? digits : null;
+}
+
+function validateRequiredBairro(bairro: unknown, propertyType: unknown): string | null {
+  if (isOptionalBairroPropertyType(propertyType)) {
+    return null;
+  }
+
+  return stringOrNull(bairro) ? null : 'Bairro é obrigatório.';
 }
 
 function hasValidPropertyDescription(value: unknown): boolean {
@@ -462,10 +463,10 @@ interface PropertyDetailRow extends RowDataPacket {
   numero?: string | null;
   bairro?: string | null;
   complemento?: string | null;
-  tipo_lote?: string | null;
   city?: string | null;
   state?: string | null;
   cep?: string | null;
+  sem_cep?: number | string | boolean | null;
   bedrooms?: number | string | null;
   bathrooms?: number | string | null;
   area_construida?: number | string | null;
@@ -588,9 +589,9 @@ function mapAdminProperty(row: PropertyDetailRow) {
     numero: row.numero ?? null,
     bairro: row.bairro ?? null,
     complemento: row.complemento ?? null,
-    tipo_lote: row.tipo_lote ?? null,
     city: row.city ?? null,
     state: row.state ?? null,
+    sem_cep: parseBoolean(row.sem_cep),
     bedrooms: toNullableNumber(row.bedrooms),
     bathrooms: toNullableNumber(row.bathrooms),
     area_construida: toNullableNumber(row.area_construida),
@@ -657,7 +658,7 @@ const PROPERTY_EDIT_FIELD_LABELS: Record<string, string> = {
   numero: 'Número',
   bairro: 'Bairro',
   complemento: 'Complemento',
-  tipoLote: 'Tipo de lote',
+  semCep: 'Sem CEP',
   city: 'Cidade',
   state: 'Estado',
   cep: 'CEP',
@@ -3855,7 +3856,7 @@ class AdminController {
             sem_quadra,
             lote,
             sem_lote,
-            tipo_lote,
+            sem_cep,
             code,
             is_promoted,
             promotion_percentage,
@@ -3884,6 +3885,9 @@ class AdminController {
       const nextSemLote = Object.prototype.hasOwnProperty.call(body, 'sem_lote')
         ? parseBoolean(body.sem_lote)
         : parseBoolean(property.sem_lote);
+      const nextSemCep = Object.prototype.hasOwnProperty.call(body, 'sem_cep')
+        ? parseBoolean(body.sem_cep)
+        : parseBoolean(property.sem_cep);
       const nextQuadra = nextSemQuadra ? null : stringOrNull(body.quadra ?? property.quadra);
       const nextLote = nextSemLote ? null : stringOrNull(body.lote ?? property.lote);
       if (!nextSemQuadra && !nextQuadra) {
@@ -3892,9 +3896,13 @@ class AdminController {
       if (!nextSemLote && !nextLote) {
         return res.status(400).json({ error: 'Lote é obrigatório.' });
       }
-      const nextTipoLote = stringOrNull(body.tipo_lote ?? property.tipo_lote);
-      if (!nextTipoLote) {
-        return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
+      const nextType = normalizePropertyType(body.type) ?? property.type;
+      const requiredBairroError = validateRequiredBairro(
+        body.bairro ?? property.bairro,
+        nextType
+      );
+      if (requiredBairroError) {
+        return res.status(400).json({ error: requiredBairroError });
       }
 
       const updateTextValidationError = [
@@ -3907,7 +3915,6 @@ class AdminController {
         validateMaxTextLength(body.city ?? property.city, 'Cidade'),
         ...(nextSemQuadra ? [] : [validateMaxTextLength(nextQuadra, 'Quadra', 25)]),
         ...(nextSemLote ? [] : [validateMaxTextLength(nextLote, 'Lote', 25)]),
-        validateMaxTextLength(nextTipoLote, 'Tipo de lote', 25),
         validateMaxTextLength(body.code ?? property.code, 'Código'),
       ].find(Boolean);
 
@@ -3991,12 +3998,12 @@ class AdminController {
         'sem_numero',
         'bairro',
         'complemento',
-        'tipo_lote',
         'sem_quadra',
         'sem_lote',
         'city',
         'state',
         'cep',
+        'sem_cep',
         'bedrooms',
         'bathrooms',
         'area_construida',
@@ -4089,14 +4096,15 @@ class AdminController {
           case 'eh_mobiliada':
           case 'sem_numero':
           case 'sem_quadra':
-          case 'sem_lote': {
+          case 'sem_lote':
+          case 'sem_cep': {
             setParts.push(`${key} = ?`);
             params.push(parseBoolean(value));
             break;
           }
-          case 'tipo_lote': {
-            setParts.push('tipo_lote = ?');
-            params.push(normalizeTipoLote(value));
+          case 'cep': {
+            setParts.push('cep = ?');
+            params.push(normalizeCepForPersistence(value, nextSemCep));
             break;
           }
           case 'is_promoted': {
@@ -4312,6 +4320,11 @@ class AdminController {
         params.push(1);
       }
 
+      if (nextSemCep === 1 && !Object.prototype.hasOwnProperty.call(body, 'cep')) {
+        setParts.push('cep = ?');
+        params.push(null);
+      }
+
       if (setParts.length === 0) {
         return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });
       }
@@ -4421,8 +4434,6 @@ class AdminController {
         'type',
         'purpose',
         'address',
-        'bairro',
-        'tipo_lote',
         'city',
         'state',
         'bedrooms',
@@ -4470,10 +4481,10 @@ class AdminController {
         sem_numero,
         bairro,
         complemento,
-        tipo_lote,
         city,
         state,
         cep,
+        sem_cep,
         bedrooms,
         bathrooms,
         area_construida,
@@ -4496,6 +4507,7 @@ class AdminController {
       const semNumeroFlag = parseBoolean(sem_numero);
       const semQuadraFlag = parseBoolean(sem_quadra);
       const semLoteFlag = parseBoolean(sem_lote);
+      const semCepFlag = parseBoolean(sem_cep);
 
       if (!semQuadraFlag && !String(quadra ?? '').trim()) {
         return res.status(400).json({ error: 'Informe a quadra ou marque a opção sem quadra.' });
@@ -4507,6 +4519,10 @@ class AdminController {
       const normalizedType = normalizePropertyType(type);
       if (!normalizedType) {
         return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
+      }
+      const requiredBairroError = validateRequiredBairro(bairro, normalizedType);
+      if (requiredBairroError) {
+        return res.status(400).json({ error: requiredBairroError });
       }
 
       const normalizedStatus = normalizeStatus(status) ?? 'approved';
@@ -4526,7 +4542,6 @@ class AdminController {
         validateMaxTextLength(city, 'Cidade'),
         ...(semQuadraFlag ? [] : [validateMaxTextLength(quadra, 'Quadra', 25)]),
         ...(semLoteFlag ? [] : [validateMaxTextLength(lote, 'Lote', 25)]),
-        validateMaxTextLength(tipo_lote, 'Tipo de lote', 25),
         validateMaxTextLength(code, 'Código'),
       ].find(Boolean);
 
@@ -4693,11 +4708,6 @@ class AdminController {
       } catch (parseError) {
         return res.status(400).json({ error: (parseError as Error).message });
       }
-      const normalizedTipoLote = normalizeTipoLote(tipo_lote);
-      if (!normalizedTipoLote) {
-        return res.status(400).json({ error: 'Tipo de lote inválido.' });
-      }
-
       if (owner_phone && String(owner_phone).trim().length > 0 && !hasValidPhone(owner_phone)) {
         return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
       }
@@ -4794,10 +4804,10 @@ class AdminController {
             numero,
             bairro,
             complemento,
-            tipo_lote,
             city,
             state,
             cep,
+            sem_cep,
             bedrooms,
             bathrooms,
             area_construida,
@@ -4843,10 +4853,10 @@ class AdminController {
           normalizedNumero,
           stringOrNull(bairro),
           stringOrNull(complemento),
-          normalizedTipoLote,
           city,
           state,
-          stringOrNull(cep),
+          normalizeCepForPersistence(cep, semCepFlag),
+          semCepFlag,
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,

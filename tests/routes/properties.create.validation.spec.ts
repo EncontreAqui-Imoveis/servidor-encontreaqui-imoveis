@@ -70,7 +70,7 @@ const basePayload = {
   numero: '123',
   bairro: 'Centro',
   complemento: 'Fundos',
-  tipo_lote: 'inteiro',
+  sem_cep: 0,
   city: 'Rio Verde',
   state: 'GO',
   cep: '75900000',

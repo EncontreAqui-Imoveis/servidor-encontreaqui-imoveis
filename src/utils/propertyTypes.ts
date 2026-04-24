@@ -23,6 +23,12 @@ export const PROPERTY_TYPES = [
   'Prédio',
 ] as const;
 
+export const OPTIONAL_BAIRRO_PROPERTY_TYPES = [
+  'Área rural',
+  'Chácara',
+  'Rancho',
+] as const;
+
 type PropertyType = (typeof PROPERTY_TYPES)[number];
 
 const LEGACY_TYPE_MAP: Record<string, PropertyType> = {
@@ -77,6 +83,11 @@ export function normalizePropertyType(value: unknown): PropertyType | null {
     (type) => normalizeTypeKey(type) === key
   );
   return normalizedDirect ?? null;
+}
+
+export function isOptionalBairroPropertyType(value: unknown): boolean {
+  const normalized = normalizePropertyType(value);
+  return normalized != null && OPTIONAL_BAIRRO_PROPERTY_TYPES.includes(normalized as (typeof OPTIONAL_BAIRRO_PROPERTY_TYPES)[number]);
 }
 
 export const PROPERTY_TYPE_LEGACY_UPDATES: Array<{ from: string; to: string }> = [

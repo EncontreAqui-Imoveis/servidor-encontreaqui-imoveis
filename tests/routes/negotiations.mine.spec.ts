@@ -15,6 +15,10 @@ vi.mock('../../src/database/connection', () => ({
   },
 }));
 
+vi.mock('../../src/services/pushNotificationService', () => ({
+  sendPushNotification: vi.fn(),
+}));
+
 vi.mock('../../src/middlewares/auth', () => ({
   authMiddleware: (req: any, _res: any, next: any) => {
     req.userId = 30003;
@@ -74,6 +78,10 @@ describe('GET /negotiations/mine', () => {
       }),
     ]);
     expect(queryMock).toHaveBeenCalledTimes(1);
+    const sql = String(queryMock.mock.calls[0]?.[0] ?? '');
+    const params = queryMock.mock.calls[0]?.[1] as unknown[];
+    expect(sql).not.toContain('n.selling_broker_id = ?');
+    expect(params.slice(0, 2)).toEqual([30003, 30003]);
   });
 
   it('falls back to the schema-aware query when the modern query is incompatible', async () => {

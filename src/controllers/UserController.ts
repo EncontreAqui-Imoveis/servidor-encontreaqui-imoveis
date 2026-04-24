@@ -34,9 +34,9 @@ interface FavoriteRow extends RowDataPacket {
   numero?: string | null;
   bairro?: string | null;
   complemento?: string | null;
-  tipo_lote?: string | null;
   city: string;
   state: string;
+  sem_cep?: number | boolean | null;
   bedrooms?: number | null;
   bathrooms?: number | null;
   area_construida?: number | string | null;
@@ -116,9 +116,9 @@ function mapFavorite(row: FavoriteRow) {
     numero: row.numero ?? null,
     bairro: row.bairro ?? null,
     complemento: row.complemento ?? null,
-    tipo_lote: row.tipo_lote ?? null,
     city: row.city,
     state: row.state,
+    sem_cep: toBoolean(row.sem_cep),
     bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
     bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
     area_construida: row.area_construida != null ? Number(row.area_construida) : null,
@@ -1130,9 +1130,9 @@ class UserController {
           p.numero,
           p.bairro,
           p.complemento,
-          p.tipo_lote,
           p.city,
           p.state,
+          p.sem_cep,
           p.bedrooms,
           p.bathrooms,
           p.area_construida,
@@ -1187,7 +1187,7 @@ class UserController {
         GROUP BY
           p.id, p.owner_id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose,
           p.price, p.price_sale, p.price_rent, p.code, p.address, p.quadra, p.lote, p.numero,
-          p.bairro, p.complemento, p.tipo_lote, p.city, p.state, p.bedrooms, p.bathrooms,
+          p.bairro, p.complemento, p.city, p.state, p.sem_cep, p.bedrooms, p.bathrooms,
           p.area_construida, p.area_terreno, p.garage_spots, p.has_wifi, p.tem_piscina,
           p.tem_energia_solar, p.tem_automacao, p.tem_ar_condicionado, p.eh_mobiliada,
           p.valor_condominio, p.valor_iptu, p.video_url, p.created_at, u.name, u.phone, u.email,

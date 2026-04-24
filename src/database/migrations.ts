@@ -302,6 +302,10 @@ async function ensureFeaturedPropertiesTable(): Promise<void> {
   `);
 }
 
+function isSafeMySqlIdentifier(name: string): boolean {
+  return /^[A-Za-z0-9_]+$/.test(name);
+}
+
 /** Tabelas antigas: PK só em property_id; evolui para (property_id, scope) e posição única por escopo. */
 async function migrateFeaturedPropertiesScope(): Promise<void> {
   if (!(await tableExists('featured_properties'))) {
@@ -311,18 +315,49 @@ async function migrateFeaturedPropertiesScope(): Promise<void> {
     return;
   }
 
-  await connection.query('ALTER TABLE featured_properties DROP INDEX idx_featured_position');
-  await connection.query('ALTER TABLE featured_properties DROP PRIMARY KEY');
+  // Remove índice único antigo em `position` (nome costuma ser idx_featured_position; varia em instalações).
+  const [posUnique] = await connection.query<RowDataPacket[]>(
+    `
+      SELECT DISTINCT INDEX_NAME
+      FROM information_schema.STATISTICS
+      WHERE table_schema = DATABASE()
+        AND table_name = 'featured_properties'
+        AND column_name = 'position'
+        AND non_unique = 0
+        AND index_name != 'PRIMARY'
+    `
+  );
+  for (const row of posUnique) {
+    const iname = String((row as { INDEX_NAME: string }).INDEX_NAME);
+    if (iname === 'idx_featured_scope_position' || !isSafeMySqlIdentifier(iname)) {
+      continue;
+    }
+    try {
+      await connection.query(
+        'ALTER TABLE featured_properties DROP INDEX `' + iname.replace(/`/g, '') + '`'
+      );
+    } catch {
+      // índice já removido ou outro conflito; segue
+    }
+  }
+  // InnoDB exige um índice em property_id (FK) ao remover a PK: mesmo ALTER evita "missing index".
+  await connection.query(
+    'ALTER TABLE featured_properties DROP PRIMARY KEY, ADD KEY idx_featured_property_fk (property_id)'
+  );
   await connection.query(`
     ALTER TABLE featured_properties
       ADD COLUMN scope ENUM('sale', 'rent') NOT NULL DEFAULT 'sale' AFTER property_id
   `);
   await connection.query(
-    'ALTER TABLE featured_properties ADD PRIMARY KEY (property_id, scope)'
+    'ALTER TABLE featured_properties DROP INDEX idx_featured_property_fk, ADD PRIMARY KEY (property_id, scope)'
   );
-  await connection.query(
-    'ALTER TABLE featured_properties ADD UNIQUE KEY idx_featured_scope_position (scope, position)'
-  );
+  try {
+    await connection.query(
+      'ALTER TABLE featured_properties ADD UNIQUE KEY idx_featured_scope_position (scope, position)'
+    );
+  } catch {
+    // idempotente se migração parcial
+  }
 }
 
 async function ensureNotificationsType(): Promise<void> {

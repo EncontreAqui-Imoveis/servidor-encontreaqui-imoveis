@@ -1972,6 +1972,17 @@ class PropertyController {
         const ownerPhoneDigits = String(owner_phone ?? '').replace(/\D/g, '');
         const localPhoneDigits =
           ownerPhoneDigits.length >= 10 && ownerPhoneDigits.length <= 13 ? ownerPhoneDigits : null;
+        let clientEmail: string | null = null;
+        try {
+          const [emailRows] = await runPropertyQuery<RowDataPacket[]>(
+            'SELECT email FROM users WHERE id = ? LIMIT 1',
+            [userId]
+          );
+          const rawEmail = String(emailRows?.[0]?.email ?? '').trim();
+          clientEmail = rawEmail || null;
+        } catch (emailError) {
+          console.error('Falha ao carregar e-mail do cliente para notificação de anúncio:', emailError);
+        }
         const whatsappDigits = localPhoneDigits
           ? localPhoneDigits.startsWith('55')
             ? localPhoneDigits
@@ -1992,6 +2003,8 @@ class PropertyController {
             propertyTitle: title,
             clientId: userId,
             clientName: owner_name ?? null,
+            clientEmail,
+            clientPhoneRaw: String(owner_phone ?? '').trim() || null,
             clientPhone: localPhoneDigits,
             whatsappUrl,
           },
@@ -2176,6 +2189,13 @@ class PropertyController {
 
     if (!userId) {
       return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+
+    if (req.userRole === 'client') {
+      return res.status(403).json({
+        error:
+          'Clientes nao podem editar imovel diretamente. Envie uma solicitacao de edicao para aprovacao.',
+      });
     }
 
     if (Number.isNaN(propertyId)) {

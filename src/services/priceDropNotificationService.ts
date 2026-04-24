@@ -10,7 +10,7 @@ import {
 const PRICE_DROP_THRESHOLD = 0.1;
 const PRICE_DROP_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const PRICE_DROP_PREFIX = 'Preço reduzido';
-const PROMOTION_PREFIX = 'Imóvel em oferta';
+const PROMOTION_PREFIX = 'Imóvel em promoção';
 
 function formatCurrency(value: number): string {
   try {

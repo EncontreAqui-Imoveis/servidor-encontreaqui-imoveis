@@ -29,6 +29,16 @@ interface NotifyUsersInput {
   sendPush?: boolean;
 }
 
+function normalizeOutgoingMessage(input: string): string {
+  const compact = String(input ?? '')
+    .normalize('NFC')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!compact) return '';
+  const hasTerminalPunctuation = /[.!?…]$/.test(compact);
+  return hasTerminalPunctuation ? compact : `${compact}.`;
+}
+
 export async function notifyUsers({
   message,
   recipientIds,
@@ -37,7 +47,7 @@ export async function notifyUsers({
   relatedEntityId = null,
   sendPush = true,
 }: NotifyUsersInput): Promise<PushNotificationResult | null> {
-  const trimmed = message.trim();
+  const trimmed = normalizeOutgoingMessage(message);
   if (!trimmed) {
     return null;
   }
@@ -64,6 +74,13 @@ export async function notifyUsers({
   ]);
 
   const batchSize = 500;
+  console.info('notify_users_dispatch_started', {
+    relatedEntityType,
+    relatedEntityId,
+    recipientRole,
+    requestedRecipients: uniqueRecipients.length,
+    sendPush,
+  });
   for (let i = 0; i < values.length; i += batchSize) {
     const chunk = values.slice(i, i + batchSize);
     await connection.query(
@@ -76,15 +93,36 @@ export async function notifyUsers({
   }
 
   if (!sendPush) {
+    console.info('notify_users_dispatch_finished', {
+      relatedEntityType,
+      relatedEntityId,
+      recipientRole,
+      requestedRecipients: uniqueRecipients.length,
+      pushRequested: 0,
+      pushSuccess: 0,
+      pushFailure: 0,
+      errorCodes: [],
+    });
     return null;
   }
 
-  return sendPushNotifications({
+  const summary = await sendPushNotifications({
     message: trimmed,
     recipientIds: uniqueRecipients,
     relatedEntityType,
     relatedEntityId,
   });
+  console.info('notify_users_dispatch_finished', {
+    relatedEntityType,
+    relatedEntityId,
+    recipientRole,
+    requestedRecipients: uniqueRecipients.length,
+    pushRequested: summary.requested,
+    pushSuccess: summary.success,
+    pushFailure: summary.failure,
+    errorCodes: summary.errorCodes,
+  });
+  return summary;
 }
 
 export async function filterRecipientsByCooldown(

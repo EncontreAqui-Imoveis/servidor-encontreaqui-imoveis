@@ -6238,7 +6238,11 @@ export async function sendNotification(req: Request, res: Response) {
 
     const audienceValue = typeof audience === 'string' ? audience.trim().toLowerCase() : 'all';
     const normalizedAudience =
-      audienceValue === 'client' || audienceValue === 'broker' ? audienceValue : 'all';
+      audienceValue === 'client' ||
+      audienceValue === 'broker' ||
+      audienceValue === 'favorites'
+        ? audienceValue
+        : 'all';
 
     const normalizedRecipients: Array<number | null> = [];
     if (Array.isArray(recipientIds)) {
@@ -6262,7 +6266,32 @@ export async function sendNotification(req: Request, res: Response) {
     const sendToAll = normalizedRecipients.some((rid) => rid === null);
     let notificationRecipients: number[] = [];
 
-    if (sendToAll) {
+    const numericEntityId = entityId != null && Number.isFinite(entityId) ? Number(entityId) : null;
+    if (normalizedAudience === 'favorites') {
+      if (entityType !== 'property' || numericEntityId == null) {
+        return res.status(400).json({
+          error:
+            "Para público 'favoritos', informe related_entity_type='property' e related_entity_id válido.",
+        });
+      }
+
+      const [favoriteRows] = await adminDb.query<RowDataPacket[]>(
+        'SELECT DISTINCT usuario_id FROM favoritos WHERE imovel_id = ?',
+        [numericEntityId]
+      );
+      const favoriteIds = (favoriteRows ?? [])
+        .map((row) => Number(row.usuario_id))
+        .filter((id) => Number.isFinite(id));
+      const favoriteIdSet = new Set(favoriteIds);
+
+      if (sendToAll) {
+        notificationRecipients = favoriteIds;
+      } else {
+        notificationRecipients = normalizedRecipients
+          .filter((rid): rid is number => typeof rid === 'number')
+          .filter((rid) => favoriteIdSet.has(rid));
+      }
+    } else if (sendToAll) {
       if (normalizedAudience === 'broker') {
         const [userRows] = await adminDb.query<RowDataPacket[]>(
           "SELECT id FROM brokers WHERE status IN ('pending_verification','approved')",
@@ -6305,6 +6334,13 @@ export async function sendNotification(req: Request, res: Response) {
     const targetBrokerIds = normalizedAudience === 'client' ? [] : brokerIds;
 
     const summaries: PushNotificationResult[] = [];
+    console.info('admin_notification_dispatch_started', {
+      audience: normalizedAudience,
+      sendToAll,
+      requestedRecipients: notificationRecipients.length,
+      relatedEntityType: entityType,
+      relatedEntityId: numericEntityId,
+    });
 
     if (targetClientIds.length > 0) {
       const summary = await notifyUsers({
@@ -6312,7 +6348,7 @@ export async function sendNotification(req: Request, res: Response) {
         recipientIds: targetClientIds,
         recipientRole: 'client',
         relatedEntityType: entityType,
-        relatedEntityId: entityId,
+        relatedEntityId: numericEntityId,
       });
       if (summary) {
         summaries.push(summary);
@@ -6325,7 +6361,7 @@ export async function sendNotification(req: Request, res: Response) {
         recipientIds: targetBrokerIds,
         recipientRole: 'broker',
         relatedEntityType: entityType,
-        relatedEntityId: entityId,
+        relatedEntityId: numericEntityId,
       });
       if (summary) {
         summaries.push(summary);
@@ -6355,9 +6391,19 @@ export async function sendNotification(req: Request, res: Response) {
 
     combined.errorCodes = Array.from(errorCodes);
 
+    console.info('admin_notification_dispatch_finished', {
+      audience: normalizedAudience,
+      requested: combined.requested,
+      success: combined.success,
+      failure: combined.failure,
+      errorCodes: combined.errorCodes,
+      relatedEntityType: entityType,
+      relatedEntityId: numericEntityId,
+    });
+
     return res
       .status(201)
-      .json({ message: 'Notificacao enviada com sucesso.', push: combined });
+      .json({ message: 'Notificação enviada com sucesso.', push: combined });
   } catch (error) {
     console.error('Erro ao enviar notificacao:', error);
     return res.status(500).json({ error: 'Erro interno do servidor.' });

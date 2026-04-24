@@ -1,5 +1,6 @@
 import { RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
+import { sendPushNotifications } from './pushNotificationService';
 
 type RelatedEntityType =
   | 'property'
@@ -178,6 +179,31 @@ export async function createUserNotification({
   ]];
 
   await insertNotifications(values);
+  try {
+    const pushSummary = await sendPushNotifications({
+      message: trimmedMessage,
+      recipientIds: [numericRecipientId],
+      relatedEntityType: type,
+      relatedEntityId: normalizedEntityId,
+    });
+    console.info('create_user_notification_push_dispatched', {
+      recipientId: numericRecipientId,
+      recipientRole: resolvedRole,
+      relatedEntityType: type,
+      relatedEntityId: normalizedEntityId,
+      requested: pushSummary.requested,
+      success: pushSummary.success,
+      failure: pushSummary.failure,
+      errorCodes: pushSummary.errorCodes,
+    });
+  } catch (pushError) {
+    console.error('Falha ao enviar push em createUserNotification:', {
+      recipientId: numericRecipientId,
+      relatedEntityType: type,
+      relatedEntityId: normalizedEntityId,
+      error: pushError,
+    });
+  }
 }
 
 async function insertNotifications(values: Array<Array<unknown>>): Promise<void> {

@@ -40,7 +40,6 @@ export function buildUserPayload(row: any, profileType: ProfileType) {
 
 export function hasCompleteProfile(row: any) {
   return !!(
-    row.phone &&
     row.street &&
     row.number &&
     row.bairro &&

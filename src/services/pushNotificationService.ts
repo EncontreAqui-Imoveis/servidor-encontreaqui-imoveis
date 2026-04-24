@@ -67,6 +67,11 @@ export async function sendPushNotifications(
   };
 
   if (tokens.length === 0) {
+    console.info('push_dispatch_skipped_no_tokens', {
+      relatedEntityType: payload.relatedEntityType,
+      relatedEntityId: payload.relatedEntityId,
+      recipientCount: payload.recipientIds?.length ?? null,
+    });
     return summary;
   }
 
@@ -76,6 +81,12 @@ export async function sendPushNotifications(
     .update(`${payload.relatedEntityType}:${payload.relatedEntityId ?? ''}:${payload.message}`)
     .digest('hex')
     .slice(0, 24);
+  console.info('push_dispatch_started', {
+    relatedEntityType: payload.relatedEntityType,
+    relatedEntityId: payload.relatedEntityId,
+    requestedTokens: tokens.length,
+    batchCount: batches.length,
+  });
   for (const batch of batches) {
     const response = await admin.messaging().sendEachForMulticast({
       tokens: batch,
@@ -141,5 +152,13 @@ export async function sendPushNotifications(
   }
 
   summary.errorCodes = Array.from(errorCodes);
+  console.info('push_dispatch_finished', {
+    relatedEntityType: payload.relatedEntityType,
+    relatedEntityId: payload.relatedEntityId,
+    requested: summary.requested,
+    success: summary.success,
+    failure: summary.failure,
+    errorCodes: summary.errorCodes,
+  });
   return summary;
 }

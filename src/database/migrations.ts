@@ -1,6 +1,10 @@
 import { RowDataPacket } from 'mysql2';
 import connection from './connection';
 import { PROPERTY_TYPE_LEGACY_UPDATES } from '../utils/propertyTypes';
+import {
+  CONTRACT_APPROVAL_STATUSES,
+  CONTRACT_DOCUMENT_TYPES,
+} from '../modules/contracts/domain/contract.types';
 
 async function tableExists(tableName: string): Promise<boolean> {
   const [rows] = await connection.query<RowDataPacket[]>(
@@ -49,29 +53,13 @@ async function getColumnType(tableName: string, columnName: string): Promise<str
   return rows[0]?.column_type ?? null;
 }
 
-const CONTRACT_DOCUMENT_TYPE_VALUES = [
-  'doc_identidade',
-  'comprovante_endereco',
-  'certidao_casamento_nascimento',
-  'certidao_inteiro_teor',
-  'certidao_onus_acoes',
-  'comprovante_renda',
-  'contrato_minuta',
-  'contrato_assinado',
-  'comprovante_pagamento',
-  'boleto_vistoria',
-] as const;
+const CONTRACT_DOCUMENT_TYPE_VALUES = CONTRACT_DOCUMENT_TYPES;
 
 const CONTRACT_DOCUMENT_TYPE_ENUM_SQL = CONTRACT_DOCUMENT_TYPE_VALUES.map(
   (value) => `'${value}'`
 ).join(', ');
 
-const CONTRACT_APPROVAL_STATUS_VALUES = [
-  'PENDING',
-  'APPROVED',
-  'APPROVED_WITH_RES',
-  'REJECTED',
-] as const;
+const CONTRACT_APPROVAL_STATUS_VALUES = CONTRACT_APPROVAL_STATUSES;
 
 const CONTRACT_APPROVAL_STATUS_ENUM_SQL = CONTRACT_APPROVAL_STATUS_VALUES.map(
   (value) => `'${value}'`

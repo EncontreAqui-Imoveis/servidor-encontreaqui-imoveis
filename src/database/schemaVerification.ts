@@ -1,5 +1,9 @@
 import { RowDataPacket } from 'mysql2';
 import connection from './connection';
+import {
+  CONTRACT_APPROVAL_STATUSES,
+  CONTRACT_DOCUMENT_TYPES,
+} from '../modules/contracts/domain/contract.types';
 
 type SchemaVerificationSummary = {
   checkedTables: number;
@@ -137,32 +141,23 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     await assertColumn(tableName, columnName);
   }
 
-  await assertEnumContains('contracts', 'seller_approval_status', [
-    'PENDING',
-    'APPROVED',
-    'APPROVED_WITH_RES',
-    'REJECTED',
-  ]);
+  await assertEnumContains(
+    'contracts',
+    'seller_approval_status',
+    Array.from(CONTRACT_APPROVAL_STATUSES)
+  );
 
-  await assertEnumContains('contracts', 'buyer_approval_status', [
-    'PENDING',
-    'APPROVED',
-    'APPROVED_WITH_RES',
-    'REJECTED',
-  ]);
+  await assertEnumContains(
+    'contracts',
+    'buyer_approval_status',
+    Array.from(CONTRACT_APPROVAL_STATUSES)
+  );
 
-  await assertEnumContains('negotiation_documents', 'document_type', [
-    'doc_identidade',
-    'comprovante_endereco',
-    'certidao_casamento_nascimento',
-    'certidao_inteiro_teor',
-    'certidao_onus_acoes',
-    'comprovante_renda',
-    'contrato_minuta',
-    'contrato_assinado',
-    'comprovante_pagamento',
-    'boleto_vistoria',
-  ]);
+  await assertEnumContains(
+    'negotiation_documents',
+    'document_type',
+    Array.from(CONTRACT_DOCUMENT_TYPES)
+  );
 
   await assertEnumContains('property_edit_requests', 'status', [
     'PENDING',

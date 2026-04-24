@@ -6326,7 +6326,10 @@ export async function sendNotification(req: Request, res: Response) {
     }
 
     if (notificationRecipients.length === 0) {
-      return res.status(404).json({ error: 'Nenhum destinatario encontrado.' });
+      return res.status(200).json({
+        message: 'Nenhum destinatário encontrado para envio.',
+        push: { requested: 0, success: 0, failure: 0, errorCodes: [] },
+      });
     }
 
     const { clientIds, brokerIds } = await splitRecipientsByRole(notificationRecipients);
@@ -6369,7 +6372,10 @@ export async function sendNotification(req: Request, res: Response) {
     }
 
     if (summaries.length === 0) {
-      return res.status(404).json({ error: 'Nenhum destinatario encontrado.' });
+      return res.status(200).json({
+        message: 'Nenhum destinatário encontrado para envio.',
+        push: { requested: 0, success: 0, failure: 0, errorCodes: [] },
+      });
     }
 
     const errorCodes = new Set<string>();

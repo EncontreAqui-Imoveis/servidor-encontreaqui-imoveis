@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 
 import {
+  CLIENTE_OUTRO_SLOT_TYPES,
   type ContractDocumentCategoryCode,
   type ContractDocumentCategoryStatus,
   type ContractDocumentType,
@@ -59,6 +60,7 @@ const CATEGORY_DOCUMENT_TYPES: Record<
   conjuge_documentos: new Set(['outro']),
   comprovante_renda: new Set(['comprovante_renda']),
   dados_bancarios: new Set(['outro']),
+  outro: new Set(['outro', ...CLIENTE_OUTRO_SLOT_TYPES]),
   docs_imovel: new Set(['certidao_inteiro_teor', 'certidao_onus_acoes']),
 };
 
@@ -88,6 +90,8 @@ export function resolveFallbackDocumentTypeByCategory(
     case 'comprovante_renda':
       return 'comprovante_renda';
     case 'dados_bancarios':
+      return 'outro';
+    case 'outro':
       return 'outro';
     case 'docs_imovel':
       return 'certidao_inteiro_teor';

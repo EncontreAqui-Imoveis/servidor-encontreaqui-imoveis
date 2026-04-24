@@ -70,6 +70,7 @@ export const CONTRACT_DOCUMENT_CATEGORY_CODES = [
   'comprovante_renda',
   'dados_bancarios',
   'docs_imovel',
+  'outro',
 ] as const;
 
 export type ContractDocumentCategoryCode =

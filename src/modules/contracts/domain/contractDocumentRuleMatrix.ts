@@ -131,6 +131,12 @@ export function resolveDocumentRequirements(input: {
         required: true,
         reasonCode: 'DOCS_IMOVEL_REQUIRED',
       },
+      {
+        category: 'outro',
+        applicability: 'optional',
+        required: false,
+        reasonCode: 'OUTRO_OPTIONAL',
+      },
     ];
   }
 
@@ -159,6 +165,12 @@ export function resolveDocumentRequirements(input: {
       applicability: 'required',
       required: true,
       reasonCode: 'COMPROVANTE_RENDA_REQUIRED',
+    },
+    {
+      category: 'outro',
+      applicability: 'optional',
+      required: false,
+      reasonCode: 'OUTRO_OPTIONAL',
     },
   ];
 }

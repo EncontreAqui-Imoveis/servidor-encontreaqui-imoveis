@@ -791,10 +791,15 @@ function hasRequiredCategoryGateApproval(input: {
   );
   const sideReady = (side: ContractDocumentProgressSide) =>
     side.categories.every(
-      (item) =>
-        !item.required ||
-        item.status === 'APPROVED' ||
-        item.status === 'NOT_APPLICABLE'
+      (item) => {
+        const status = String(item.status ?? '').trim().toUpperCase();
+        return (
+          !item.required ||
+          status === 'APPROVED' ||
+          status === 'APPROVED_WITH_RES' ||
+          status === 'NOT_APPLICABLE'
+        );
+      }
     );
   const sellerReady = sideReady(progress.seller);
   if (input.doubleEnded) {

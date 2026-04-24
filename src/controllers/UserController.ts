@@ -12,6 +12,7 @@ import {
   sanitizeAddressInput,
   signUserToken,
 } from '../services/userSessionService';
+import { hasCompleteProfile } from '../services/authSessionService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -259,7 +260,23 @@ class UserController {
 
     try {
       const userRows = await runUserQuery<RowDataPacket[]>(
-          'SELECT id, name, email, email_verified_at, phone FROM users WHERE id = ?',
+          `
+            SELECT
+              id,
+              name,
+              email,
+              email_verified_at,
+              phone,
+              street,
+              number,
+              bairro,
+              city,
+              state,
+              cep,
+              complement
+            FROM users
+            WHERE id = ?
+          `,
         [userId]
       );
 
@@ -291,6 +308,7 @@ class UserController {
             role: 'broker',
             status: brokerStatus,
             requiresDocuments,
+            needsCompletion: !hasCompleteProfile(user),
               user: {
                 id: user.id,
                 name: user.name,
@@ -298,6 +316,13 @@ class UserController {
                 email_verified: user.email_verified_at != null,
                 email_verified_at: user.email_verified_at ?? null,
                 phone: user.phone,
+                street: user.street ?? null,
+                number: user.number ?? null,
+                bairro: user.bairro ?? null,
+                city: user.city ?? null,
+                state: user.state ?? null,
+                cep: user.cep ?? null,
+                complement: user.complement ?? null,
             },
           });
         }
@@ -306,6 +331,7 @@ class UserController {
       return res.json({
         role: 'client',
         requiresDocuments: false,
+        needsCompletion: !hasCompleteProfile(user),
           user: {
             id: user.id,
             name: user.name,
@@ -313,6 +339,13 @@ class UserController {
             email_verified: user.email_verified_at != null,
             email_verified_at: user.email_verified_at ?? null,
             phone: user.phone,
+            street: user.street ?? null,
+            number: user.number ?? null,
+            bairro: user.bairro ?? null,
+            city: user.city ?? null,
+            state: user.state ?? null,
+            cep: user.cep ?? null,
+            complement: user.complement ?? null,
         },
       });
     } catch (error) {
@@ -399,7 +432,23 @@ class UserController {
       );
 
       const userRows = await runUserQuery<RowDataPacket[]>(
-        'SELECT id, name, email, phone FROM users WHERE id = ?',
+        `
+          SELECT
+            id,
+            name,
+            email,
+            email_verified_at,
+            phone,
+            street,
+            number,
+            bairro,
+            city,
+            state,
+            cep,
+            complement
+          FROM users
+          WHERE id = ?
+        `,
         [userId]
       );
 
@@ -428,11 +477,21 @@ class UserController {
         role,
         status,
         requiresDocuments,
+        needsCompletion: !hasCompleteProfile(user),
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
+          email_verified: user.email_verified_at != null,
+          email_verified_at: user.email_verified_at ?? null,
           phone: user.phone,
+          street: user.street ?? null,
+          number: user.number ?? null,
+          bairro: user.bairro ?? null,
+          city: user.city ?? null,
+          state: user.state ?? null,
+          cep: user.cep ?? null,
+          complement: user.complement ?? null,
         },
       });
     } catch (error: any) {

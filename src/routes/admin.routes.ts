@@ -38,6 +38,7 @@ adminRoutes.post('/logout', adminController.logout);
 adminRoutes.post('/reauth', adminController.reauth);
 
 adminRoutes.post('/notifications/send', sendNotification);
+adminRoutes.delete('/notifications/announcements', adminController.clearAnnouncementNotifications);
 adminRoutes.delete('/notifications/:id', adminController.deleteNotification);
 adminRoutes.delete('/notifications', adminController.clearNotifications);
 adminRoutes.post('/uploads/sign', adminController.signCloudinaryUpload);

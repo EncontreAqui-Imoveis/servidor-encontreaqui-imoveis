@@ -2,8 +2,8 @@
 export type AreaConstruidaUnidade = 'm2' | 'alqueire' | 'hectare';
 
 const M2_PER_HECTARE = 10_000;
-/** Alqueire paulista (24.200 m²) — valor usual em SP; documentar se a imobiliária usar outra região. */
-const M2_PER_ALQUEIRE = 24_200;
+/** Alqueire goiano (48.400 m²) — padrão adotado no produto. */
+const M2_PER_ALQUEIRE = 48_400;
 
 export function normalizeAreaUnidade(raw: string | null | undefined): AreaConstruidaUnidade {
   const u = String(raw ?? '')

@@ -2372,6 +2372,7 @@ class AdminController {
     }
 
     const tx = await adminDb.getConnection();
+    let previousDocumentToDelete: AdminNegotiationDocumentRow | null = null;
     try {
       await tx.beginTransaction();
       const [negotiationRows] = await tx.query<RowDataPacket[]>(
@@ -2397,6 +2398,35 @@ class AdminController {
         });
       }
 
+      const [existingRows] = await tx.query<AdminNegotiationDocumentRow[]>(
+        `
+          SELECT
+            id,
+            type,
+            document_type,
+            metadata_json,
+            storage_provider,
+            storage_bucket,
+            storage_key,
+            storage_content_type,
+            storage_size_bytes,
+            storage_etag
+          FROM negotiation_documents
+          WHERE negotiation_id = ?
+            AND type = 'other'
+            AND document_type = 'contrato_assinado'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [negotiationId]
+      );
+      const existingDocument = existingRows[0];
+      if (existingDocument) {
+        await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [existingDocument.id]);
+        previousDocumentToDelete = existingDocument;
+      }
+
       const documentId = await saveNegotiationSignedProposalDocument(
         negotiationId,
         uploadedFile.buffer,
@@ -2411,6 +2441,11 @@ class AdminController {
       );
 
       await tx.commit();
+      if (previousDocumentToDelete) {
+        await deleteNegotiationDocumentObject(previousDocumentToDelete).catch((storageError) => {
+          console.error('Falha ao excluir PDF assinado anterior no storage:', storageError);
+        });
+      }
       return res.status(201).json({
         message: 'PDF assinado enviado com sucesso.',
         negotiationId,
@@ -3778,6 +3813,7 @@ class AdminController {
           SELECT
             id,
             status,
+            description,
             price,
             price_sale,
             price_rent,
@@ -3785,6 +3821,18 @@ class AdminController {
             promotional_rent_price,
             purpose,
             title,
+            owner_name,
+            address,
+            numero,
+            bairro,
+            complemento,
+            city,
+            quadra,
+            sem_quadra,
+            lote,
+            sem_lote,
+            tipo_lote,
+            code,
             is_promoted,
             promotion_percentage,
             promotional_rent_percentage
@@ -3806,6 +3854,20 @@ class AdminController {
         });
       }
 
+      const nextSemQuadra = Object.prototype.hasOwnProperty.call(body, 'sem_quadra')
+        ? parseBoolean(body.sem_quadra)
+        : parseBoolean(property.sem_quadra);
+      const nextSemLote = Object.prototype.hasOwnProperty.call(body, 'sem_lote')
+        ? parseBoolean(body.sem_lote)
+        : parseBoolean(property.sem_lote);
+      const nextQuadra = nextSemQuadra ? null : stringOrNull(body.quadra ?? property.quadra);
+      const nextLote = nextSemLote ? null : stringOrNull(body.lote ?? property.lote);
+      if (!nextSemQuadra && !nextQuadra) {
+        return res.status(400).json({ error: 'Quadra é obrigatória.' });
+      }
+      if (!nextSemLote && !nextLote) {
+        return res.status(400).json({ error: 'Lote é obrigatório.' });
+      }
       const nextTipoLote = stringOrNull(body.tipo_lote ?? property.tipo_lote);
       if (!nextTipoLote) {
         return res.status(400).json({ error: 'Tipo de lote é obrigatório.' });
@@ -3819,8 +3881,8 @@ class AdminController {
         validateMaxTextLength(body.bairro ?? property.bairro, 'Bairro'),
         validateMaxTextLength(body.complemento ?? property.complemento, 'Complemento'),
         validateMaxTextLength(body.city ?? property.city, 'Cidade'),
-        validateMaxTextLength(body.quadra ?? property.quadra, 'Quadra', 25),
-        validateMaxTextLength(body.lote ?? property.lote, 'Lote', 25),
+        ...(nextSemQuadra ? [] : [validateMaxTextLength(nextQuadra, 'Quadra', 25)]),
+        ...(nextSemLote ? [] : [validateMaxTextLength(nextLote, 'Lote', 25)]),
         validateMaxTextLength(nextTipoLote, 'Tipo de lote', 25),
         validateMaxTextLength(body.code ?? property.code, 'Código'),
       ].find(Boolean);
@@ -3902,9 +3964,12 @@ class AdminController {
         'quadra',
         'lote',
         'numero',
+        'sem_numero',
         'bairro',
         'complemento',
         'tipo_lote',
+        'sem_quadra',
+        'sem_lote',
         'city',
         'state',
         'cep',
@@ -3997,7 +4062,10 @@ class AdminController {
           case 'tem_energia_solar':
           case 'tem_automacao':
           case 'tem_ar_condicionado':
-          case 'eh_mobiliada': {
+          case 'eh_mobiliada':
+          case 'sem_numero':
+          case 'sem_quadra':
+          case 'sem_lote': {
             setParts.push(`${key} = ?`);
             params.push(parseBoolean(value));
             break;
@@ -5908,7 +5976,7 @@ class AdminController {
 
     try {
       const [propertyRows] = await adminDb.query<RowDataPacket[]>(
-        'SELECT id FROM properties WHERE id = ?',
+        'SELECT id, video_url FROM properties WHERE id = ?',
         [propertyId]
       );
 
@@ -5916,8 +5984,11 @@ class AdminController {
         return res.status(404).json({ error: 'Imovel nao encontrado.' });
       }
 
+      const previousVideoUrl =
+        typeof propertyRows[0]?.video_url === 'string' ? propertyRows[0].video_url : null;
       const uploaded = await uploadToCloudinary(file, 'videos');
       await adminDb.query('UPDATE properties SET video_url = ? WHERE id = ?', [uploaded.url, propertyId]);
+      await cleanupPropertyMediaAssets([previousVideoUrl], 'admin_replace_property_video');
 
       return res.status(201).json({ message: 'Video adicionado com sucesso.', video: uploaded.url });
     } catch (error) {
@@ -6147,6 +6218,30 @@ class AdminController {
       return res.status(204).send();
     } catch (error) {
       console.error('Erro ao limpar notificacoes:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
+  async clearAnnouncementNotifications(req: AuthRequest, res: Response) {
+    const adminId = Number(req.userId);
+
+    if (!adminId) {
+      return res.status(401).json({ error: 'Administrador nao autenticado.' });
+    }
+
+    try {
+      await adminDb.query(
+        `
+          DELETE FROM notifications
+          WHERE recipient_id = ?
+            AND recipient_type = 'admin'
+            AND related_entity_type = 'announcement'
+        `,
+        [adminId]
+      );
+      return res.status(204).send();
+    } catch (error) {
+      console.error('Erro ao limpar avisos:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
   }

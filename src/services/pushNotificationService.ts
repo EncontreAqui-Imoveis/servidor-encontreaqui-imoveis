@@ -101,7 +101,7 @@ export async function sendPushNotifications(
     const response = await admin.messaging().sendEachForMulticast({
       tokens: batch,
       notification: {
-        title: 'Mais Imóveis',
+        title: 'Encontre Aqui',
         body: payload.message,
       },
       android: {

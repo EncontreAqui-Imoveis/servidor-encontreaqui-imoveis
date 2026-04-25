@@ -264,7 +264,7 @@ export async function authMiddleware(
       if (brokers.length > 0 && brokers[0].status === 'rejected') {
         return res.status(403).json({
           error:
-            'Sua conta de corretor foi rejeitada. Para se registrar como cliente, use um email diferente.',
+            'Sua conta de corretor foi rejeitada. Voce pode enviar nova solicitacao de corretor pelo app.',
         });
       }
       if (brokers.length > 0) {
@@ -309,7 +309,7 @@ export async function isBroker(
     if (brokers[0].status !== 'approved') {
       return res.status(403).json({
         error:
-          'Acesso negado. Sua conta de corretor n??o foi aprovada ou foi rejeitada. Para se registrar como cliente, use um email diferente.',
+          'Acesso negado. Conta de corretor nao aprovada. Se estiver rejeitada, envie nova solicitacao de corretor.',
       });
     }
 

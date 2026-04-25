@@ -189,4 +189,95 @@ describe('Contract response shape contracts', () => {
       limit: 20,
     });
   });
+
+  it('redacts owner sensitive fields for client viewers', async () => {
+    const clientApp = express();
+    clientApp.use(express.json());
+    clientApp.use((req, _res, next) => {
+      (req as any).userId = 90001;
+      (req as any).userRole = 'client';
+      next();
+    });
+    clientApp.get('/contracts/:id', (req, res) =>
+      contractController.getById(req as any, res)
+    );
+
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
+        return [[
+          {
+            id: 'contract-redact-1',
+            negotiation_id: 'neg-redact-1',
+            property_id: 303,
+            status: 'AWAITING_DOCS',
+            seller_info: JSON.stringify({
+              nome: 'Proprietario',
+              dados_bancarios: 'Banco XPTO',
+            }),
+            buyer_info: JSON.stringify({ nome: 'Comprador' }),
+            commission_data: JSON.stringify({ saleValue: 999999 }),
+            workflow_metadata: JSON.stringify({}),
+            seller_approval_status: 'PENDING',
+            buyer_approval_status: 'PENDING',
+            seller_approval_reason: JSON.stringify({}),
+            buyer_approval_reason: JSON.stringify({}),
+            created_at: '2026-03-01 10:00:00',
+            updated_at: '2026-03-01 10:00:00',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30004,
+            buyer_client_id: 90001,
+            property_owner_id: 80001,
+            property_title: 'Casa Sul',
+            property_purpose: 'Venda',
+            property_code: 'CS-303',
+            capturing_broker_name: 'Captador',
+            selling_broker_name: 'Legado',
+            capturing_agency_name: 'Encontre Aqui',
+            capturing_agency_address: 'Rua Sul, 12',
+          },
+        ]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[
+          {
+            id: 7001,
+            type: 'other',
+            document_type: 'outro',
+            metadata_json: JSON.stringify({
+              side: 'seller',
+              documentCategory: 'dados_bancarios',
+              originalFileName: 'bank.pdf',
+            }),
+            created_at: '2026-03-01 11:00:00',
+          },
+          {
+            id: 7002,
+            type: 'other',
+            document_type: 'doc_identidade',
+            metadata_json: JSON.stringify({
+              side: 'buyer',
+              documentCategory: 'identidade',
+              originalFileName: 'id.pdf',
+            }),
+            created_at: '2026-03-01 11:01:00',
+          },
+        ]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(clientApp).get('/contracts/contract-redact-1');
+    expect(response.status).toBe(200);
+    expect(response.body.contract.ownerInfo).toEqual({ nome: 'Proprietario' });
+    expect(response.body.contract.sellerInfo).toEqual({ nome: 'Proprietario' });
+    expect(response.body.contract.commissionData).toEqual({});
+    expect(response.body.documents).toEqual([
+      expect.objectContaining({
+        id: 7002,
+        side: 'buyer',
+      }),
+    ]);
+  });
 });

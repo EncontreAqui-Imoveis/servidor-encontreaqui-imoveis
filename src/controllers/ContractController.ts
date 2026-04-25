@@ -159,6 +159,8 @@ interface ExistingContractRow extends RowDataPacket {
 interface ContractDataBody {
   sellerInfo?: unknown;
   seller_info?: unknown;
+  ownerInfo?: unknown;
+  owner_info?: unknown;
   buyerInfo?: unknown;
   buyer_info?: unknown;
 }
@@ -494,6 +496,7 @@ function normalizeContractDocumentCategory(
 
 function resolveCategoryStatus(value: unknown): ContractDocumentCategoryStatus {
   const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'APPROVED_WITH_RES') return 'APPROVED_WITH_RES';
   if (isContractDocumentCategoryStatus(normalized)) return normalized;
   return 'PENDING';
 }
@@ -505,10 +508,22 @@ function resolveSideApprovalFromCategoryProgress(
   if (required.some((item) => item.status === 'REJECTED')) {
     return 'REJECTED';
   }
-  if (required.length > 0 && required.every((item) => item.status === 'APPROVED')) {
+  if (
+    required.length > 0 &&
+    required.every(
+      (item) => item.status === 'APPROVED' || item.status === 'APPROVED_WITH_RES'
+    )
+  ) {
+    if (required.some((item) => item.status === 'APPROVED_WITH_RES')) {
+      return 'APPROVED_WITH_RES';
+    }
     return 'APPROVED';
   }
-  if (required.some((item) => item.status === 'APPROVED')) {
+  if (
+    required.some(
+      (item) => item.status === 'APPROVED' || item.status === 'APPROVED_WITH_RES'
+    )
+  ) {
     return 'APPROVED_WITH_RES';
   }
   return 'PENDING';
@@ -808,19 +823,74 @@ function hasRequiredCategoryGateApproval(input: {
   return sellerReady && sideReady(progress.buyer);
 }
 
-function mapContract(row: ContractRow) {
+const OWNER_SENSITIVE_KEYS = new Set([
+  'dados_bancarios',
+  'dadosBancarios',
+  'bankData',
+  'bank_data',
+  'bankAccount',
+  'bank_account',
+  'pix',
+  'pixKey',
+  'pix_key',
+  'agencia',
+  'conta',
+  'commission',
+  'commissionData',
+  'commission_data',
+]);
+
+function canViewOwnerSensitiveData(req: AuthRequest | null, row: ContractRow): boolean {
+  if (!req) return false;
+  const role = String(req.userRole ?? '').trim().toLowerCase();
+  if (role === 'admin') {
+    return true;
+  }
+  const userId = Number(req.userId ?? 0);
+  return Number.isFinite(userId) && userId > 0 && userId === Number(row.capturing_broker_id ?? 0);
+}
+
+function redactOwnerInfoByRole(
+  ownerInfo: Record<string, unknown>,
+  canViewSensitiveData: boolean
+): Record<string, unknown> {
+  if (canViewSensitiveData) {
+    return ownerInfo;
+  }
+  const redactedEntries = Object.entries(ownerInfo).filter(
+    ([key]) => !OWNER_SENSITIVE_KEYS.has(key)
+  );
+  return Object.fromEntries(redactedEntries);
+}
+
+function shouldExposeOwnerSensitiveDocument(
+  input: {
+    side: ContractDocumentSide | null;
+    documentCategory: ContractDocumentCategoryCode | null;
+  },
+  canViewSensitiveData: boolean
+): boolean {
+  if (canViewSensitiveData) return true;
+  return !(input.side === 'seller' && input.documentCategory === 'dados_bancarios');
+}
+
+function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const documentRequirements = resolveDocumentRequirementsForContract(
     buildContractDocumentRuleContextFromRow(row)
   );
+  const ownerInfo = parseStoredJsonObject(row.seller_info);
+  const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
+  const ownerInfoForViewer = redactOwnerInfoByRole(ownerInfo, canViewSensitiveData);
   return {
     id: row.id,
     negotiationId: row.negotiation_id,
     propertyId: Number(row.property_id),
     status: resolveContractStatus(row.status),
-    sellerInfo: parseStoredJsonObject(row.seller_info),
-    ownerInfo: parseStoredJsonObject(row.seller_info),
+    ownerInfo: ownerInfoForViewer,
+    // Compatibilidade legada: sellerInfo segue disponível no wire, mas semântica canônica é ownerInfo.
+    sellerInfo: ownerInfoForViewer,
     buyerInfo: parseStoredJsonObject(row.buyer_info),
-    commissionData: parseStoredJsonObject(row.commission_data),
+    commissionData: canViewSensitiveData ? parseStoredJsonObject(row.commission_data) : {},
     workflowMetadata: parseStoredJsonObject(row.workflow_metadata),
     sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
     ownerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
@@ -831,10 +901,10 @@ function mapContract(row: ContractRow) {
     capturingBrokerId:
       row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
-      row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
+      row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
     buyerClientId: row.buyer_client_id !== null ? Number(row.buyer_client_id) : null,
     capturingBrokerName: row.capturing_broker_name ?? null,
-    sellingBrokerName: row.capturing_broker_name ?? null,
+    sellingBrokerName: row.selling_broker_name ?? null,
     ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
     ownerName: row.property_owner_name ?? null,
     propertyTitle: row.property_title ?? null,
@@ -991,18 +1061,29 @@ function buildContractDocumentProgress(
 
 function mapContractWithDocumentProgress(
   row: ContractRow,
-  documentRows: ContractDocumentRow[]
+  documentRows: ContractDocumentRow[],
+  req: AuthRequest | null = null
 ): ReturnType<typeof mapContract> & {
   documentProgress: ContractDocumentProgressSummary;
   documents: Array<ReturnType<typeof mapDocument> & { downloadUrl: string }>;
 } {
+  const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
   const documents = documentRows
     .filter((document) => !isProposalDocument(document))
     .filter((document) => !isRejectedNegotiationDocumentRow(document))
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${row.negotiation_id}/documents/${document.id}/download`,
-    }));
+    }))
+    .filter((document) =>
+      shouldExposeOwnerSensitiveDocument(
+        {
+          side: document.side,
+          documentCategory: document.documentCategory,
+        },
+        canViewSensitiveData
+      )
+    );
 
   const matrixContext = buildContractDocumentRuleContextFromRow(row);
   const progress = buildContractDocumentProgress(
@@ -1014,7 +1095,7 @@ function mapContractWithDocumentProgress(
   );
 
   return {
-    ...mapContract(row),
+    ...mapContract(row, req),
     documentProgress: progress,
     documents,
   };
@@ -1864,7 +1945,7 @@ class ContractController {
 
       return res.status(201).json({
         message: 'Contrato criado com sucesso.',
-        contract: createdRows[0] ? mapContract(createdRows[0]) : null,
+        contract: createdRows[0] ? mapContract(createdRows[0], req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -1949,7 +2030,7 @@ class ContractController {
 
       return res.status(200).json({
         data: rows.map((row) => ({
-          ...mapContract(row),
+          ...mapContract(row, req),
           documents: documentsByNegotiation.get(row.negotiation_id) ?? [],
         })),
         total,
@@ -2042,7 +2123,7 @@ class ContractController {
 
       return res.status(200).json({
         data: rows.map((row) => ({
-          ...mapContract(row),
+          ...mapContract(row, req),
           documentProgress: buildContractDocumentProgress(
             (documentsByNegotiation.get(row.negotiation_id) ?? []).map((doc) => {
               const mapped = mapDocument(doc);
@@ -2227,7 +2308,7 @@ class ContractController {
 
       return res.status(200).json({
         message,
-        contract: updated ? mapContract(updated) : null,
+        contract: updated ? mapContract(updated, req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -2385,6 +2466,7 @@ class ContractController {
       const nextContractStatus: ContractStatus = mustMoveToDraft
         ? 'IN_DRAFT'
         : 'AWAITING_DOCS';
+      const shouldReleasePropertyAvailability = nextSideStatus === 'REJECTED';
       const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
         contract.workflow_metadata,
         reviewAuditEvent
@@ -2413,6 +2495,30 @@ class ContractController {
           contractId,
         ]
       );
+
+      if (shouldReleasePropertyAvailability) {
+        await tx.query(
+          `
+            UPDATE negotiations
+            SET status = 'IN_NEGOTIATION'
+            WHERE id = ?
+          `,
+          [contract.negotiation_id]
+        );
+        await tx.query(
+          `
+            UPDATE properties
+            SET
+              status = 'approved',
+              visibility = 'PUBLIC',
+              lifecycle_status = 'AVAILABLE'
+            WHERE id = ?
+              AND lifecycle_status NOT IN ('SOLD', 'RENTED')
+              AND status NOT IN ('sold', 'rented')
+          `,
+          [contract.property_id]
+        );
+      }
 
       const updated = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
@@ -2479,7 +2585,7 @@ class ContractController {
 
       return res.status(200).json({
         message: 'Avaliação do lado atualizada com sucesso.',
-        contract: updated ? mapContract(updated) : null,
+        contract: updated ? mapContract(updated, req) : null,
         movedToDraft: mustMoveToDraft,
       });
     } catch (error) {
@@ -2685,7 +2791,7 @@ class ContractController {
         message: 'Revisão por categoria atualizada com sucesso.',
         contract: updatedContract
           ? {
-              ...mapContract(updatedContract),
+              ...mapContract(updatedContract, req),
               documentProgress: progress,
             }
           : null,
@@ -2897,7 +3003,7 @@ class ContractController {
 
       return res.status(200).json({
         message: 'Minuta anexada e contrato avançado para AWAITING_SIGNATURES.',
-        contract: updatedContract ? mapContract(updatedContract) : null,
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -3024,7 +3130,7 @@ class ContractController {
 
       return res.status(200).json({
         message: 'Contrato finalizado com sucesso.',
-        contract: updatedContract ? mapContract(updatedContract) : null,
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -3154,7 +3260,7 @@ class ContractController {
       return res.status(200).json({
         message:
           'Contrato reiniciado com sucesso. Todos os documentos vinculados foram removidos.',
-        contract: updatedContract ? mapContract(updatedContract) : null,
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -3241,7 +3347,7 @@ class ContractController {
 
       return res.status(200).json({
         message: 'VGV atualizado com sucesso.',
-        contract: updatedContract ? mapContract(updatedContract) : null,
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -3624,17 +3730,27 @@ class ContractController {
         [contract.negotiation_id]
       );
 
+      const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
       const mappedDocuments = documents
         .filter((document) => !isProposalDocument(document))
         .filter((document) => !isRejectedNegotiationDocumentRow(document))
         .map((document) => ({
           ...mapDocument(document),
           downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
-        }));
+        }))
+        .filter((document) =>
+          shouldExposeOwnerSensitiveDocument(
+            {
+              side: document.side,
+              documentCategory: document.documentCategory,
+            },
+            canViewSensitiveData
+          )
+        );
 
       return res.status(200).json({
         contract: {
-          ...mapContract(contract),
+          ...mapContract(contract, req),
           documentProgress: buildContractDocumentProgress(
             mappedDocuments.map((document) => ({
               ...document,
@@ -3688,14 +3804,26 @@ class ContractController {
         [contract.negotiation_id, contract.id]
       );
 
-      if (documents.length === 0) {
+      const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
+      const visibleDocuments = documents.filter((document) => {
+        const mapped = mapDocument(document);
+        return shouldExposeOwnerSensitiveDocument(
+          {
+            side: mapped.side,
+            documentCategory: mapped.documentCategory,
+          },
+          canViewSensitiveData
+        );
+      });
+
+      if (visibleDocuments.length === 0) {
         return res.status(404).json({
           error: 'Nenhum documento vinculado a este contrato foi encontrado.',
         });
       }
 
       const zip = new JSZip();
-      for (const document of documents) {
+      for (const document of visibleDocuments) {
         const mapped = mapDocument(document);
         const fallbackName =
           mapped.originalFileName ??
@@ -3749,17 +3877,27 @@ class ContractController {
         [contract.negotiation_id]
       );
 
+      const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
       const mappedDocuments = documents
         .filter((document) => !isProposalDocument(document))
         .filter((document) => !isRejectedNegotiationDocumentRow(document))
         .map((document) => ({
           ...mapDocument(document),
           downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
-        }));
+        }))
+        .filter((document) =>
+          shouldExposeOwnerSensitiveDocument(
+            {
+              side: document.side,
+              documentCategory: document.documentCategory,
+            },
+            canViewSensitiveData
+          )
+        );
 
       return res.status(200).json({
         contract: {
-          ...mapContract(contract),
+          ...mapContract(contract, req),
           documentProgress: buildContractDocumentProgress(
             mappedDocuments.map((document) => ({
               ...document,
@@ -3785,10 +3923,13 @@ class ContractController {
     const body = (req.body ?? {}) as {
       sameAsCapturing?: unknown;
       sellingBrokerId?: unknown;
+      sellerBrokerId?: unknown;
+      selling_broker_id?: unknown;
     };
     const sameAsCapturing =
       body.sameAsCapturing === true || String(body.sameAsCapturing ?? '').toLowerCase() === 'true';
-    const sellingBrokerIdRaw = body.sellingBrokerId;
+    const sellingBrokerIdRaw =
+      body.sellingBrokerId ?? body.sellerBrokerId ?? body.selling_broker_id;
     const userId = Number(req.userId ?? 0);
     if (!Number.isFinite(userId) || userId <= 0) {
       return res.status(401).json({ error: 'Usuário não autenticado.' });
@@ -3858,7 +3999,7 @@ class ContractController {
     const updated = await fetchContractByNegotiationId(negotiationId);
     return res.status(200).json({
       message: 'Responsável operacional sincronizado com o captador.',
-      contract: updated ? mapContract(updated) : null,
+      contract: updated ? mapContract(updated, req) : null,
     });
   }
 
@@ -3951,7 +4092,7 @@ class ContractController {
       return res.status(200).json({
         message:
           'Assinatura presencial informada com sucesso. A administração foi notificada.',
-        contract: updatedContract ? mapContract(updatedContract) : null,
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
@@ -4424,13 +4565,15 @@ class ContractController {
 
     const body = (req.body ?? {}) as ContractDataBody;
 
-    let sellerPatch: Record<string, unknown> | null = null;
+    let ownerPatch: Record<string, unknown> | null = null;
     let buyerPatch: Record<string, unknown> | null = null;
 
     try {
-      sellerPatch = normalizeJsonObject(body.sellerInfo ?? body.seller_info, 'sellerInfo', {
-        emptyStringAsNull: true,
-      });
+      ownerPatch = normalizeJsonObject(
+        body.ownerInfo ?? body.owner_info ?? body.sellerInfo ?? body.seller_info,
+        'ownerInfo',
+        { emptyStringAsNull: true }
+      );
       buyerPatch = normalizeJsonObject(body.buyerInfo ?? body.buyer_info, 'buyerInfo', {
         emptyStringAsNull: true,
       });
@@ -4439,9 +4582,9 @@ class ContractController {
       return res.status(400).json({ error: message });
     }
 
-    if (!sellerPatch && !buyerPatch) {
+    if (!ownerPatch && !buyerPatch) {
       return res.status(400).json({
-        error: 'Informe ao menos sellerInfo ou buyerInfo para atualização.',
+        error: 'Informe ao menos ownerInfo ou buyerInfo para atualização.',
       });
     }
 
@@ -4466,7 +4609,7 @@ class ContractController {
       const canEditSeller = canEditSellerSide(req, contract);
       const canEditBuyer = canEditBuyerSide(req, contract);
 
-      if (sellerPatch && !canEditSeller && !doubleEnded) {
+      if (ownerPatch && !canEditSeller && !doubleEnded) {
         await tx.rollback();
         return res.status(403).json({
           error: 'Somente o proprietário pode editar ownerInfo.',
@@ -4487,10 +4630,10 @@ class ContractController {
         contract.buyer_approval_status
       );
 
-      if (sellerPatch && !approvalStatusAllowsEditing(sellerStatus) && !isAdmin) {
+      if (ownerPatch && !approvalStatusAllowsEditing(sellerStatus) && !isAdmin) {
         await tx.rollback();
         return res.status(403).json({
-          error: 'Dados do lado seller não podem ser alterados após aprovação.',
+          error: 'Dados do lado owner não podem ser alterados após aprovação.',
         });
       }
 
@@ -4513,10 +4656,10 @@ class ContractController {
         }
       }
 
-      const sellerInfo = parseStoredJsonObject(contract.seller_info);
+      const ownerInfo = parseStoredJsonObject(contract.seller_info);
       const buyerInfo = parseStoredJsonObject(contract.buyer_info);
 
-      const nextSellerInfo = sellerPatch ?? sellerInfo;
+      const nextOwnerInfo = ownerPatch ?? ownerInfo;
       const nextBuyerInfo = buyerPatch ?? buyerInfo;
 
       await tx.query(
@@ -4529,7 +4672,7 @@ class ContractController {
           WHERE id = ?
         `,
         [
-          JSON.stringify(nextSellerInfo),
+          JSON.stringify(nextOwnerInfo),
           JSON.stringify(nextBuyerInfo),
           contractId,
         ]
@@ -4540,7 +4683,7 @@ class ContractController {
 
       return res.status(200).json({
         message: 'Dados do contrato atualizados com sucesso.',
-        contract: updatedContract ? mapContract(updatedContract) : null,
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
       await tx.rollback();

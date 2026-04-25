@@ -218,7 +218,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(secondResponse.body.contract.buyerApprovalStatus).toBe(
       'APPROVED_WITH_RES'
     );
-    expect(createUserNotificationMock).toHaveBeenCalledTimes(2);
+    expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'negotiation',
@@ -233,11 +233,6 @@ describe('Contract granular approval and signed docs endpoints', () => {
           status: 'APPROVED_WITH_RES',
           reason: 'Documentos válidos com ressalva contratual.',
         }),
-      })
-    );
-    expect(createUserNotificationMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        recipientId: 30002,
       })
     );
   });
@@ -275,6 +270,27 @@ describe('Contract granular approval and signed docs endpoints', () => {
       expect.objectContaining({
         agencySignedContractReceivedBy: 'admin',
       })
+    );
+  });
+
+  it('when rejected, keeps contract in AWAITING_DOCS and releases property availability', async () => {
+    const response = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'seller',
+        status: 'REJECTED',
+        reason: 'Documento essencial inconsistente.',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.status).toBe('AWAITING_DOCS');
+    expect(txMock.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE negotiations'),
+      ['neg-1']
+    );
+    expect(txMock.query).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE properties'),
+      [101]
     );
   });
 });

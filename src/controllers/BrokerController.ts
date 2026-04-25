@@ -421,9 +421,15 @@ class BrokerController {
 
             const currentStatus = String(brokerRows[0].status ?? '').trim();
             if (currentStatus === 'rejected') {
-                return res.status(403).json({
-                    error: "Sua solicitacao de corretor foi rejeitada.",
-                });
+                await brokerDb.query(
+                    'UPDATE brokers SET creci = ?, status = ? WHERE id = ?',
+                    [creciToStore, 'pending_verification', brokerId]
+                );
+                await brokerDb.query('UPDATE broker_documents SET status = ? WHERE broker_id = ?', [
+                    'pending',
+                    brokerId,
+                ]);
+                return res.status(200).json({ status: 'pending_verification', role: 'broker' });
             }
 
             await brokerDb.query('UPDATE brokers SET creci = ? WHERE id = ?', [creciToStore, brokerId]);
@@ -859,10 +865,10 @@ class BrokerController {
                 ? String(brokerStatusRows[0].status ?? '').trim().toLowerCase()
                 : '';
             if (currentStatus === 'rejected') {
-                return res.status(403).json({
-                    success: false,
-                    error: "Sua solicitacao foi rejeitada. Inicie novamente para se tornar corretor."
-                });
+                await brokerDb.query(
+                    'UPDATE brokers SET creci = ?, status = ? WHERE id = ?',
+                    [creciToStore, 'pending_verification', brokerId]
+                );
             }
             // Garante que a linha em brokers existe; se não existir, cria com status pending_verification.
             if (brokerStatusRows.length === 0) {

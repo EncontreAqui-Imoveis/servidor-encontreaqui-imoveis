@@ -1297,7 +1297,7 @@ async function notifyBrokerApprovedChange(brokerId: number): Promise<void> {
     const role = await resolveUserNotificationRole(brokerId);
     if (role === 'broker') {
       await notifyUsers({
-        message: 'Sua conta de corretor foi aprovada. Voce ja pode anunciar imoveis.',
+        message: 'Parabens, voce se tornou corretor cadastrado na Encontre Aqui.',
         recipientIds: [brokerId],
         recipientRole: 'broker',
         relatedEntityType: 'broker',
@@ -1318,7 +1318,7 @@ async function notifyBrokerRejectedChange(brokerId: number): Promise<void> {
 
   try {
     await notifyUsers({
-      message: 'Sua solicitacao para se tornar corretor foi rejeitada.',
+      message: 'Sua solicitacao para se tornar corretor foi rejeitada. Sua conta voltou para cliente.',
       recipientIds: [brokerId],
       recipientRole: 'client',
       relatedEntityType: 'broker',
@@ -5844,6 +5844,10 @@ class AdminController {
     } finally {
       tx.release();
     }
+  }
+
+  async demoteClientBroker(req: Request, res: Response) {
+    return this.cleanupBroker(req, res);
   }
 
   async updateBrokerStatus(req: Request, res: Response) {

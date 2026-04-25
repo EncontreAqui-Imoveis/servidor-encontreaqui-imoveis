@@ -64,6 +64,9 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
   app.patch('/admin/brokers/:id/status', (req, res) =>
     adminController.updateBrokerStatus(req as any, res),
   );
+  app.post('/admin/clients/:id/demote-broker', (req, res) =>
+    adminController.demoteClientBroker(req as any, res),
+  );
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -132,6 +135,7 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
       expect.objectContaining({
         recipientIds: [77],
         recipientRole: 'client',
+        message: 'Sua solicitacao para se tornar corretor foi rejeitada. Sua conta voltou para cliente.',
       }),
     );
   });
@@ -182,5 +186,32 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
         String(call[0]).includes('name = ?') || String(call[0]).includes('email = ?'),
       ),
     ).toBe(false);
+  });
+
+  it('demotes broker via client endpoint keeping role client', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 88,
+            name: 'Broker Demote',
+            email: 'broker2@test.com',
+            broker_id: 88,
+            broker_status: 'approved',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const response = await request(app).post('/admin/clients/88/demote-broker').send({});
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      role: 'client',
+      status: 'rejected',
+    });
   });
 });

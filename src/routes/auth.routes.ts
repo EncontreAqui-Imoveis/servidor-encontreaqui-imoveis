@@ -7,6 +7,8 @@ const authRoutes = Router();
 
 const authWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS);
 const authLimit = Number(process.env.AUTH_RATE_LIMIT_MAX);
+const authLightWindowMs = Number(process.env.AUTH_LIGHT_RATE_LIMIT_WINDOW_MS);
+const authLightLimit = Number(process.env.AUTH_LIGHT_RATE_LIMIT_MAX);
 
 const authSensitiveLimiter = rateLimit({
   windowMs:
@@ -18,6 +20,19 @@ const authSensitiveLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     error: 'Muitas tentativas em rotas de autenticacao. Tente novamente em instantes.',
+  },
+});
+
+const authLightLimiter = rateLimit({
+  windowMs:
+    Number.isFinite(authLightWindowMs) && authLightWindowMs > 0
+      ? authLightWindowMs
+      : 15 * 60 * 1000,
+  limit: Number.isFinite(authLightLimit) && authLightLimit > 0 ? authLightLimit : 120,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas tentativas de consulta de autenticacao. Tente novamente em instantes.',
   },
 });
 
@@ -39,16 +54,16 @@ authRoutes.post('/verify-phone', (req, res) => authController.verifyPhone(req, r
 authRoutes.post('/email-verification/send', authSensitiveLimiter, (req, res) =>
   authController.sendEmailVerification(req, res)
 );
-authRoutes.post('/email-verification/check', authSensitiveLimiter, (req, res) =>
+authRoutes.post('/email-verification/check', authLightLimiter, (req, res) =>
   authController.checkEmailVerification(req, res)
 );
 authRoutes.post('/email-verification/verify-code', authSensitiveLimiter, (req, res) =>
   authController.verifyEmailVerificationCode(req, res)
 );
-authRoutes.get('/check-email', authSensitiveLimiter, (req, res) =>
+authRoutes.get('/check-email', authLightLimiter, (req, res) =>
   authController.checkEmail(req, res)
 );
-authRoutes.get('/check-creci', authSensitiveLimiter, (req, res) =>
+authRoutes.get('/check-creci', authLightLimiter, (req, res) =>
   authController.checkCreci(req, res)
 );
 authRoutes.post('/password-reset/request', authSensitiveLimiter, (req, res) =>

@@ -470,6 +470,31 @@ function normalizeCepForPersistence(value: unknown, semCepFlag: 0 | 1): string |
   return digits.length > 0 ? digits : null;
 }
 
+function normalizeAddressNumberForPersistence(
+  rawNumber: unknown,
+  semNumeroFlag: 0 | 1
+): string | null {
+  if (semNumeroFlag === 1) {
+    return null;
+  }
+
+  const normalizedRaw = String(rawNumber ?? '').trim();
+  if (!normalizedRaw) {
+    return null;
+  }
+
+  const normalizedNoSpace = normalizedRaw.replace(/\s+/g, '').toUpperCase();
+  if (normalizedNoSpace === 'S/N' || normalizedNoSpace === 'SN') {
+    return null;
+  }
+
+  const sanitized = normalizedRaw
+    .normalize('NFD')
+    .replace(/[^\w/-]/g, '')
+    .trim();
+  return sanitized.length > 0 ? sanitized.toUpperCase() : null;
+}
+
 function validateRequiredBairro(
   bairro: unknown,
   propertyType: unknown
@@ -1073,14 +1098,7 @@ class PropertyController {
         });
       }
     }
-    const numeroDigits = String(numero ?? '').replace(/\D/g, '');
-    if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
-      logPropertyCreateValidationFailure(req, "broker", "invalid_numero", {
-        rawNumero: String(numero ?? ''),
-      });
-      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
-    }
-    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
+    const numeroNormalizado = normalizeAddressNumberForPersistence(numero, semNumeroFlag);
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;
@@ -1632,14 +1650,7 @@ class PropertyController {
         });
       }
     }
-    const numeroDigits = String(numero ?? '').replace(/\D/g, '');
-    if (semNumeroFlag !== 1 && String(numero ?? '').trim().length > 0 && numeroDigits.length === 0) {
-      logPropertyCreateValidationFailure(req, "client", "invalid_numero", {
-        rawNumero: String(numero ?? ''),
-      });
-      return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
-    }
-    const numeroNormalizado = semNumeroFlag === 1 ? null : stringOrNull(numeroDigits);
+    const numeroNormalizado = normalizeAddressNumberForPersistence(numero, semNumeroFlag);
 
     let promotionFlag: 0 | 1 = 0;
     let promotionPercentage: number | null = null;

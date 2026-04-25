@@ -130,6 +130,7 @@ adminRoutes.delete('/users/:id', requireAdminReauth, adminController.deleteUser)
 adminRoutes.get('/clients', adminController.getAllClients);
 adminRoutes.get('/clients/:id', adminController.getClientById);
 adminRoutes.post('/clients/:id/promote-broker', adminController.promoteClientToBroker);
+adminRoutes.post('/clients/:id/demote-broker', adminController.demoteClientBroker);
 adminRoutes.put('/clients/:id', adminController.updateClient);
 adminRoutes.delete('/clients/:id', requireAdminReauth, adminController.deleteClient);
 adminRoutes.get('/clients/:id/properties', adminController.getClientProperties);

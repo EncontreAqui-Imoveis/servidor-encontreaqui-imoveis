@@ -2107,10 +2107,10 @@ class NegotiationController {
             return this.respondWithCode(
               req,
               res,
-              429,
+              409,
               'PROPOSAL_EDIT_COOLDOWN',
               `Aguarde ${rest} segundo(s) para editar novamente esta proposta.`,
-              true,
+              false,
               { secondsUntilNextEdit: rest }
             );
           }

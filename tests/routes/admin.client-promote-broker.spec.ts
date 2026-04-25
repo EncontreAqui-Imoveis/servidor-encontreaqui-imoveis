@@ -23,6 +23,11 @@ vi.mock('../../src/services/adminPersistenceService', () => ({
   adminDb: { getConnection: getConnectionMock, query: vi.fn() },
 }));
 
+const { notifyUsersMock, resolveUserNotificationRoleMock } = vi.hoisted(() => ({
+  notifyUsersMock: vi.fn(),
+  resolveUserNotificationRoleMock: vi.fn(),
+}));
+
 vi.mock('../../src/services/adminAccountLifecycleService', () => ({
   loadUserLifecycleSnapshot: (db: unknown, id: number, opts?: unknown) =>
     loadUserLifecycleSnapshotMock(db, id, opts),
@@ -35,8 +40,8 @@ vi.mock('../../src/services/adminAccountLifecycleService', () => ({
 }));
 
 vi.mock('../../src/services/userNotificationService', () => ({
-  notifyUsers: vi.fn().mockResolvedValue(null),
-  resolveUserNotificationRole: vi.fn().mockResolvedValue('broker'),
+  notifyUsers: notifyUsersMock,
+  resolveUserNotificationRole: resolveUserNotificationRoleMock,
   splitRecipientsByRole: vi.fn().mockResolvedValue({ clientIds: [], brokerIds: [] }),
 }));
 
@@ -60,6 +65,8 @@ describe('POST /admin/clients/:id/promote-broker', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    notifyUsersMock.mockResolvedValue(null);
+    resolveUserNotificationRoleMock.mockResolvedValue('broker');
     getConnectionMock.mockResolvedValue(txMock);
     txMock.beginTransaction.mockResolvedValue(undefined);
     txMock.commit.mockResolvedValue(undefined);
@@ -94,6 +101,14 @@ describe('POST /admin/clients/:id/promote-broker', () => {
       String(c[0]).includes('INSERT INTO brokers'),
     );
     expect(insertCall).toBeTruthy();
+    expect(notifyUsersMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientIds: [10],
+        recipientRole: 'broker',
+        relatedEntityType: 'broker',
+        message: 'Parabens, voce se tornou corretor cadastrado na Encontre Aqui.',
+      }),
+    );
   });
 
   it('returns 409 on duplicate CRECI', async () => {

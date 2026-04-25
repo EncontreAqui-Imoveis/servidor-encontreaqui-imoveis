@@ -163,6 +163,31 @@ describe('POST /properties description length contract', () => {
     );
   });
 
+  it('accepts address number as S/N without forcing numeric digits', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 125, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'numero-sn')
+      .send({
+        ...basePayload,
+        numero: 'S/N',
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams).toEqual(expect.arrayContaining([null]));
+  });
+
   it('rejects a description above 500 characters and logs the reason', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

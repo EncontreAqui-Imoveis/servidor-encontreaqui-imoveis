@@ -79,6 +79,7 @@ export type ContractDocumentCategoryCode =
 export const CONTRACT_DOCUMENT_CATEGORY_STATUSES = [
   'PENDING',
   'APPROVED',
+  'APPROVED_WITH_RES',
   'REJECTED',
   'NOT_APPLICABLE',
 ] as const;

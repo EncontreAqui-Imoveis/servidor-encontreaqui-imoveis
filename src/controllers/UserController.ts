@@ -10,6 +10,7 @@ import { runUserQuery } from '../services/userPersistenceService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
 import {
   sanitizeAddressInput,
+  sanitizePartialAddressInput,
   signUserToken,
 } from '../services/userSessionService';
 import { hasCompleteProfile } from '../services/authSessionService';
@@ -369,6 +370,8 @@ class UserController {
         Object.prototype.hasOwnProperty.call(payload, field);
 
       const updates: Record<string, string | null> = {};
+      const hasAddressField = (field: string) =>
+        Object.prototype.hasOwnProperty.call(payload, field);
 
       if (hasField('name')) {
         const name = stringOrNull(payload.name);
@@ -412,6 +415,60 @@ class UserController {
           });
         }
         updates.phone = normalizedPhone;
+      }
+
+      const shouldProcessAddress = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep']
+        .some(hasAddressField);
+      if (shouldProcessAddress) {
+        const addressPayload: Record<string, unknown> = {
+          ...(hasAddressField('street') ? { street: payload.street } : {}),
+          ...(hasAddressField('number') ? { number: payload.number } : {}),
+          ...(hasAddressField('complement') ? { complement: payload.complement } : {}),
+          ...(hasAddressField('bairro') ? { bairro: payload.bairro } : {}),
+          ...(hasAddressField('city') ? { city: payload.city } : {}),
+          ...(hasAddressField('state') ? { state: payload.state } : {}),
+          ...(hasAddressField('cep') ? { cep: payload.cep } : {}),
+          ...(hasAddressField('withoutNumber')
+              ? { withoutNumber: payload.withoutNumber }
+              : {}),
+          ...(hasAddressField('without_number')
+              ? { without_number: payload.without_number }
+              : {}),
+        };
+
+        const addressResult = sanitizePartialAddressInput(addressPayload);
+        if (!addressResult.ok) {
+          return res.status(400).json({
+            status: 'error',
+            code: 'ADDRESS_VALIDATION_FAILED',
+            message: 'Endereco incompleto ou invalido.',
+            error: 'Endereco incompleto ou invalido.',
+            fields: addressResult.errors,
+            correlation_id: getRequestId(req),
+          });
+        }
+
+        if (addressResult.value.street !== undefined) {
+          updates.street = addressResult.value.street;
+        }
+        if (addressResult.value.number !== undefined) {
+          updates.number = addressResult.value.number;
+        }
+        if (addressResult.value.complement !== undefined) {
+          updates.complement = addressResult.value.complement;
+        }
+        if (addressResult.value.bairro !== undefined) {
+          updates.bairro = addressResult.value.bairro;
+        }
+        if (addressResult.value.city !== undefined) {
+          updates.city = addressResult.value.city;
+        }
+        if (addressResult.value.state !== undefined) {
+          updates.state = addressResult.value.state;
+        }
+        if (addressResult.value.cep !== undefined) {
+          updates.cep = addressResult.value.cep;
+        }
       }
 
       const fieldsToUpdate = Object.keys(updates);

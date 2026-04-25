@@ -921,7 +921,7 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
 function mapDocument(row: ContractDocumentRow) {
   const metadata = parseStoredJsonObject(row.metadata_json);
   const sideValue = String(metadata.side ?? '').trim().toLowerCase();
-  const side =
+  const side: ContractDocumentSide | null =
     sideValue === 'seller' || sideValue === 'buyer'
       ? sideValue
       : null;

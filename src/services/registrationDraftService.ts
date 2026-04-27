@@ -39,6 +39,75 @@ const PHONE_OTP_TTL_SECONDS = 5 * 60;
 const PHONE_MAX_ATTEMPTS = 5;
 const PHONE_COOLDOWN_SECONDS = 60;
 const PASSWORD_TTL_MINUTES = 60;
+const PHONE_OTP_PROVIDER =
+  String(process.env.PHONE_OTP_PROVIDER ?? process.env.DRAFT_PHONE_OTP_PROVIDER ?? '').trim().toLowerCase();
+type PhoneOtpDeliveryResult =
+  | { ok: true; provider: string; status: 'sent' | 'mock' }
+  | { ok: false; provider: string; status: 'disabled' | 'mock' | 'unsupported' | 'error' };
+
+function resolvePhoneOtpProvider(): string {
+  if (!PHONE_OTP_PROVIDER) {
+    return 'disabled';
+  }
+  return PHONE_OTP_PROVIDER;
+}
+
+async function dispatchDraftPhoneOtp(
+  draftId: string,
+  _phone: string,
+  _code: string,
+): Promise<PhoneOtpDeliveryResult> {
+  const provider = resolvePhoneOtpProvider();
+  const draftIdSuffix = draftId.slice(-6);
+
+  if (process.env.NODE_ENV === 'test') {
+    return { ok: true, provider: provider || 'test', status: 'sent' };
+  }
+
+  if (provider === 'disabled') {
+    console.warn('[draft.verify-phone] provider nao configurado', {
+      draftIdSuffix,
+      provider: 'disabled',
+      status: 'not-dispatched',
+    });
+    return { ok: false, provider: 'disabled', status: 'disabled' };
+  }
+
+  if (provider === 'mock' || provider === 'noop') {
+    console.warn('[draft.verify-phone] provider em modo mock/no-op', {
+      draftIdSuffix,
+      provider,
+      status: 'not-dispatched',
+    });
+    return { ok: false, provider, status: 'mock' };
+  }
+
+  if (provider === 'log' || provider === 'console') {
+    console.info('[draft.verify-phone] provider somente para logs', {
+      draftIdSuffix,
+      provider,
+      status: 'not-dispatched',
+    });
+    return { ok: false, provider, status: 'unsupported' };
+  }
+
+  if (provider === 'sms' || provider === 'twilio' || provider === 'aws_sns' || provider === 'nexmo') {
+    // TODO: integrar provider real de SMS
+    console.error('[draft.verify-phone] provider SMS nao implementado no backend', {
+      draftIdSuffix,
+      provider,
+      status: 'not-dispatched',
+    });
+    return { ok: false, provider, status: 'unsupported' };
+  }
+
+  console.error('[draft.verify-phone] provider desconhecido', {
+    draftIdSuffix,
+    provider,
+    status: 'not-dispatched',
+  });
+  return { ok: false, provider, status: 'unsupported' };
+}
 
 export class DraftFlowError extends Error {
   statusCode: number;
@@ -678,6 +747,16 @@ export async function requestDraftPhoneOtp(
     cooldownSeconds: PHONE_COOLDOWN_SECONDS,
     expiresAt,
   });
+
+  const delivery = await dispatchDraftPhoneOtp(draft.draft_id, normalizedPhone, code);
+  if (!delivery.ok) {
+    await useDraftPhoneOtp(sessionToken);
+    throw new DraftFlowError(
+      503,
+      'PHONE_OTP_DELIVERY_FAILED',
+      `Nao foi possivel enviar o codigo por SMS (${delivery.status}).`,
+    );
+  }
 
   if (process.env.NODE_ENV === 'test') {
     return {

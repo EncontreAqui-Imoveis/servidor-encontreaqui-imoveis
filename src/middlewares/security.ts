@@ -168,7 +168,10 @@ export function buildCorsOptions(): CorsOptions {
       }
 
       const normalizedRequestOrigin = normalizeOrigin(origin);
-      if (allowedOriginSet.has(normalizedRequestOrigin)) {
+      if (
+        allowedOriginSet.has(normalizedRequestOrigin) ||
+        normalizedRequestOrigin.endsWith('.vercel.app')
+      ) {
         callback(null, true);
         return;
       }

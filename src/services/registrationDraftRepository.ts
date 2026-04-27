@@ -542,3 +542,15 @@ export async function getDraftDocuments(draftId: number): Promise<DraftDocumentR
   return rows[0] ?? null;
 }
 
+export async function deleteCompletedDraftByEmail(email: string): Promise<void> {
+  const [rows] = await authDb.query<RegistrationDraftRow[]>(
+    "SELECT id FROM registration_drafts WHERE LOWER(TRIM(email)) = ? AND status = 'COMPLETED'",
+    [email.trim().toLowerCase()],
+  );
+
+  for (const row of rows) {
+    await authDb.query('DELETE FROM registration_phone_otps WHERE draft_id = ?', [row.id]);
+    await authDb.query('DELETE FROM registration_draft_documents WHERE draft_id = ?', [row.id]);
+    await authDb.query('DELETE FROM registration_drafts WHERE id = ?', [row.id]);
+  }
+}

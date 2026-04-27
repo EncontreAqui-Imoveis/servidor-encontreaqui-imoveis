@@ -159,23 +159,19 @@ export async function deleteUserAccount(
 
   // Clean up completed registration drafts so the email can be re-used
   try {
-    await db.query(
-      "DELETE FROM registration_drafts WHERE user_id = ? AND status = 'COMPLETED'",
-      [userId],
+    const userEmail = snapshot.email;
+    const [drafts] = await db.query(
+      "SELECT id FROM registration_drafts WHERE (user_id = ? OR LOWER(TRIM(email)) = LOWER(TRIM(?))) AND status = 'COMPLETED'",
+      [userId, userEmail],
     );
-  } catch (draftError) {
-    console.warn(
-      'Falha ao remover drafts COMPLETED do usuario; tentando por email.',
-      draftError,
-    );
-    try {
-      await db.query(
-        "DELETE FROM registration_drafts WHERE LOWER(TRIM(email)) = LOWER(TRIM((SELECT email FROM users WHERE id = ?))) AND status = 'COMPLETED'",
-        [userId],
-      );
-    } catch {
-      /* best effort */
+
+    for (const draft of (drafts as any[])) {
+      await db.query('DELETE FROM registration_phone_otps WHERE draft_id = ?', [draft.id]);
+      await db.query('DELETE FROM registration_draft_documents WHERE draft_id = ?', [draft.id]);
+      await db.query('DELETE FROM registration_drafts WHERE id = ?', [draft.id]);
     }
+  } catch (draftError) {
+    console.warn('Falha ao remover drafts COMPLETED do usuario.', draftError);
   }
 
   const [result] = await db.query('DELETE FROM users WHERE id = ?', [userId]);

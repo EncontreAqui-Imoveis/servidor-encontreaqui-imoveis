@@ -4072,6 +4072,7 @@ class AdminController {
             u.email,
             u.phone,
             u.created_at,
+            b.creci,
             CASE
             WHEN b.id IS NOT NULL AND b.status IN ('approved','pending_verification') THEN 'broker'
               ELSE 'client'
@@ -5957,6 +5958,114 @@ class AdminController {
     }
   }
 
+  async uploadBrokerDocuments(req: Request, res: Response) {
+    const brokerId = Number(req.params.id);
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor inválido.' });
+    }
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
+    if (!files || Object.keys(files).length === 0) {
+      return res.status(400).json({ error: 'Nenhum documento enviado.' });
+    }
+
+    const db = await adminDb.getConnection();
+    try {
+      await db.beginTransaction();
+
+      const [broker] = await db.query<RowDataPacket[]>('SELECT id FROM brokers WHERE id = ?', [brokerId]);
+      if (broker.length === 0) {
+        await db.rollback();
+        return res.status(404).json({ error: 'Corretor não encontrado.' });
+      }
+
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      if (files.creciFront) {
+        const result = await uploadToCloudinary(files.creciFront[0], 'brokers/documents');
+        updates.push('creci_front_url = ?');
+        values.push(result.url);
+      }
+      if (files.creciBack) {
+        const result = await uploadToCloudinary(files.creciBack[0], 'brokers/documents');
+        updates.push('creci_back_url = ?');
+        values.push(result.url);
+      }
+      if (files.selfie) {
+        const result = await uploadToCloudinary(files.selfie[0], 'brokers/documents');
+        updates.push('selfie_url = ?');
+        values.push(result.url);
+      }
+
+      if (updates.length > 0) {
+        await db.query(
+          `INSERT INTO broker_documents (broker_id, ${updates.map((u) => u.split(' = ')[0]).join(', ')}, status)
+           VALUES (?, ${updates.map(() => '?').join(', ')}, 'pending')
+           ON DUPLICATE KEY UPDATE ${updates.join(', ')}, status = 'pending', updated_at = CURRENT_TIMESTAMP`,
+          [brokerId, ...values, ...values]
+        );
+      }
+
+      await db.commit();
+      return res.status(200).json({ message: 'Documentos atualizados com sucesso.' });
+    } catch (error) {
+      await db.rollback();
+      console.error('Erro ao fazer upload de documentos do corretor:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    } finally {
+      db.release();
+    }
+  }
+
+  async deleteBrokerDocument(req: Request, res: Response) {
+    const brokerId = Number(req.params.id);
+    const { docType } = req.params;
+    if (Number.isNaN(brokerId)) {
+      return res.status(400).json({ error: 'Identificador de corretor inválido.' });
+    }
+
+    const allowedDocTypes = ['creciFront', 'creciBack', 'selfie'];
+    if (!allowedDocTypes.includes(docType)) {
+      return res.status(400).json({ error: 'Tipo de documento inválido.' });
+    }
+
+    const columnMap: Record<string, string> = {
+      creciFront: 'creci_front_url',
+      creciBack: 'creci_back_url',
+      selfie: 'selfie_url',
+    };
+    const column = columnMap[docType];
+
+    const db = await adminDb.getConnection();
+    try {
+      await db.beginTransaction();
+
+      const [docs] = await db.query<RowDataPacket[]>(
+        `SELECT ${column} FROM broker_documents WHERE broker_id = ?`,
+        [brokerId]
+      );
+
+      if (docs.length > 0 && docs[0][column]) {
+        await cleanupPropertyMediaAssets([docs[0][column]], 'admin_delete_broker_doc');
+
+        await db.query(
+          `UPDATE broker_documents SET ${column} = NULL, status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?`,
+          [brokerId]
+        );
+      }
+
+      await db.commit();
+      return res.status(200).json({ message: 'Documento removido com sucesso.' });
+    } catch (error) {
+      await db.rollback();
+      console.error('Erro ao excluir documento do corretor:', error);
+      return res.status(500).json({ error: 'Erro interno do servidor.' });
+    } finally {
+      db.release();
+    }
+  }
+
   async listBrokers(req: Request, res: Response) {
     try {
       const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
@@ -6102,9 +6211,14 @@ class AdminController {
             u.created_at,
             b.creci,
             b.status,
-            b.agency_id
+            b.agency_id,
+            bd.creci_front_url,
+            bd.creci_back_url,
+            bd.selfie_url,
+            bd.status as document_status
           FROM brokers b
           INNER JOIN users u ON b.id = u.id
+          LEFT JOIN broker_documents bd ON b.id = bd.broker_id
           WHERE b.id = ?
           LIMIT 1
         `,
@@ -6838,6 +6952,8 @@ export async function sendNotification(req: Request, res: Response) {
       related_entity_type,
       related_entity_id,
       audience,
+      pushAction,
+      title,
     } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim() === '') {
@@ -6973,6 +7089,8 @@ export async function sendNotification(req: Request, res: Response) {
         recipientRole: 'client',
         relatedEntityType: entityType,
         relatedEntityId: numericEntityId,
+        pushAction,
+        title,
       });
       if (summary) {
         summaries.push(summary);
@@ -6986,6 +7104,8 @@ export async function sendNotification(req: Request, res: Response) {
         recipientRole: 'broker',
         relatedEntityType: entityType,
         relatedEntityId: numericEntityId,
+        pushAction,
+        title,
       });
       if (summary) {
         summaries.push(summary);

@@ -152,6 +152,17 @@ adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
 adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);
 adminRoutes.put('/brokers/:id', adminController.updateBroker);
 adminRoutes.delete('/brokers/:id', requireAdminReauth, adminController.deleteBroker);
+
+adminRoutes.post(
+  '/brokers/:id/documents',
+  brokerDocsUpload.fields([
+    { name: 'creciFront', maxCount: 1 },
+    { name: 'creciBack', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+  ]),
+  adminController.uploadBrokerDocuments
+);
+adminRoutes.delete('/brokers/:id/documents/:docType', adminController.deleteBrokerDocument);
 adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
 
 adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);

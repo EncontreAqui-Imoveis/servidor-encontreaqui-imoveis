@@ -119,6 +119,8 @@ export async function notifyPriceDropIfNeeded({
       recipientRole: group.role,
       relatedEntityType: 'property',
       relatedEntityId: propertyId,
+      pushAction: 'promotion',
+      title: 'Redução de Preço',
     });
   }
 }
@@ -181,6 +183,8 @@ export async function notifyPromotionStarted(input: {
       recipientRole: group.role,
       relatedEntityType: 'property',
       relatedEntityId: propertyId,
+      pushAction: 'promotion',
+      title: 'Imóvel em Promoção',
     });
   }
 }

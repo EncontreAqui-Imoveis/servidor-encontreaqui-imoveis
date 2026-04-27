@@ -62,6 +62,19 @@ function resolvePhoneOtpProvider(): string {
   return provider;
 }
 
+function buildPhoneVerificationDiagnostic() {
+  return {
+    provider: resolvePhoneOtpProvider(),
+    envNodeEnv: String(process.env.NODE_ENV ?? '').trim(),
+    hasDraftVerifyPhoneProvider: Boolean(process.env.DRAFT_VERIFY_PHONE_PROVIDER),
+    hasPhoneOtpProvider: Boolean(process.env.PHONE_OTP_PROVIDER),
+    hasDraftPhoneOtpProvider: Boolean(process.env.DRAFT_PHONE_OTP_PROVIDER),
+    hasFirebaseProjectId: Boolean(process.env.FIREBASE_PROJECT_ID),
+    hasFirebaseClientEmail: Boolean(process.env.FIREBASE_CLIENT_EMAIL),
+    hasFirebasePrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
+  };
+}
+
 function resolveDraftPhoneVerificationMode(): DraftPhoneVerificationMode {
   const provider = resolvePhoneOtpProvider();
   if (provider === 'firebase') {
@@ -744,6 +757,8 @@ export async function requestDraftPhoneOtp(
   rawDraftToken: unknown,
   phone: unknown,
 ) {
+  const logContext = buildPhoneVerificationDiagnostic();
+  console.info('[draft.verify-phone] request start', logContext);
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
   const normalizedPhone = normalizePhone(phone);
   if (!normalizedPhone) {
@@ -752,18 +767,7 @@ export async function requestDraftPhoneOtp(
 
   const verificationMode = resolveDraftPhoneVerificationMode();
   if (verificationMode === 'unavailable') {
-    console.error('[draft.verify-phone] provider indisponivel', {
-      draftIdSuffix: draft.draft_id.slice(-6),
-      envNodeEnv: String(process.env.NODE_ENV ?? '').trim(),
-      provider: resolvePhoneOtpProvider(),
-      hasDraftVerifyPhoneProvider: Boolean(process.env.DRAFT_VERIFY_PHONE_PROVIDER),
-      hasPhoneOtpProvider: Boolean(process.env.PHONE_OTP_PROVIDER),
-      hasDraftPhoneOtpProvider: Boolean(process.env.DRAFT_PHONE_OTP_PROVIDER),
-      hasFirebaseProjectId: Boolean(process.env.FIREBASE_PROJECT_ID),
-      hasFirebaseClientEmail: Boolean(process.env.FIREBASE_CLIENT_EMAIL),
-      hasFirebasePrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
-      hasFirebaseServiceAccountPath: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PATH),
-    });
+    console.error('[draft.verify-phone] provider indisponivel', { ...logContext, outcome: 'unavailable', reason: 'PHONE_VERIFICATION_UNAVAILABLE' });
     throw new DraftFlowError(
       503,
       'PHONE_VERIFICATION_UNAVAILABLE',
@@ -775,6 +779,7 @@ export async function requestDraftPhoneOtp(
     await updateDraftByDraftId(draftId, draftTokenHash, {
       phone: normalizedPhone,
     });
+    console.info('[draft.verify-phone] request outcome', { ...logContext, outcome: 'mode=firebase', draftStep: draft.current_step ?? null });
     return {
       mode: 'firebase',
       requiresFirebaseIdToken: true,
@@ -831,6 +836,8 @@ export async function requestDraftPhoneOtp(
       `Nao foi possivel enviar o codigo por SMS (${delivery.status}).`,
     );
   }
+
+  console.info('[draft.verify-phone] request outcome', { ...logContext, outcome: 'mode=legacy', draftStep: draft.current_step ?? null });
 
   if (process.env.NODE_ENV === 'test') {
     return {

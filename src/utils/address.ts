@@ -106,17 +106,40 @@ export function sanitizeAddressInput(
   }
 
   const street = normalizeText(input.street);
-  if (!street) errors.push('street');
+  const numberInput = input.number;
   const number =
-    withoutNumber === true ? WITHOUT_NUMBER_VALUE : normalizeNumber(input.number);
-  if (!number) errors.push('number');
+    withoutNumber === true ? WITHOUT_NUMBER_VALUE : normalizeNumber(numberInput);
   const bairro = normalizeText(input.bairro);
-  if (!bairro) errors.push('bairro');
   const city = normalizeText(input.city);
-  if (!city) errors.push('city');
   const state = normalizeState(input.state);
-  if (!state) errors.push('state');
   const cep = normalizeCep(input.cep);
+  const complement = normalizeText(input.complement);
+
+  // Se tudo estiver vazio, consideramos que o usuário não quer informar endereço agora.
+  const hasAnyField = !!(street || number || bairro || city || state || cep || complement);
+
+  if (!hasAnyField) {
+    return {
+      ok: true,
+      value: {
+        street: '',
+        number: '',
+        complement: null,
+        bairro: '',
+        city: '',
+        state: '',
+        cep: null,
+      },
+    };
+  }
+
+  // Se informou algum campo, validamos a consistência mínima.
+  if (!street) errors.push('street');
+  if (!number) errors.push('number');
+  if (!bairro) errors.push('bairro');
+  if (!city) errors.push('city');
+  if (!state) errors.push('state');
+
   if (options.requireCep !== false) {
     if (!cep) {
       errors.push('cep');
@@ -124,7 +147,6 @@ export function sanitizeAddressInput(
   } else if (input.cep !== undefined && input.cep !== null && !cep) {
     errors.push('cep');
   }
-  const complement = normalizeText(input.complement);
 
   if (street && !withinLimit(street, MAX_STREET)) errors.push('street');
   if (number && !withinLimit(number, MAX_NUMBER)) errors.push('number');

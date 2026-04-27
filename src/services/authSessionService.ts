@@ -46,14 +46,15 @@ export function buildUserPayload(row: any, profileType: ProfileType) {
 }
 
 export function hasCompleteProfile(row: any) {
-  return !!(
-    row.phone &&
-    row.street &&
-    row.number &&
-    row.bairro &&
-    row.city &&
-    row.state
-  );
+  // Se for corretor, continua exigindo telefone (para contato/propostas).
+  // Endereço agora é opcional para todos, a menos que o negócio exija futuramente.
+  if (row.role === 'broker') {
+    return !!(row.phone && String(row.phone).trim().length >= 8);
+  }
+
+  // Para clientes, se tiver nome (que vem do Google/Auth), já consideramos apto.
+  // O telefone será solicitado apenas quando for realmente necessário (ex.: abrir chat).
+  return true;
 }
 
 function normalizeTokenVersion(value: unknown): number {

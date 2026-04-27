@@ -90,7 +90,7 @@ export function createHttpApp() {
   app.use(securityHeaders);
   app.use(enforceHttps);
   app.use(cors(corsOptions));
-  app.options('/{*corsPreflight}', cors(corsOptions));
+  app.options('*', cors(corsOptions));
   app.use((req, res, next) => {
     if (req.method === 'OPTIONS') {
       return res.sendStatus(204);
@@ -101,7 +101,7 @@ export function createHttpApp() {
 
   app.use(
     express.json({
-      limit: '2mb',
+      limit: '10mb',
       type: 'application/json',
     }),
   );
@@ -109,7 +109,7 @@ export function createHttpApp() {
   app.use(
     express.urlencoded({
       extended: true,
-      limit: '2mb',
+      limit: '10mb',
       parameterLimit: 1000,
       type: 'application/x-www-form-urlencoded',
     }),

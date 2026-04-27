@@ -19,6 +19,8 @@ export interface PushNotificationPayload {
    * Clientes antigos ignoram; clientes novos usam com prioridade sobre só tipo/estado.
    */
   action?: string | null;
+  /** Título da notificação (ex.: 'Nova Proposta', 'Imóvel em Promoção'). */
+  title?: string | null;
 }
 
 export interface PushNotificationResult {
@@ -101,7 +103,7 @@ export async function sendPushNotifications(
     const response = await admin.messaging().sendEachForMulticast({
       tokens: batch,
       notification: {
-        title: 'Encontre Aqui',
+        title: (payload.title ?? '').trim() || 'Encontre Aqui',
         body: payload.message,
       },
       android: {

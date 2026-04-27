@@ -99,7 +99,7 @@ authRoutes.post(
     { name: 'selfie', maxCount: 1 },
   ]),
   handleDraftUploadError,
-  (req, res) => registrationDraftController.submitDocuments(req, res),
+  (req: Request, res: Response) => registrationDraftController.submitDocuments(req, res),
 );
 authRoutes.post('/register/draft/:draftId/finalize', authSensitiveLimiter, (req, res) =>
   registrationDraftController.finalize(req, res),

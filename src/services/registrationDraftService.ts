@@ -405,6 +405,8 @@ export async function sendDraftEmailVerificationCode(draftId: string, rawDraftTo
     throw new DraftFlowError(429, issue.code, `Aguarde ${issue.retryAfterSeconds}s para reenviar.`);
   }
 
+  const retryAfterSeconds = 0;
+
   try {
     await sendEmailCodeEmail({
       to: draft.email,
@@ -422,7 +424,7 @@ export async function sendDraftEmailVerificationCode(draftId: string, rawDraftTo
     sentAt: now().toISOString(),
     expiresAt: issue.expiresAt.toISOString(),
     cooldownSec: issue.cooldownSec,
-    retryAfterSeconds: issue.retryAfterSeconds,
+    retryAfterSeconds,
     resendType: issue.resendType,
   };
 }

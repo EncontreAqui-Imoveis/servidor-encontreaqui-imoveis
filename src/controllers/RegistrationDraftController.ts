@@ -164,7 +164,8 @@ class RegistrationDraftController {
       this.ensureDraftFlowEnabled();
       const code = String(req.body?.code ?? '').trim();
       const response = await confirmDraftEmailCode(this.draftId(req), this.draftToken(req), code);
-      return res.status(200).json({ status: 'ok', ...response });
+      const { status, ...payload } = response as { status?: string; [key: string]: unknown };
+      return res.status(200).json({ ...payload, status: status ?? 'ok' });
     } catch (error) {
       return this.handleError(req, res, error);
     }
@@ -189,7 +190,8 @@ class RegistrationDraftController {
         req.body?.sessionToken,
         req.body?.code,
       );
-      return res.status(200).json({ status: 'ok', ...response });
+      const { status, ...payload } = response as { status?: string; [key: string]: unknown };
+      return res.status(200).json({ ...payload, status: status ?? 'ok' });
     } catch (error) {
       return this.handleError(req, res, error);
     }
@@ -273,7 +275,8 @@ class RegistrationDraftController {
     try {
       this.ensureDraftFlowEnabled();
       const response = await discardRegistrationDraft(this.draftId(req), this.draftToken(req));
-      return res.status(200).json({ status: 'ok', ...response });
+      const { status, ...payload } = response as { status?: string; [key: string]: unknown };
+      return res.status(200).json({ ...payload, status: status ?? 'ok' });
     } catch (error) {
       return this.handleError(req, res, error);
     }

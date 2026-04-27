@@ -87,6 +87,8 @@ export type EmailCodeSendResult =
       dailyRemaining: number;
     };
 
+type EmailCodeQueryParam = string | number | null;
+
 export async function issueEmailCodeChallenge(params: {
   email: string;
   purpose: EmailChallengePurpose;
@@ -104,7 +106,7 @@ export async function issueEmailCodeChallenge(params: {
 
   const whereEmail = 'email = ?';
   const whereDraft = params.draftId && params.draftTokenHash ? ' AND draft_id = ? AND draft_token_hash = ?' : '';
-  const queryParams = [email];
+  const queryParams: EmailCodeQueryParam[] = [email];
   if (params.draftId && params.draftTokenHash) {
     queryParams.push(params.draftId, params.draftTokenHash);
   }
@@ -268,7 +270,7 @@ export async function getEmailVerificationStatus(params: {
   const draftFilter = params.draftId && params.draftTokenHash
     ? 'draft_id = ? AND draft_token_hash = ?'
     : 'draft_id IS NULL';
-  const challengeParams = [email];
+  const challengeParams: EmailCodeQueryParam[] = [email];
   if (params.draftId && params.draftTokenHash) {
     challengeParams.push(params.draftId, params.draftTokenHash);
   }
@@ -321,9 +323,9 @@ export async function verifyEmailCode(params: {
   const now = params.now ?? new Date();
   const hasDraftContext = Boolean(params.draftId && params.draftTokenHash);
   const draftFilter = hasDraftContext ? 'AND draft_id = ? AND draft_token_hash = ?' : 'AND draft_id IS NULL';
-  const draftQueryParams = [email];
+  const draftQueryParams: EmailCodeQueryParam[] = [email];
   if (hasDraftContext) {
-    draftQueryParams.push(params.draftId, params.draftTokenHash);
+    draftQueryParams.push(params.draftId as number, params.draftTokenHash as string);
   }
 
   const [rows] = await authDb.query<EmailCodeChallengeRow[]>(

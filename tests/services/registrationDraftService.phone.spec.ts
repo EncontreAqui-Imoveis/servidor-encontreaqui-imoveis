@@ -152,6 +152,25 @@ describe('requestDraftPhoneOtp', () => {
     expect(useDraftPhoneOtpMock).not.toHaveBeenCalled();
   });
 
+  it('usa fluxo firebase mesmo com valor com aspas no provider', async () => {
+    process.env.NODE_ENV = 'production';
+    process.env.PHONE_OTP_PROVIDER = '"firebase"';
+    updateDraftByDraftIdMock.mockResolvedValueOnce(undefined);
+
+    const response = await requestDraftPhoneOtp('draft-abc', 'tok', '55 11 99999-0001');
+
+    expect(response).toEqual({
+      mode: 'firebase',
+      requiresFirebaseIdToken: true,
+      phone: '5511999990001',
+    });
+    expect(updateDraftByDraftIdMock).toHaveBeenCalledWith('draft-abc', expect.any(String), {
+      phone: '5511999990001',
+    });
+    expect(upsertDraftPhoneOtpMock).not.toHaveBeenCalled();
+    expect(useDraftPhoneOtpMock).not.toHaveBeenCalled();
+  });
+
   it('continua retornando sucesso em ambiente de test (sem provider real)', async () => {
     process.env.NODE_ENV = 'test';
     upsertDraftPhoneOtpMock.mockResolvedValueOnce(undefined);

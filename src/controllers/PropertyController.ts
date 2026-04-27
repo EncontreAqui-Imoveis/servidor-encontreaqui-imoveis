@@ -1319,21 +1319,29 @@ class PropertyController {
       const files = req.files ?? {};
 
       const imageFiles = files.images ?? [];
-      if (imageFiles.length < 1) {
+      const bodyImages = req.body?.images
+        ? (Array.isArray(req.body.images) ? req.body.images : [req.body.images])
+            .filter((v: unknown) => typeof v === 'string' && String(v).startsWith('http'))
+        : [];
+
+      if (imageFiles.length + bodyImages.length < 1) {
         logPropertyCreateValidationFailure(req, "broker", "missing_images");
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
       }
-      if (imageFiles.length > MAX_IMAGES_PER_PROPERTY) {
+      if (imageFiles.length + bodyImages.length > MAX_IMAGES_PER_PROPERTY) {
         return res.status(400).json({
           error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel.`,
         });
       }
+
+      imageUrls.push(...bodyImages);
+
       for (const file of imageFiles) {
         const uploaded = await uploadToCloudinary(file, 'properties');
         imageUrls.push(uploaded.url);
       }
 
-      let videoUrl: string | null = null;
+      let videoUrl: string | null = req.body?.video && typeof req.body.video === 'string' && req.body.video.startsWith('http') ? req.body.video : null;
       if (files.video && files.video[0]) {
         const uploadedVideo = await uploadToCloudinary(files.video[0], 'videos');
         videoUrl = uploadedVideo.url;
@@ -1851,21 +1859,29 @@ class PropertyController {
       const files = req.files ?? {};
 
       const imageFiles = files.images ?? [];
-      if (imageFiles.length < 1) {
+      const bodyImages = req.body?.images
+        ? (Array.isArray(req.body.images) ? req.body.images : [req.body.images])
+            .filter((v: unknown) => typeof v === 'string' && String(v).startsWith('http'))
+        : [];
+
+      if (imageFiles.length + bodyImages.length < 1) {
         logPropertyCreateValidationFailure(req, "client", "missing_images");
         return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imovel.' });
       }
-      if (imageFiles.length > MAX_IMAGES_PER_PROPERTY) {
+      if (imageFiles.length + bodyImages.length > MAX_IMAGES_PER_PROPERTY) {
         return res.status(400).json({
           error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel.`,
         });
       }
+
+      imageUrls.push(...bodyImages);
+
       for (const file of imageFiles) {
         const uploaded = await uploadToCloudinary(file, 'properties');
         imageUrls.push(uploaded.url);
       }
 
-      let videoUrl: string | null = null;
+      let videoUrl: string | null = req.body?.video && typeof req.body.video === 'string' && req.body.video.startsWith('http') ? req.body.video : null;
       if (files.video && files.video[0]) {
         const uploadedVideo = await uploadToCloudinary(files.video[0], 'videos');
         videoUrl = uploadedVideo.url;

@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { userController } from '../controllers/UserController';
 import { authController } from '../controllers/AuthController';
 import { authMiddleware } from '../middlewares/auth';
+import uploadController from '../controllers/UploadController';
 
 const userRoutes = Router();
 
@@ -33,6 +34,7 @@ userRoutes.post('/auth/google', (req, res) => authController.google(req, res));
 userRoutes.post('/auth/firebase', userController.firebaseLogin);
 userRoutes.get('/me', authMiddleware, (req, res) => userController.getProfile(req as any, res));
 userRoutes.put('/me', authMiddleware, (req, res) => userController.updateProfile(req as any, res));
+userRoutes.get('/upload/signature', authMiddleware, (req, res) => uploadController.getSignature(req, res));
 userRoutes.put('/me/address', authMiddleware, (req, res) =>
   userController.updateAddress(req as any, res),
 );

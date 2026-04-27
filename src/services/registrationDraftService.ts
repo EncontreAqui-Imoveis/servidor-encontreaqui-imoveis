@@ -51,7 +51,11 @@ function resolvePhoneOtpProvider(): string {
       process.env.DRAFT_VERIFY_PHONE_PROVIDER ??
       process.env.DRAFT_PHONE_OTP_PROVIDER ??
       '',
-  ).trim().toLowerCase();
+  )
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .trim()
+    .toLowerCase();
   if (!provider) {
     return 'disabled';
   }
@@ -748,6 +752,18 @@ export async function requestDraftPhoneOtp(
 
   const verificationMode = resolveDraftPhoneVerificationMode();
   if (verificationMode === 'unavailable') {
+    console.error('[draft.verify-phone] provider indisponivel', {
+      draftIdSuffix: draft.draft_id.slice(-6),
+      envNodeEnv: String(process.env.NODE_ENV ?? '').trim(),
+      provider: resolvePhoneOtpProvider(),
+      hasDraftVerifyPhoneProvider: Boolean(process.env.DRAFT_VERIFY_PHONE_PROVIDER),
+      hasPhoneOtpProvider: Boolean(process.env.PHONE_OTP_PROVIDER),
+      hasDraftPhoneOtpProvider: Boolean(process.env.DRAFT_PHONE_OTP_PROVIDER),
+      hasFirebaseProjectId: Boolean(process.env.FIREBASE_PROJECT_ID),
+      hasFirebaseClientEmail: Boolean(process.env.FIREBASE_CLIENT_EMAIL),
+      hasFirebasePrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
+      hasFirebaseServiceAccountPath: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PATH),
+    });
     throw new DraftFlowError(
       503,
       'PHONE_VERIFICATION_UNAVAILABLE',
@@ -880,6 +896,18 @@ export async function confirmDraftPhoneOtp(
   }
 
   if (verificationMode === 'unavailable') {
+    console.error('[draft.verify-phone] confirm provider indisponivel', {
+      draftIdSuffix: draft.draft_id.slice(-6),
+      envNodeEnv: String(process.env.NODE_ENV ?? '').trim(),
+      provider: resolvePhoneOtpProvider(),
+      hasDraftVerifyPhoneProvider: Boolean(process.env.DRAFT_VERIFY_PHONE_PROVIDER),
+      hasPhoneOtpProvider: Boolean(process.env.PHONE_OTP_PROVIDER),
+      hasDraftPhoneOtpProvider: Boolean(process.env.DRAFT_PHONE_OTP_PROVIDER),
+      hasFirebaseProjectId: Boolean(process.env.FIREBASE_PROJECT_ID),
+      hasFirebaseClientEmail: Boolean(process.env.FIREBASE_CLIENT_EMAIL),
+      hasFirebasePrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
+      hasFirebaseServiceAccountPath: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PATH),
+    });
     throw new DraftFlowError(
       503,
       'PHONE_VERIFICATION_UNAVAILABLE',

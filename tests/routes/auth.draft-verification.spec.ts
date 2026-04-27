@@ -78,6 +78,63 @@ describe('Verificações em /auth/register/draft', () => {
     expect(serviceMocks.sendDraftEmailVerificationCodeMock).toHaveBeenCalledWith('draft-abc', 'tok');
   });
 
+  it('envia reenvio inicial e resend de e-mail de verificação de draft sem emitir JWT', async () => {
+    serviceMocks.sendDraftEmailVerificationCodeMock
+      .mockResolvedValueOnce({
+        sentAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300000).toISOString(),
+        cooldownSec: 60,
+        retryAfterSeconds: 60,
+        resendType: 'initial',
+      })
+      .mockResolvedValueOnce({
+        sentAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300000).toISOString(),
+        cooldownSec: 60,
+        retryAfterSeconds: 60,
+        resendType: 'resend',
+      });
+
+    const initial = await request(app)
+      .post('/auth/register/draft/draft-abc/verify-email')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({});
+
+    const resend = await request(app)
+      .post('/auth/register/draft/draft-abc/verify-email')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({});
+
+    expect(initial.status).toBe(200);
+    expect(initial.body.resendType).toBe('initial');
+    expect(resend.status).toBe(200);
+    expect(resend.body.resendType).toBe('resend');
+    expect(initial.body).not.toHaveProperty('token');
+    expect(resend.body).not.toHaveProperty('token');
+    expect(serviceMocks.sendDraftEmailVerificationCodeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('mapeia falha no challenge sem expor erro interno genérico', async () => {
+    serviceMocks.sendDraftEmailVerificationCodeMock.mockRejectedValueOnce(
+      new DraftFlowErrorMock(
+        503,
+        'EMAIL_CODE_CHALLENGE_FAILED',
+        'Falha temporaria ao enviar o codigo de verificacao.',
+      ),
+    );
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-abc/verify-email')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({});
+
+    expect(response.status).toBe(503);
+    expect(response.body.code).toBe('EMAIL_CODE_CHALLENGE_FAILED');
+  });
+
   it('confirma código inválido de e-mail e retorna erro', async () => {
     serviceMocks.confirmDraftEmailCodeMock.mockRejectedValue(
       new DraftFlowErrorMock(400, 'EMAIL_CODE_INVALID', 'Codigo invalido.'),

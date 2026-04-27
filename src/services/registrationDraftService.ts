@@ -513,13 +513,19 @@ export async function getRegistrationDraft(draftId: string, rawDraftToken: unkno
 export async function sendDraftEmailVerificationCode(draftId: string, rawDraftToken: unknown) {
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
 
-  const issue = await issueEmailCodeChallenge({
-    email: draft.email,
-    purpose: 'verify_email',
-    draftId: draft.id,
-    draftTokenHash,
-    draftStep: 1,
-  });
+  let issue;
+  try {
+    issue = await issueEmailCodeChallenge({
+      email: draft.email,
+      purpose: 'verify_email',
+      draftId: draft.id,
+      draftTokenHash,
+      draftStep: 1,
+    });
+  } catch (error) {
+    console.error('Falha ao registrar desafio de código para rascunho:', error);
+    throw new DraftFlowError(503, 'EMAIL_CODE_CHALLENGE_FAILED', 'Falha temporária ao enviar o codigo de verificacao.');
+  }
 
   if (!issue.allowed) {
     throw new DraftFlowError(429, issue.code, `Aguarde ${issue.retryAfterSeconds}s para reenviar.`);

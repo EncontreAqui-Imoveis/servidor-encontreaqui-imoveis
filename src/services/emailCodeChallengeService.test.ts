@@ -39,6 +39,86 @@ describe('emailCodeChallengeService', () => {
     }
   });
 
+  it('alinha colunas/valores no insert para fluxo sem draft', async () => {
+    queryMock
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([{ insertId: 101 }]);
+
+    const result = await issueEmailCodeChallenge({
+      email: 'legacy@example.com',
+      purpose: 'verify_email',
+      userId: 1,
+    });
+
+    expect(result.allowed).toBe(true);
+
+    const insertCall = queryMock.mock.calls[1];
+    const sql = String(insertCall?.[0] ?? '');
+    const values = insertCall?.[1] as unknown[];
+    const match = sql.match(/\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/s);
+    expect(match).not.toBeNull();
+    const columns = match![1].split(',').map((item) => item.trim()).filter(Boolean);
+    const valueTokens = match![2].split(',').map((item) => item.trim()).filter(Boolean);
+    expect(columns).toHaveLength(valueTokens.length);
+    expect(columns).toEqual([
+      'user_id',
+      'draft_id',
+      'draft_token_hash',
+      'draft_step',
+      'email',
+      'purpose',
+      'code_hash',
+      'send_attempt_number',
+      'failed_attempts',
+      'max_attempts',
+      'cooldown_seconds',
+      'expires_at',
+      'sent_at',
+      'delivery_provider',
+      'status',
+    ]);
+    expect(valueTokens).toHaveLength(columns.length);
+    expect(values).toHaveLength(valueTokens.filter((token) => token === '?').length);
+    expect(values[1]).toBeNull();
+    expect(values[2]).toBeNull();
+    expect(values[3]).toBeNull();
+  });
+
+  it('alinha colunas/valores no insert para fluxo com draft e permite resend', async () => {
+    queryMock
+      .mockResolvedValueOnce([[{ id: 55, sent_at: new Date(Date.now() - 120 * 1000) }]])
+      .mockResolvedValueOnce([{ insertId: 202 }]);
+
+    const issue = await issueEmailCodeChallenge({
+      email: 'draft@example.com',
+      purpose: 'verify_email',
+      draftId: 123,
+      draftTokenHash: 'token-hash',
+      draftStep: 2,
+    });
+    expect(issue.allowed).toBe(true);
+    if (issue.allowed) {
+      expect(issue.attemptNumber).toBe(2);
+      expect(issue.requestId).toBe(202);
+    }
+
+    const insertCall = queryMock.mock.calls[1];
+    const sql = String(insertCall?.[0] ?? '');
+    const values = insertCall?.[1] as unknown[];
+    const match = sql.match(/\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)/s);
+    expect(match).not.toBeNull();
+    const columns = match![1].split(',').map((item) => item.trim()).filter(Boolean);
+    const valueTokens = match![2].split(',').map((item) => item.trim()).filter(Boolean);
+    expect(columns).toHaveLength(valueTokens.length);
+    expect(columns[1]).toBe('draft_id');
+    expect(columns[2]).toBe('draft_token_hash');
+    expect(columns[3]).toBe('draft_step');
+    expect(values).toHaveLength(15);
+    expect(values[1]).toBe(123);
+    expect(values[2]).toBe('token-hash');
+    expect(values[3]).toBe(2);
+  });
+
   it('locks verify_email challenge after max invalid attempts', async () => {
     queryMock
       .mockResolvedValueOnce([

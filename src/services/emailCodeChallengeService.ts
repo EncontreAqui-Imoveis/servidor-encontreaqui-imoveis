@@ -69,6 +69,58 @@ function resolveNextCooldownAfterSend(newAttemptCount: number): number {
   return resolveCooldownForExistingAttempts(newAttemptCount);
 }
 
+function buildIssueEmailInsertPayload(params: {
+  userId: number | null;
+  draftId: number | null;
+  draftTokenHash: string | null;
+  draftStep: number | null;
+  email: string;
+  purpose: EmailChallengePurpose;
+  codeHash: string;
+  attemptNumber: number;
+  maxAttempts: number;
+  cooldownSeconds: number;
+  expiresAt: Date;
+  sentAt: Date;
+  deliveryProvider: string;
+}) {
+  const columns = [
+    'user_id',
+    'draft_id',
+    'draft_token_hash',
+    'draft_step',
+    'email',
+    'purpose',
+    'code_hash',
+    'send_attempt_number',
+    'failed_attempts',
+    'max_attempts',
+    'cooldown_seconds',
+    'expires_at',
+    'sent_at',
+    'delivery_provider',
+    'status',
+  ] as const;
+  const values: (string | number | null | Date)[] = [
+    params.userId,
+    params.draftId,
+    params.draftTokenHash,
+    params.draftStep,
+    params.email,
+    params.purpose,
+    params.codeHash,
+    params.attemptNumber,
+    0,
+    params.maxAttempts,
+    params.cooldownSeconds,
+    params.expiresAt,
+    params.sentAt,
+    params.deliveryProvider,
+    'sent',
+  ];
+  return { columns, values };
+}
+
 export type EmailCodeSendResult =
   | {
       allowed: true;
@@ -159,43 +211,29 @@ export async function issueEmailCodeChallenge(params: {
   const expiresAt = new Date(now.getTime() + CODE_TTL_MINUTES * 60 * 1000);
   const cooldownSecondsApplied = resolveCooldownForExistingAttempts(attemptsInLast24h);
 
+  const insertPayload = buildIssueEmailInsertPayload({
+    userId,
+    draftId: params.draftId ?? null,
+    draftTokenHash: params.draftTokenHash ?? null,
+    draftStep: params.draftStep ?? null,
+    email,
+    purpose: params.purpose,
+    codeHash: hashValue(code),
+    attemptNumber,
+    maxAttempts: MAX_FAILED_ATTEMPTS,
+    cooldownSeconds: cooldownSecondsApplied,
+    expiresAt,
+    sentAt: now,
+    deliveryProvider,
+  });
+  const placeholders = insertPayload.values.map(() => '?').join(', ');
   const [insertResult] = await authDb.query<ResultSetHeader>(
     `
       INSERT INTO email_code_challenges
-        (
-          user_id,
-          draft_id,
-          draft_token_hash,
-          draft_step,
-          email,
-          purpose,
-          code_hash,
-          send_attempt_number,
-          failed_attempts,
-          max_attempts,
-          cooldown_seconds,
-          expires_at,
-          sent_at,
-          delivery_provider,
-          status
-        )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'sent')
+        (${insertPayload.columns.join(', ')})
+      VALUES (${placeholders})
     `,
-    [
-      userId,
-      params.draftId ?? null,
-      params.draftTokenHash ?? null,
-      params.draftStep ?? null,
-      email,
-      params.purpose,
-      hashValue(code),
-      attemptNumber,
-      MAX_FAILED_ATTEMPTS,
-      cooldownSecondsApplied,
-      expiresAt,
-      now,
-      deliveryProvider,
-    ]
+    insertPayload.values
   );
 
   return {

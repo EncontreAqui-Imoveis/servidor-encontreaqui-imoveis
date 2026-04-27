@@ -92,6 +92,54 @@ function hashToken(raw: string): string {
   return hashDraftToken(raw);
 }
 
+function normalizeDraftTextValue(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text.length > 0 ? text : null;
+}
+
+function buildCreateDraftAddressInput(input: {
+  street?: unknown;
+  number?: unknown;
+  complement?: unknown;
+  bairro?: unknown;
+  city?: unknown;
+  state?: unknown;
+  cep?: unknown;
+  withoutNumber?: unknown;
+}) {
+  const values: {
+    street?: string;
+    number?: string;
+    complement?: string;
+    bairro?: string;
+    city?: string;
+    state?: string;
+    cep?: string;
+    withoutNumber?: unknown;
+  } = {};
+
+  const street = normalizeDraftTextValue(input.street);
+  const number = normalizeDraftTextValue(input.number);
+  const complement = normalizeDraftTextValue(input.complement);
+  const bairro = normalizeDraftTextValue(input.bairro);
+  const city = normalizeDraftTextValue(input.city);
+  const state = normalizeDraftTextValue(input.state);
+  const cep = normalizeDraftTextValue(input.cep);
+
+  if (street) values.street = street;
+  if (number) values.number = number;
+  if (complement) values.complement = complement;
+  if (bairro) values.bairro = bairro;
+  if (city) values.city = city;
+  if (state) values.state = state;
+  if (cep) values.cep = cep;
+  if (input.withoutNumber !== undefined && (input.withoutNumber === true || Object.keys(values).length > 0)) {
+    values.withoutNumber = input.withoutNumber;
+  }
+
+  return values;
+}
+
 function normalizePhone(value: unknown): string {
   return String(value ?? '').replace(/\D/g, '');
 }
@@ -268,7 +316,10 @@ export async function createRegistrationDraft(input: {
     }
   }
 
-  const addressPayload = addressProvided(input) ? parseAddressBody(input) : null;
+  const createDraftAddress = buildCreateDraftAddressInput(input);
+  const addressPayload = Object.keys(createDraftAddress).length > 0
+    ? parseAddressBody(createDraftAddress, true)
+    : null;
   if (addressPayload && !addressPayload.ok) {
     throw new DraftFlowError(400, 'DRAFT_ADDRESS_INVALID', 'Endereco invalido.');
   }

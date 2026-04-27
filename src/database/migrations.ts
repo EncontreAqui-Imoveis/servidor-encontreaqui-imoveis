@@ -53,6 +53,40 @@ async function getColumnType(tableName: string, columnName: string): Promise<str
   return rows[0]?.column_type ?? null;
 }
 
+function normalizeForeignKeyType(columnType: string): string {
+  return columnType
+    .toLowerCase()
+    .replace(/\s+collate\s+[^\s]+/g, '')
+    .replace(/\s+character set\s+[^\s]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isColumnTypeCompatibleForForeignKey(
+  referencedType: string,
+  referencingType: string,
+): boolean {
+  return normalizeForeignKeyType(referencedType) === normalizeForeignKeyType(referencingType);
+}
+
+async function hasForeignKeyConstraint(
+  tableName: string,
+  constraintName: string,
+): Promise<boolean> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      SELECT 1
+      FROM information_schema.REFERENTIAL_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND CONSTRAINT_NAME = ?
+      LIMIT 1
+    `,
+    [tableName, constraintName],
+  );
+  return rows.length > 0;
+}
+
 const CONTRACT_DOCUMENT_TYPE_VALUES = CONTRACT_DOCUMENT_TYPES;
 
 const CONTRACT_DOCUMENT_TYPE_ENUM_SQL = CONTRACT_DOCUMENT_TYPE_VALUES.map(
@@ -810,13 +844,21 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
     return;
   }
 
+  const negotiationIdType = (await getColumnType('negotiations', 'id')) || 'CHAR(36)';
+  const usersIdType = (await getColumnType('users', 'id')) || 'INT';
+  const adminsIdType = (await getColumnType('admins', 'id')) || 'INT';
+
+  const hasFk = await hasForeignKeyConstraint(
+    'negotiation_responsibles',
+    'fk_negotiation_responsibles_negotiation',
+  );
   if (!(await tableExists('negotiation_responsibles'))) {
     await connection.query(`
       CREATE TABLE negotiation_responsibles (
         id INT PRIMARY KEY AUTO_INCREMENT,
-        negotiation_id CHAR(36) NOT NULL,
-        user_id INT NOT NULL,
-        assigned_by INT NULL,
+        negotiation_id ${negotiationIdType} NOT NULL,
+        user_id ${usersIdType} NOT NULL,
+        assigned_by ${adminsIdType} NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_negotiation_responsibles_pair (negotiation_id, user_id),
         KEY idx_negotiation_responsibles_negotiation (negotiation_id),
@@ -829,6 +871,34 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
           FOREIGN KEY (assigned_by) REFERENCES admins(id) ON DELETE SET NULL
       )
     `);
+    return;
+  }
+
+  const negotiationResponsibleIdType = await getColumnType('negotiation_responsibles', 'negotiation_id');
+  let shouldRecreateFk = false;
+  if (
+    negotiationIdType &&
+    negotiationResponsibleIdType &&
+    !isColumnTypeCompatibleForForeignKey(negotiationIdType, negotiationResponsibleIdType)
+  ) {
+    if (hasFk) {
+      await connection.query(
+        'ALTER TABLE negotiation_responsibles DROP FOREIGN KEY fk_negotiation_responsibles_negotiation',
+      );
+      shouldRecreateFk = true;
+    }
+    await connection.query(
+      `ALTER TABLE negotiation_responsibles MODIFY COLUMN negotiation_id ${negotiationIdType} NOT NULL`,
+    );
+    shouldRecreateFk = true;
+  }
+
+  if (!hasFk || shouldRecreateFk) {
+    await connection.query(
+      `ALTER TABLE negotiation_responsibles
+       ADD CONSTRAINT fk_negotiation_responsibles_negotiation
+       FOREIGN KEY (negotiation_id) REFERENCES negotiations(id) ON DELETE CASCADE`,
+    );
   }
 }
 

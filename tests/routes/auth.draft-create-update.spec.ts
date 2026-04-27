@@ -92,6 +92,8 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
     const response = await request(app).post('/auth/register/draft').send({
       email: 'novo@dominio.com',
       name: 'Usuario',
+      phone: '61999999999',
+      profileType: 'client',
       password: 'Senha123',
     });
 
@@ -100,6 +102,58 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
     expect(response.body.draft.token).toBeUndefined();
     expect(response.body.draft.profileType).toBe('client');
     expect(response.body.expiresAtMinutes).toBe(1440);
+  });
+
+  it('aceita criação de draft com campos de endereço vazios', async () => {
+    serviceMocks.createRegistrationDraftMock.mockResolvedValue({
+      draftId: 'draft-empty-address',
+      draftToken: 'tok',
+      draft: {
+        draftId: 'draft-empty-address',
+        profileType: 'client',
+        email: 'semendereco@dominio.com',
+        name: 'Usuario',
+        status: 'OPEN',
+        currentStep: 'IDENTITY',
+      },
+      expiresAtMinutes: 1440,
+    });
+
+    const response = await request(app).post('/auth/register/draft').send({
+      email: 'semendereco@dominio.com',
+      name: 'Usuario',
+      password: 'Senha123',
+      profileType: 'client',
+      phone: '61999999999',
+      street: '',
+      number: '',
+      complement: '',
+      bairro: '',
+      city: '',
+      state: '',
+      cep: '',
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.draftId).toBe('draft-empty-address');
+  });
+
+  it('rejeita criação de draft com cep inválido informado', async () => {
+    serviceMocks.createRegistrationDraftMock.mockRejectedValue(
+      new DraftFlowErrorMock(400, 'DRAFT_ADDRESS_INVALID', 'Endereco invalido.'),
+    );
+
+    const response = await request(app).post('/auth/register/draft').send({
+      email: 'erro@dominio.com',
+      name: 'Usuario',
+      password: 'Senha123',
+      profileType: 'client',
+      phone: '61999999999',
+      cep: '123',
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('DRAFT_ADDRESS_INVALID');
   });
 
   it('atualiza rascunho com cabeçalho de fluxo válido', async () => {

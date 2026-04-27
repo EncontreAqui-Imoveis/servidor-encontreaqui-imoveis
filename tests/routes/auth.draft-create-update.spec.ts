@@ -19,12 +19,20 @@ class DraftFlowErrorMock extends Error {
   statusCode: number;
   code: string;
   retryAfterSeconds?: number;
+  fields?: string[];
 
-  constructor(statusCode: number, code: string, message: string, retryAfterSeconds?: number) {
+  constructor(
+    statusCode: number,
+    code: string,
+    message: string,
+    retryAfterSeconds?: number,
+    fields?: string[],
+  ) {
     super(message);
     this.statusCode = statusCode;
     this.code = code;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.fields = fields;
   }
 }
 
@@ -210,6 +218,182 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
       'tok',
       expect.objectContaining({ name: 'Usuario Atualizado', currentStep: 'CONTACT' }),
     );
+  });
+
+  it('aceita PATCH de payload parcial sem endereço', async () => {
+    serviceMocks.patchRegistrationDraftMock.mockResolvedValue({
+      draftId: 'draft-abc',
+      profileType: 'client',
+      email: 'novo@dominio.com',
+      name: 'Nome Somente',
+      status: 'OPEN',
+      currentStep: 'CONTACT',
+    });
+
+    const response = await request(app)
+      .patch('/auth/register/draft/draft-abc')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({
+        name: 'Nome Somente',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.draft.currentStep).toBe('CONTACT');
+  });
+
+  it('aceita PATCH com campos de endereço vazios', async () => {
+    serviceMocks.patchRegistrationDraftMock.mockResolvedValue({
+      draftId: 'draft-abc',
+      profileType: 'client',
+      email: 'novo@dominio.com',
+      name: 'Usuario',
+      status: 'OPEN',
+      currentStep: 'IDENTITY',
+    });
+
+    const response = await request(app)
+      .patch('/auth/register/draft/draft-abc')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({
+        street: '',
+        number: '',
+        complement: '',
+        bairro: '',
+        city: '',
+        state: '',
+        cep: '',
+      });
+
+    expect(response.status).toBe(200);
+    expect(serviceMocks.patchRegistrationDraftMock).toHaveBeenCalledWith(
+      'draft-abc',
+      'tok',
+      expect.objectContaining({
+        street: '',
+        number: '',
+      }),
+    );
+  });
+
+  it('aceita PATCH com endereço completo sem CEP e sem erro', async () => {
+    serviceMocks.patchRegistrationDraftMock.mockResolvedValue({
+      draftId: 'draft-abc',
+      profileType: 'client',
+      email: 'novo@dominio.com',
+      name: 'Usuario',
+      street: 'Rua Exemplo',
+      number: '123',
+      bairro: 'Centro',
+      city: 'Cidade',
+      state: 'GO',
+      status: 'OPEN',
+      currentStep: 'ADDRESS',
+    });
+
+    const response = await request(app)
+      .patch('/auth/register/draft/draft-abc')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({
+        street: 'Rua Exemplo',
+        number: '123',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.draft.street).toBe('Rua Exemplo');
+  });
+
+  it('aceita PATCH com endereço completo com CEP válido', async () => {
+    serviceMocks.patchRegistrationDraftMock.mockResolvedValue({
+      draftId: 'draft-abc',
+      profileType: 'client',
+      email: 'novo@dominio.com',
+      name: 'Usuario',
+      street: 'Rua Exemplo',
+      number: '123',
+      bairro: 'Centro',
+      city: 'Cidade',
+      state: 'GO',
+      cep: '79878979',
+      status: 'OPEN',
+      currentStep: 'ADDRESS',
+    });
+
+    const response = await request(app)
+      .patch('/auth/register/draft/draft-abc')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({
+        street: 'Rua Exemplo',
+        number: '123',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: '79878979',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.draft.cep).toBe('79878979');
+  });
+
+  it('retorna código de campo para PATCH com CEP inválido', async () => {
+    serviceMocks.patchRegistrationDraftMock.mockRejectedValue(
+      new DraftFlowErrorMock(
+        400,
+        'DRAFT_ADDRESS_INVALID',
+        'Endereco invalido.',
+        undefined,
+        ['cep'],
+      ),
+    );
+
+    const response = await request(app)
+      .patch('/auth/register/draft/draft-abc')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({
+        street: 'Rua Exemplo',
+        number: '123',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: '123',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('DRAFT_ADDRESS_INVALID');
+    expect(response.body.fields).toEqual(['cep']);
+  });
+
+  it('aceita PATCH com número S/N', async () => {
+    serviceMocks.patchRegistrationDraftMock.mockResolvedValue({
+      draftId: 'draft-abc',
+      profileType: 'client',
+      email: 'novo@dominio.com',
+      name: 'Usuario',
+      status: 'OPEN',
+      currentStep: 'ADDRESS',
+    });
+
+    const response = await request(app)
+      .patch('/auth/register/draft/draft-abc')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({
+        number: 'S/N',
+        withoutNumber: true,
+        street: 'Rua Sem Numero',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+      });
+
+    expect(response.status).toBe(200);
   });
 
   it('rejeita atualização de endereço com cep inválido', async () => {

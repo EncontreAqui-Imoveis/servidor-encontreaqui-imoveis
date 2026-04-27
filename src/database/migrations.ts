@@ -53,6 +53,82 @@ async function getColumnType(tableName: string, columnName: string): Promise<str
   return rows[0]?.column_type ?? null;
 }
 
+type ColumnMetadata = {
+  tableName: string;
+  columnName: string;
+  columnType: string;
+  dataType: string;
+  characterSetName: string | null;
+  collationName: string | null;
+};
+
+async function getColumnMetadata(
+  tableName: string,
+  columnName: string,
+): Promise<ColumnMetadata | null> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      SELECT column_type, data_type, character_set_name, collation_name
+      FROM information_schema.columns
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+      LIMIT 1
+    `,
+    [tableName, columnName],
+  );
+  const row = rows[0];
+  if (!row?.column_type || !row?.data_type) {
+    return null;
+  }
+  return {
+    tableName,
+    columnName,
+    columnType: String(row.column_type),
+    dataType: String(row.data_type),
+    characterSetName: row.character_set_name == null ? null : String(row.character_set_name),
+    collationName: row.collation_name == null ? null : String(row.collation_name),
+  };
+}
+
+function shouldKeepCharacterSettings(refType: string): boolean {
+  const dataType = refType.toLowerCase();
+  return (
+    dataType.includes('char')
+    || dataType.includes('text')
+    || dataType.includes('binary')
+  );
+}
+
+function isFkColumnCompatible(
+  referenced: ColumnMetadata | null,
+  referencing: ColumnMetadata | null,
+) {
+  if (!referenced || !referencing) return false;
+  if (shouldKeepCharacterSettings(referenced.dataType) || shouldKeepCharacterSettings(referencing.dataType)) {
+    return (
+      normalizeForeignKeyType(referenced.columnType) === normalizeForeignKeyType(referencing.columnType)
+      && (referenced.characterSetName ?? '') === (referencing.characterSetName ?? '')
+      && (referenced.collationName ?? '') === (referencing.collationName ?? '')
+    );
+  }
+  return normalizeForeignKeyType(referenced.columnType) === normalizeForeignKeyType(referencing.columnType);
+}
+
+function formatFkColumnType(columnMeta: ColumnMetadata | null, fallbackType: string): string {
+  if (!columnMeta) {
+    return fallbackType;
+  }
+  let typeExpression = columnMeta.columnType;
+  if (columnMeta.characterSetName) {
+    typeExpression = `${typeExpression} CHARACTER SET ${columnMeta.characterSetName}`;
+  }
+  if (columnMeta.collationName) {
+    typeExpression = `${typeExpression} COLLATE ${columnMeta.collationName}`;
+  }
+  return typeExpression;
+}
+
 function normalizeForeignKeyType(columnType: string): string {
   return columnType
     .toLowerCase()
@@ -844,9 +920,22 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
     return;
   }
 
-  const negotiationIdType = (await getColumnType('negotiations', 'id')) || 'CHAR(36)';
-  const usersIdType = (await getColumnType('users', 'id')) || 'INT';
-  const adminsIdType = (await getColumnType('admins', 'id')) || 'INT';
+  const negotiationIdMetadata = await getColumnMetadata('negotiations', 'id');
+  const usersIdMetadata = await getColumnMetadata('users', 'id');
+  const adminsIdMetadata = await getColumnMetadata('admins', 'id');
+
+  const negotiationIdType = formatFkColumnType(
+    negotiationIdMetadata,
+    (await getColumnType('negotiations', 'id')) || 'CHAR(36)',
+  );
+  const usersIdType = formatFkColumnType(
+    usersIdMetadata,
+    (await getColumnType('users', 'id')) || 'INT',
+  );
+  const adminsIdType = formatFkColumnType(
+    adminsIdMetadata,
+    (await getColumnType('admins', 'id')) || 'INT',
+  );
 
   const hasFk = await hasForeignKeyConstraint(
     'negotiation_responsibles',
@@ -874,13 +963,33 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
     return;
   }
 
-  const negotiationResponsibleIdType = await getColumnType('negotiation_responsibles', 'negotiation_id');
+  const negotiationResponsibleIdMetadata = await getColumnMetadata(
+    'negotiation_responsibles',
+    'negotiation_id',
+  );
+  const shouldAlignNegotiationColumn = !isFkColumnCompatible(
+    negotiationIdMetadata,
+    negotiationResponsibleIdMetadata,
+  );
+  const shouldAlignUserColumn = !isFkColumnCompatible(
+    usersIdMetadata,
+    await getColumnMetadata('negotiation_responsibles', 'user_id'),
+  );
+  const hasUserFk = await hasForeignKeyConstraint(
+    'negotiation_responsibles',
+    'fk_negotiation_responsibles_user',
+  );
+  const shouldAlignAssignedByColumn = !isFkColumnCompatible(
+    adminsIdMetadata,
+    await getColumnMetadata('negotiation_responsibles', 'assigned_by'),
+  );
+  const hasAssignedByFk = await hasForeignKeyConstraint(
+    'negotiation_responsibles',
+    'fk_negotiation_responsibles_assigned_by',
+  );
+
   let shouldRecreateFk = false;
-  if (
-    negotiationIdType &&
-    negotiationResponsibleIdType &&
-    !isColumnTypeCompatibleForForeignKey(negotiationIdType, negotiationResponsibleIdType)
-  ) {
+  if (shouldAlignNegotiationColumn) {
     if (hasFk) {
       await connection.query(
         'ALTER TABLE negotiation_responsibles DROP FOREIGN KEY fk_negotiation_responsibles_negotiation',
@@ -893,11 +1002,56 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
     shouldRecreateFk = true;
   }
 
+  if (shouldAlignUserColumn) {
+    if (hasUserFk) {
+      await connection.query(
+        'ALTER TABLE negotiation_responsibles DROP FOREIGN KEY fk_negotiation_responsibles_user',
+      );
+    }
+    await connection.query(
+      `ALTER TABLE negotiation_responsibles MODIFY COLUMN user_id ${usersIdType} NOT NULL`,
+    );
+  }
+
+  if (shouldAlignAssignedByColumn) {
+    if (hasAssignedByFk) {
+      await connection.query(
+        'ALTER TABLE negotiation_responsibles DROP FOREIGN KEY fk_negotiation_responsibles_assigned_by',
+      );
+    }
+    await connection.query(
+      `ALTER TABLE negotiation_responsibles MODIFY COLUMN assigned_by ${adminsIdType} NULL`,
+    );
+  }
+
   if (!hasFk || shouldRecreateFk) {
     await connection.query(
       `ALTER TABLE negotiation_responsibles
        ADD CONSTRAINT fk_negotiation_responsibles_negotiation
        FOREIGN KEY (negotiation_id) REFERENCES negotiations(id) ON DELETE CASCADE`,
+    );
+  }
+  if (
+    shouldAlignUserColumn
+    || !(await hasForeignKeyConstraint('negotiation_responsibles', 'fk_negotiation_responsibles_user'))
+  ) {
+    await connection.query(
+      `ALTER TABLE negotiation_responsibles
+       ADD CONSTRAINT fk_negotiation_responsibles_user
+       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`,
+    );
+  }
+  if (
+    shouldAlignAssignedByColumn
+    || !(await hasForeignKeyConstraint(
+      'negotiation_responsibles',
+      'fk_negotiation_responsibles_assigned_by',
+    ))
+  ) {
+    await connection.query(
+      `ALTER TABLE negotiation_responsibles
+       ADD CONSTRAINT fk_negotiation_responsibles_assigned_by
+       FOREIGN KEY (assigned_by) REFERENCES admins(id) ON DELETE SET NULL`,
     );
   }
 }

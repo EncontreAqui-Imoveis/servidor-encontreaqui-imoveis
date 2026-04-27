@@ -84,6 +84,7 @@ class RegistrationDraftController {
         code: error.code,
         error: error.message,
         retry_after_seconds: error.retryAfterSeconds,
+        ...(error.fields ? { fields: error.fields } : {}),
         correlation_id: this.correlationId(req),
       });
     }

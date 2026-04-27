@@ -1,11 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import 'dotenv/config';
 
-const { queryMock, createDraftMock, discardExpiredDraftsMock, findOpenDraftByEmailMock } = vi.hoisted(() => ({
+const {
+  queryMock,
+  createDraftMock,
+  discardExpiredDraftsMock,
+  findOpenDraftByEmailMock,
+  getDraftByDraftIdAndTokenMock,
+  updateDraftByDraftIdMock,
+} = vi.hoisted(() => ({
   queryMock: vi.fn(),
   createDraftMock: vi.fn(),
   discardExpiredDraftsMock: vi.fn(),
   findOpenDraftByEmailMock: vi.fn(),
+  getDraftByDraftIdAndTokenMock: vi.fn(),
+  updateDraftByDraftIdMock: vi.fn(),
 }));
 
 vi.mock('../../src/database/connection', () => ({
@@ -22,10 +31,12 @@ vi.mock('../../src/services/registrationDraftRepository', async () => {
     createDraft: createDraftMock,
     discardExpiredDrafts: discardExpiredDraftsMock,
     findOpenDraftByEmail: findOpenDraftByEmailMock,
+    getDraftByDraftIdAndToken: getDraftByDraftIdAndTokenMock,
+    updateDraftByDraftId: updateDraftByDraftIdMock,
   };
 });
 
-import { createRegistrationDraft } from '../../src/services/registrationDraftService';
+import { createRegistrationDraft, patchRegistrationDraft } from '../../src/services/registrationDraftService';
 
 function buildDraftRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -57,8 +68,8 @@ function buildDraftRow(overrides: Record<string, unknown> = {}) {
     password_hash_expires_at: null,
     current_step: 'IDENTITY',
     revision: 1,
-    expires_at: new Date('2026-04-27T00:00:00.000Z'),
-    created_at: new Date('2026-04-27T00:00:00.000Z'),
+    expires_at: new Date(Date.now() + 60 * 60 * 1000),
+    created_at: new Date(),
     updated_at: new Date('2026-04-27T00:00:00.000Z'),
     completed_at: null,
     discarded_at: null,
@@ -153,5 +164,177 @@ describe('createRegistrationDraft', () => {
 
     expect(createDraftMock).not.toHaveBeenCalled();
     expect(discardExpiredDraftsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('aceita PATCH de rascunho com payload parcial sem endereço', async () => {
+    const draft = buildDraftRow();
+    getDraftByDraftIdAndTokenMock
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, name: 'Nome Atualizado' });
+
+    const response = await patchRegistrationDraft('draft-abc', 'tok', {
+      name: 'Nome Atualizado',
+    });
+
+    expect(updateDraftByDraftIdMock).toHaveBeenCalledWith(
+      'draft-abc',
+      expect.any(String),
+      expect.objectContaining({ name: 'Nome Atualizado' }),
+    );
+    expect(getDraftByDraftIdAndTokenMock).toHaveBeenCalledTimes(2);
+    expect(getDraftByDraftIdAndTokenMock).toHaveBeenNthCalledWith(1, 'draft-abc', expect.any(String));
+    expect(response.name).toBe('Nome Atualizado');
+  });
+
+  it('aceita PATCH com campos de endereço vazios (ignorados)', async () => {
+    getDraftByDraftIdAndTokenMock.mockResolvedValueOnce(buildDraftRow());
+
+    const response = await patchRegistrationDraft('draft-abc', 'tok', {
+      street: '',
+      number: '',
+      complement: '',
+      bairro: '',
+      city: '',
+      state: '',
+      cep: '',
+    });
+
+    expect(updateDraftByDraftIdMock).not.toHaveBeenCalled();
+    expect(response.name).toBe('Usuario');
+  });
+
+  it('aceita PATCH com endereço completo sem CEP', async () => {
+    const draft = buildDraftRow();
+    getDraftByDraftIdAndTokenMock
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({
+        ...draft,
+        street: 'Rua X',
+        number: '100',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: null,
+      });
+
+    await patchRegistrationDraft('draft-abc', 'tok', {
+      street: 'Rua X',
+      number: '100',
+      bairro: 'Centro',
+      city: 'Cidade',
+      state: 'GO',
+    });
+
+    expect(updateDraftByDraftIdMock).toHaveBeenCalledWith(
+      'draft-abc',
+      expect.any(String),
+      expect.objectContaining({
+        street: 'Rua X',
+        number: '100',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+      }),
+    );
+  });
+
+  it('aceita PATCH com endereço completo com CEP válido', async () => {
+    const draft = buildDraftRow();
+    getDraftByDraftIdAndTokenMock
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({
+        ...draft,
+        street: 'Rua X',
+        number: '100',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: '79878979',
+      });
+
+    await patchRegistrationDraft('draft-abc', 'tok', {
+      street: 'Rua X',
+      number: '100',
+      bairro: 'Centro',
+      city: 'Cidade',
+      state: 'GO',
+      cep: '79878979',
+    });
+
+    expect(updateDraftByDraftIdMock).toHaveBeenCalledWith(
+      'draft-abc',
+      expect.any(String),
+      expect.objectContaining({ cep: '79878979' }),
+    );
+  });
+
+  it('rejeita PATCH com CEP inválido informado e retorna campo com erro', async () => {
+    const draft = buildDraftRow();
+    getDraftByDraftIdAndTokenMock.mockResolvedValueOnce(draft);
+
+    await expect(
+      patchRegistrationDraft('draft-abc', 'tok', {
+        street: 'Rua X',
+        number: '100',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: '123',
+      }),
+    ).rejects.toMatchObject({
+      code: 'DRAFT_ADDRESS_INVALID',
+      statusCode: 400,
+      fields: ['cep'],
+    });
+
+    expect(updateDraftByDraftIdMock).not.toHaveBeenCalled();
+  });
+
+  it('aceita PATCH com "S/N" e sem número', async () => {
+    const draft = buildDraftRow();
+    getDraftByDraftIdAndTokenMock
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, number: 'S/N' });
+
+    await patchRegistrationDraft('draft-abc', 'tok', {
+      number: 'S/N',
+      street: 'Rua Sem Numero',
+      bairro: 'Centro',
+      city: 'Cidade',
+      state: 'GO',
+    });
+
+    expect(updateDraftByDraftIdMock).toHaveBeenCalledWith(
+      'draft-abc',
+      expect.any(String),
+      expect.objectContaining({
+        number: 'S/N',
+        withoutNumber: true,
+      }),
+    );
+  });
+
+  it('aceita PATCH com withoutNumber=true', async () => {
+    const draft = buildDraftRow();
+    getDraftByDraftIdAndTokenMock
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValueOnce({ ...draft, number: 'S/N' });
+
+    await patchRegistrationDraft('draft-abc', 'tok', {
+      withoutNumber: true,
+      street: 'Rua Sem Numero',
+      bairro: 'Centro',
+      city: 'Cidade',
+      number: '10',
+      state: 'GO',
+    });
+
+    expect(updateDraftByDraftIdMock).toHaveBeenCalledWith(
+      'draft-abc',
+      expect.any(String),
+      expect.objectContaining({
+        withoutNumber: true,
+      }),
+    );
   });
 });

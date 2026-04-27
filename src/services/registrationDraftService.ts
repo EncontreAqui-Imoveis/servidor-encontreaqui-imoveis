@@ -22,6 +22,7 @@ import { hashDraftToken, generateDraftId, generateDraftToken, nowDate, draftExpi
 import {
   sanitizeAddressInput,
   sanitizePartialAddressInput,
+  AddressFields,
 } from '../utils/address';
 import { hasValidCreci, normalizeCreci } from '../utils/creci';
 import { buildUserPayload, signUserToken, hasCompleteProfile } from './authSessionService';
@@ -43,11 +44,19 @@ export class DraftFlowError extends Error {
   statusCode: number;
   code: string;
   retryAfterSeconds?: number;
-  constructor(statusCode: number, code: string, message: string, retryAfterSeconds?: number) {
+  fields?: string[];
+  constructor(
+    statusCode: number,
+    code: string,
+    message: string,
+    retryAfterSeconds?: number,
+    fields?: string[],
+  ) {
     super(message);
     this.statusCode = statusCode;
     this.code = code;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.fields = fields;
   }
 }
 
@@ -136,8 +145,23 @@ function buildCreateDraftAddressInput(input: {
   if (input.withoutNumber !== undefined && (input.withoutNumber === true || Object.keys(values).length > 0)) {
     values.withoutNumber = input.withoutNumber;
   }
+  if (
+    !('withoutNumber' in values)
+    && isWithoutNumberText(input.number)
+    && !('withoutNumber' in input)
+  ) {
+    values.withoutNumber = true;
+  }
 
   return values;
+}
+
+function isWithoutNumberText(value: unknown): boolean {
+  const text = normalizeDraftTextValue(value);
+  if (!text) {
+    return false;
+  }
+  return /^(s\/?n|sn)$/i.test(text.replace(/\s+/g, ''));
 }
 
 function normalizePhone(value: unknown): string {
@@ -146,19 +170,6 @@ function normalizePhone(value: unknown): string {
 
 function normalizeNumericCode(value: unknown): string {
   return String(value ?? '').replace(/\D/g, '');
-}
-
-function addressProvided(body: { street?: unknown; number?: unknown; complement?: unknown; bairro?: unknown; city?: unknown; state?: unknown; cep?: unknown; withoutNumber?: unknown; }): boolean {
-  return (
-    body.street !== undefined ||
-    body.number !== undefined ||
-    body.complement !== undefined ||
-    body.bairro !== undefined ||
-    body.city !== undefined ||
-    body.state !== undefined ||
-    body.cep !== undefined ||
-    body.withoutNumber !== undefined
-  );
 }
 
 function draftPayload(draft: RegistrationDraftRow) {
@@ -187,6 +198,14 @@ function draftPayload(draft: RegistrationDraftRow) {
   };
 }
 
+type ParsedAddressPayload = {
+  ok: true;
+  value: Partial<AddressFields>;
+} | {
+  ok: false;
+  errors: string[];
+};
+
 function parseAddressBody(body: {
   street?: unknown;
   number?: unknown;
@@ -196,28 +215,65 @@ function parseAddressBody(body: {
   state?: unknown;
   cep?: unknown;
   withoutNumber?: unknown;
-}, partial = false) {
+}, partial = false): ParsedAddressPayload {
+  const hasWithoutNumberFlag =
+    Object.prototype.hasOwnProperty.call(body, 'withoutNumber')
+    || Object.prototype.hasOwnProperty.call(body, 'without_number');
+  const sanitizedBody = Object.fromEntries(
+    Object.entries(body).filter(([, value]) => value !== undefined),
+  ) as {
+    street?: unknown;
+    number?: unknown;
+    complement?: unknown;
+    bairro?: unknown;
+    city?: unknown;
+    state?: unknown;
+    cep?: unknown;
+    withoutNumber?: unknown;
+    without_number?: unknown;
+  };
+  const payload = {
+    ...sanitizedBody,
+    ...(isWithoutNumberText(sanitizedBody.number) && !('withoutNumber' in sanitizedBody)
+      && !('without_number' in sanitizedBody)
+      ? { withoutNumber: true }
+      : {}),
+  };
   if (partial) {
-    return sanitizePartialAddressInput({
-      street: body.street,
-      number: body.number,
-      complement: body.complement,
-      bairro: body.bairro,
-      city: body.city,
-      state: body.state,
-      cep: body.cep,
-      withoutNumber: body.withoutNumber,
-    });
+    const partialInput = {
+      ...(payload.street !== undefined ? { street: payload.street } : {}),
+      ...(payload.number !== undefined ? { number: payload.number } : {}),
+      ...(payload.complement !== undefined ? { complement: payload.complement } : {}),
+      ...(payload.bairro !== undefined ? { bairro: payload.bairro } : {}),
+      ...(payload.city !== undefined ? { city: payload.city } : {}),
+      ...(payload.state !== undefined ? { state: payload.state } : {}),
+      ...(payload.cep !== undefined ? { cep: payload.cep } : {}),
+      ...(payload.withoutNumber !== undefined ? { withoutNumber: payload.withoutNumber } : {}),
+    };
+    const parsed = sanitizePartialAddressInput(partialInput);
+    if (!parsed.ok && !hasWithoutNumberFlag) {
+      const parsedWithoutWithoutNumber = sanitizePartialAddressInput(
+        Object.fromEntries(
+          Object.entries(partialInput).filter(([key]) => key !== 'withoutNumber'),
+        ),
+      );
+      if (parsedWithoutWithoutNumber.ok) {
+        return parsedWithoutWithoutNumber;
+      }
+      const errors = parsedWithoutWithoutNumber.errors.filter((field) => field !== 'without_number');
+      return { ok: false, errors };
+    }
+    return parsed;
   }
   return sanitizeAddressInput({
-    street: body.street,
-    number: body.number,
-    complement: body.complement,
-    bairro: body.bairro,
-    city: body.city,
-    state: body.state,
-    cep: body.cep,
-    without_number: body.withoutNumber,
+    street: payload.street,
+    number: payload.number,
+    complement: payload.complement,
+    bairro: payload.bairro,
+    city: payload.city,
+    state: payload.state,
+    cep: payload.cep,
+    ...(payload.withoutNumber !== undefined ? { without_number: payload.withoutNumber } : {}),
   }, { requireCep: false });
 }
 
@@ -321,7 +377,13 @@ export async function createRegistrationDraft(input: {
     ? parseAddressBody(createDraftAddress, true)
     : null;
   if (addressPayload && !addressPayload.ok) {
-    throw new DraftFlowError(400, 'DRAFT_ADDRESS_INVALID', 'Endereco invalido.');
+    throw new DraftFlowError(
+      400,
+      'DRAFT_ADDRESS_INVALID',
+      'Endereco invalido.',
+      undefined,
+      addressPayload.errors,
+    );
   }
 
   const passwordHash = normalizedProvider === 'email' ? await bcrypt.hash(password, 8) : null;
@@ -412,10 +474,17 @@ export async function patchRegistrationDraft(
     }
     updates.creci = creci;
   }
-  if (addressProvided(body)) {
-    const addr = parseAddressBody(body, true);
+  const patchAddressInput = buildCreateDraftAddressInput(body);
+  if (Object.keys(patchAddressInput).length > 0) {
+    const addr = parseAddressBody(patchAddressInput, true);
     if (!addr.ok) {
-      throw new DraftFlowError(400, 'DRAFT_ADDRESS_INVALID', 'Endereco invalido.');
+      throw new DraftFlowError(
+        400,
+        'DRAFT_ADDRESS_INVALID',
+        'Endereco invalido.',
+        undefined,
+        addr.errors,
+      );
     }
     updates.street = addr.value.street;
     updates.number = addr.value.number;
@@ -424,7 +493,7 @@ export async function patchRegistrationDraft(
     updates.city = addr.value.city;
     updates.state = addr.value.state;
     updates.cep = addr.value.cep;
-    updates.withoutNumber = !!body.withoutNumber;
+    updates.withoutNumber = body.withoutNumber === undefined ? isWithoutNumberText(addr.value.number) : !!body.withoutNumber;
   }
 
   if (Object.keys(updates).length > 0) {
@@ -894,6 +963,8 @@ export async function upsertFirebaseContextToDraft(
   rawDraftToken: unknown,
   context: {
     firebaseUid: string;
+    withoutNumber?: unknown;
+    without_number?: unknown;
     email?: unknown;
     name?: unknown;
     phone?: unknown;
@@ -919,10 +990,17 @@ export async function upsertFirebaseContextToDraft(
   if (context.email !== undefined) {
     updates.email = normalizeEmail(context.email);
   }
-    if (addressProvided(context as any)) {
-    const addr = parseAddressBody(context as any, true);
+  const contextAddressInput = buildCreateDraftAddressInput(context as any);
+  if (Object.keys(contextAddressInput).length > 0) {
+    const addr = parseAddressBody(contextAddressInput, true);
     if (!addr.ok) {
-      throw new DraftFlowError(400, 'DRAFT_ADDRESS_INVALID', 'Endereco invalido.');
+      throw new DraftFlowError(
+        400,
+        'DRAFT_ADDRESS_INVALID',
+        'Endereco invalido.',
+        undefined,
+        addr.errors,
+      );
     }
     updates.street = addr.value.street;
     updates.number = addr.value.number;
@@ -931,6 +1009,8 @@ export async function upsertFirebaseContextToDraft(
     updates.city = addr.value.city;
     updates.state = addr.value.state;
     updates.cep = addr.value.cep;
+    updates.withoutNumber = isWithoutNumberText(addr.value.number)
+      || (context.withoutNumber ?? false);
   }
 
   await updateDraftByDraftId(draftId, draftTokenHash, updates as any);

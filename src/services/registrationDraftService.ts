@@ -32,6 +32,7 @@ import {
   deleteEmailCodeChallenge,
 } from './emailCodeChallengeService';
 import { sendEmailCodeEmail } from './emailService';
+import firebaseAdmin from '../config/firebaseAdmin';
 
 export type DraftFinalizeAction = 'send_later' | 'submit_documents';
 
@@ -39,17 +40,54 @@ const PHONE_OTP_TTL_SECONDS = 5 * 60;
 const PHONE_MAX_ATTEMPTS = 5;
 const PHONE_COOLDOWN_SECONDS = 60;
 const PASSWORD_TTL_MINUTES = 60;
-const PHONE_OTP_PROVIDER =
-  String(process.env.PHONE_OTP_PROVIDER ?? process.env.DRAFT_PHONE_OTP_PROVIDER ?? '').trim().toLowerCase();
+type DraftPhoneVerificationMode = 'firebase' | 'legacy' | 'unavailable';
 type PhoneOtpDeliveryResult =
   | { ok: true; provider: string; status: 'sent' | 'mock' }
   | { ok: false; provider: string; status: 'disabled' | 'mock' | 'unsupported' | 'error' };
 
 function resolvePhoneOtpProvider(): string {
-  if (!PHONE_OTP_PROVIDER) {
+  const provider = String(
+    process.env.PHONE_OTP_PROVIDER ??
+      process.env.DRAFT_VERIFY_PHONE_PROVIDER ??
+      process.env.DRAFT_PHONE_OTP_PROVIDER ??
+      '',
+  ).trim().toLowerCase();
+  if (!provider) {
     return 'disabled';
   }
-  return PHONE_OTP_PROVIDER;
+  return provider;
+}
+
+function resolveDraftPhoneVerificationMode(): DraftPhoneVerificationMode {
+  const provider = resolvePhoneOtpProvider();
+  if (provider === 'firebase') {
+    return 'firebase';
+  }
+
+  if (String(process.env.NODE_ENV ?? '').toLowerCase() === 'test') {
+    return 'legacy';
+  }
+
+  if (provider === 'mock' || provider === 'custom' || provider === 'test' || provider === 'noop') {
+    return 'legacy';
+  }
+
+  return 'unavailable';
+}
+
+function extractFirebasePhoneFromTokenClaims(claims: unknown): string {
+  if (!claims || typeof claims !== 'object') {
+    return '';
+  }
+
+  const payload = claims as {
+    phone_number?: unknown;
+    phoneNumber?: unknown;
+    phone?: unknown;
+    [key: string]: unknown;
+  };
+
+  return normalizePhone(payload.phone_number ?? payload.phoneNumber ?? payload.phone ?? '');
 }
 
 async function dispatchDraftPhoneOtp(
@@ -708,6 +746,26 @@ export async function requestDraftPhoneOtp(
     throw new DraftFlowError(400, 'PHONE_REQUIRED', 'Telefone e obrigatorio.');
   }
 
+  const verificationMode = resolveDraftPhoneVerificationMode();
+  if (verificationMode === 'unavailable') {
+    throw new DraftFlowError(
+      503,
+      'PHONE_VERIFICATION_UNAVAILABLE',
+      'Verificacao de telefone indisponivel no momento.',
+    );
+  }
+
+  if (verificationMode === 'firebase') {
+    await updateDraftByDraftId(draftId, draftTokenHash, {
+      phone: normalizedPhone,
+    });
+    return {
+      mode: 'firebase',
+      requiresFirebaseIdToken: true,
+      phone: normalizedPhone,
+    };
+  }
+
   const [existingRows] = await authDb.query<RowDataPacket[]>(
     `
       SELECT sent_at, attempts, max_attempts, cooldown_seconds
@@ -777,8 +835,58 @@ export async function confirmDraftPhoneOtp(
   rawDraftToken: unknown,
   sessionToken: unknown,
   code: unknown,
+  firebaseIdToken?: unknown,
 ) {
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
+  const verificationMode = resolveDraftPhoneVerificationMode();
+  const normalizedFirebaseIdToken = normalizeToken(firebaseIdToken);
+
+  if (verificationMode === 'firebase') {
+    if (!normalizedFirebaseIdToken) {
+      throw new DraftFlowError(
+        400,
+        'PHONE_FIREBASE_TOKEN_REQUIRED',
+        'Token de autenticacao do Firebase e obrigatorio para confirmacao.',
+      );
+    }
+
+    let claims: unknown;
+    try {
+      claims = await firebaseAdmin.auth().verifyIdToken(normalizedFirebaseIdToken);
+    } catch {
+      throw new DraftFlowError(401, 'PHONE_FIREBASE_TOKEN_INVALID', 'Token do Firebase invalido ou expirado.');
+    }
+
+    const phoneFromToken = extractFirebasePhoneFromTokenClaims(claims);
+    if (!phoneFromToken) {
+      throw new DraftFlowError(400, 'PHONE_FIREBASE_TOKEN_INVALID', 'Token do Firebase nao possui telefone.');
+    }
+
+    if (draft.phone && normalizePhone(draft.phone) !== phoneFromToken) {
+      throw new DraftFlowError(
+        409,
+        'PHONE_MISMATCH',
+        'Telefone informado nao confere com o token de autenticacao.',
+      );
+    }
+
+    const nowTime = now();
+    await updateDraftByDraftId(draftId, draftTokenHash, {
+      phone: phoneFromToken,
+      phoneVerifiedAt: nowTime,
+      currentStep: 'VERIFICATION',
+    });
+    return { status: 'verified', phone: phoneFromToken };
+  }
+
+  if (verificationMode === 'unavailable') {
+    throw new DraftFlowError(
+      503,
+      'PHONE_VERIFICATION_UNAVAILABLE',
+      'Verificacao de telefone indisponivel no momento.',
+    );
+  }
+
   const otpCode = normalizeNumericCode(code);
   const normalizedSession = normalizeToken(sessionToken);
 

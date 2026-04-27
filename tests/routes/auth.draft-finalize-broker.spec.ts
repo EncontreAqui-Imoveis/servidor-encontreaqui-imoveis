@@ -134,6 +134,39 @@ describe('Finalização de rascunho para corretor', () => {
     expect(response.body.requiresDocuments).toBe(true);
   });
 
+  it('finaliza corretor sem phoneVerifiedAt no rascunho', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockResolvedValue({
+      token: 'jwt-broker-phone-opcional',
+      user: {
+        id: 13,
+        email: 'corretor-sem-fone@dominio.com',
+        name: 'Corretor Sem Telefone',
+        role: 'broker',
+        phone: null,
+        street: 'Rua 2',
+        number: '20',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: null,
+      },
+      needsCompletion: false,
+      requiresDocuments: true,
+      action: 'send_later',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-broker/finalize')
+      .set('x-draft-id', 'draft-broker')
+      .set('x-draft-token', 'tok')
+      .send({ action: 'send_later' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.token).toBe('jwt-broker-phone-opcional');
+    expect(response.body.requiresDocuments).toBe(true);
+    expect(response.body.user.phone).toBeNull();
+  });
+
   it('rejeita corretor que encerra com action submit_documents sem docs', async () => {
     serviceMocks.finalizeRegistrationDraftMock.mockRejectedValue(
       new DraftFlowErrorMock(

@@ -190,6 +190,7 @@ class RegistrationDraftController {
         this.draftToken(req),
         req.body?.sessionToken,
         req.body?.code,
+        req.body?.firebaseIdToken,
       );
       const { status, ...payload } = response as { status?: string; [key: string]: unknown };
       return res.status(200).json({ ...payload, status: status ?? 'ok' });

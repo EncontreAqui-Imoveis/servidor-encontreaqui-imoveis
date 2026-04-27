@@ -200,4 +200,50 @@ describe('Verificações em /auth/register/draft', () => {
     expect(response.status).toBe(404);
     expect(response.body.code).toBe('PHONE_SESSION_NOT_FOUND');
   });
+
+  it('solicita verificação por telefone em modo firebase', async () => {
+    serviceMocks.requestDraftPhoneOtpMock.mockResolvedValue({
+      mode: 'firebase',
+      requiresFirebaseIdToken: true,
+      phone: '5511999999999',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-abc/verify-phone')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({ phone: '5511999999999' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.mode).toBe('firebase');
+    expect(response.body.requiresFirebaseIdToken).toBe(true);
+    expect(response.body.phone).toBe('5511999999999');
+    expect(response.body).not.toHaveProperty('sessionToken');
+  });
+
+  it('confirma telefone com Firebase token sem retorno de usuário/JWT', async () => {
+    serviceMocks.confirmDraftPhoneOtpMock.mockResolvedValue({
+      status: 'verified',
+      phone: '5511999999999',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-abc/verify-phone/confirm')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({ firebaseIdToken: 'firebase-id-token' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('verified');
+    expect(response.body.phone).toBe('5511999999999');
+    expect(response.body).not.toHaveProperty('token');
+    expect(response.body).not.toHaveProperty('user');
+    expect(serviceMocks.confirmDraftPhoneOtpMock).toHaveBeenCalledWith(
+      'draft-abc',
+      'tok',
+      undefined,
+      undefined,
+      'firebase-id-token',
+    );
+  });
 });

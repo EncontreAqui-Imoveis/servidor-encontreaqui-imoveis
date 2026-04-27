@@ -125,4 +125,36 @@ describe('Finalização de rascunho para cliente', () => {
     expect(response.body.user.cep).toBeNull();
     expect(response.body.requiresDocuments).toBe(false);
   });
+
+  it('finaliza cliente sem phoneVerifiedAt no rascunho', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockResolvedValue({
+      token: 'jwt-client-phone-opcional',
+      user: {
+        id: 13,
+        email: 'cliente-sem-fone@dominio.com',
+        name: 'Cliente Sem Telefone',
+        role: 'client',
+        phone: null,
+        street: 'Rua 2',
+        number: '20',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: null,
+      },
+      needsCompletion: false,
+      requiresDocuments: false,
+      action: 'submit_documents',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-client/finalize')
+      .set('x-draft-id', 'draft-client')
+      .set('x-draft-token', 'tok')
+      .send({ action: 'submit_documents' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.token).toBe('jwt-client-phone-opcional');
+    expect(response.body.user.phone).toBeNull();
+  });
 });

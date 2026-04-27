@@ -562,32 +562,70 @@ export async function confirmDraftEmailCode(
 ) {
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
   const normalizedCode = normalizeNumericCode(code);
+  const db = await authDb.getConnection();
+  let committed = false;
+  try {
+    await db.beginTransaction();
+    const result = await verifyEmailCode(
+      {
+        email: draft.email,
+        code: normalizedCode,
+        draftId: draft.id,
+        draftTokenHash,
+      },
+      {
+        db,
+        consumeCode: false,
+      },
+    );
 
-  const result = await verifyEmailCode({
-    email: draft.email,
-    code: normalizedCode,
-    draftId: draft.id,
-    draftTokenHash,
-  });
+    if (result.status === 'verified') {
+      await updateDraftByDraftId(draftId, draftTokenHash, { emailVerifiedAt: result.verifiedAt }, db);
+      await db.query<ResultSetHeader>(
+        `
+          UPDATE email_code_challenges
+          SET status = 'verified', verified_at = ?
+          WHERE id = ?
+        `,
+        [result.verifiedAt, result.challengeId],
+      );
+      await db.commit();
+      committed = true;
+      return {
+        status: 'verified',
+        verifiedAt: result.verifiedAt.toISOString(),
+      };
+    }
 
-  if (result.status === 'verified') {
-    await updateDraftByDraftId(draftId, draftTokenHash, { emailVerifiedAt: result.verifiedAt });
-    return {
-      status: 'verified',
-      verifiedAt: result.verifiedAt.toISOString(),
-    };
-  }
-  if (result.status === 'expired') {
-    throw new DraftFlowError(410, 'EMAIL_CODE_EXPIRED', 'Codigo de verificacao expirado.');
-  }
-  if (result.status === 'locked') {
-    throw new DraftFlowError(423, 'EMAIL_CODE_LOCKED', 'Codigo bloqueado por excesso de tentativas.');
-  }
-  if (result.status === 'invalid') {
-    throw new DraftFlowError(400, 'EMAIL_CODE_INVALID', 'Codigo invalido.');
-  }
+    await db.commit();
+    committed = true;
 
-  throw new DraftFlowError(400, 'EMAIL_CODE_MISSING', 'Codigo de verificacao nao encontrado.');
+    if (result.status === 'expired') {
+      throw new DraftFlowError(410, 'EMAIL_CODE_EXPIRED', 'Codigo de verificacao expirado.');
+    }
+    if (result.status === 'locked') {
+      throw new DraftFlowError(423, 'EMAIL_CODE_LOCKED', 'Codigo bloqueado por excesso de tentativas.');
+    }
+    if (result.status === 'invalid') {
+      throw new DraftFlowError(400, 'EMAIL_CODE_INVALID', 'Codigo invalido.');
+    }
+
+    throw new DraftFlowError(400, 'EMAIL_CODE_MISSING', 'Codigo de verificacao nao encontrado.');
+  } catch (error) {
+    if (!committed) {
+      await db.rollback();
+    }
+    if (error instanceof DraftFlowError) {
+      throw error;
+    }
+    throw new DraftFlowError(
+      500,
+      'EMAIL_CODE_CONFIRM_FAILED',
+      'Nao foi possivel confirmar o codigo no momento.',
+    );
+  } finally {
+    db.release();
+  }
 }
 
 export async function requestDraftPhoneOtp(
@@ -777,9 +815,14 @@ export async function finalizeRegistrationDraft(
       `
         SELECT *
         FROM registration_drafts
-        WHERE draft_id = ? AND draft_token_hash = ? AND status = 'OPEN'
+        WHERE id = (
+          SELECT id
+          FROM registration_drafts
+          WHERE draft_id = ? AND draft_token_hash = ? AND status = 'OPEN'
+          ORDER BY id DESC
+          LIMIT 1
+        )
         FOR UPDATE
-        LIMIT 1
       `,
       [draftId, draftTokenHash],
     );

@@ -40,6 +40,10 @@ function toDate(value: Date | string | null): Date | null {
   return value instanceof Date ? value : new Date(value);
 }
 
+type Queryable = {
+  query: typeof authDb.query;
+};
+
 function floorPositiveSeconds(valueMs: number): number {
   return Math.max(0, Math.floor(valueMs / 1000));
 }
@@ -355,7 +359,12 @@ export async function verifyEmailCode(params: {
   now?: Date;
   draftId?: number | null;
   draftTokenHash?: string | null;
+}, options?: {
+  db?: Queryable;
+  consumeCode?: boolean;
 }): Promise<VerifyEmailCodeResult> {
+  const db = options?.db ?? authDb;
+  const shouldConsumeCode = options?.consumeCode ?? true;
   const email = params.email.trim().toLowerCase();
   const code = String(params.code ?? '').replace(/\D/g, '');
   const now = params.now ?? new Date();
@@ -366,7 +375,7 @@ export async function verifyEmailCode(params: {
     draftQueryParams.push(params.draftId as number, params.draftTokenHash as string);
   }
 
-  const [rows] = await authDb.query<EmailCodeChallengeRow[]>(
+  const [rows] = await db.query<EmailCodeChallengeRow[]>(
     `
       SELECT *
       FROM email_code_challenges
@@ -386,7 +395,7 @@ export async function verifyEmailCode(params: {
 
   const expiresAt = toDate(latest.expires_at);
   if (!expiresAt || expiresAt.getTime() <= now.getTime() || latest.status === 'expired') {
-    await authDb.query(
+    await db.query(
       `
         UPDATE email_code_challenges
         SET status = 'expired'
@@ -408,7 +417,7 @@ export async function verifyEmailCode(params: {
   if (code.length !== 6 || latest.code_hash !== hashValue(code)) {
     const failedAttempts = Number(latest.failed_attempts ?? 0) + 1;
     const shouldLock = failedAttempts >= Number(latest.max_attempts ?? MAX_FAILED_ATTEMPTS);
-    await authDb.query(
+    await db.query(
       `
         UPDATE email_code_challenges
         SET failed_attempts = ?, status = ?
@@ -425,33 +434,35 @@ export async function verifyEmailCode(params: {
     };
   }
 
-  await authDb.query(
-    `
-      UPDATE email_code_challenges
-      SET status = 'verified', verified_at = ?
-      WHERE id = ?
-    `,
-    [now, latest.id]
-  );
+  if (shouldConsumeCode) {
+    await db.query(
+      `
+        UPDATE email_code_challenges
+        SET status = 'verified', verified_at = ?
+        WHERE id = ?
+      `,
+      [now, latest.id]
+    );
 
-  if (hasDraftContext) {
-    await authDb.query(
-      `
-        UPDATE registration_drafts
-        SET email_verified_at = COALESCE(email_verified_at, ?)
-        WHERE id = ? AND draft_token_hash = ? AND status = 'OPEN'
-      `,
-      [now, params.draftId, params.draftTokenHash]
-    );
-  } else {
-    await authDb.query(
-      `
-        UPDATE users
-        SET email_verified_at = COALESCE(email_verified_at, ?)
-        WHERE email = ?
-      `,
-      [now, email]
-    );
+    if (hasDraftContext) {
+      await db.query(
+        `
+          UPDATE registration_drafts
+          SET email_verified_at = COALESCE(email_verified_at, ?)
+          WHERE id = ? AND draft_token_hash = ? AND status = 'OPEN'
+        `,
+        [now, params.draftId, params.draftTokenHash]
+      );
+    } else {
+      await db.query(
+        `
+          UPDATE users
+          SET email_verified_at = COALESCE(email_verified_at, ?)
+          WHERE email = ?
+        `,
+        [now, email]
+      );
+    }
   }
 
   return {

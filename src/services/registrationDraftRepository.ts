@@ -2,6 +2,10 @@ import crypto from 'crypto';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { authDb } from './authPersistenceService';
 
+type Queryable = {
+  query: typeof authDb.query;
+};
+
 export type DraftProfileType = 'client' | 'broker';
 export type DraftStatus = 'OPEN' | 'COMPLETED' | 'DISCARDED' | 'EXPIRED';
 export type DraftStep =
@@ -226,9 +230,14 @@ export async function getDraftByDraftIdAndTokenForUpdate(
     `
       SELECT *
       FROM registration_drafts
-      WHERE draft_id = ? AND draft_token_hash = ? AND status = 'OPEN'
+      WHERE id = (
+        SELECT id
+        FROM registration_drafts
+        WHERE draft_id = ? AND draft_token_hash = ? AND status = 'OPEN'
+        ORDER BY id DESC
+        LIMIT 1
+      )
       FOR UPDATE
-      LIMIT 1
     `,
     [draftId, draftTokenHash],
   );
@@ -330,6 +339,7 @@ export async function updateDraftByDraftId(
     userId?: number | null;
     revisionIncrement?: boolean;
   },
+  db: Queryable = authDb,
 ): Promise<void> {
   const set: string[] = [];
   const values: unknown[] = [];
@@ -381,7 +391,7 @@ export async function updateDraftByDraftId(
     WHERE draft_id = ? AND draft_token_hash = ? AND status = 'OPEN'
   `;
   values.push(draftId, draftTokenHash);
-  await authDb.query<ResultSetHeader>(query, values);
+  await db.query<ResultSetHeader>(query, values);
 }
 
 export async function discardExpiredDrafts(): Promise<number> {

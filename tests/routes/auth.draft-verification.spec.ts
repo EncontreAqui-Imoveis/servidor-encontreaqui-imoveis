@@ -151,6 +151,25 @@ describe('Verificações em /auth/register/draft', () => {
     expect(response.body.error).toBe('Codigo invalido.');
   });
 
+  it('confirma código válido sem emitir JWT/usuário', async () => {
+    serviceMocks.confirmDraftEmailCodeMock.mockResolvedValue({
+      status: 'verified',
+      verifiedAt: new Date().toISOString(),
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-abc/verify-email/confirm')
+      .set('x-draft-id', 'draft-abc')
+      .set('x-draft-token', 'tok')
+      .send({ code: '123456' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe('verified');
+    expect(response.body.verifiedAt).toBeDefined();
+    expect(response.body).not.toHaveProperty('token');
+    expect(response.body).not.toHaveProperty('user');
+  });
+
   it('envia OTP de telefone e retorna sessionToken', async () => {
     serviceMocks.requestDraftPhoneOtpMock.mockResolvedValue({
       sessionToken: 'session-123',

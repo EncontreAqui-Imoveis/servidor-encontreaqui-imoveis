@@ -134,6 +134,7 @@ describe('POST /admin/reauth and DELETE /admin/clients/:id', () => {
       ])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 2 }])
+      .mockResolvedValueOnce([{ affectedRows: 0 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     const deleteResponse = await request(app)

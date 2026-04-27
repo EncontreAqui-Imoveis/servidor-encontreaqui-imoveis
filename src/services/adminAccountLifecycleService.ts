@@ -157,6 +157,27 @@ export async function deleteUserAccount(
     [userId],
   );
 
+  // Clean up completed registration drafts so the email can be re-used
+  try {
+    await db.query(
+      "DELETE FROM registration_drafts WHERE user_id = ? AND status = 'COMPLETED'",
+      [userId],
+    );
+  } catch (draftError) {
+    console.warn(
+      'Falha ao remover drafts COMPLETED do usuario; tentando por email.',
+      draftError,
+    );
+    try {
+      await db.query(
+        "DELETE FROM registration_drafts WHERE LOWER(TRIM(email)) = LOWER(TRIM((SELECT email FROM users WHERE id = ?))) AND status = 'COMPLETED'",
+        [userId],
+      );
+    } catch {
+      /* best effort */
+    }
+  }
+
   const [result] = await db.query('DELETE FROM users WHERE id = ?', [userId]);
   return { snapshot, affected: result.affectedRows > 0 };
 }

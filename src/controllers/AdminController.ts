@@ -4426,6 +4426,8 @@ class AdminController {
         'sale_value',
         'commission_rate',
         'commission_value',
+        'broker_id',
+        'owner_id',
       ]);
 
       const setParts: string[] = [];
@@ -4609,6 +4611,20 @@ class AdminController {
             }
             setParts.push('owner_phone = ?');
             params.push(normalizePhone(text));
+            break;
+          }
+          case 'broker_id': {
+            if (value === undefined || value === null || value === '') {
+              setParts.push('broker_id = ?');
+              params.push(null);
+              break;
+            }
+            const parsedBrokerId = Number(value);
+            if (!Number.isInteger(parsedBrokerId) || parsedBrokerId <= 0) {
+              return res.status(400).json({ error: 'broker_id invalido.' });
+            }
+            setParts.push('broker_id = ?');
+            params.push(parsedBrokerId);
             break;
           }
           case 'owner_id': {

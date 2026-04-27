@@ -15,6 +15,9 @@ const MAX_FAILED_ATTEMPTS = 5;
 interface EmailCodeChallengeRow extends RowDataPacket {
   id: number;
   user_id: number | null;
+  draft_id: number | null;
+  draft_token_hash: string | null;
+  draft_step: number | null;
   email: string;
   purpose: EmailChallengePurpose;
   code_hash: string;
@@ -88,6 +91,9 @@ export async function issueEmailCodeChallenge(params: {
   email: string;
   purpose: EmailChallengePurpose;
   userId?: number | null;
+  draftId?: number | null;
+  draftTokenHash?: string | null;
+  draftStep?: number | null;
   deliveryProvider?: string;
   now?: Date;
 }): Promise<EmailCodeSendResult> {
@@ -96,16 +102,24 @@ export async function issueEmailCodeChallenge(params: {
   const now = params.now ?? new Date();
   const deliveryProvider = (params.deliveryProvider ?? 'brevo').trim() || 'brevo';
 
+  const whereEmail = 'email = ?';
+  const whereDraft = params.draftId && params.draftTokenHash ? ' AND draft_id = ? AND draft_token_hash = ?' : '';
+  const queryParams = [email];
+  if (params.draftId && params.draftTokenHash) {
+    queryParams.push(params.draftId, params.draftTokenHash);
+  }
+  queryParams.push(params.purpose);
+
   const [rows] = await authDb.query<EmailCodeChallengeRow[]>(
     `
       SELECT id, sent_at, expires_at, status
       FROM email_code_challenges
-      WHERE email = ?
+      WHERE ${whereEmail} ${whereDraft ? 'AND user_id IS NULL' : ''}
         AND purpose = ?
         AND sent_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
       ORDER BY sent_at DESC
     `,
-    [email, params.purpose]
+    queryParams,
   );
 
   const attemptsInLast24h = rows.length;
@@ -148,6 +162,9 @@ export async function issueEmailCodeChallenge(params: {
       INSERT INTO email_code_challenges
         (
           user_id,
+          draft_id,
+          draft_token_hash,
+          draft_step,
           email,
           purpose,
           code_hash,
@@ -160,10 +177,13 @@ export async function issueEmailCodeChallenge(params: {
           delivery_provider,
           status
         )
-      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'sent')
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'sent')
     `,
     [
       userId,
+      params.draftId ?? null,
+      params.draftTokenHash ?? null,
+      params.draftStep ?? null,
       email,
       params.purpose,
       hashValue(code),
@@ -206,35 +226,63 @@ export type EmailVerificationStatusResult =
 export async function getEmailVerificationStatus(params: {
   email: string;
   now?: Date;
+  draftId?: number | null;
+  draftTokenHash?: string | null;
 }): Promise<EmailVerificationStatusResult> {
   const email = params.email.trim().toLowerCase();
   const now = params.now ?? new Date();
 
-  const [userRows] = await authDb.query<RowDataPacket[]>(
-    `
-      SELECT email_verified_at
-      FROM users
-      WHERE email = ?
-      LIMIT 1
-    `,
-    [email]
-  );
+  if (!params.draftId || !params.draftTokenHash) {
+    const [userRows] = await authDb.query<RowDataPacket[]>(
+      `
+        SELECT email_verified_at
+        FROM users
+        WHERE email = ?
+        LIMIT 1
+      `,
+      [email]
+    );
 
-  const verifiedAt = toDate(userRows[0]?.email_verified_at ?? null);
-  if (verifiedAt) {
-    return { status: 'verified', verifiedAt };
+    const verifiedAt = toDate(userRows[0]?.email_verified_at ?? null);
+    if (verifiedAt) {
+      return { status: 'verified', verifiedAt };
+    }
   }
 
+  if (params.draftId && params.draftTokenHash) {
+    const [draftRows] = await authDb.query<EmailCodeChallengeRow[]>(
+      `
+        SELECT email_verified_at AS verified_at
+        FROM registration_drafts
+        WHERE id = ? AND draft_token_hash = ? AND status = 'OPEN'
+        LIMIT 1
+      `,
+      [params.draftId, params.draftTokenHash]
+    );
+    const draftVerifiedAt = toDate(draftRows[0]?.verified_at ?? null);
+    if (draftVerifiedAt) {
+      return { status: 'verified', verifiedAt: draftVerifiedAt };
+    }
+  }
+
+  const draftFilter = params.draftId && params.draftTokenHash
+    ? 'draft_id = ? AND draft_token_hash = ?'
+    : 'draft_id IS NULL';
+  const challengeParams = [email];
+  if (params.draftId && params.draftTokenHash) {
+    challengeParams.push(params.draftId, params.draftTokenHash);
+  }
   const [rows] = await authDb.query<EmailCodeChallengeRow[]>(
     `
       SELECT id, expires_at, status
       FROM email_code_challenges
       WHERE email = ?
         AND purpose = 'verify_email'
+        AND ${draftFilter}
       ORDER BY sent_at DESC
       LIMIT 1
     `,
-    [email]
+    challengeParams
   );
 
   const latest = rows[0];
@@ -265,10 +313,18 @@ export async function verifyEmailCode(params: {
   email: string;
   code: string;
   now?: Date;
+  draftId?: number | null;
+  draftTokenHash?: string | null;
 }): Promise<VerifyEmailCodeResult> {
   const email = params.email.trim().toLowerCase();
   const code = String(params.code ?? '').replace(/\D/g, '');
   const now = params.now ?? new Date();
+  const hasDraftContext = Boolean(params.draftId && params.draftTokenHash);
+  const draftFilter = hasDraftContext ? 'AND draft_id = ? AND draft_token_hash = ?' : 'AND draft_id IS NULL';
+  const draftQueryParams = [email];
+  if (hasDraftContext) {
+    draftQueryParams.push(params.draftId, params.draftTokenHash);
+  }
 
   const [rows] = await authDb.query<EmailCodeChallengeRow[]>(
     `
@@ -276,10 +332,11 @@ export async function verifyEmailCode(params: {
       FROM email_code_challenges
       WHERE email = ?
         AND purpose = 'verify_email'
+        ${draftFilter}
       ORDER BY sent_at DESC
       LIMIT 1
     `,
-    [email]
+    draftQueryParams
   );
 
   const latest = rows[0];
@@ -336,14 +393,26 @@ export async function verifyEmailCode(params: {
     `,
     [now, latest.id]
   );
-  await authDb.query(
-    `
-      UPDATE users
-      SET email_verified_at = COALESCE(email_verified_at, ?)
-      WHERE email = ?
-    `,
-    [now, email]
-  );
+
+  if (hasDraftContext) {
+    await authDb.query(
+      `
+        UPDATE registration_drafts
+        SET email_verified_at = COALESCE(email_verified_at, ?)
+        WHERE id = ? AND draft_token_hash = ? AND status = 'OPEN'
+      `,
+      [now, params.draftId, params.draftTokenHash]
+    );
+  } else {
+    await authDb.query(
+      `
+        UPDATE users
+        SET email_verified_at = COALESCE(email_verified_at, ?)
+        WHERE email = ?
+      `,
+      [now, email]
+    );
+  }
 
   return {
     status: 'verified',

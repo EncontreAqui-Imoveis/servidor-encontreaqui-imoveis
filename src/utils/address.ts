@@ -5,7 +5,7 @@ export type AddressFields = {
   bairro: string;
   city: string;
   state: string;
-  cep: string;
+  cep: string | null;
 };
 
 export type AddressInput = Partial<Record<keyof AddressFields, unknown>> & {
@@ -29,6 +29,10 @@ const MAX_CITY = 100;
 const CEP_LENGTH = 8;
 const STATE_LENGTH = 2;
 const WITHOUT_NUMBER_VALUE = 'S/N';
+
+type AddressNormalizeOptions = {
+  requireCep?: boolean;
+};
 
 function normalizeText(value: unknown): string | null {
   if (value === undefined || value === null) {
@@ -86,7 +90,10 @@ function withinLimit(value: string, limit: number): boolean {
   return value.length <= limit;
 }
 
-export function sanitizeAddressInput(input: AddressInput): AddressResult {
+export function sanitizeAddressInput(
+  input: AddressInput,
+  options: AddressNormalizeOptions = {},
+): AddressResult {
   const errors: string[] = [];
   const hasWithoutNumberField =
     'withoutNumber' in input || 'without_number' in input;
@@ -110,7 +117,13 @@ export function sanitizeAddressInput(input: AddressInput): AddressResult {
   const state = normalizeState(input.state);
   if (!state) errors.push('state');
   const cep = normalizeCep(input.cep);
-  if (!cep) errors.push('cep');
+  if (options.requireCep !== false) {
+    if (!cep) {
+      errors.push('cep');
+    }
+  } else if (input.cep !== undefined && input.cep !== null && !cep) {
+    errors.push('cep');
+  }
   const complement = normalizeText(input.complement);
 
   if (street && !withinLimit(street, MAX_STREET)) errors.push('street');
@@ -132,7 +145,7 @@ export function sanitizeAddressInput(input: AddressInput): AddressResult {
       bairro: bairro!,
       city: city!,
       state: state!,
-      cep: cep!,
+      cep: cep ?? null,
     },
   };
 }

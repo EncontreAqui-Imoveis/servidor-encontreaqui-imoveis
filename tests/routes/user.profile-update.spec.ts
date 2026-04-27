@@ -47,6 +47,61 @@ describe('PUT /users/me profile update', () => {
     vi.clearAllMocks();
   });
 
+  it('retorna /users/me com endereço completo sem cep como needsCompletion=false', async () => {
+    queryMock.mockResolvedValueOnce([
+      [
+        {
+          id: 123,
+          name: 'Cliente',
+          email: 'user@test.com',
+          email_verified_at: '2026-01-01T00:00:00.000Z',
+          phone: '64999999999',
+          street: 'Rua A',
+          number: '100',
+          complement: null,
+          bairro: 'Centro',
+          city: 'Rio Verde',
+          state: 'GO',
+          cep: null,
+        },
+      ],
+    ]);
+    queryMock.mockResolvedValueOnce([[]]);
+
+    const response = await request(app).get('/users/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body.needsCompletion).toBe(false);
+    expect(response.body.user.cep).toBeNull();
+  });
+
+  it('retorna /users/me com endereço incompleto mesmo sem cep como needsCompletion=true', async () => {
+    queryMock.mockResolvedValueOnce([
+      [
+        {
+          id: 123,
+          name: 'Cliente',
+          email: 'user@test.com',
+          email_verified_at: '2026-01-01T00:00:00.000Z',
+          phone: '64999999999',
+          street: 'Rua A',
+          number: null,
+          complement: null,
+          bairro: 'Centro',
+          city: 'Rio Verde',
+          state: 'GO',
+          cep: null,
+        },
+      ],
+    ]);
+    queryMock.mockResolvedValueOnce([[]]);
+
+    const response = await request(app).get('/users/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body.needsCompletion).toBe(true);
+  });
+
   it('allows partial update with only name', async () => {
     queryMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
     queryMock.mockResolvedValueOnce([

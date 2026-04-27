@@ -51,6 +51,18 @@ describe('authSessionService', () => {
       hasCompleteProfile({
         phone: '64999999999',
         street: 'Rua 1',
+        number: '10',
+        bairro: 'Centro',
+        city: 'Rio Verde',
+        state: 'GO',
+        cep: null,
+      }),
+    ).toBe(true);
+
+    expect(
+      hasCompleteProfile({
+        phone: '64999999999',
+        street: 'Rua 1',
         number: '',
         bairro: 'Centro',
         city: 'Rio Verde',

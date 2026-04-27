@@ -124,6 +124,24 @@ describe('sanitizeAddressInput', () => {
     }
   });
 
+  it('aceita endereco manual completo sem cep', () => {
+    const result = sanitizeAddressInput(
+      {
+        street: 'Rua Central',
+        number: '123A',
+        bairro: 'Centro',
+        city: 'Goiania',
+        state: 'GO',
+      },
+      { requireCep: false },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.cep).toBeNull();
+    }
+  });
+
   it('fails when without_number is false and number is missing', () => {
     const result = sanitizeAddressInput({
       street: 'Rua A',

@@ -14,6 +14,8 @@ import {
   signUserToken,
 } from '../services/userSessionService';
 import { hasCompleteProfile } from '../services/authSessionService';
+import { upsertFirebaseContextToDraft } from '../services/registrationDraftService';
+import { isDraftRegistrationEnabled } from '../config/featureFlags';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -713,9 +715,8 @@ class UserController {
         }
 
         const empty = (v: any) => v === null || v === undefined || String(v).trim() === '';
-        const missingProfile =
-          (empty(user.phone) || empty(user.street) || empty(user.number) || empty(user.bairro) || empty(user.city) || empty(user.state) || empty(user.cep)) &&
-          user.broker_status == null;
+      const missingProfile =
+        !hasCompleteProfile(user) && user.broker_status == null;
         if (autoMode && missingProfile) {
           return res.json({
             requiresProfileChoice: true,
@@ -798,8 +799,7 @@ class UserController {
         }
       }
 
-      const needsCompletion =
-        !user.phone || !user.street || !user.number || !user.bairro || !user.city || !user.state || !user.cep;
+      const needsCompletion = !hasCompleteProfile(user);
       const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
       const requiresDocuments =
         effectiveRole === 'broker' &&
@@ -846,6 +846,9 @@ class UserController {
   }
 
   async firebaseLogin(req: Request, res: Response) {
+    const draftId = String(req.header('x-draft-id') || '').trim();
+    const draftToken = String(req.header('x-draft-token') || '').trim();
+    const isDraftContext = draftId.length > 0 || draftToken.length > 0;
     const {
       idToken,
       name: nameOverride,
@@ -877,6 +880,29 @@ class UserController {
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       const { uid, email, name, phone_number: phone } = decodedToken as any;
+      if (isDraftContext && isDraftRegistrationEnabled()) {
+        if (!draftId || !draftToken) {
+          return res.status(400).json({ error: 'Draft context incompleto.' });
+        }
+        const draftResult = await upsertFirebaseContextToDraft(draftId, draftToken, {
+          firebaseUid: uid,
+          email,
+          name: nameOverride ?? name,
+          phone: phoneOverride ?? phone,
+          street: street,
+          number: number,
+          complement: complement,
+          bairro: bairro,
+          city: city,
+          state: state,
+          cep: cep,
+        });
+        return res.status(200).json({
+          status: 'ok',
+          draft: draftResult,
+          draftId,
+        });
+      }
 
       const fallbackEmail = email ?? `${uid}@noemail.firebase`;
       const displayName = name || `User-${uid.substring(0, 8)}`;

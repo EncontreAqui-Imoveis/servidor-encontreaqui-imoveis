@@ -1,7 +1,9 @@
-import { Router } from 'express';
+import { NextFunction, Request, Response, Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { authController } from '../controllers/AuthController';
+import { registrationDraftController } from '../controllers/RegistrationDraftController';
 import { authMiddleware } from '../middlewares/auth';
+import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 
 const authRoutes = Router();
 
@@ -36,7 +38,75 @@ const authLightLimiter = rateLimit({
   },
 });
 
+function handleDraftUploadError(
+  error: unknown,
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  if (!error) {
+    return next();
+  }
+
+  if (error instanceof Error) {
+    const code = (error as { code?: string }).code;
+    if (code && ['LIMIT_FILE_SIZE', 'LIMIT_UNEXPECTED_FILE', 'LIMIT_FIELD_KEY', 'LIMIT_FIELD_VALUE', 'LIMIT_PART_COUNT'].includes(code)) {
+      return res.status(400).json({
+        status: 'error',
+        code: 'DRAFT_DOCUMENTS_INVALID',
+        error: error.message || 'Arquivo(s) de documento de rascunho inválidos.',
+      });
+    }
+  }
+
+  return res.status(400).json({
+    status: 'error',
+    code: 'DRAFT_DOCUMENTS_INVALID',
+    error: error instanceof Error ? error.message : 'Arquivo(s) de documento de rascunho inválidos.',
+  });
+}
+
 authRoutes.post('/register', (req, res) => authController.register(req, res));
+authRoutes.post('/register/draft', authLightLimiter, (req, res) =>
+  registrationDraftController.create(req, res),
+);
+authRoutes.patch('/register/draft/:draftId', authLightLimiter, (req, res) =>
+  registrationDraftController.patch(req, res),
+);
+authRoutes.get('/register/draft/:draftId', authLightLimiter, (req, res) =>
+  registrationDraftController.get(req, res),
+);
+authRoutes.post('/register/draft/:draftId/verify-email', authSensitiveLimiter, (req, res) =>
+  registrationDraftController.sendEmailVerification(req, res),
+);
+authRoutes.post('/register/draft/:draftId/verify-email/confirm', authSensitiveLimiter, (req, res) =>
+  registrationDraftController.confirmEmailCode(req, res),
+);
+authRoutes.post('/register/draft/:draftId/verify-phone', authSensitiveLimiter, (req, res) =>
+  registrationDraftController.requestPhoneVerification(req, res),
+);
+authRoutes.post('/register/draft/:draftId/verify-phone/confirm', authSensitiveLimiter, (req, res) =>
+  registrationDraftController.confirmPhoneOtp(req, res),
+);
+authRoutes.post(
+  '/register/draft/:draftId/submit-documents',
+  authSensitiveLimiter,
+  brokerDocsUpload.fields([
+    { name: 'crecifront', maxCount: 1 },
+    { name: 'creciFront', maxCount: 1 },
+    { name: 'creciback', maxCount: 1 },
+    { name: 'creciBack', maxCount: 1 },
+    { name: 'selfie', maxCount: 1 },
+  ]),
+  handleDraftUploadError,
+  (req, res) => registrationDraftController.submitDocuments(req, res),
+);
+authRoutes.post('/register/draft/:draftId/finalize', authSensitiveLimiter, (req, res) =>
+  registrationDraftController.finalize(req, res),
+);
+authRoutes.post('/register/draft/:draftId/discard', authLightLimiter, (req, res) =>
+  registrationDraftController.discard(req, res),
+);
 authRoutes.post('/login', authSensitiveLimiter, (req, res) =>
   authController.login(req, res)
 );

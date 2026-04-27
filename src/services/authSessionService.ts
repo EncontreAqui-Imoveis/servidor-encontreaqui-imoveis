@@ -52,8 +52,7 @@ export function hasCompleteProfile(row: any) {
     row.number &&
     row.bairro &&
     row.city &&
-    row.state &&
-    row.cep
+    row.state
   );
 }
 

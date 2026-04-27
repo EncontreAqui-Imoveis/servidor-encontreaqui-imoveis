@@ -104,6 +104,34 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
     expect(response.body.expiresAtMinutes).toBe(1440);
   });
 
+  it('retorna draftId com tamanho compatível com schema', async () => {
+    serviceMocks.createRegistrationDraftMock.mockResolvedValue({
+      draftId: '11111111-1111-4111-8111-111111111111',
+      draftToken: 'tok',
+      draft: {
+        draftId: '11111111-1111-4111-8111-111111111111',
+        profileType: 'client',
+        email: 'novo@dominio.com',
+        name: 'Usuario',
+        status: 'OPEN',
+        currentStep: 'IDENTITY',
+      },
+      expiresAtMinutes: 1440,
+    });
+
+    const response = await request(app).post('/auth/register/draft').send({
+      email: 'novo@dominio.com',
+      name: 'Usuario',
+      phone: '61999999999',
+      profileType: 'client',
+      password: 'Senha123',
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.draftId).toHaveLength(36);
+    expect(response.body.draftId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
   it('aceita criação de draft com campos de endereço vazios', async () => {
     serviceMocks.createRegistrationDraftMock.mockResolvedValue({
       draftId: 'draft-empty-address',

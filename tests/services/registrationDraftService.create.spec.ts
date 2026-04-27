@@ -87,6 +87,7 @@ describe('createRegistrationDraft', () => {
     });
 
     expect(createDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      draftId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
       street: undefined,
       number: undefined,
       complement: undefined,
@@ -95,6 +96,10 @@ describe('createRegistrationDraft', () => {
       state: undefined,
       cep: undefined,
     }));
+    expect(createDraftMock).toHaveBeenCalledTimes(1);
+    const draftPayload = createDraftMock.mock.calls[0]?.[0];
+    expect(draftPayload.draftId).toHaveLength(36);
+    expect(draftPayload.draftId.startsWith('draft-')).toBe(false);
   });
 
   it('aceita criação com campos de endereço vazios', async () => {

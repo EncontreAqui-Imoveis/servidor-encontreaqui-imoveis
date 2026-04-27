@@ -79,7 +79,6 @@ export interface DraftDocumentRow extends RowDataPacket {
 }
 
 const TOKEN_LIFETIME_MINUTES = 1440;
-const DRAFT_ID_PREFIX = 'draft-';
 const DRAFT_TOKEN_BYTES = 32;
 
 export function nowDate(): Date {
@@ -91,7 +90,7 @@ export function draftExpiryAt(base: Date = nowDate()): Date {
 }
 
 export function generateDraftId(): string {
-  return `${DRAFT_ID_PREFIX}${crypto.randomUUID()}`;
+  return crypto.randomUUID();
 }
 
 export function generateDraftToken(): string {

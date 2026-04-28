@@ -125,14 +125,25 @@ export function buildCorsOptions(): CorsOptions {
     'http://127.0.0.1:5173',
     'http://localhost:4173',
     'http://127.0.0.1:4173',
+    'http://localhost:19006',
+    'http://127.0.0.1:19006',
+    'http://localhost:8081',
+    'http://127.0.0.1:8081',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
   ];
+  const envLocalOrigins = (process.env.CORS_LOCAL_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => normalizeOrigin(origin))
+    .filter((origin) => origin.length > 0);
   const mergedConfiguredOrigins = Array.from(
     new Set([
       ...configuredOrigins,
       ...supplementalOrigins,
+      ...envLocalOrigins,
       // Sempre incluir domínios de produção do site/painel (evita CORS se NODE_ENV ou CORS_ORIGINS no Railway estiverem incompletos).
       ...PRODUCTION_FALLBACK_ORIGINS,
-      ...(nodeEnv === 'production' ? [] : defaultLocalOrigins),
+      ...defaultLocalOrigins,
     ]),
   );
   const allowedOrigins =

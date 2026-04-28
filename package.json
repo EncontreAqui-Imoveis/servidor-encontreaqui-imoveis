@@ -20,7 +20,8 @@
     "migrate:down": "ts-node src/database/migrationRunner.ts down",
     "migrate:status": "ts-node src/database/migrationRunner.ts status",
     "db:init": "ts-node src/database/init.ts",
-    "db:verify": "ts-node src/database/schemaVerification.ts"
+    "db:verify": "ts-node src/database/schemaVerification.ts",
+    "sentry:test": "ts-node scripts/sentry-test.ts"
   },
   "keywords": [],
   "author": "Ctrshift-Pm",

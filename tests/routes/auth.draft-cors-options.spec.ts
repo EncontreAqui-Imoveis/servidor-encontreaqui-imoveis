@@ -3,7 +3,13 @@ import request from 'supertest';
 import { createHttpApp } from '../../src/httpApp';
 
 const origin = 'https://encontreaquiimoveis.com.br';
-const preflightHeaders = 'x-draft-token,Content-Type,Authorization';
+const localOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+const preflightHeaders = 'x-draft-token,x-draft-id,authorization,content-type';
 
 describe('CORS preflight para rotas de draft', () => {
   const app = createHttpApp();
@@ -47,6 +53,20 @@ describe('CORS preflight para rotas de draft', () => {
 
   it('aceita OPTIONS em POST /register/draft/:draftId/discard', async () => {
     assertCorsHeaders(await optionsRequest(`/auth/register/draft/${draftId}/discard`, 'POST'));
+  });
+
+  it('aceita localhost e 127.0.0.1 no preflight de PATCH draft', async () => {
+    for (const localOrigin of localOrigins) {
+      const response = await request(app)
+        .options(`/auth/register/draft/${draftId}`)
+        .set('Origin', localOrigin)
+        .set('Access-Control-Request-Method', 'PATCH')
+        .set('Access-Control-Request-Headers', preflightHeaders);
+
+      assertCorsHeaders(response);
+      expect(response.status).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe(localOrigin);
+    }
   });
 });
 

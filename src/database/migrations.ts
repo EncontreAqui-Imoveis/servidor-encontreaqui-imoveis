@@ -21,6 +21,22 @@ async function tableExists(tableName: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+async function indexExists(tableName: string, indexName: string): Promise<boolean> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      SELECT 1
+      FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND index_name = ?
+      LIMIT 1
+    `,
+    [tableName, indexName]
+  );
+
+  return rows.length > 0;
+}
+
 async function columnExists(tableName: string, columnName: string): Promise<boolean> {
   const [rows] = await connection.query<RowDataPacket[]>(
     `
@@ -1084,6 +1100,31 @@ async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
   }
 }
 
+async function ensurePropertyIndices(): Promise<void> {
+  if (!(await tableExists('properties'))) return;
+
+  // FullText Index for Search
+  if (!(await indexExists('properties', 'idx_properties_fulltext'))) {
+    console.log('Adicionando índice FULLTEXT em properties(title, description)...');
+    await connection.query(
+      'ALTER TABLE properties ADD FULLTEXT INDEX idx_properties_fulltext (title, description)'
+    );
+  }
+
+  // Price Index (Range filters)
+  if (!(await indexExists('properties', 'idx_properties_price'))) {
+    await connection.query('ALTER TABLE properties ADD INDEX idx_properties_price (price)');
+  }
+
+  // Type and Purpose (Category filters)
+  if (!(await indexExists('properties', 'idx_properties_type'))) {
+    await connection.query('ALTER TABLE properties ADD INDEX idx_properties_type (type)');
+  }
+  if (!(await indexExists('properties', 'idx_properties_purpose'))) {
+    await connection.query('ALTER TABLE properties ADD INDEX idx_properties_purpose (purpose)');
+  }
+}
+
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
@@ -1105,6 +1146,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureUsersTokenVersionColumn();
     await ensureNegotiationResponsiblesAndBrokerProfileType();
     await ensureNegotiationStatusHistoryColumnsFreetext();
+    await ensurePropertyIndices();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

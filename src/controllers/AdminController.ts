@@ -6020,13 +6020,14 @@ class AdminController {
 
   async deleteBrokerDocument(req: Request, res: Response) {
     const brokerId = Number(req.params.id);
-    const { docType } = req.params;
+    const rawDocType = req.params.docType;
+    const docType = Array.isArray(rawDocType) ? rawDocType[0] : rawDocType;
     if (Number.isNaN(brokerId)) {
       return res.status(400).json({ error: 'Identificador de corretor inválido.' });
     }
 
     const allowedDocTypes = ['creciFront', 'creciBack', 'selfie'];
-    if (!allowedDocTypes.includes(docType)) {
+    if (!docType || !allowedDocTypes.includes(docType)) {
       return res.status(400).json({ error: 'Tipo de documento inválido.' });
     }
 

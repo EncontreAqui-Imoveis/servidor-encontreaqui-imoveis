@@ -44,6 +44,129 @@ type DraftPhoneVerificationMode = 'firebase' | 'legacy' | 'unavailable';
 type PhoneOtpDeliveryResult =
   | { ok: true; provider: string; status: 'sent' | 'mock' }
   | { ok: false; provider: string; status: 'disabled' | 'mock' | 'unsupported' | 'error' };
+type DraftFinalizeLegalAcceptance = {
+  acceptedTerms?: unknown;
+  acceptedPrivacyPolicy?: unknown;
+  acceptedBrokerAgreement?: unknown;
+  termsVersion?: unknown;
+  privacyPolicyVersion?: unknown;
+  brokerAgreementVersion?: unknown;
+};
+type DraftFinalizeRequestContext = {
+  ip?: string | null;
+  userAgent?: string | null;
+};
+type DraftLegalAcceptanceType = 'terms' | 'privacy' | 'broker_agreement';
+type ResolvedDraftLegalAcceptance = {
+  type: DraftLegalAcceptanceType;
+  version: string;
+  acceptedAt: Date;
+};
+
+type QueryExecutor = {
+  query: typeof authDb.query;
+};
+
+function toLegalAcceptanceBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function normalizeLegalAcceptanceVersion(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function resolveDraftLegalAcceptances(
+  profileType: DraftProfileType,
+  action: DraftFinalizeAction,
+  payload: DraftFinalizeLegalAcceptance,
+): ResolvedDraftLegalAcceptance[] {
+  const acceptedTerms = toLegalAcceptanceBoolean(payload.acceptedTerms);
+  const termsVersion = normalizeLegalAcceptanceVersion(payload.termsVersion);
+  if (!acceptedTerms || !termsVersion) {
+    throw new DraftFlowError(400, 'TERMS_ACCEPTANCE_REQUIRED', 'Aceite dos termos de uso e obrigatorio.');
+  }
+
+  const acceptedPrivacy = toLegalAcceptanceBoolean(payload.acceptedPrivacyPolicy);
+  const privacyVersion = normalizeLegalAcceptanceVersion(payload.privacyPolicyVersion);
+  if (!acceptedPrivacy || !privacyVersion) {
+    throw new DraftFlowError(400, 'PRIVACY_ACCEPTANCE_REQUIRED', 'Aceite da politica de privacidade e obrigatorio.');
+  }
+
+  const requiresBrokerAgreement =
+    profileType === 'broker' && (action === 'send_later' || action === 'submit_documents');
+  let brokerAgreementVersion = '';
+  if (requiresBrokerAgreement) {
+    const acceptedBrokerAgreement = toLegalAcceptanceBoolean(payload.acceptedBrokerAgreement);
+    brokerAgreementVersion = normalizeLegalAcceptanceVersion(payload.brokerAgreementVersion);
+    if (!acceptedBrokerAgreement || !brokerAgreementVersion) {
+      throw new DraftFlowError(
+        400,
+        'BROKER_AGREEMENT_REQUIRED',
+        'Aceite do contrato de adesao de corretor e obrigatorio.',
+      );
+    }
+  }
+
+  const acceptedAt = now();
+  const acceptances: ResolvedDraftLegalAcceptance[] = [
+    {
+      type: 'terms',
+      version: termsVersion,
+      acceptedAt,
+    },
+    {
+      type: 'privacy',
+      version: privacyVersion,
+      acceptedAt,
+    },
+  ];
+
+  if (requiresBrokerAgreement && brokerAgreementVersion) {
+    acceptances.push({
+      type: 'broker_agreement',
+      version: brokerAgreementVersion,
+      acceptedAt,
+    });
+  }
+
+  return acceptances;
+}
+
+function normalizeRequestContextValue(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function persistDraftLegalAcceptances(
+  db: QueryExecutor,
+  userId: number,
+  acceptances: ResolvedDraftLegalAcceptance[],
+  ip: string | null,
+  userAgent: string | null,
+) {
+  if (acceptances.length === 0) {
+    return;
+  }
+
+  for (const acceptance of acceptances) {
+    await db.query<ResultSetHeader>(
+      `
+        INSERT INTO user_legal_acceptances (
+          user_id,
+          type,
+          version,
+          accepted_at,
+          ip,
+          user_agent
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [userId, acceptance.type, acceptance.version, acceptance.acceptedAt, ip, userAgent],
+    );
+  }
+}
 
 function resolvePhoneOtpProvider(): string {
   const provider = String(
@@ -1009,6 +1132,8 @@ export async function finalizeRegistrationDraft(
   draftId: string,
   rawDraftToken: unknown,
   action: DraftFinalizeAction,
+  legalAcceptance: DraftFinalizeLegalAcceptance = {},
+  requestContext: DraftFinalizeRequestContext = {},
 ) {
   const token = normalizeToken(rawDraftToken);
   if (!token) {
@@ -1056,6 +1181,7 @@ export async function finalizeRegistrationDraft(
     const lockedDraft = lockRows[0] as RegistrationDraftRow;
     const lockedProfile = String(lockedDraft.profile_type || draft.profile_type) as DraftProfileType;
     const authProvider = String(lockedDraft.auth_provider || draft.auth_provider || 'email') as DraftAuthProvider;
+    const acceptedLegal = resolveDraftLegalAcceptances(lockedProfile, action, legalAcceptance);
     if (lockedProfile === 'client' && authProvider === 'email' && !lockedDraft.password_hash) {
       await db.rollback();
       throw new DraftFlowError(400, 'DRAFT_PASSWORD_REQUIRED', 'Senha nao informada para cliente.');
@@ -1096,6 +1222,14 @@ export async function finalizeRegistrationDraft(
       ],
     );
     const userId = userInsertResult.insertId;
+
+    await persistDraftLegalAcceptances(
+      db,
+      userId,
+      acceptedLegal,
+      normalizeRequestContextValue(requestContext.ip),
+      normalizeRequestContextValue(requestContext.userAgent),
+    );
 
     let requiresDocuments = false;
     if (lockedProfile === 'broker') {

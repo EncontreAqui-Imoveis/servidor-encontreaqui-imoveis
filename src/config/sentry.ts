@@ -23,7 +23,7 @@ export function initSentry() {
       environment: process.env.NODE_ENV || 'development',
     });
 
-    console.log('Sentry inicializado com sucesso.');
+    console.log(`Sentry inicializado com sucesso (DSN: ${dsn.substring(0, 10)}...)`);
   } catch (error) {
     console.error('Falha ao inicializar Sentry. Seguindo sem telemetria:', {
       message: error instanceof Error ? error.message : String(error),

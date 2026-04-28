@@ -94,7 +94,15 @@ describe('Finalização de rascunho para corretor', () => {
       .post('/auth/register/draft/draft-broker/finalize')
       .set('x-draft-id', 'draft-broker')
       .set('x-draft-token', 'tok')
-      .send({ action: 'send_later' });
+      .send({
+        action: 'send_later',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.requiresDocuments).toBe(true);
@@ -126,7 +134,15 @@ describe('Finalização de rascunho para corretor', () => {
       .post('/auth/register/draft/draft-broker/finalize')
       .set('x-draft-id', 'draft-broker')
       .set('x-draft-token', 'tok')
-      .send({ action: 'submit_documents' });
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.action).toBe('submit_documents');
@@ -159,7 +175,15 @@ describe('Finalização de rascunho para corretor', () => {
       .post('/auth/register/draft/draft-broker/finalize')
       .set('x-draft-id', 'draft-broker')
       .set('x-draft-token', 'tok')
-      .send({ action: 'send_later' });
+      .send({
+        action: 'send_later',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.token).toBe('jwt-broker-phone-opcional');
@@ -180,10 +204,72 @@ describe('Finalização de rascunho para corretor', () => {
       .post('/auth/register/draft/draft-broker/finalize')
       .set('x-draft-id', 'draft-broker')
       .set('x-draft-token', 'tok')
-      .send({ action: 'submit_documents' });
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('DRAFT_DOCUMENTS_MISSING');
+  });
+
+  it('rejeita corretor send_later sem termo de adesão', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockRejectedValue(
+      new DraftFlowErrorMock(
+        400,
+        'BROKER_AGREEMENT_REQUIRED',
+        'Aceite do contrato de adesso de corretor e obrigatorio.',
+      ),
+    );
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-broker/finalize')
+      .set('x-draft-id', 'draft-broker')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'send_later',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: false,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('BROKER_AGREEMENT_REQUIRED');
+  });
+
+  it('rejeita corretor submit_documents sem termo de adesão', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockRejectedValue(
+      new DraftFlowErrorMock(
+        400,
+        'BROKER_AGREEMENT_REQUIRED',
+        'Aceite do contrato de adesso de corretor e obrigatorio.',
+      ),
+    );
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-broker/finalize')
+      .set('x-draft-id', 'draft-broker')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: false,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('BROKER_AGREEMENT_REQUIRED');
   });
 
   it('rejeita upload com tipo de arquivo inválido em submit-documents', async () => {

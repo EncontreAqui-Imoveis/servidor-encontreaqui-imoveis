@@ -1,5 +1,6 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import multer from 'multer';
+import * as Sentry from '@sentry/node';
 
 import { getRequestId } from './requestContext';
 import { redactValue } from '../utils/logSanitizer';
@@ -106,6 +107,7 @@ export const globalErrorHandler: ErrorRequestHandler = (
   );
 
   if (statusCode >= 500) {
+    Sentry.captureException(normalized);
     res.status(500).json({ error: 'Erro interno do servidor.', requestId });
     return;
   }

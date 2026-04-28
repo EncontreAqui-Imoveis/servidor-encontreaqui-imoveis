@@ -71,12 +71,64 @@ describe('Finalização de rascunho para cliente', () => {
       .post('/auth/register/draft/draft-client/finalize')
       .set('x-draft-id', 'draft-client')
       .set('x-draft-token', 'tok')
-      .send({ action: 'submit_documents' });
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.token).toBe('jwt-client');
     expect(response.body.user.role).toBe('client');
     expect(response.body.requiresDocuments).toBe(false);
+  });
+
+  it('rejeita cliente sem aceitação dos termos', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockRejectedValue(
+      new DraftFlowErrorMock(400, 'TERMS_ACCEPTANCE_REQUIRED', 'Aceite dos termos de uso e obrigatorio.'),
+    );
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-client/finalize')
+      .set('x-draft-id', 'draft-client')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: false,
+        acceptedPrivacyPolicy: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('TERMS_ACCEPTANCE_REQUIRED');
+  });
+
+  it('rejeita cliente sem aceitação da política de privacidade', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockRejectedValue(
+      new DraftFlowErrorMock(
+        400,
+        'PRIVACY_ACCEPTANCE_REQUIRED',
+        'Aceite da politica de privacidade e obrigatorio.',
+      ),
+    );
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-client/finalize')
+      .set('x-draft-id', 'draft-client')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: false,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('PRIVACY_ACCEPTANCE_REQUIRED');
   });
 
   it('retorna erro quando senha obrigatória não foi informada', async () => {
@@ -88,7 +140,13 @@ describe('Finalização de rascunho para cliente', () => {
       .post('/auth/register/draft/draft-client/finalize')
       .set('x-draft-id', 'draft-client')
       .set('x-draft-token', 'tok')
-      .send({ action: 'submit_documents' });
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('DRAFT_PASSWORD_REQUIRED');
@@ -118,7 +176,13 @@ describe('Finalização de rascunho para cliente', () => {
       .post('/auth/register/draft/draft-client/finalize')
       .set('x-draft-id', 'draft-client')
       .set('x-draft-token', 'tok')
-      .send({ action: 'submit_documents' });
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.needsCompletion).toBe(false);
@@ -151,7 +215,13 @@ describe('Finalização de rascunho para cliente', () => {
       .post('/auth/register/draft/draft-client/finalize')
       .set('x-draft-id', 'draft-client')
       .set('x-draft-token', 'tok')
-      .send({ action: 'submit_documents' });
+      .send({
+        action: 'submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
 
     expect(response.status).toBe(200);
     expect(response.body.token).toBe('jwt-client-phone-opcional');

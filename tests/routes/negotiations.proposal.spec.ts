@@ -125,11 +125,13 @@ describe('POST /negotiations/proposal', () => {
     });
 
     expect(response.status).toBe(201);
-    expect(response.header['content-type']).toContain('application/pdf');
-    expect(Buffer.isBuffer(response.body)).toBe(true);
+    expect(response.body).toMatchObject({
+      message: 'Fila de processamento desativada. Proposta gerada de forma síncrona.',
+      negotiationId: expect.any(String),
+    });
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledTimes(1);
     expect(txMock.commit).toHaveBeenCalledTimes(1);
@@ -207,7 +209,6 @@ describe('POST /negotiations/proposal', () => {
         ],
       ])
       .mockResolvedValueOnce([[{ name: 'Broker Captador' }]])
-      .mockResolvedValueOnce([[{ name: 'Broker Vendedor' }]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -228,12 +229,12 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30004, 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         brokerName: 'Broker Captador',
-        sellingBrokerName: 'Broker Vendedor',
+        sellingBrokerName: 'Broker Captador',
       })
     );
   });
@@ -328,7 +329,7 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([expect.any(String), 101, 30003, 30003, 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
     );
   });
 

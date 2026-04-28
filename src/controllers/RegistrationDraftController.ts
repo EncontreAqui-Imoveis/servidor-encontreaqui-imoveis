@@ -266,7 +266,19 @@ class RegistrationDraftController {
         .toLowerCase();
       const action: DraftFinalizeAction =
         requestedAction === 'send_later' ? 'send_later' : 'submit_documents';
-      const response = await finalizeRegistrationDraft(this.draftId(req), this.draftToken(req), action);
+      const body = req.body ?? {};
+      const requestContext = {
+        ip: req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0] : req.ip,
+        userAgent: req.get('user-agent'),
+      };
+      const response = await finalizeRegistrationDraft(this.draftId(req), this.draftToken(req), action, {
+        acceptedTerms: body.acceptedTerms,
+        acceptedPrivacyPolicy: body.acceptedPrivacyPolicy,
+        acceptedBrokerAgreement: body.acceptedBrokerAgreement,
+        termsVersion: body.termsVersion,
+        privacyPolicyVersion: body.privacyPolicyVersion,
+        brokerAgreementVersion: body.brokerAgreementVersion,
+      }, requestContext);
       return res.status(200).json({ status: 'ok', ...response });
     } catch (error) {
       return this.handleError(req, res, error);

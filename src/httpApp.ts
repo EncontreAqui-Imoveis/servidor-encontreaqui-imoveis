@@ -136,10 +136,9 @@ export function createHttpApp() {
     }
   });
 
-  // Sentry error handler
-  import('@sentry/node').then(Sentry => {
-    Sentry.setupExpressErrorHandler(app);
-  });
+  // Sentry error handler - must be registered after routes and before custom error handlers
+  const Sentry = require("@sentry/node");
+  Sentry.setupExpressErrorHandler(app);
 
   app.use(notFoundHandler);
   app.use(globalErrorHandler);

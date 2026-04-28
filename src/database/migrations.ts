@@ -1103,12 +1103,14 @@ async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
 async function ensurePropertyIndices(): Promise<void> {
   if (!(await tableExists('properties'))) return;
 
-  // FullText Index for Search
-  if (!(await indexExists('properties', 'idx_properties_fulltext'))) {
-    console.log('Adicionando índice FULLTEXT em properties(title, description)...');
-    await connection.query(
-      'ALTER TABLE properties ADD FULLTEXT INDEX idx_properties_fulltext (title, description)'
-    );
+  // FullText Index for Search (Split for TiDB compatibility)
+  if (!(await indexExists('properties', 'idx_properties_title_ft'))) {
+    console.log('Adicionando índice FULLTEXT em properties(title)...');
+    await connection.query('ALTER TABLE properties ADD FULLTEXT INDEX idx_properties_title_ft (title)');
+  }
+  if (!(await indexExists('properties', 'idx_properties_description_ft'))) {
+    console.log('Adicionando índice FULLTEXT em properties(description)...');
+    await connection.query('ALTER TABLE properties ADD FULLTEXT INDEX idx_properties_description_ft (description)');
   }
 
   // Price Index (Range filters)
@@ -1122,6 +1124,42 @@ async function ensurePropertyIndices(): Promise<void> {
   }
   if (!(await indexExists('properties', 'idx_properties_purpose'))) {
     await connection.query('ALTER TABLE properties ADD INDEX idx_properties_purpose (purpose)');
+  }
+
+  // Created At (Newest sorting)
+  if (!(await indexExists('properties', 'idx_properties_created'))) {
+    await connection.query('ALTER TABLE properties ADD INDEX idx_properties_created (created_at)');
+  }
+
+  // Is Promoted (Featured filter)
+  if (!(await indexExists('properties', 'idx_properties_promoted'))) {
+    await connection.query('ALTER TABLE properties ADD INDEX idx_properties_promoted (is_promoted)');
+  }
+}
+
+async function ensureGeneralIndices(): Promise<void> {
+  // Negotiations
+  if (await tableExists('negotiations')) {
+    if (!(await indexExists('negotiations', 'idx_negotiations_status'))) {
+      await connection.query('ALTER TABLE negotiations ADD INDEX idx_negotiations_status (status)');
+    }
+    if (!(await indexExists('negotiations', 'idx_negotiations_property'))) {
+      await connection.query('ALTER TABLE negotiations ADD INDEX idx_negotiations_property (property_id)');
+    }
+  }
+
+  // Users
+  if (await tableExists('users')) {
+    if (!(await indexExists('users', 'idx_users_name'))) {
+      await connection.query('ALTER TABLE users ADD INDEX idx_users_name (name)');
+    }
+  }
+
+  // Notifications
+  if (await tableExists('notifications')) {
+    if (!(await indexExists('notifications', 'idx_notifications_recipient_read'))) {
+      await connection.query('ALTER TABLE notifications ADD INDEX idx_notifications_recipient_read (recipient_id, is_read)');
+    }
   }
 }
 
@@ -1147,6 +1185,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureNegotiationResponsiblesAndBrokerProfileType();
     await ensureNegotiationStatusHistoryColumnsFreetext();
     await ensurePropertyIndices();
+    await ensureGeneralIndices();
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);

@@ -16,6 +16,7 @@ import {
   saveNegotiationProposalDocument,
   saveNegotiationSignedProposalDocument,
 } from '../services/negotiationPersistenceService';
+import { addPdfJob } from '../modules/negotiations/infra/PdfQueue';
 
 interface NegotiationRow extends RowDataPacket {
   id: string;
@@ -1063,6 +1064,39 @@ class NegotiationController {
     });
   }
 
+  private isPdfQueueDispatchFallbackError(error: unknown): boolean {
+    const anyError = error as { code?: unknown; message?: unknown };
+    const code = String(anyError?.code ?? '').toUpperCase();
+    const message = String(anyError?.message ?? '').toLowerCase();
+
+    return (
+      code === 'PDF_QUEUE_DISABLED' ||
+      code === 'ECONNREFUSED' ||
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT' ||
+      code === 'ENOTFOUND' ||
+      code === 'EHOSTUNREACH' ||
+      message.includes('pdf queue disabled') ||
+      message.includes('redis connection') ||
+      message.includes('redis') ||
+      message.includes('connection refused')
+    );
+  }
+
+  private async fallbackGenerateProposalSynchronously(
+    negotiationId: string,
+    proposalData: ProposalData
+  ): Promise<number> {
+    const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
+    return saveNegotiationProposalDocument(negotiationId, pdfBuffer, null, {
+      originalFileName: 'proposta.pdf',
+      generated: true,
+      metadata: {
+        source: 'sync-fallback',
+      },
+    });
+  }
+
   async listMine(req: AuthRequest, res: Response): Promise<Response> {
     const userId = Number(req.userId);
     if (!Number.isFinite(userId) || userId <= 0) {
@@ -1145,23 +1179,60 @@ class NegotiationController {
         [proposalData.clientName, proposalData.clientCpf, negotiationId]
       );
 
-      const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
-      const documentId = await saveNegotiationProposalDocument(
-        negotiationId,
-        pdfBuffer,
-        undefined,
-        {
-          originalFileName: 'proposta.pdf',
-          generated: true,
-        }
-      );
+      try {
+        await addPdfJob({
+          negotiationId,
+          proposalData,
+          documentType: 'proposal',
+          userId: Number(req.userId),
+        });
 
-      return res.status(201).json({
-        id: documentId,
-        message: 'Proposta gerada e armazenada com sucesso.',
-        negotiationId,
-        sizeBytes: pdfBuffer.length,
-      });
+        return res.status(202).json({
+          message:
+            'A proposta está sendo gerada em segundo plano. Você receberá uma notificação quando estiver pronta.',
+          negotiationId,
+        });
+      } catch (queueError) {
+        if (!this.isPdfQueueDispatchFallbackError(queueError)) {
+          throw queueError;
+        }
+
+        console.warn('Fila de PDF indisponível. Usando fallback síncrono para proposta.', {
+          negotiationId,
+          queueError: queueError instanceof Error ? queueError.message : String(queueError),
+        });
+
+        try {
+          await this.fallbackGenerateProposalSynchronously(negotiationId, proposalData);
+          return res.status(201).json({
+            message: 'Fila de processamento desativada. Proposta gerada de forma síncrona.',
+            negotiationId,
+          });
+        } catch (fallbackError) {
+          console.error('Falha no fallback síncrono de geração de proposta:', fallbackError);
+          if (isDependencyUnavailableError(fallbackError)) {
+            return this.respondWithCode(
+              req,
+              res,
+              503,
+              'DEPENDENCY_UNAVAILABLE',
+              'Servico temporariamente indisponivel. Tente novamente em instantes.',
+              true
+            );
+          }
+          if (fallbackError instanceof Error) {
+            return this.respondWithCode(
+              req,
+              res,
+              500,
+              'INTERNAL_SERVER_ERROR',
+              fallbackError.message,
+              false
+            );
+          }
+          throw fallbackError;
+        }
+      }
     } catch (error) {
       console.error('Erro ao gerar/salvar proposta em BLOB:', error);
       if (isDependencyUnavailableError(error)) {
@@ -1541,34 +1612,62 @@ class NegotiationController {
         validityDays: payload.validadeDias,
       };
 
-      const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
-      const documentId = await saveNegotiationProposalDocument(
-        negotiationId,
-        pdfBuffer,
-        tx,
-        {
-          originalFileName: 'proposta.pdf',
-          generated: true,
+      try {
+        await addPdfJob({
+          negotiationId,
+          proposalData,
+          documentType: 'proposal',
+          userId: Number(req.userId),
+        });
+      } catch (queueError) {
+        if (!this.isPdfQueueDispatchFallbackError(queueError)) {
+          throw queueError;
         }
-      );
 
-      await tx.execute(
-        `
-          UPDATE negotiation_proposal_idempotency
-          SET negotiation_id = ?, document_id = ?
-          WHERE user_id = ? AND idempotency_key = ?
-        `,
-        [negotiationId, documentId, req.userId, idempotencyKey]
-      );
+        console.warn('Fila de PDF indisponível. Usando fallback síncrono para proposta.', {
+          negotiationId,
+          queueError: queueError instanceof Error ? queueError.message : String(queueError),
+        });
+
+        try {
+          await this.fallbackGenerateProposalSynchronously(negotiationId, proposalData);
+          await tx.commit();
+          return res.status(201).json({
+            message: 'Fila de processamento desativada. Proposta gerada de forma síncrona.',
+            negotiationId,
+          });
+        } catch (fallbackError) {
+          console.error('Falha no fallback síncrono de geração de proposta:', fallbackError);
+          if (isDependencyUnavailableError(fallbackError)) {
+            return this.respondWithCode(
+              req,
+              res,
+              503,
+              'DEPENDENCY_UNAVAILABLE',
+              'Servico temporariamente indisponivel. Tente novamente em instantes.',
+              true
+            );
+          }
+          if (fallbackError instanceof Error) {
+            return this.respondWithCode(
+              req,
+              res,
+              500,
+              'INTERNAL_SERVER_ERROR',
+              fallbackError.message,
+              false
+            );
+          }
+          throw fallbackError;
+        }
+      }
 
       await tx.commit();
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="proposal_${negotiationId}.pdf"`);
-      res.setHeader('Content-Length', pdfBuffer.length.toString());
-      res.setHeader('X-Negotiation-Id', negotiationId);
-      res.setHeader('X-Document-Id', String(documentId));
-      return res.status(201).send(pdfBuffer);
+      return res.status(202).json({
+        message: 'Proposta enviada! Estamos gerando o documento PDF agora. Você será notificado em instantes.',
+        negotiationId,
+      });
     } catch (error: any) {
       if (tx) {
         await tx.rollback();

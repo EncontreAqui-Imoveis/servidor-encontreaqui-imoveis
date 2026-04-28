@@ -15,6 +15,10 @@ mainRoutes.get('/', (req, res) => {
     return res.json({ message: 'API Imobiliária no ar!' });
 });
 
+mainRoutes.get("/debug-sentry", function mainHandler(req, res) {
+  throw new Error("Meu primeiro erro no Sentry!");
+});
+
 mainRoutes.use('/auth', authRoutes);
 mainRoutes.use('/users', userRoutes);
 mainRoutes.use('/brokers', brokerRoutes);

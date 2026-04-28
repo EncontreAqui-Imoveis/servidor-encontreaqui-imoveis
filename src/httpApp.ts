@@ -136,6 +136,11 @@ export function createHttpApp() {
     }
   });
 
+  // Sentry error handler
+  import('@sentry/node').then(Sentry => {
+    Sentry.setupExpressErrorHandler(app);
+  });
+
   app.use(notFoundHandler);
   app.use(globalErrorHandler);
 

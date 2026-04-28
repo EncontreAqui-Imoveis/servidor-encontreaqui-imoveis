@@ -1103,15 +1103,45 @@ async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
 async function ensurePropertyIndices(): Promise<void> {
   if (!(await tableExists('properties'))) return;
 
+  const isTidb = String(process.env.DB_DIALECT ?? '').trim().toLowerCase() === 'tidb';
+
+  const addFullTextIndexIfSupported = async (
+    indexName: string,
+    columnName: string,
+  ): Promise<void> => {
+    if (await indexExists('properties', indexName)) return;
+
+    const statement = `ALTER TABLE properties ADD FULLTEXT INDEX ${indexName} (${columnName})`;
+    try {
+      console.log(`Adicionando índice FULLTEXT em properties(${columnName})...`);
+      await connection.query(statement);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isUnsupportedColumnarError =
+        /Unsupported add columnar index|columnar replica must exist/i.test(message);
+
+      if (isTidb || isUnsupportedColumnarError) {
+        console.warn(
+          'FULLTEXT opcional não pôde ser criado em properties; pulando para não quebrar startup/migrations em TiDB.',
+          {
+            table: 'properties',
+            indexName,
+            columnName,
+            dialect: process.env.DB_DIALECT ?? null,
+            reason: isUnsupportedColumnarError ? message : undefined,
+          },
+        );
+        return;
+      }
+
+      throw error;
+    }
+  };
+
   // FullText Index for Search (Split for TiDB compatibility)
-  if (!(await indexExists('properties', 'idx_properties_title_ft'))) {
-    console.log('Adicionando índice FULLTEXT em properties(title)...');
-    await connection.query('ALTER TABLE properties ADD FULLTEXT INDEX idx_properties_title_ft (title)');
-  }
-  if (!(await indexExists('properties', 'idx_properties_description_ft'))) {
-    console.log('Adicionando índice FULLTEXT em properties(description)...');
-    await connection.query('ALTER TABLE properties ADD FULLTEXT INDEX idx_properties_description_ft (description)');
-  }
+  await addFullTextIndexIfSupported('idx_properties_title_ft', 'title');
+  await addFullTextIndexIfSupported('idx_properties_description_ft', 'description');
 
   // Price Index (Range filters)
   if (!(await indexExists('properties', 'idx_properties_price'))) {

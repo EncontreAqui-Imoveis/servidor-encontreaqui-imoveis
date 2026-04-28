@@ -130,6 +130,46 @@ class RegistrationDraftController {
     }
   }
 
+  private resolveFinalizeAction(rawAction: unknown): DraftFinalizeAction {
+    const normalized = String(rawAction ?? '').trim().toLowerCase().replace(/-/g, '_');
+    const actionMap: Record<string, DraftFinalizeAction | undefined> = {
+      '': 'submit_documents',
+      submit_documents: 'submit_documents',
+      submitdocuments: 'submit_documents',
+      broker_submit_documents: 'submit_documents',
+      send_later: 'send_later',
+      sendlater: 'send_later',
+      broker_send_later: 'send_later',
+      client_finalize: 'submit_documents',
+    };
+    const action = actionMap[normalized];
+    if (action) {
+      return action;
+    }
+    throw new DraftFlowError(400, 'DRAFT_INVALID_ACTION', 'Acao de finalizacao invalida.');
+  }
+
+  private logDraftFinalizeRequest(
+    req: Request,
+    draftId: string,
+    actionRaw: unknown,
+    action: DraftFinalizeAction,
+    body: Record<string, unknown>,
+  ) {
+    console.info('Finalize draft recebido', {
+      requestId: this.correlationId(req),
+      draftIdSuffix: String(draftId ?? '').slice(-8),
+      actionRaw: String(actionRaw ?? ''),
+      actionCanonical: action,
+      acceptedTerms: body.acceptedTerms === true || body.acceptedTerms === 'true',
+      acceptedPrivacyPolicy: body.acceptedPrivacyPolicy === true || body.acceptedPrivacyPolicy === 'true',
+      acceptedBrokerAgreement: body.acceptedBrokerAgreement === true || body.acceptedBrokerAgreement === 'true',
+      termsVersion: body.termsVersion,
+      privacyPolicyVersion: body.privacyPolicyVersion,
+      brokerAgreementVersion: body.brokerAgreementVersion,
+    });
+  }
+
   async get(req: Request, res: Response) {
     try {
       this.ensureDraftFlowEnabled();
@@ -259,19 +299,18 @@ class RegistrationDraftController {
   }
 
   async finalize(req: Request, res: Response) {
+    const actionRaw = req.body?.action;
+    const draftId = this.draftId(req);
+    const body = req.body ?? {};
     try {
       this.ensureDraftFlowEnabled();
-      const requestedAction = String(req.body?.action ?? '')
-        .trim()
-        .toLowerCase();
-      const action: DraftFinalizeAction =
-        requestedAction === 'send_later' ? 'send_later' : 'submit_documents';
-      const body = req.body ?? {};
+      const action = this.resolveFinalizeAction(actionRaw);
+      this.logDraftFinalizeRequest(req, draftId, actionRaw, action, body as Record<string, unknown>);
       const requestContext = {
         ip: req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0] : req.ip,
         userAgent: req.get('user-agent'),
       };
-      const response = await finalizeRegistrationDraft(this.draftId(req), this.draftToken(req), action, {
+      const response = await finalizeRegistrationDraft(draftId, this.draftToken(req), action, {
         acceptedTerms: body.acceptedTerms,
         acceptedPrivacyPolicy: body.acceptedPrivacyPolicy,
         acceptedBrokerAgreement: body.acceptedBrokerAgreement,
@@ -281,6 +320,14 @@ class RegistrationDraftController {
       }, requestContext);
       return res.status(200).json({ status: 'ok', ...response });
     } catch (error) {
+      if (error instanceof DraftFlowError) {
+        console.warn('Finalize draft falhou', {
+          requestId: this.correlationId(req),
+          draftIdSuffix: String(draftId).slice(-8),
+          actionRaw: String(actionRaw ?? ''),
+          errorCode: error.code,
+        });
+      }
       return this.handleError(req, res, error);
     }
   }

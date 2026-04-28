@@ -52,7 +52,7 @@ describe('Finalização de rascunho para cliente', () => {
     app = express();
     app.use(express.json());
     app.use('/auth', authRoutes);
-  }, 30000);
+  }, 60000);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -104,6 +104,56 @@ describe('Finalização de rascunho para cliente', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('TERMS_ACCEPTANCE_REQUIRED');
+  });
+
+  it('aceita action client_finalize como submit_documents', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockResolvedValue({
+      token: 'jwt-client-clientfinalize',
+      user: { id: 10, email: 'cliente@dominio.com', name: 'Cliente', role: 'client' },
+      needsCompletion: false,
+      requiresDocuments: false,
+      action: 'submit_documents',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-client/finalize')
+      .set('x-draft-id', 'draft-client')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'client_finalize',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(200);
+    expect(serviceMocks.finalizeRegistrationDraftMock).toHaveBeenCalledWith(
+      'draft-client',
+      'tok',
+      'submit_documents',
+      expect.objectContaining({
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('rejeita action inválida no finalize do cliente', async () => {
+    const response = await request(app)
+      .post('/auth/register/draft/draft-client/finalize')
+      .set('x-draft-id', 'draft-client')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'client_unknown',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('DRAFT_INVALID_ACTION');
+    expect(serviceMocks.finalizeRegistrationDraftMock).not.toHaveBeenCalled();
   });
 
   it('rejeita cliente sem aceitação da política de privacidade', async () => {

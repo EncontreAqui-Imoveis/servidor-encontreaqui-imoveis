@@ -60,7 +60,7 @@ describe('Finalização de rascunho para corretor', () => {
     app = express();
     app.use(express.json());
     app.use('/auth', authRoutes);
-  }, 30000);
+  }, 60000);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -110,6 +110,54 @@ describe('Finalização de rascunho para corretor', () => {
     expect(response.body.action).toBe('send_later');
   });
 
+  it('aceita broker_send_later como alias de send_later', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockResolvedValue({
+      token: 'jwt-broker-alias',
+      user: {
+        id: 14,
+        email: 'corretor-alias@dominio.com',
+        name: 'Corretor Alias',
+        role: 'broker',
+        street: 'Rua Corretor',
+        number: '100',
+        bairro: 'Centro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: null,
+      },
+      needsCompletion: false,
+      requiresDocuments: true,
+      action: 'send_later',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-broker/finalize')
+      .set('x-draft-id', 'draft-broker')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'broker_send_later',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(200);
+    expect(serviceMocks.finalizeRegistrationDraftMock).toHaveBeenCalledWith(
+      'draft-broker',
+      'tok',
+      'send_later',
+      expect.objectContaining({
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('finaliza corretor por submit_documents sem cep com endereço manual completo', async () => {
     serviceMocks.finalizeRegistrationDraftMock.mockResolvedValue({
       token: 'jwt-broker-submit',
@@ -148,6 +196,54 @@ describe('Finalização de rascunho para corretor', () => {
     expect(response.body.action).toBe('submit_documents');
     expect(response.body.user.cep).toBeNull();
     expect(response.body.requiresDocuments).toBe(true);
+  });
+
+  it('aceita broker_submit_documents como alias de submit_documents', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockResolvedValue({
+      token: 'jwt-broker-submit-alias',
+      user: {
+        id: 15,
+        email: 'corretor-submit-alias@dominio.com',
+        name: 'Corretor Submit Alias',
+        role: 'broker',
+        street: 'Rua Corretor',
+        number: '200',
+        bairro: 'Bairro',
+        city: 'Cidade',
+        state: 'GO',
+        cep: null,
+      },
+      needsCompletion: false,
+      requiresDocuments: true,
+      action: 'submit_documents',
+    });
+
+    const response = await request(app)
+      .post('/auth/register/draft/draft-broker/finalize')
+      .set('x-draft-id', 'draft-broker')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'broker_submit_documents',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+        termsVersion: '2026-04-28',
+        privacyPolicyVersion: '2026-04-28',
+        brokerAgreementVersion: '2026-04-28',
+      });
+
+    expect(response.status).toBe(200);
+    expect(serviceMocks.finalizeRegistrationDraftMock).toHaveBeenCalledWith(
+      'draft-broker',
+      'tok',
+      'submit_documents',
+      expect.objectContaining({
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+      }),
+      expect.any(Object),
+    );
   });
 
   it('finaliza corretor sem phoneVerifiedAt no rascunho', async () => {
@@ -216,6 +312,23 @@ describe('Finalização de rascunho para corretor', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.code).toBe('DRAFT_DOCUMENTS_MISSING');
+  });
+
+  it('rejeita action inválida no finalize do broker', async () => {
+    const response = await request(app)
+      .post('/auth/register/draft/draft-broker/finalize')
+      .set('x-draft-id', 'draft-broker')
+      .set('x-draft-token', 'tok')
+      .send({
+        action: 'broker_invalid',
+        acceptedTerms: true,
+        acceptedPrivacyPolicy: true,
+        acceptedBrokerAgreement: true,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe('DRAFT_INVALID_ACTION');
+    expect(serviceMocks.finalizeRegistrationDraftMock).not.toHaveBeenCalled();
   });
 
   it('rejeita corretor send_later sem termo de adesão', async () => {

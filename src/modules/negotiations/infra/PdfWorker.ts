@@ -1,5 +1,5 @@
 import { Worker, Job } from 'bullmq';
-import { redisConfig } from '../../../config/redis';
+import { getRedisConfigForPdfQueue } from '../../../config/redis';
 import { isPdfWorkerEnabled, PDF_QUEUE_NAME, PdfJobData } from './PdfQueue';
 import { generateNegotiationProposalPdf, saveNegotiationProposalDocument } from '../../../services/negotiationPersistenceService';
 import { createUserNotification } from '../../../services/notificationService';
@@ -11,6 +11,15 @@ export function setupPdfWorker() {
   }
 
   try {
+    const redisConnection = getRedisConfigForPdfQueue();
+    if (!redisConnection.config) {
+      console.error('PDF worker não pode iniciar sem configuração Redis:', {
+        reason: redisConnection.reason,
+        source: redisConnection.source,
+      });
+      return null;
+    }
+
     const worker = new Worker<PdfJobData>(
       PDF_QUEUE_NAME,
       async (job: Job<PdfJobData>) => {
@@ -69,7 +78,7 @@ export function setupPdfWorker() {
         }
       },
       {
-        connection: redisConfig,
+        connection: redisConnection.config,
         concurrency: 5,
       }
     );

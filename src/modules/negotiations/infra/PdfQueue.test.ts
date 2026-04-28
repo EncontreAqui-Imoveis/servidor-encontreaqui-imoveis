@@ -1,21 +1,17 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { addPdfJob, pdfQueue } from './PdfQueue';
 
-vi.mock('bullmq', () => {
-  class QueueMock {
-    add: ReturnType<typeof vi.fn>;
-
-    constructor() {
-      this.add = vi.fn().mockResolvedValue({ id: 'job-123' });
-    }
-  }
-
-  return {
-    Queue: QueueMock,
-  };
-});
-
+const queueAddMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 'job-123' }));
+const queueCtorMock = vi.hoisted(() =>
+  vi.fn(function () {
+    return { add: queueAddMock };
+  }),
+);
 const originalPdfWorkerEnabled = process.env.PDF_WORKER_ENABLED;
+
+vi.mock('bullmq', () => ({
+  Queue: queueCtorMock,
+}));
 
 describe('PdfQueue', () => {
   beforeAll(() => {
@@ -24,6 +20,7 @@ describe('PdfQueue', () => {
 
   beforeEach(() => {
     process.env.PDF_WORKER_ENABLED = 'true';
+    queueCtorMock.mockClear();
     vi.clearAllMocks();
   });
 
@@ -59,7 +56,8 @@ describe('PdfQueue', () => {
 
     const result = await addPdfJob(jobData);
 
-    expect(pdfQueue.add).toHaveBeenCalledWith('generate-pdf', jobData, expect.any(Object));
+    expect(queueAddMock).toHaveBeenCalledWith('generate-pdf', jobData, expect.any(Object));
+    expect(queueCtorMock).toHaveBeenCalledTimes(1);
     expect(result).toBeUndefined();
   });
 
@@ -88,6 +86,38 @@ describe('PdfQueue', () => {
     };
 
     await expect(addPdfJob(jobData)).rejects.toThrow('PDF_QUEUE_DISABLED');
-    expect((pdfQueue.add as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+    expect(queueAddMock).not.toHaveBeenCalled();
+    expect(queueCtorMock).toHaveBeenCalledTimes(0);
+  });
+
+  it('não instancia Queue quando PDF_WORKER_ENABLED=false', async () => {
+    process.env.PDF_WORKER_ENABLED = 'false';
+
+    const jobData = {
+      negotiationId: 'neg-789',
+      proposalData: {
+        clientName: 'Bruno',
+        clientCpf: '12312312312',
+        propertyAddress: 'Rua Zero, 1',
+        brokerName: 'Maria',
+        sellingBrokerName: 'Maria',
+        value: 100000,
+        payment: {
+          cash: 100000,
+          tradeIn: 0,
+          financing: 0,
+          others: 0,
+        },
+        validityDays: 10,
+      },
+      documentType: 'proposal' as const,
+      userId: 3,
+    };
+
+    await expect(addPdfJob(jobData)).rejects.toMatchObject({
+      code: 'PDF_QUEUE_DISABLED',
+    });
+
+    expect(queueCtorMock).toHaveBeenCalledTimes(0);
   });
 });

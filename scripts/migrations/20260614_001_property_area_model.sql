@@ -1,11 +1,7 @@
 -- +migrate Up
-ALTER TABLE properties
-  ADD COLUMN area_construida_valor DECIMAL(18, 4) NULL,
-  ADD COLUMN area_construida_m2 DECIMAL(18, 2) NULL,
-  ADD COLUMN area_construida_unidade VARCHAR(20) NOT NULL DEFAULT 'm2',
-  ADD COLUMN area_terreno_valor DECIMAL(18, 4) NULL,
-  ADD COLUMN area_terreno_unidade VARCHAR(20) NOT NULL DEFAULT 'm2',
-  ADD COLUMN area_terreno_m2 DECIMAL(18, 2) NULL;
+-- A criação das colunas e o backfill de modelagem de área são tratados
+-- de forma idempotente no bootstrap da aplicação (src/database/migrations.ts).
+-- Esse migration permanece apenas como marcador histórico.
 
 UPDATE properties
 SET
@@ -29,10 +25,5 @@ WHERE
   area_construida_valor IS NULL OR area_construida_m2 IS NULL OR area_terreno_valor IS NULL OR area_terreno_m2 IS NULL;
 
 -- +migrate Down
-ALTER TABLE properties
-  DROP COLUMN area_terreno_m2,
-  DROP COLUMN area_terreno_unidade,
-  DROP COLUMN area_terreno_valor,
-  DROP COLUMN area_construida_unidade,
-  DROP COLUMN area_construida_m2,
-  DROP COLUMN area_construida_valor;
+-- A reversão explícita das novas colunas de área permanece na DDL inicial/controle
+-- centralizado (src/database/init.ts e src/database/migrations.ts).

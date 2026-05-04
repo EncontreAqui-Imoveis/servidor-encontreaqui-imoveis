@@ -1,7 +1,6 @@
 export const CANONICAL_PROPERTY_AMENITIES = [
   "POÇO ARTESIANO",
   "MOBILIADA",
-  "PLANEJADOS",
   "ELEVADOR",
   "ACADEMIA",
   "CHURRASQUEIRA",
@@ -13,7 +12,7 @@ export const CANONICAL_PROPERTY_AMENITIES = [
   "SAUNA",
 ] as const;
 
-const CANONICAL_AMENITY_LOOKUP: Record<string, (typeof CANONICAL_PROPERTY_AMENITIES)[number]> = {
+const CANONICAL_AMENITY_LOOKUP: Record<string, string> = {
   "poco artesanal": "POÇO ARTESIANO",
   "mobiliada": "MOBILIADA",
   "planejados": "PLANEJADOS",
@@ -33,7 +32,7 @@ const CANONICAL_AMENITY_LOOKUP: Record<string, (typeof CANONICAL_PROPERTY_AMENIT
   "sauna": "SAUNA",
 };
 
-const AMENITY_ID_TO_CANONICAL: Record<string, (typeof CANONICAL_PROPERTY_AMENITIES)[number]> = {
+const AMENITY_ID_TO_CANONICAL: Record<string, string> = {
   "1": "POÇO ARTESIANO",
   "2": "MOBILIADA",
   "3": "PLANEJADOS",

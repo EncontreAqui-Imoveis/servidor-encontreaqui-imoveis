@@ -1104,33 +1104,7 @@ class NegotiationController {
     }
 
     try {
-      let data: NegotiationSummaryPayload[];
-      try {
-        data = await queryMineNegotiationsCurrent(userId);
-      } catch (error) {
-        console.warn(
-          'Fallback schema-aware ativado em /negotiations/mine:',
-          (error as { code?: string; message?: string }).code ??
-            (error as { message?: string }).message ??
-            error,
-        );
-
-        try {
-          data = await queryMineNegotiationsSchemaAware(userId);
-        } catch (fallbackError) {
-          if (!isSchemaCompatibilityError(fallbackError)) {
-            throw fallbackError;
-          }
-
-          console.warn(
-            'Fallback legado ativado em /negotiations/mine:',
-            (fallbackError as { code?: string; message?: string }).code ??
-              (fallbackError as { message?: string }).message ??
-              fallbackError,
-          );
-          data = await queryMineNegotiationsLegacy(userId);
-        }
-      }
+      const data = await queryMineNegotiationsSchemaAware(userId);
 
       return res.status(200).json({
         data,

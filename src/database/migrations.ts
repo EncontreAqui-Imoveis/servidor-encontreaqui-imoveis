@@ -5,6 +5,7 @@ import {
   CONTRACT_APPROVAL_STATUSES,
   CONTRACT_DOCUMENT_TYPES,
 } from '../modules/contracts/domain/contract.types';
+import { ensurePublicPropertyIdentifiersForLegacyRows } from '../utils/propertyCode';
 
 async function tableExists(tableName: string): Promise<boolean> {
   const [rows] = await connection.query<RowDataPacket[]>(
@@ -329,6 +330,8 @@ async function ensurePropertiesColumns(): Promise<void> {
     { name: 'price_rent', nullable: true },
     { name: 'promotion_price', nullable: true },
     { name: 'promotional_rent_price', nullable: true },
+    { name: 'area_construida', nullable: true },
+    { name: 'area_terreno', nullable: true },
   ];
 
   for (const { name, nullable } of priceColumns) {
@@ -363,6 +366,14 @@ async function ensurePropertiesColumns(): Promise<void> {
   if (!(await columnExists('properties', 'amenities'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN amenities JSON NULL');
   }
+  if (!(await columnExists('properties', 'public_id'))) {
+    await connection.query("ALTER TABLE properties ADD COLUMN public_id CHAR(36) NULL UNIQUE");
+  }
+  if (!(await columnExists('properties', 'public_code'))) {
+    await connection.query("ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL UNIQUE");
+  }
+
+  await ensurePublicPropertyIdentifiersForLegacyRows(200);
 }
 
 async function ensurePropertyEditRequestsTable(): Promise<void> {

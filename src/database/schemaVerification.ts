@@ -134,6 +134,8 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['brokers', 'profile_type'],
     ['properties', 'updated_at'],
     ['properties', 'sem_cep'],
+    ['properties', 'public_id'],
+    ['properties', 'public_code'],
     ['property_edit_requests', 'updated_at'],
     ['property_edit_requests', 'before_json'],
     ['property_edit_requests', 'after_json'],

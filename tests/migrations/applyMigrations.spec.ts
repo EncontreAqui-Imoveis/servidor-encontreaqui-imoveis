@@ -27,6 +27,8 @@ describe('applyMigrations', () => {
       'negotiation_documents.metadata_json',
       'admins.token_version',
       'users.token_version',
+      'properties.public_id',
+      'properties.public_code',
     ]);
 
     queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
@@ -85,6 +87,18 @@ describe('applyMigrations', () => {
 
     expect(
       sqlStatements.some((sql) =>
+        sql.includes("ALTER TABLE properties ADD COLUMN public_id CHAR(36) NULL UNIQUE")
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes("ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL UNIQUE")
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
         sql.includes('ALTER TABLE admins ADD COLUMN token_version INT NOT NULL DEFAULT 1')
       )
     ).toBe(true);
@@ -104,6 +118,14 @@ describe('applyMigrations', () => {
     expect(
       sqlStatements.some((sql) =>
         sql.includes('UPDATE users SET token_version = 1 WHERE token_version IS NULL OR token_version < 1')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes(
+          'SELECT id, public_id, public_code FROM properties WHERE public_id IS NULL OR public_code IS NULL LIMIT ?'
+        )
       )
     ).toBe(true);
   });

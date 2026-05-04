@@ -42,7 +42,18 @@ describe('GET /negotiations/mine', () => {
   });
 
   it('returns the authenticated user negotiations in the site shape', async () => {
-    queryMock.mockResolvedValueOnce([
+    queryMock
+      .mockResolvedValueOnce([
+        [
+          { column_name: 'buyer_client_id' },
+          { column_name: 'selling_broker_id' },
+          { column_name: 'client_name' },
+          { column_name: 'client_cpf' },
+          { column_name: 'updated_at' },
+          { column_name: 'payment_details' },
+        ],
+      ])
+      .mockResolvedValueOnce([
       [
         {
           id: 'neg-1',
@@ -77,30 +88,30 @@ describe('GET /negotiations/mine', () => {
         clientCpf: '11122233344',
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledTimes(1);
-    const sql = String(queryMock.mock.calls[0]?.[0] ?? '');
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    const schemaSql = String(queryMock.mock.calls[0]?.[0] ?? '');
     const params = queryMock.mock.calls[0]?.[1] as unknown[];
-    expect(sql).not.toContain('n.selling_broker_id = ?');
-    expect(params.slice(0, 2)).toEqual([30003, 30003]);
+    expect(schemaSql).toContain('information_schema.columns');
+    expect(params).toEqual([]);
+    const listParams = queryMock.mock.calls[1]?.[1] as unknown[];
+    expect(listParams?.slice(0, 2)).toEqual([30003, 30003]);
   });
 
-  it('falls back to the schema-aware query when the modern query is incompatible', async () => {
+  it('uses schema-aware query for /negotiations/mine when optional columns are inspected', async () => {
     queryMock
-      .mockRejectedValueOnce(Object.assign(new Error('Unknown column buyer_client_id'), {
-        code: 'ER_BAD_FIELD_ERROR',
-      }))
       .mockResolvedValueOnce([
         [
           { column_name: 'client_name' },
           { column_name: 'client_cpf' },
           { column_name: 'updated_at' },
           { column_name: 'payment_details' },
+          { column_name: 'last_draft_edit_at' },
         ],
       ])
       .mockResolvedValueOnce([
         [
           {
-            id: 'neg-legacy',
+            id: 'neg-schema',
             property_id: 101,
             property_title: 'Apartamento Centro',
             property_city: 'Goiânia',
@@ -127,7 +138,7 @@ describe('GET /negotiations/mine', () => {
     expect(response.status).toBe(200);
     expect(response.body.data).toEqual([
       expect.objectContaining({
-        id: 'neg-legacy',
+        id: 'neg-schema',
         propertyId: 101,
         propertyTitle: 'Apartamento Centro',
         status: 'IN_NEGOTIATION',
@@ -135,6 +146,6 @@ describe('GET /negotiations/mine', () => {
         clientCpf: '99988877766',
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledTimes(3);
+    expect(queryMock).toHaveBeenCalledTimes(2);
   });
 });

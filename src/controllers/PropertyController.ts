@@ -24,7 +24,11 @@ import {
   isOptionalBairroPropertyType,
   normalizePropertyType,
 } from "../utils/propertyTypes";
-import { allocateNextPropertyCode } from "../utils/propertyCode";
+import {
+  allocateNextPropertyCode,
+  allocatePublicPropertyIdentifiers,
+  PUBLIC_PROPERTY_CODE_REGEX,
+} from "../utils/propertyCode";
 import {
   areaInputToSquareMeters,
   normalizeAreaUnidade,
@@ -79,9 +83,71 @@ const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const MAX_PROPERTY_COUNT = 99;
-const MAX_PROPERTY_AREA = 9999999.99;
+const MAX_PROPERTY_AREA = 99999999.99;
 const MAX_PROPERTY_PRICE = 9999999999.99;
 const MAX_PROPERTY_FEE = 99999999.99;
+const PUBLIC_ID_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type PublicPropertyLookup = {
+  kind: 'id' | 'public_id' | 'public_code' | 'code';
+  value: string | number;
+};
+
+function normalizePublicCode(value: unknown): string | null {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  return PUBLIC_PROPERTY_CODE_REGEX.test(normalized) ? normalized : null;
+}
+
+function extractPublicCodeFromValue(raw: unknown): string | null {
+  const normalized = String(raw ?? '').trim();
+  const fromEnd = normalized.match(/([A-Za-z0-9]{6})$/);
+  if (fromEnd?.[1]) {
+    const candidate = fromEnd[1];
+    const normalizedCandidate = normalizePublicCode(candidate);
+    if (normalizedCandidate) {
+      return normalizedCandidate;
+    }
+  }
+
+  return normalizePublicCode(normalized);
+}
+
+function resolvePublicPropertyLookup(raw: unknown): PublicPropertyLookup | null {
+  const normalized = String(raw ?? '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    return { kind: 'id', value: Number(normalized) };
+  }
+
+  if (PUBLIC_ID_UUID_RE.test(normalized)) {
+    return { kind: 'public_id', value: normalized };
+  }
+
+  const publicCode = extractPublicCodeFromValue(normalized);
+  if (publicCode) {
+    return { kind: 'public_code', value: publicCode };
+  }
+
+  return { kind: 'code', value: normalized };
+}
+
+function buildPublicPropertyLookupWhereClause(lookup: PublicPropertyLookup): string {
+  switch (lookup.kind) {
+    case 'id':
+      return 'p.id = ?';
+    case 'public_id':
+      return 'p.public_id = ?';
+    case 'public_code':
+      return 'p.public_code = ?';
+    default:
+      return 'TRIM(p.code) = ?';
+  }
+}
+
 const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'title',
   'description',
@@ -219,6 +285,8 @@ interface PropertyRow extends RowDataPacket {
   promotion_price?: number | string | null;
   promotional_rent_price?: number | string | null;
   code?: string | null;
+  public_id?: string | null;
+  public_code?: string | null;
   address: string;
   quadra?: string | null;
   lote?: string | null;
@@ -294,6 +362,37 @@ function parsePropertyAmenitiesFromRow(value: unknown): string[] | null {
     }
   }
   return null;
+}
+
+function toPublicAmenityLabel(label: string): string {
+  const normalized = String(label ?? "").trim();
+  if (!normalized) {
+    return normalized;
+  }
+  return normalized
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+    .replace(/\/[a-z]/g, (match) => `/${match[1].toUpperCase()}`);
+}
+
+function normalizePublicAmenities(
+  value: string[] | null,
+): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  const seen = new Set<string>();
+  const normalized = value
+    .map((entry) => String(entry ?? '').trim())
+    .filter((entry) => entry.length > 0)
+    .filter((entry) => entry.toUpperCase() !== 'PLANEJADOS')
+    .map((entry) => toPublicAmenityLabel(entry));
+
+  for (const entry of normalized) {
+    seen.add(entry);
+  }
+  return Array.from(seen);
 }
 
 interface PropertyEditRequestRow extends RowDataPacket {
@@ -626,6 +725,8 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     }
     : null;
 
+  const rawAmenities = parsePropertyAmenitiesFromRow(row.amenities);
+
   const mapped = {
     id: row.id,
     title: row.title,
@@ -694,6 +795,8 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     broker_id: row.broker_id != null ? Number(row.broker_id) : null,
     owner_id: row.owner_id != null ? Number(row.owner_id) : null,
     code: row.code ?? null,
+    public_id: row.public_id ?? null,
+    public_code: row.public_code ?? null,
     owner_name: includeOwnerInfo ? (row.owner_name ?? null) : null,
     owner_phone: includeOwnerInfo ? (row.owner_phone ?? null) : null,
     address: row.address,
@@ -718,7 +821,7 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     sem_lote: toBoolean((row as PropertyRow & { sem_lote?: unknown }).sem_lote),
     area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
     garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
-    amenities: parsePropertyAmenitiesFromRow(row.amenities),
+    amenities: includeOwnerInfo ? rawAmenities : normalizePublicAmenities(rawAmenities),
     has_wifi: toBoolean(row.has_wifi),
     tem_piscina: toBoolean(row.tem_piscina),
     tem_energia_solar: toBoolean(row.tem_energia_solar),
@@ -920,11 +1023,12 @@ async function upsertSaleRecord(
   );
 }
 
-async function fetchPropertyAggregateById(
-  propertyId: number,
+async function fetchPropertyAggregateByLookup(
+  lookup: PublicPropertyLookup,
   options?: { publicOnly?: boolean }
 ): Promise<PropertyAggregateRow | null> {
   const publicOnly = options?.publicOnly === true;
+  const whereClause = buildPublicPropertyLookupWhereClause(lookup);
   const rows = await runPropertyQuery<PropertyAggregateRow[]>(
     `
       SELECT
@@ -981,14 +1085,21 @@ async function fetchPropertyAggregateById(
         ON per.property_id = p.id
        AND per.status = 'PENDING'
       LEFT JOIN property_images pi ON pi.property_id = p.id
-      WHERE p.id = ?
+      WHERE ${whereClause}
         ${publicOnly ? "AND p.status = 'approved' AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'" : ''}
       GROUP BY p.id
     `,
-    [...NEGOTIATION_TERMINAL_STATUSES, propertyId]
+    [...NEGOTIATION_TERMINAL_STATUSES, lookup.value]
   );
 
   return rows?.[0] ?? null;
+}
+
+async function fetchPropertyAggregateById(
+  propertyId: number,
+  options?: { publicOnly?: boolean }
+): Promise<PropertyAggregateRow | null> {
+  return fetchPropertyAggregateByLookup({ kind: 'id', value: propertyId }, options);
 }
 
 class PropertyController {
@@ -1030,14 +1141,13 @@ class PropertyController {
   }
 
   async showPublic(req: Request, res: Response) {
-    const propertyId = Number(req.params.id);
-
-    if (Number.isNaN(propertyId)) {
+    const lookup = resolvePublicPropertyLookup(req.params.id);
+    if (!lookup) {
       return res.status(400).json({ error: "Identificador de imóvel inválido." });
     }
 
     try {
-      const property = await fetchPropertyAggregateById(propertyId, {
+      const property = await fetchPropertyAggregateByLookup(lookup, {
         publicOnly: true,
       });
 
@@ -1429,6 +1539,14 @@ class PropertyController {
         return res.status(400).json({ error: (parseError as Error).message });
       }
 
+      if (
+        numericAreaConstruida != null &&
+        numericAreaTerreno != null &&
+        numericAreaConstruida > numericAreaTerreno
+      ) {
+        return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
+      }
+
       const numericValidationError = [
         validatePropertyNumericRange(numericPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
         validatePropertyNumericRange(numericPriceSale, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
@@ -1495,6 +1613,7 @@ class PropertyController {
         trimmedBrokerPropertyCode.length > 0
           ? trimmedBrokerPropertyCode
           : await allocateNextPropertyCode();
+      const { publicId, publicCode } = await allocatePublicPropertyIdentifiers();
 
       const result = await runPropertyQuery<ResultSetHeader>(
         `
@@ -1549,8 +1668,10 @@ class PropertyController {
             eh_mobiliada,
             valor_condominio,
             valor_iptu,
-            video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            video_url,
+            public_id,
+            public_code
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
@@ -1604,6 +1725,8 @@ class PropertyController {
           numericValorCondominio,
           numericValorIptu,
           videoUrl,
+          publicId,
+          publicCode,
         ]
       );
 
@@ -2027,6 +2150,14 @@ class PropertyController {
         return res.status(400).json({ error: (parseError as Error).message });
       }
 
+      if (
+        numericAreaConstruida != null &&
+        numericAreaTerreno != null &&
+        numericAreaConstruida > numericAreaTerreno
+      ) {
+        return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
+      }
+
       const numericValidationError = [
         validatePropertyNumericRange(numericPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
         validatePropertyNumericRange(numericPriceSale, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
@@ -2093,6 +2224,7 @@ class PropertyController {
         trimmedClientPropertyCode.length > 0
           ? trimmedClientPropertyCode
           : await allocateNextPropertyCode();
+      const { publicId, publicCode } = await allocatePublicPropertyIdentifiers();
 
       const result = await runPropertyQuery<ResultSetHeader>(
         `
@@ -2147,8 +2279,10 @@ class PropertyController {
             eh_mobiliada,
             valor_condominio,
             valor_iptu,
-            video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            video_url,
+            public_id,
+            public_code
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           null,
@@ -2202,6 +2336,8 @@ class PropertyController {
           numericValorCondominio,
           numericValorIptu,
           videoUrl,
+          publicId,
+          publicCode,
         ]
       );
 
@@ -2595,6 +2731,12 @@ class PropertyController {
         property.promotional_rent_percentage != null
           ? Number(property.promotional_rent_percentage)
           : null;
+      let nextAreaConstruida =
+        property.area_construida != null ? Number(property.area_construida) : null;
+      let nextAreaTerreno =
+        property.area_terreno != null ? Number(property.area_terreno) : null;
+      let nextAreaConstruidaUnidade =
+        normalizeAreaUnidade((property as PropertyRow & { area_construida_unidade?: string | null }).area_construida_unidade);
 
       // Always allow editing all fields, even if approved
       const updatableFields = new Set([
@@ -2634,6 +2776,7 @@ class PropertyController {
         'bedrooms',
         'bathrooms',
         'area_construida',
+        'area_construida_unidade',
         'area_terreno',
         'garage_spots',
         'amenities',
@@ -2756,11 +2899,42 @@ class PropertyController {
             break;
           }
           case 'area_construida':
+          case 'area_construida_unidade':
           case 'area_terreno':
           case 'valor_condominio':
           case 'valor_iptu': {
             try {
+              if (key === 'area_construida_unidade') {
+                nextAreaConstruidaUnidade = normalizeAreaUnidade(
+                  (normalizedUpdateBody[key] as string | null | undefined)
+                );
+                fields.push('area_construida_unidade = ?');
+                values.push(nextAreaConstruidaUnidade);
+                break;
+              }
               fields.push(`\`${key}\` = ?`);
+              if (key === 'area_terreno') {
+                nextAreaTerreno = parseDecimal(normalizedUpdateBody[key]);
+                values.push(nextAreaTerreno);
+                break;
+              }
+              if (key === 'area_construida') {
+                const parsedArea = parseDecimal(normalizedUpdateBody[key]);
+                if (parsedArea == null) {
+                  nextAreaConstruida = null;
+                  values.push(null);
+                  break;
+                }
+                nextAreaConstruida = areaInputToSquareMeters(
+                  parsedArea,
+                  nextAreaConstruidaUnidade
+                );
+                if (Number.isNaN(nextAreaConstruida)) {
+                  throw new Error('Area construida invalida.');
+                }
+                values.push(nextAreaConstruida);
+                break;
+              }
               values.push(parseDecimal(normalizedUpdateBody[key]));
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
@@ -2968,6 +3142,19 @@ class PropertyController {
           : supportsRent
             ? nextRentPrice
             : nextSalePrice;
+      const hasAreaUpdate = bodyKeys.includes('area_construida') || bodyKeys.includes('area_terreno');
+      const nextAreaConstruidaState =
+        bodyKeys.includes('area_construida') || !hasAreaUpdate
+          ? nextAreaConstruida
+          : property.area_construida != null
+            ? Number(property.area_construida)
+            : null;
+      const nextAreaTerrenoState =
+        bodyKeys.includes('area_terreno') || !hasAreaUpdate
+          ? nextAreaTerreno
+          : property.area_terreno != null
+            ? Number(property.area_terreno)
+            : null;
       const numericValidationError = [
         validatePropertyNumericRange(nextBasePrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
         validatePropertyNumericRange(nextSalePrice, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
@@ -3007,16 +3194,16 @@ class PropertyController {
               { max: MAX_PROPERTY_COUNT, allowNull: true }
             )
           : null,
-        bodyKeys.includes('area_construida')
+        bodyKeys.includes('area_construida') || !hasAreaUpdate
           ? validatePropertyNumericRange(
-              parseDecimal(normalizedUpdateBody.area_construida),
+              nextAreaConstruidaState,
               'Área construída',
               { max: MAX_PROPERTY_AREA, allowNull: true }
             )
           : null,
-        bodyKeys.includes('area_terreno')
+        bodyKeys.includes('area_terreno') || !hasAreaUpdate
           ? validatePropertyNumericRange(
-              parseDecimal(normalizedUpdateBody.area_terreno),
+              nextAreaTerrenoState,
               'Área do terreno',
               { max: MAX_PROPERTY_AREA, allowNull: true }
             )
@@ -3039,6 +3226,14 @@ class PropertyController {
 
       if (numericValidationError) {
         return res.status(400).json({ error: numericValidationError });
+      }
+
+      if (
+        nextAreaConstruidaState != null &&
+        nextAreaTerrenoState != null &&
+        nextAreaConstruidaState > nextAreaTerrenoState
+      ) {
+        return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
       }
 
       if (

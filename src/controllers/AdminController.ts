@@ -5626,9 +5626,13 @@ class AdminController {
             b.created_at
           FROM brokers b
           INNER JOIN users u ON b.id = u.id
-          LEFT JOIN broker_documents bd ON b.id = bd.broker_id
+          INNER JOIN broker_documents bd
+            ON b.id = bd.broker_id
+            AND bd.status IN ('pending', 'rejected')
+            AND bd.creci_front_url IS NOT NULL
+            AND bd.creci_back_url IS NOT NULL
+            AND bd.selfie_url IS NOT NULL
           WHERE b.status = 'pending_verification'
-            AND (bd.status = 'pending' OR bd.status IS NULL)
         `
       );
 

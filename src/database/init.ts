@@ -133,6 +133,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
         eh_mobiliada TINYINT(1) DEFAULT 0,
         valor_condominio DECIMAL(10, 2) NULL,
         valor_iptu DECIMAL(10, 2) NULL,
+        amenities JSON NULL,
         video_url VARCHAR(255) NULL,
         sale_value DECIMAL(12, 2) NULL,
         commission_rate DECIMAL(5, 2) NULL,

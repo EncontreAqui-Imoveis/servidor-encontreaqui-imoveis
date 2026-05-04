@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
+import { consoleLoggingIntegration } from '@sentry/node';
 
 export function initSentry() {
   const rawDsn = process.env.SENTRY_DSN;
@@ -13,8 +14,10 @@ export function initSentry() {
   try {
     Sentry.init({
       dsn,
+      enableLogs: true,
       integrations: [
         nodeProfilingIntegration(),
+        consoleLoggingIntegration({ levels: ['log', 'warn', 'error'] }),
       ],
       // Performance Monitoring
       tracesSampleRate: 1.0, // Capture 100% of the transactions

@@ -20,6 +20,8 @@ function isNonEmpty(value: string | undefined): boolean {
 
   initSentry();
 
+  Sentry.logger.info('User triggered test log', { action: 'test_log' });
+
   const eventId = Sentry.captureMessage(
     '[backend] teste de integração de telemetria',
     'info',
@@ -27,6 +29,6 @@ function isNonEmpty(value: string | undefined): boolean {
 
   console.log(`Evento Sentry enviado com sucesso. EventId: ${eventId}`);
 
-  await Sentry.close(2000);
+  await Sentry.close(5000);
   console.log('Flush finalizado. Verifique o dashboard do Sentry (eventId acima).');
 })();

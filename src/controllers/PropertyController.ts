@@ -30,6 +30,7 @@ import {
   normalizeAreaUnidade,
   type AreaConstruidaUnidade,
 } from "../utils/propertyAreaUnits";
+import { normalizePropertyAmenities } from "../utils/propertyAmenities";
 import { stripExpiredPromotionFromPublicPayload } from "../utils/promotionPublicWindow";
 
 interface MulterFiles {
@@ -236,6 +237,7 @@ interface PropertyRow extends RowDataPacket {
   sem_quadra?: number | boolean | string | null;
   sem_lote?: number | boolean | string | null;
   garage_spots?: number | null;
+  amenities?: unknown;
   has_wifi?: number | boolean | null;
   tem_piscina?: number | boolean | null;
   tem_energia_solar?: number | boolean | null;
@@ -267,6 +269,31 @@ interface PropertyRow extends RowDataPacket {
 
 interface PropertyAggregateRow extends PropertyRow {
   images?: string | null;
+}
+
+function parsePropertyAmenitiesFromRow(value: unknown): string[] | null {
+  if (value == null) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map((item) => String(item)) : null;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(normalized);
+      if (Array.isArray(parsed)) {
+        return parsed.length > 0 ? parsed.map((item) => String(item)) : null;
+      }
+    } catch {
+      return normalized.length > 0 ? [normalized] : null;
+    }
+  }
+  return null;
 }
 
 interface PropertyEditRequestRow extends RowDataPacket {
@@ -391,15 +418,66 @@ function parseDecimal(value: unknown): Nullable<number> {
   return parsed;
 }
 
-function parseInteger(value: unknown): Nullable<number> {
+function parseInteger(
+  value: unknown,
+  options?: { label?: string },
+): Nullable<number> {
+  const label = options?.label ?? "Valor inteiro";
   if (value === undefined || value === null || value === "") {
     return null;
   }
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    throw new Error("Valor inteiro inválido.");
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
+    throw new Error(`${label} inválido.`);
   }
-  return Math.trunc(parsed);
+  return parsed;
+}
+
+function normalizeNumericCountField(
+  value: unknown,
+  options: { label: string; required?: boolean; hasField: boolean },
+): Nullable<number> {
+  const { label, required = false, hasField } = options;
+  if (value === undefined || value === null) {
+    if (!hasField) {
+      return null;
+    }
+    return required ? 0 : null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      if (!hasField) {
+        return null;
+      }
+      return required ? 0 : 0;
+    }
+
+    const normalized = trimmed
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    const hasDigits = /\d/.test(normalized);
+    const isSemValue =
+      normalized === "s/n" ||
+      normalized === "sn" ||
+      normalized === "sem" ||
+      (/\bsem\b/.test(normalized) && !hasDigits);
+    if (isSemValue) {
+      return 0;
+    }
+  }
+
+  const parsed = parseInteger(value, { label });
+  if (parsed == null) {
+    return null;
+  }
+  if (parsed < 0) {
+    throw new Error(`${label} deve ser no mínimo 0.`);
+  }
+  return parsed;
 }
 
 function parseBoolean(value: unknown): 0 | 1 {
@@ -631,6 +709,7 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     sem_lote: toBoolean((row as PropertyRow & { sem_lote?: unknown }).sem_lote),
     area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
     garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
+    amenities: parsePropertyAmenitiesFromRow(row.amenities),
     has_wifi: toBoolean(row.has_wifi),
     tem_piscina: toBoolean(row.tem_piscina),
     tem_energia_solar: toBoolean(row.tem_energia_solar),
@@ -739,7 +818,7 @@ function validatePropertyNumericRange(
     return options.allowNull ? null : `${label} inválido.`;
   }
   if (value < 0) {
-    return `${label} inválido.`;
+    return `${label} deve ser no mínimo 0.`;
   }
   if (value > options.max) {
     return `${label} deve ser no máximo ${options.max}.`;
@@ -971,6 +1050,7 @@ class PropertyController {
       return res.status(401).json({ error: "Corretor não autenticado." });
     }
 
+    const createPayload = req.body ?? {};
     const {
       title,
       description,
@@ -1010,6 +1090,12 @@ class PropertyController {
       area_terreno,
       area,
       garage_spots,
+      amenities,
+      amenityIds,
+      amenity_ids,
+      featureIds,
+      feature_ids,
+      features,
       has_wifi,
       tem_piscina,
       tem_energia_solar,
@@ -1021,11 +1107,32 @@ class PropertyController {
       sem_quadra,
       sem_lote,
       area_construida_unidade,
-    } = req.body ?? {};
+    } = createPayload;
     const semNumeroFlag = parseBoolean(sem_numero);
     const semQuadraFlag = parseBoolean(sem_quadra);
     const semLoteFlag = parseBoolean(sem_lote);
     const semCepFlag = parseBoolean(sem_cep);
+    const hasBedrooms = Object.prototype.hasOwnProperty.call(createPayload, "bedrooms");
+    const hasBathrooms = Object.prototype.hasOwnProperty.call(createPayload, "bathrooms");
+    const hasGarageSpots = Object.prototype.hasOwnProperty.call(createPayload, "garage_spots");
+
+    let normalizedAmenities: string[] = [];
+    try {
+      normalizedAmenities = normalizePropertyAmenities(
+        amenities ??
+          amenityIds ??
+          amenity_ids ??
+          featureIds ??
+          feature_ids ??
+          features ??
+          null
+      );
+    } catch (amenityError) {
+      logPropertyCreateValidationFailure(req, "broker", "amenity_parse_error", {
+        error: (amenityError as Error).message,
+      });
+      return res.status(400).json({ error: (amenityError as Error).message });
+    }
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
 
@@ -1267,24 +1374,51 @@ class PropertyController {
           .json({ error: 'Imóvel já cadastrado no sistema.' });
       }
 
-      const numericBedrooms = parseInteger(bedrooms);
-      const numericBathrooms = parseInteger(bathrooms);
-      const numericGarageSpots = parseInteger(garage_spots);
-      const areaUnidade = normalizeAreaUnidade(
-        typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
-      );
-      const rawAreaInput = parseDecimal(area_construida ?? area);
+      let numericBedrooms: number | null;
+      let numericBathrooms: number | null;
+      let numericGarageSpots: number | null;
+      let areaUnidade: AreaConstruidaUnidade;
       let numericAreaConstruida: number | null = null;
-      if (rawAreaInput != null) {
-        const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
-        if (Number.isNaN(converted)) {
-          return res.status(400).json({ error: 'Área construída inválida.' });
+      let numericAreaTerreno: number | null = null;
+      let numericValorCondominio: number | null = null;
+      let numericValorIptu: number | null = null;
+
+      try {
+        numericBedrooms = normalizeNumericCountField(bedrooms, {
+          label: "Quartos",
+          required: true,
+          hasField: hasBedrooms,
+        });
+        numericBathrooms = normalizeNumericCountField(bathrooms, {
+          label: "Banheiros",
+          required: true,
+          hasField: hasBathrooms,
+        });
+        numericGarageSpots = normalizeNumericCountField(garage_spots, {
+          label: "Garagens",
+          required: true,
+          hasField: hasGarageSpots,
+        });
+        areaUnidade = normalizeAreaUnidade(
+          typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
+        );
+        const rawAreaInput = parseDecimal(area_construida ?? area);
+        if (rawAreaInput != null) {
+          const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
+          if (Number.isNaN(converted)) {
+            return res.status(400).json({ error: 'Área construída inválida.' });
+          }
+          numericAreaConstruida = converted;
         }
-        numericAreaConstruida = converted;
+        numericAreaTerreno = parseDecimal(area_terreno);
+        numericValorCondominio = parseDecimal(valor_condominio);
+        numericValorIptu = parseDecimal(valor_iptu);
+      } catch (parseError) {
+        logPropertyCreateValidationFailure(req, "broker", "numeric_parse_error", {
+          message: (parseError as Error).message,
+        });
+        return res.status(400).json({ error: (parseError as Error).message });
       }
-      const numericAreaTerreno = parseDecimal(area_terreno);
-      const numericValorCondominio = parseDecimal(valor_condominio);
-      const numericValorIptu = parseDecimal(valor_iptu);
 
       const numericValidationError = [
         validatePropertyNumericRange(numericPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
@@ -1397,6 +1531,7 @@ class PropertyController {
             area_construida_unidade,
             area_terreno,
             garage_spots,
+            amenities,
             has_wifi,
             tem_piscina,
             tem_energia_solar,
@@ -1406,7 +1541,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           brokerId,
@@ -1450,6 +1585,7 @@ class PropertyController {
           areaUnidade,
           numericAreaTerreno,
           numericGarageSpots,
+          normalizedAmenities.length > 0 ? JSON.stringify(normalizedAmenities) : null,
           hasWifiFlag,
           temPiscinaFlag,
           temEnergiaSolarFlag,
@@ -1531,6 +1667,8 @@ class PropertyController {
       return res.status(401).json({ error: 'Usuario nao autenticado.' });
     }
 
+    const createClientPayload = req.body ?? {};
+
     const {
       title,
       description,
@@ -1570,6 +1708,12 @@ class PropertyController {
       area_terreno,
       area,
       garage_spots,
+      amenities,
+      amenityIds,
+      amenity_ids,
+      featureIds,
+      feature_ids,
+      features,
       has_wifi,
       tem_piscina,
       tem_energia_solar,
@@ -1581,11 +1725,32 @@ class PropertyController {
       sem_quadra,
       sem_lote,
       area_construida_unidade,
-    } = req.body ?? {};
+    } = createClientPayload;
     const semNumeroFlag = parseBoolean(sem_numero);
     const semQuadraFlag = parseBoolean(sem_quadra);
     const semLoteFlag = parseBoolean(sem_lote);
     const semCepFlag = parseBoolean(sem_cep);
+    const hasBedrooms = Object.prototype.hasOwnProperty.call(createClientPayload, "bedrooms");
+    const hasBathrooms = Object.prototype.hasOwnProperty.call(createClientPayload, "bathrooms");
+    const hasGarageSpots = Object.prototype.hasOwnProperty.call(createClientPayload, "garage_spots");
+
+    let normalizedAmenities: string[] = [];
+    try {
+      normalizedAmenities = normalizePropertyAmenities(
+        amenities ??
+          amenityIds ??
+          amenity_ids ??
+          featureIds ??
+          feature_ids ??
+          features ??
+          null
+      );
+    } catch (amenityError) {
+      logPropertyCreateValidationFailure(req, "client", "amenity_parse_error", {
+        error: (amenityError as Error).message,
+      });
+      return res.status(400).json({ error: (amenityError as Error).message });
+    }
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
 
@@ -1807,24 +1972,51 @@ class PropertyController {
           .json({ error: 'Imovel ja cadastrado no sistema.' });
       }
 
-      const numericBedrooms = parseInteger(bedrooms);
-      const numericBathrooms = parseInteger(bathrooms);
-      const numericGarageSpots = parseInteger(garage_spots);
-      const areaUnidade = normalizeAreaUnidade(
-        typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
-      );
-      const rawAreaInput = parseDecimal(area_construida ?? area);
+      let numericBedrooms: number | null;
+      let numericBathrooms: number | null;
+      let numericGarageSpots: number | null;
+      let areaUnidade: AreaConstruidaUnidade;
       let numericAreaConstruida: number | null = null;
-      if (rawAreaInput != null) {
-        const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
-        if (Number.isNaN(converted)) {
-          return res.status(400).json({ error: 'Área construída inválida.' });
+      let numericAreaTerreno: number | null = null;
+      let numericValorCondominio: number | null = null;
+      let numericValorIptu: number | null = null;
+
+      try {
+        numericBedrooms = normalizeNumericCountField(bedrooms, {
+          label: "Quartos",
+          required: true,
+          hasField: hasBedrooms,
+        });
+        numericBathrooms = normalizeNumericCountField(bathrooms, {
+          label: "Banheiros",
+          required: true,
+          hasField: hasBathrooms,
+        });
+        numericGarageSpots = normalizeNumericCountField(garage_spots, {
+          label: "Garagens",
+          required: true,
+          hasField: hasGarageSpots,
+        });
+        areaUnidade = normalizeAreaUnidade(
+          typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
+        );
+        const rawAreaInput = parseDecimal(area_construida ?? area);
+        if (rawAreaInput != null) {
+          const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
+          if (Number.isNaN(converted)) {
+            return res.status(400).json({ error: 'Área construída inválida.' });
+          }
+          numericAreaConstruida = converted;
         }
-        numericAreaConstruida = converted;
+        numericAreaTerreno = parseDecimal(area_terreno);
+        numericValorCondominio = parseDecimal(valor_condominio);
+        numericValorIptu = parseDecimal(valor_iptu);
+      } catch (parseError) {
+        logPropertyCreateValidationFailure(req, "client", "numeric_parse_error", {
+          message: (parseError as Error).message,
+        });
+        return res.status(400).json({ error: (parseError as Error).message });
       }
-      const numericAreaTerreno = parseDecimal(area_terreno);
-      const numericValorCondominio = parseDecimal(valor_condominio);
-      const numericValorIptu = parseDecimal(valor_iptu);
 
       const numericValidationError = [
         validatePropertyNumericRange(numericPrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
@@ -1832,9 +2024,9 @@ class PropertyController {
         validatePropertyNumericRange(numericPriceRent, 'Preço de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         validatePropertyNumericRange(numericPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         validatePropertyNumericRange(numericPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
-        validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
+          validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
+          validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
+          validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
@@ -1937,6 +2129,7 @@ class PropertyController {
             area_construida_unidade,
             area_terreno,
             garage_spots,
+            amenities,
             has_wifi,
             tem_piscina,
             tem_energia_solar,
@@ -1946,7 +2139,7 @@ class PropertyController {
             valor_condominio,
             valor_iptu,
             video_url
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           null,
@@ -1990,6 +2183,7 @@ class PropertyController {
           areaUnidade,
           numericAreaTerreno,
           numericGarageSpots,
+          normalizedAmenities.length > 0 ? JSON.stringify(normalizedAmenities) : null,
           hasWifiFlag,
           temPiscinaFlag,
           temEnergiaSolarFlag,
@@ -2303,14 +2497,37 @@ class PropertyController {
       const previousPromotionFlag = toBoolean(property.is_promoted);
 
       const body = req.body ?? {};
-      const bodyKeys = Object.keys(body);
+      const normalizedUpdateBody: Record<string, unknown> = {
+        ...body,
+      } as Record<string, unknown>;
+      const rawAmenitiesForUpdate =
+        body.amenities ??
+        body.amenityIds ??
+        body.amenity_ids ??
+        body.featureIds ??
+        body.feature_ids ??
+        body.features ??
+        null;
+      if (rawAmenitiesForUpdate != null) {
+        normalizedUpdateBody.amenities = rawAmenitiesForUpdate;
+        delete normalizedUpdateBody.amenityIds;
+        delete normalizedUpdateBody.amenity_ids;
+        delete normalizedUpdateBody.featureIds;
+        delete normalizedUpdateBody.feature_ids;
+        delete normalizedUpdateBody.features;
+      }
+      const bodyKeys = Object.keys(normalizedUpdateBody);
       const semNumeroBody =
-        body.sem_numero !== undefined ? parseBoolean(body.sem_numero) : null;
+        normalizedUpdateBody.sem_numero !== undefined
+          ? parseBoolean(normalizedUpdateBody.sem_numero)
+          : null;
       const semCepBody =
-        body.sem_cep !== undefined ? parseBoolean(body.sem_cep) : parseBoolean(property.sem_cep);
+        normalizedUpdateBody.sem_cep !== undefined
+          ? parseBoolean(normalizedUpdateBody.sem_cep)
+          : parseBoolean(property.sem_cep);
 
       const nextDescription = normalizePropertyDescription(
-        String(body.description ?? property.description ?? '')
+        String(normalizedUpdateBody.description ?? property.description ?? '')
       );
       if (!hasValidPropertyDescription(nextDescription)) {
         return res.status(400).json({
@@ -2318,9 +2535,9 @@ class PropertyController {
         });
       }
 
-      const nextType = normalizePropertyType(body.type) ?? property.type;
+      const nextType = normalizePropertyType(normalizedUpdateBody.type) ?? property.type;
       const requiredBairroError = validateRequiredBairro(
-        body.bairro ?? property.bairro,
+        normalizedUpdateBody.bairro ?? property.bairro,
         nextType
       );
       if (requiredBairroError) {
@@ -2328,23 +2545,23 @@ class PropertyController {
       }
 
       const updateTextValidationError = [
-        validateMaxTextLength(body.title ?? property.title, 'Título'),
-        validateMaxTextLength(body.owner_name ?? property.owner_name, 'Nome do proprietário'),
-        validateMaxTextLength(body.address ?? property.address, 'Endereço'),
-        validateMaxTextLength(body.numero ?? property.numero, 'Número', 25),
-        validateMaxTextLength(body.bairro ?? property.bairro, 'Bairro'),
-        validateMaxTextLength(body.complemento ?? property.complemento, 'Complemento'),
-        validateMaxTextLength(body.city ?? property.city, 'Cidade'),
-        validateMaxTextLength(body.quadra ?? property.quadra, 'Quadra', 25),
-        validateMaxTextLength(body.lote ?? property.lote, 'Lote', 25),
-        validateMaxTextLength(body.code ?? property.code, 'Código'),
+        validateMaxTextLength(normalizedUpdateBody.title ?? property.title, 'Título'),
+        validateMaxTextLength(normalizedUpdateBody.owner_name ?? property.owner_name, 'Nome do proprietário'),
+        validateMaxTextLength(normalizedUpdateBody.address ?? property.address, 'Endereço'),
+        validateMaxTextLength(normalizedUpdateBody.numero ?? property.numero, 'Número', 25),
+        validateMaxTextLength(normalizedUpdateBody.bairro ?? property.bairro, 'Bairro'),
+        validateMaxTextLength(normalizedUpdateBody.complemento ?? property.complemento, 'Complemento'),
+        validateMaxTextLength(normalizedUpdateBody.city ?? property.city, 'Cidade'),
+        validateMaxTextLength(normalizedUpdateBody.quadra ?? property.quadra, 'Quadra', 25),
+        validateMaxTextLength(normalizedUpdateBody.lote ?? property.lote, 'Lote', 25),
+        validateMaxTextLength(normalizedUpdateBody.code ?? property.code, 'Código'),
       ].find(Boolean);
 
       if (updateTextValidationError) {
         return res.status(400).json({ error: updateTextValidationError });
       }
 
-      const nextPurpose = normalizePurpose(body.purpose) ?? property.purpose;
+      const nextPurpose = normalizePurpose(normalizedUpdateBody.purpose) ?? property.purpose;
       const purposeLower = String(nextPurpose ?? '').toLowerCase();
       const supportsSale = purposeLower.includes('vend');
       const supportsRent = purposeLower.includes('alug');
@@ -2410,6 +2627,7 @@ class PropertyController {
         'area_construida',
         'area_terreno',
         'garage_spots',
+        'amenities',
         'has_wifi',
         'tem_piscina',
         'tem_energia_solar',
@@ -2432,7 +2650,7 @@ class PropertyController {
 
         switch (key) {
           case 'status': {
-            const normalized = normalizeStatus(body.status);
+            const normalized = normalizeStatus(normalizedUpdateBody.status);
             if (!normalized) {
               return res.status(400).json({ error: 'Status informado invalido.' });
             }
@@ -2442,7 +2660,7 @@ class PropertyController {
             break;
           }
           case 'purpose': {
-            const normalized = normalizePurpose(body.purpose);
+            const normalized = normalizePurpose(normalizedUpdateBody.purpose);
             if (!normalized) {
               return res.status(400).json({ error: 'Finalidade informada e invalida.' });
             }
@@ -2451,7 +2669,7 @@ class PropertyController {
             break;
           }
           case 'type': {
-            const normalized = normalizePropertyType(body.type);
+            const normalized = normalizePropertyType(normalizedUpdateBody.type);
             if (!normalized) {
               return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
             }
@@ -2461,7 +2679,7 @@ class PropertyController {
           }
           case 'price': {
             try {
-              const parsed = parsePrice(body.price);
+              const parsed = parsePrice(normalizedUpdateBody.price);
               fields.push('price = ?');
               values.push(parsed);
               if (supportsSale && !supportsRent) {
@@ -2482,7 +2700,7 @@ class PropertyController {
           case 'price_sale':
           case 'price_rent': {
             try {
-              const parsed = parsePrice(body[key]);
+              const parsed = parsePrice(normalizedUpdateBody[key]);
               fields.push(`\`${key}\` = ?`);
               values.push(parsed);
               if (key === 'price_sale') {
@@ -2502,7 +2720,27 @@ class PropertyController {
           case 'garage_spots': {
             try {
               fields.push(`\`${key}\` = ?`);
-              values.push(parseInteger(body[key]));
+              const hasField = Object.prototype.hasOwnProperty.call(normalizedUpdateBody, key);
+              const parsed = normalizeNumericCountField(normalizedUpdateBody[key], {
+                label: key === 'garage_spots' ? 'Garagens' : key === 'bedrooms' ? 'Quartos' : 'Banheiros',
+                hasField,
+                required: false,
+              });
+              values.push(parsed);
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'amenities': {
+            try {
+              const normalizedAmenityList = normalizePropertyAmenities(normalizedUpdateBody.amenities);
+              fields.push('amenities = ?');
+              values.push(
+                normalizedAmenityList.length > 0
+                  ? JSON.stringify(normalizedAmenityList)
+                  : null
+              );
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
@@ -2514,7 +2752,7 @@ class PropertyController {
           case 'valor_iptu': {
             try {
               fields.push(`\`${key}\` = ?`);
-              values.push(parseDecimal(body[key]));
+              values.push(parseDecimal(normalizedUpdateBody[key]));
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
@@ -2527,11 +2765,11 @@ class PropertyController {
           case 'tem_ar_condicionado':
           case 'eh_mobiliada': {
             fields.push(`\`${key}\` = ?`);
-            values.push(parseBoolean(body[key]));
+            values.push(parseBoolean(normalizedUpdateBody[key]));
             break;
           }
           case 'is_promoted': {
-            const parsed = parseBoolean(body[key]);
+            const parsed = parseBoolean(normalizedUpdateBody[key]);
             nextPromotionFlag = parsed;
             if (parsed === 0) {
               nextPromotionPercentage = null;
@@ -2563,7 +2801,7 @@ class PropertyController {
           case 'promo_percentage':
           case 'promotion_percentage': {
             try {
-              const parsed = parsePromotionPercentage(body[key]);
+              const parsed = parsePromotionPercentage(normalizedUpdateBody[key]);
               nextPromotionPercentage = parsed;
               fields.push('promo_percentage = ?');
               values.push(parsed);
@@ -2578,7 +2816,7 @@ class PropertyController {
           case 'promotional_price':
           case 'promotional_rent_price': {
             try {
-              const parsed = parseOptionalPrice(body[key]);
+              const parsed = parseOptionalPrice(normalizedUpdateBody[key]);
               if (key === 'promotional_rent_price') {
                 fields.push('promotional_rent_price = ?');
                 values.push(parsed);
@@ -2598,7 +2836,7 @@ class PropertyController {
           }
           case 'promotional_rent_percentage': {
             try {
-              const parsed = parsePromotionPercentage(body[key]);
+              const parsed = parsePromotionPercentage(normalizedUpdateBody[key]);
               fields.push('promotional_rent_percentage = ?');
               values.push(parsed);
               nextPromotionalRentPercentage = parsed;
@@ -2615,8 +2853,8 @@ class PropertyController {
           case 'promo_end_date':
           case 'promotion_end': {
             try {
-              const parsedDate = parsePromotionDate(body[key]);
-              const parsedDateTime = parsePromotionDateTime(body[key]);
+              const parsedDate = parsePromotionDate(normalizedUpdateBody[key]);
+              const parsedDateTime = parsePromotionDateTime(normalizedUpdateBody[key]);
               if (key === 'promotion_start' || key === 'promo_start_date') {
                 fields.push('promo_start_date = ?');
                 values.push(parsedDate);
@@ -2634,7 +2872,7 @@ class PropertyController {
             break;
           }
           case 'owner_phone': {
-            const text = String(body[key] ?? '').trim();
+            const text = String(normalizedUpdateBody[key] ?? '').trim();
             if (text.length > 0) {
               const digits = text.replace(/\D/g, '');
               if (digits.length < 10 || digits.length > 13) {
@@ -2658,7 +2896,7 @@ class PropertyController {
               values.push(null);
               break;
             }
-            const rawNumero = String(body.numero ?? '').trim();
+            const rawNumero = String(normalizedUpdateBody.numero ?? '').trim();
             const numeroDigits = rawNumero.replace(/\D/g, '');
             if (rawNumero.length > 0 && numeroDigits.length === 0) {
               return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
@@ -2669,12 +2907,12 @@ class PropertyController {
           }
           case 'sem_cep': {
             fields.push('sem_cep = ?');
-            values.push(parseBoolean(body[key]));
+            values.push(parseBoolean(normalizedUpdateBody[key]));
             break;
           }
           case 'cep': {
             fields.push('cep = ?');
-            values.push(normalizeCepForPersistence(body[key], semCepBody));
+            values.push(normalizeCepForPersistence(normalizedUpdateBody[key], semCepBody));
             break;
           }
           default: {
@@ -2682,7 +2920,7 @@ class PropertyController {
               continue;
             }
             fields.push(`\`${key}\` = ?`);
-            values.push(stringOrNull(body[key]));
+            values.push(stringOrNull(normalizedUpdateBody[key]));
           }
         }
       }
@@ -2728,25 +2966,65 @@ class PropertyController {
         validatePropertyNumericRange(nextPromotionPrice, 'Preço promocional de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         validatePropertyNumericRange(nextPromotionalRentPrice, 'Preço promocional de aluguel', { max: MAX_PROPERTY_PRICE, allowNull: true }),
         bodyKeys.includes('bedrooms')
-          ? validatePropertyNumericRange(parseInteger(body.bedrooms), 'Quartos', { max: MAX_PROPERTY_COUNT, allowNull: true })
+          ? validatePropertyNumericRange(
+              normalizeNumericCountField(normalizedUpdateBody.bedrooms, {
+                label: 'Quartos',
+                required: false,
+                hasField: bodyKeys.includes('bedrooms'),
+              }),
+              'Quartos',
+              { max: MAX_PROPERTY_COUNT, allowNull: true }
+            )
           : null,
         bodyKeys.includes('bathrooms')
-          ? validatePropertyNumericRange(parseInteger(body.bathrooms), 'Banheiros', { max: MAX_PROPERTY_COUNT, allowNull: true })
+          ? validatePropertyNumericRange(
+              normalizeNumericCountField(normalizedUpdateBody.bathrooms, {
+                label: 'Banheiros',
+                required: false,
+                hasField: bodyKeys.includes('bathrooms'),
+              }),
+              'Banheiros',
+              { max: MAX_PROPERTY_COUNT, allowNull: true }
+            )
           : null,
         bodyKeys.includes('garage_spots')
-          ? validatePropertyNumericRange(parseInteger(body.garage_spots), 'Garagens', { max: MAX_PROPERTY_COUNT, allowNull: true })
+          ? validatePropertyNumericRange(
+              normalizeNumericCountField(normalizedUpdateBody.garage_spots, {
+                label: 'Garagens',
+                required: false,
+                hasField: bodyKeys.includes('garage_spots'),
+              }),
+              'Garagens',
+              { max: MAX_PROPERTY_COUNT, allowNull: true }
+            )
           : null,
         bodyKeys.includes('area_construida')
-          ? validatePropertyNumericRange(parseDecimal(body.area_construida), 'Área construída', { max: MAX_PROPERTY_AREA, allowNull: true })
+          ? validatePropertyNumericRange(
+              parseDecimal(normalizedUpdateBody.area_construida),
+              'Área construída',
+              { max: MAX_PROPERTY_AREA, allowNull: true }
+            )
           : null,
         bodyKeys.includes('area_terreno')
-          ? validatePropertyNumericRange(parseDecimal(body.area_terreno), 'Área do terreno', { max: MAX_PROPERTY_AREA, allowNull: true })
+          ? validatePropertyNumericRange(
+              parseDecimal(normalizedUpdateBody.area_terreno),
+              'Área do terreno',
+              { max: MAX_PROPERTY_AREA, allowNull: true }
+            )
           : null,
         bodyKeys.includes('valor_condominio')
-          ? validatePropertyNumericRange(parseDecimal(body.valor_condominio), 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true })
+          ? validatePropertyNumericRange(
+              parseDecimal(normalizedUpdateBody.valor_condominio),
+              'Valor de condomínio',
+              { max: MAX_PROPERTY_FEE, allowNull: true }
+            )
           : null,
         bodyKeys.includes('valor_iptu')
-          ? validatePropertyNumericRange(parseDecimal(body.valor_iptu), 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true })
+          ? validatePropertyNumericRange(
+              parseDecimal(normalizedUpdateBody.valor_iptu),
+              'Valor de IPTU',
+              { max: MAX_PROPERTY_FEE, allowNull: true }
+            )
           : null,
       ].find(Boolean);
 

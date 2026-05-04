@@ -88,6 +88,7 @@ describe('Finalização de rascunho para corretor', () => {
       needsCompletion: false,
       requiresDocuments: true,
       action: 'send_later',
+      underReview: false,
     });
 
     const response = await request(app)
@@ -108,6 +109,7 @@ describe('Finalização de rascunho para corretor', () => {
     expect(response.body.requiresDocuments).toBe(true);
     expect(response.body.needsCompletion).toBe(false);
     expect(response.body.action).toBe('send_later');
+    expect(response.body.underReview).toBe(false);
   });
 
   it('aceita broker_send_later como alias de send_later', async () => {
@@ -128,6 +130,7 @@ describe('Finalização de rascunho para corretor', () => {
       needsCompletion: false,
       requiresDocuments: true,
       action: 'send_later',
+      underReview: false,
     });
 
     const response = await request(app)
@@ -145,6 +148,7 @@ describe('Finalização de rascunho para corretor', () => {
       });
 
     expect(response.status).toBe(200);
+    expect(response.body.underReview).toBe(false);
     expect(serviceMocks.finalizeRegistrationDraftMock).toHaveBeenCalledWith(
       'draft-broker',
       'tok',
@@ -176,6 +180,7 @@ describe('Finalização de rascunho para corretor', () => {
       needsCompletion: false,
       requiresDocuments: true,
       action: 'submit_documents',
+      underReview: true,
     });
 
     const response = await request(app)
@@ -196,6 +201,7 @@ describe('Finalização de rascunho para corretor', () => {
     expect(response.body.action).toBe('submit_documents');
     expect(response.body.user.cep).toBeNull();
     expect(response.body.requiresDocuments).toBe(true);
+    expect(response.body.underReview).toBe(true);
   });
 
   it('aceita broker_submit_documents como alias de submit_documents', async () => {
@@ -216,6 +222,7 @@ describe('Finalização de rascunho para corretor', () => {
       needsCompletion: false,
       requiresDocuments: true,
       action: 'submit_documents',
+      underReview: true,
     });
 
     const response = await request(app)
@@ -233,6 +240,7 @@ describe('Finalização de rascunho para corretor', () => {
       });
 
     expect(response.status).toBe(200);
+    expect(response.body.underReview).toBe(true);
     expect(serviceMocks.finalizeRegistrationDraftMock).toHaveBeenCalledWith(
       'draft-broker',
       'tok',
@@ -265,6 +273,7 @@ describe('Finalização de rascunho para corretor', () => {
       needsCompletion: false,
       requiresDocuments: true,
       action: 'send_later',
+      underReview: false,
     });
 
     const response = await request(app)
@@ -285,6 +294,7 @@ describe('Finalização de rascunho para corretor', () => {
     expect(response.body.token).toBe('jwt-broker-phone-opcional');
     expect(response.body.requiresDocuments).toBe(true);
     expect(response.body.user.phone).toBeNull();
+    expect(response.body.underReview).toBe(false);
   });
 
   it('rejeita corretor que encerra com action submit_documents sem docs', async () => {

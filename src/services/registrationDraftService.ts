@@ -1232,6 +1232,7 @@ export async function finalizeRegistrationDraft(
     );
 
     let requiresDocuments = false;
+    let underReview = false;
     if (lockedProfile === 'broker') {
       if (!lockedDraft.creci) {
         await db.rollback();
@@ -1244,6 +1245,7 @@ export async function finalizeRegistrationDraft(
       requiresDocuments = true;
 
       if (action === 'submit_documents') {
+        underReview = true;
         const [docsRows] = await db.query<RowDataPacket[]>(
           'SELECT creci_front_url, creci_back_url, selfie_url FROM registration_draft_documents WHERE draft_id = ? LIMIT 1',
           [lockedDraft.id],
@@ -1323,6 +1325,7 @@ export async function finalizeRegistrationDraft(
       }, profile),
       needsCompletion: !hasCompleteProfile(row),
       requiresDocuments,
+      underReview,
       action,
     };
   } catch (error) {

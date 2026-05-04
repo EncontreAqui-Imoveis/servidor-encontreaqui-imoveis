@@ -188,6 +188,150 @@ describe('POST /properties description length contract', () => {
     expect(insertParams).toEqual(expect.arrayContaining([null]));
   });
 
+  it('accepts quartos as 0', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 126, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'quartos-zero')
+      .send({
+        ...basePayload,
+        bedrooms: 0,
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams?.[35]).toBe(0);
+  });
+
+  it('accepts bathrooms and garage_spots as 0', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 129, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'counts-zero')
+      .send({
+        ...basePayload,
+        bedrooms: 1,
+        bathrooms: 0,
+        garage_spots: 0,
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams?.[36]).toBe(0);
+    expect(insertParams?.[40]).toBe(0);
+  });
+
+  it('accepts amenities by canonical strings and legacy ids', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 127, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'amenities-compat')
+      .send({
+        ...basePayload,
+        amenities: ['mobiliada', '1', 'Sauna'],
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(
+      insertParams.some((value) => typeof value === 'string' && value.includes('MOBILIADA'))
+    ).toBe(true);
+  });
+
+  it('rejects negative quartos with explicit minimum validation message', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 128, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'quartos-negative')
+      .send({
+        ...basePayload,
+        bedrooms: -1,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Quartos deve ser no mínimo 0.');
+  });
+
+  it('rejects negative count fields with clear minimum validation', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 130, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'count-negative')
+      .send({
+        ...basePayload,
+        bathrooms: -2,
+        garage_spots: -1,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Banheiros deve ser no mínimo 0.');
+  });
+
+  it('rejects invalid amenity input', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 131, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'amenities-invalid')
+      .send({
+        ...basePayload,
+        amenities: ['mobiliada', 'inexistente'],
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Comodidade inválida: inexistente');
+  });
+
   it('rejects a description above 500 characters and logs the reason', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

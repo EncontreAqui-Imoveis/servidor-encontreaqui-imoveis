@@ -360,6 +360,9 @@ async function ensurePropertiesColumns(): Promise<void> {
   if (!(await columnExists('properties', 'rejection_reason'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN rejection_reason TEXT NULL');
   }
+  if (!(await columnExists('properties', 'amenities'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN amenities JSON NULL');
+  }
 }
 
 async function ensurePropertyEditRequestsTable(): Promise<void> {
@@ -1104,11 +1107,24 @@ async function ensurePropertyIndices(): Promise<void> {
   if (!(await tableExists('properties'))) return;
 
   const isTidb = String(process.env.DB_DIALECT ?? '').trim().toLowerCase() === 'tidb';
+  const rawFullTextEnabled = String(process.env.PROPERTY_FULLTEXT_ENABLED ?? '').trim().toLowerCase();
+  const isPropertyFullTextEnabled = rawFullTextEnabled.length > 0
+    ? ['1', 'true', 'yes', 'on'].includes(rawFullTextEnabled)
+    : !isTidb;
+  const shouldLogFullTextDisabled = !isPropertyFullTextEnabled;
+
+  if (shouldLogFullTextDisabled) {
+    console.log('FULLTEXT de properties desativado por configuração.');
+  }
 
   const addFullTextIndexIfSupported = async (
     indexName: string,
     columnName: string,
   ): Promise<void> => {
+    if (shouldLogFullTextDisabled) {
+      return;
+    }
+
     if (await indexExists('properties', indexName)) return;
 
     const statement = `ALTER TABLE properties ADD FULLTEXT INDEX ${indexName} (${columnName})`;

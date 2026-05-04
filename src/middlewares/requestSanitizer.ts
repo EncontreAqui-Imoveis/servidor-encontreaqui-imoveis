@@ -38,11 +38,13 @@ function replaceObjectContents(
 
 function sanitizeDigitField(
   payload: Record<string, unknown>,
-  field: string
+  field: string,
+  options: { allowNegative?: boolean } = {}
 ): void {
   const value = payload[field];
   if (value == null || value === '') return;
-  payload[field] = String(value).replace(/\D/g, '');
+  const regex = options.allowNegative ? /[^0-9-]/g : /\D/g;
+  payload[field] = String(value).replace(regex, '');
 }
 
 function sanitizeDecimalField(
@@ -60,9 +62,9 @@ function sanitizePropertyPayload(payload: Record<string, unknown>): void {
   sanitizeDigitField(payload, 'cep');
   sanitizeDigitField(payload, 'owner_phone');
   sanitizeDigitField(payload, 'broker_phone');
-  sanitizeDigitField(payload, 'bedrooms');
-  sanitizeDigitField(payload, 'bathrooms');
-  sanitizeDigitField(payload, 'garage_spots');
+  sanitizeDigitField(payload, 'bedrooms', { allowNegative: true });
+  sanitizeDigitField(payload, 'bathrooms', { allowNegative: true });
+  sanitizeDigitField(payload, 'garage_spots', { allowNegative: true });
 
   sanitizeDecimalField(payload, 'price');
   sanitizeDecimalField(payload, 'price_sale');

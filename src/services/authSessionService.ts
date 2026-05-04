@@ -53,7 +53,7 @@ export function hasCompleteProfile(row: any) {
   }
 
   // Para clientes, se tiver nome (que vem do Google/Auth), já consideramos apto.
-  // O telefone será solicitado apenas quando for realmente necessário (ex.: abrir chat).
+  // O telefone será solicitado apenas quando for realmente necessário (ex.: abrir chat)
   return true;
 }
 

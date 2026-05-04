@@ -459,12 +459,21 @@ function normalizeNumericCountField(
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .trim();
+    const compacted = normalized.replace(/\s+/g, " ");
     const hasDigits = /\d/.test(normalized);
     const isSemValue =
-      normalized === "s/n" ||
-      normalized === "sn" ||
-      normalized === "sem" ||
-      (/\bsem\b/.test(normalized) && !hasDigits);
+      compacted === "s/n" ||
+      compacted === "sn" ||
+      compacted === "sem" ||
+      compacted === "nenhum" ||
+      compacted === "nao" ||
+      compacted === "não" ||
+      compacted === "zero" ||
+      (/\bsem\b/.test(normalized) && !hasDigits) ||
+      (/\bnenhum\b/.test(normalized) && !hasDigits) ||
+      (/\bnao\b/.test(normalized) && !hasDigits) ||
+      (/\bnão\b/.test(normalized) && !hasDigits) ||
+      (/\bzero\b/.test(normalized) && !hasDigits);
     if (isSemValue) {
       return 0;
     }

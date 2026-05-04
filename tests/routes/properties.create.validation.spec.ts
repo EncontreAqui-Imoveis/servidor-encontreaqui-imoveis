@@ -49,6 +49,7 @@ vi.mock('../../src/config/cloudinary', () => ({
 
 vi.mock('../../src/services/notificationService', () => ({
   notifyAdmins: vi.fn(),
+  createAdminNotification: vi.fn(),
 }));
 
 vi.mock('../../src/services/priceDropNotificationService', () => ({
@@ -85,6 +86,56 @@ const basePayload = {
   tem_automacao: 0,
   tem_ar_condicionado: 1,
   eh_mobiliada: 0,
+};
+
+const mockPropertyRow = {
+  id: 555,
+  broker_id: 30003,
+  owner_id: null,
+  title: 'Casa térrea',
+  description: description500,
+  type: 'Casa',
+  purpose: 'Venda',
+  status: 'approved',
+  is_promoted: 0,
+  price: 250000,
+  price_sale: 250000,
+  price_rent: null,
+  promotion_price: null,
+  promotional_rent_price: null,
+  promotional_rent_percentage: null,
+  promotion_percentage: null,
+  promo_percentage: null,
+  promo_start_date: null,
+  promo_end_date: null,
+  promotion_start: null,
+  promotion_end: null,
+  code: null,
+  owner_name: 'Ana Silva',
+  owner_phone: '+55 (64) 99999-9999',
+  address: 'Rua A',
+  bairro: 'Centro',
+  complemento: 'Fundos',
+  city: 'Rio Verde',
+  state: 'GO',
+  cep: '75900000',
+  sem_cep: 0,
+  bedrooms: 3,
+  bathrooms: 2,
+  area_construida: 180,
+  area_construida_unidade: 'm2',
+  area_terreno: 250,
+  garage_spots: 2,
+  has_wifi: 1,
+  tem_piscina: 0,
+  tem_energia_solar: 0,
+  tem_automacao: 0,
+  tem_ar_condicionado: 1,
+  eh_mobiliada: 0,
+  valor_condominio: null,
+  valor_iptu: null,
+  created_at: new Date(),
+  updated_at: new Date(),
 };
 
 describe('POST /properties description length contract', () => {
@@ -330,6 +381,209 @@ describe('POST /properties description length contract', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('Comodidade inválida: inexistente');
+  });
+
+  it('accepts createForClient with bedrooms/bathrooms/garage_spots as 0', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 132, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-counts-zero')
+      .send({
+        ...basePayload,
+        bedrooms: 0,
+        bathrooms: 0,
+        garage_spots: 0,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBeDefined();
+    const insertCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams?.[35]).toBe(0);
+    expect(insertParams?.[36]).toBe(0);
+    expect(insertParams?.[40]).toBe(0);
+  });
+
+  it('accepts textual zero-like values on createForClient without treating as invalid', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 133, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-counts-textual-zero')
+      .send({
+        ...basePayload,
+        bedrooms: 'zero',
+        bathrooms: 'Nenhum',
+        garage_spots: 'nao',
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBeDefined();
+    const insertCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams?.[35]).toBe(0);
+    expect(insertParams?.[36]).toBe(0);
+    expect(insertParams?.[40]).toBe(0);
+  });
+
+  it('rejects createForClient negative bedroom value', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 134, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-quartos-negative')
+      .send({
+        ...basePayload,
+        bedrooms: -1,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Quartos deve ser no mínimo 0.');
+  });
+
+  it('accepts canonical amenities on createForClient', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 135, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-amenities-compat')
+      .send({
+        ...basePayload,
+        amenities: ['mobiliada', '1', 'SAUNA'],
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(
+      insertParams.some((value) => typeof value === 'string' && value.includes('MOBILIADA'))
+    ).toBe(true);
+    expect(
+      insertParams.some((value) => typeof value === 'string' && value.includes('SAUNA'))
+    ).toBe(true);
+  });
+
+  it('rejects negative values on createForClient bathrooms/garages', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 136, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-count-negative')
+      .send({
+        ...basePayload,
+        bathrooms: -2,
+        garage_spots: -1,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Banheiros deve ser no mínimo 0.');
+  });
+
+  it('updates property with bedrooms = 0 via PUT /properties/:id', async () => {
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
+        return [[mockPropertyRow]];
+      }
+      if (sql.includes('UPDATE properties SET')) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const response = await request(app)
+      .put('/properties/555')
+      .set('x-request-id', 'update-put-bedrooms-zero')
+      .send({ bedrooms: 0 });
+
+    expect(response.status).toBe(200);
+    const updateCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('UPDATE properties SET')
+    );
+    const updateParams = updateCall?.[1] as unknown[];
+    expect(updateParams?.[0]).toBe(0);
+    expect(updateParams?.[1]).toBe(555);
+  });
+
+  it('updates property amenities via PATCH /properties/:id', async () => {
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
+        return [[mockPropertyRow]];
+      }
+      if (sql.includes('UPDATE properties SET')) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const response = await request(app)
+      .patch('/properties/555')
+      .set('x-request-id', 'update-patch-amenities')
+      .send({ amenities: ['Mobiliada', '2'] });
+
+    expect(response.status).toBe(200);
+    const updateCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('UPDATE properties SET')
+    );
+    const updateParams = updateCall?.[1] as unknown[];
+    expect(typeof updateParams?.[0]).toBe('string');
+    expect(String(updateParams?.[0])).toContain('MOBILIADA');
+    expect(updateParams?.[1]).toBe(555);
+  });
+
+  it('rejects invalid amenities on PATCH /properties/:id', async () => {
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
+        return [[mockPropertyRow]];
+      }
+      if (sql.includes('UPDATE properties SET')) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const response = await request(app)
+      .patch('/properties/555')
+      .set('x-request-id', 'update-patch-amenities-invalid')
+      .send({ amenities: ['inexistente'] });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Comodidade inválida: inexistente');
+    const updateCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('UPDATE properties SET')
+    );
+    expect(updateCall).toBeUndefined();
   });
 
   it('rejects a description above 500 characters and logs the reason', async () => {

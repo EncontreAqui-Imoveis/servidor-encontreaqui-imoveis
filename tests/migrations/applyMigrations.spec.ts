@@ -246,7 +246,7 @@ describe('applyMigrations', () => {
         ) {
           return [[{ CONSTRAINT_NAME: 'fk_negotiation_responsibles_negotiation' }]];
         }
-        return [];
+        return [[]];
       }
 
       return [[]];

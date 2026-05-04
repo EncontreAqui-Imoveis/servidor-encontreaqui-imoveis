@@ -372,6 +372,48 @@ async function ensurePropertiesColumns(): Promise<void> {
   if (!(await columnExists('properties', 'public_code'))) {
     await connection.query("ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL UNIQUE");
   }
+  if (!(await columnExists('properties', 'area_construida_valor'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN area_construida_valor DECIMAL(18, 4) NULL');
+  }
+  if (!(await columnExists('properties', 'area_construida_m2'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN area_construida_m2 DECIMAL(18, 2) NULL');
+  }
+  if (!(await columnExists('properties', 'area_terreno_valor'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN area_terreno_valor DECIMAL(18, 4) NULL');
+  }
+  if (!(await columnExists('properties', 'area_terreno_unidade'))) {
+    await connection.query("ALTER TABLE properties ADD COLUMN area_terreno_unidade VARCHAR(20) NOT NULL DEFAULT 'm2'");
+  }
+  if (!(await columnExists('properties', 'area_terreno_m2'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN area_terreno_m2 DECIMAL(18, 2) NULL');
+  }
+  if (!(await columnExists('properties', 'area_construida_unidade'))) {
+    await connection.query(
+      "ALTER TABLE properties ADD COLUMN area_construida_unidade VARCHAR(20) NOT NULL DEFAULT 'm2'"
+    );
+  }
+
+  await connection.query(`
+    UPDATE properties
+    SET
+      area_construida_valor = CASE
+        WHEN area_construida_valor IS NULL AND area_construida IS NOT NULL THEN area_construida
+        ELSE area_construida_valor
+      END,
+      area_construida_m2 = CASE
+        WHEN area_construida_m2 IS NULL AND area_construida IS NOT NULL THEN area_construida
+        ELSE area_construida_m2
+      END,
+      area_terreno_valor = CASE
+        WHEN area_terreno_valor IS NULL AND area_terreno IS NOT NULL THEN area_terreno
+        ELSE area_terreno_valor
+      END,
+      area_terreno_m2 = CASE
+        WHEN area_terreno_m2 IS NULL AND area_terreno IS NOT NULL THEN area_terreno
+        ELSE area_terreno_m2
+      END
+    WHERE (area_construida_valor IS NULL OR area_construida_m2 IS NULL OR area_terreno_valor IS NULL OR area_terreno_m2 IS NULL)
+  `);
 
   await ensurePublicPropertyIdentifiersForLegacyRows(200);
 }

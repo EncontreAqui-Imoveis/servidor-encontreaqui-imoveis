@@ -71,6 +71,8 @@ function sanitizePropertyPayload(payload: Record<string, unknown>): void {
   sanitizeDecimalField(payload, 'price_rent');
   sanitizeDecimalField(payload, 'area_construida');
   sanitizeDecimalField(payload, 'area_terreno');
+  sanitizeDecimalField(payload, 'area_construida_valor');
+  sanitizeDecimalField(payload, 'area_terreno_valor');
 }
 
 export function requestSanitizer(

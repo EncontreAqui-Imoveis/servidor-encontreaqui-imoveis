@@ -32,6 +32,7 @@ import {
 import {
   areaInputToSquareMeters,
   normalizeAreaUnidade,
+  parseAreaUnidade,
   type AreaConstruidaUnidade,
 } from "../utils/propertyAreaUnits";
 import { normalizePropertyAmenities } from "../utils/propertyAmenities";
@@ -302,6 +303,11 @@ interface PropertyRow extends RowDataPacket {
   area_construida?: number | string | null;
   area_construida_unidade?: string | null;
   area_terreno?: number | string | null;
+  area_construida_valor?: number | string | null;
+  area_construida_m2?: number | string | null;
+  area_terreno_valor?: number | string | null;
+  area_terreno_unidade?: string | null;
+  area_terreno_m2?: number | string | null;
   sem_quadra?: number | boolean | string | null;
   sem_lote?: number | boolean | string | null;
   garage_spots?: number | null;
@@ -515,6 +521,44 @@ function parseDecimal(value: unknown): Nullable<number> {
     throw new Error("Valor numérico inválido.");
   }
   return parsed;
+}
+
+type ParsedAreaValues = {
+  valor: Nullable<number>;
+  unidade: AreaConstruidaUnidade;
+  m2: Nullable<number>;
+};
+
+function parseAreaWithUnit({
+  value,
+  unidade,
+  label,
+}: {
+  value: unknown;
+  unidade: unknown;
+  label: string;
+}): ParsedAreaValues {
+  const parsedValor = parseDecimal(value);
+  const areaUnidade = parseAreaUnidade(unidade);
+
+  if (parsedValor == null) {
+    return { valor: null, unidade: areaUnidade, m2: null };
+  }
+
+  if (parsedValor < 0) {
+    throw new Error(`${label} não pode ser negativo.`);
+  }
+
+  const converted = areaInputToSquareMeters(parsedValor, areaUnidade);
+  if (Number.isNaN(converted)) {
+    throw new Error(`${label} inválida.`);
+  }
+
+  return {
+    valor: parsedValor,
+    unidade: areaUnidade,
+    m2: Number(converted.toFixed(2)),
+  };
 }
 
 function parseInteger(
@@ -812,14 +856,35 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
     bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
     area_construida:
-      row.area_construida != null ? Number(row.area_construida) : null,
+      row.area_construida_m2 != null
+        ? Number(row.area_construida_m2)
+        : row.area_construida != null
+          ? Number(row.area_construida)
+          : null,
     area_construida_unidade: normalizeAreaUnidade(
       (row as PropertyRow & { area_construida_unidade?: string | null })
         .area_construida_unidade,
     ) as AreaConstruidaUnidade,
+    area_construida_valor:
+      row.area_construida_valor != null ? Number(row.area_construida_valor) : null,
+    area_construida_m2:
+      row.area_construida_m2 != null ? Number(row.area_construida_m2) : null,
     sem_quadra: toBoolean((row as PropertyRow & { sem_quadra?: unknown }).sem_quadra),
     sem_lote: toBoolean((row as PropertyRow & { sem_lote?: unknown }).sem_lote),
-    area_terreno: row.area_terreno != null ? Number(row.area_terreno) : null,
+    area_terreno:
+      row.area_terreno_m2 != null
+        ? Number(row.area_terreno_m2)
+        : row.area_terreno != null
+          ? Number(row.area_terreno)
+          : null,
+    area_terreno_valor:
+      row.area_terreno_valor != null ? Number(row.area_terreno_valor) : null,
+    area_terreno_m2:
+      row.area_terreno_m2 != null ? Number(row.area_terreno_m2) : null,
+    area_terreno_unidade: normalizeAreaUnidade(
+      (row as PropertyRow & { area_terreno_unidade?: string | null })
+        .area_terreno_unidade,
+    ) as AreaConstruidaUnidade,
     garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
     amenities: includeOwnerInfo ? rawAmenities : normalizePublicAmenities(rawAmenities),
     has_wifi: toBoolean(row.has_wifi),
@@ -1208,7 +1273,7 @@ class PropertyController {
       area_construida,
       area_terreno,
       area,
-      garage_spots,
+          garage_spots,
       amenities,
       amenityIds,
       amenity_ids,
@@ -1226,6 +1291,7 @@ class PropertyController {
       sem_quadra,
       sem_lote,
       area_construida_unidade,
+      area_terreno_unidade,
     } = createPayload;
     const semNumeroFlag = parseBoolean(sem_numero);
     const semQuadraFlag = parseBoolean(sem_quadra);
@@ -1496,9 +1562,16 @@ class PropertyController {
       let numericBedrooms: number | null;
       let numericBathrooms: number | null;
       let numericGarageSpots: number | null;
-      let areaUnidade: AreaConstruidaUnidade;
-      let numericAreaConstruida: number | null = null;
-      let numericAreaTerreno: number | null = null;
+      let areaConstruida: {
+        valor: number | null;
+        unidade: AreaConstruidaUnidade;
+        m2: number | null;
+      };
+      let areaTerreno: {
+        valor: number | null;
+        unidade: AreaConstruidaUnidade;
+        m2: number | null;
+      };
       let numericValorCondominio: number | null = null;
       let numericValorIptu: number | null = null;
 
@@ -1518,18 +1591,16 @@ class PropertyController {
           required: true,
           hasField: hasGarageSpots,
         });
-        areaUnidade = normalizeAreaUnidade(
-          typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
-        );
-        const rawAreaInput = parseDecimal(area_construida ?? area);
-        if (rawAreaInput != null) {
-          const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
-          if (Number.isNaN(converted)) {
-            return res.status(400).json({ error: 'Área construída inválida.' });
-          }
-          numericAreaConstruida = converted;
-        }
-        numericAreaTerreno = parseDecimal(area_terreno);
+        areaConstruida = parseAreaWithUnit({
+          value: area_construida ?? area,
+          unidade: area_construida_unidade,
+          label: "Área construída",
+        });
+        areaTerreno = parseAreaWithUnit({
+          value: area_terreno,
+          unidade: area_terreno_unidade,
+          label: "Área do terreno",
+        });
         numericValorCondominio = parseDecimal(valor_condominio);
         numericValorIptu = parseDecimal(valor_iptu);
       } catch (parseError) {
@@ -1540,9 +1611,9 @@ class PropertyController {
       }
 
       if (
-        numericAreaConstruida != null &&
-        numericAreaTerreno != null &&
-        numericAreaConstruida > numericAreaTerreno
+        areaConstruida.m2 != null &&
+        areaTerreno.m2 != null &&
+        areaConstruida.m2 > areaTerreno.m2
       ) {
         return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
       }
@@ -1556,8 +1627,8 @@ class PropertyController {
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
-        validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(areaTerreno.m2, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -1615,6 +1686,67 @@ class PropertyController {
           : await allocateNextPropertyCode();
       const { publicId, publicCode } = await allocatePublicPropertyIdentifiers();
 
+      const propertyInsertValues: unknown[] = [
+        brokerId,
+        null,
+        title,
+        normalizedDescription,
+        normalizedType,
+        normalizedPurpose,
+        'pending_approval',
+        promotionFlag,
+        promotionPercentage,
+        promotionStart,
+        promotionEnd,
+        promotionPercentage,
+        promotionStartDate,
+        promotionEndDate,
+        numericPrice,
+        numericPriceSale,
+        numericPriceRent,
+        numericPromotionPrice,
+        numericPromotionalRentPrice,
+        promotionalRentPercentage,
+        resolvedBrokerPropertyCode,
+        stringOrNull(owner_name),
+        stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
+        address,
+        effectiveQuadra,
+        semQuadraFlag,
+        effectiveLote,
+        semLoteFlag,
+        numeroNormalizado,
+        stringOrNull(bairro),
+        stringOrNull(complemento),
+        city,
+        state,
+        normalizeCepForPersistence(cep, semCepFlag),
+        semCepFlag,
+        numericBedrooms,
+        numericBathrooms,
+        areaConstruida.m2,
+        areaConstruida.unidade,
+        areaTerreno.m2,
+        areaConstruida.valor,
+        areaConstruida.m2,
+        areaTerreno.valor,
+        areaTerreno.unidade,
+        areaTerreno.m2,
+        numericGarageSpots,
+        normalizedAmenities.length > 0 ? JSON.stringify(normalizedAmenities) : null,
+        hasWifiFlag,
+        temPiscinaFlag,
+        temEnergiaSolarFlag,
+        temAutomacaoFlag,
+        temArCondicionadoFlag,
+        ehMobiliadaFlag,
+        numericValorCondominio,
+        numericValorIptu,
+        videoUrl,
+        publicId,
+        publicCode,
+      ];
+      const propertyInsertPlaceholders = propertyInsertValues.map(() => '?').join(', ');
       const result = await runPropertyQuery<ResultSetHeader>(
         `
           INSERT INTO properties (
@@ -1658,6 +1790,11 @@ class PropertyController {
             area_construida,
             area_construida_unidade,
             area_terreno,
+            area_construida_valor,
+            area_construida_m2,
+            area_terreno_valor,
+            area_terreno_unidade,
+            area_terreno_m2,
             garage_spots,
             amenities,
             has_wifi,
@@ -1671,63 +1808,9 @@ class PropertyController {
             video_url,
             public_id,
             public_code
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (${propertyInsertPlaceholders})
         `,
-        [
-          brokerId,
-          null,
-          title,
-          normalizedDescription,
-          normalizedType,
-          normalizedPurpose,
-          'pending_approval',
-          promotionFlag,
-          promotionPercentage,
-          promotionStart,
-          promotionEnd,
-          promotionPercentage,
-          promotionStartDate,
-          promotionEndDate,
-          numericPrice,
-          numericPriceSale,
-          numericPriceRent,
-          numericPromotionPrice,
-          numericPromotionalRentPrice,
-          promotionalRentPercentage,
-          resolvedBrokerPropertyCode,
-          stringOrNull(owner_name),
-          stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
-          address,
-          effectiveQuadra,
-          semQuadraFlag,
-          effectiveLote,
-          semLoteFlag,
-          numeroNormalizado,
-          stringOrNull(bairro),
-          stringOrNull(complemento),
-          city,
-          state,
-          normalizeCepForPersistence(cep, semCepFlag),
-          semCepFlag,
-          numericBedrooms,
-          numericBathrooms,
-          numericAreaConstruida,
-          areaUnidade,
-          numericAreaTerreno,
-          numericGarageSpots,
-          normalizedAmenities.length > 0 ? JSON.stringify(normalizedAmenities) : null,
-          hasWifiFlag,
-          temPiscinaFlag,
-          temEnergiaSolarFlag,
-          temAutomacaoFlag,
-          temArCondicionadoFlag,
-          ehMobiliadaFlag,
-          numericValorCondominio,
-          numericValorIptu,
-          videoUrl,
-          publicId,
-          publicCode,
-        ]
+        propertyInsertValues
       );
 
       const propertyId = result.insertId;
@@ -1857,6 +1940,7 @@ class PropertyController {
       sem_quadra,
       sem_lote,
       area_construida_unidade,
+      area_terreno_unidade,
     } = createClientPayload;
     const semNumeroFlag = parseBoolean(sem_numero);
     const semQuadraFlag = parseBoolean(sem_quadra);
@@ -2107,9 +2191,16 @@ class PropertyController {
       let numericBedrooms: number | null;
       let numericBathrooms: number | null;
       let numericGarageSpots: number | null;
-      let areaUnidade: AreaConstruidaUnidade;
-      let numericAreaConstruida: number | null = null;
-      let numericAreaTerreno: number | null = null;
+      let areaConstruida: {
+        valor: number | null;
+        unidade: AreaConstruidaUnidade;
+        m2: number | null;
+      };
+      let areaTerreno: {
+        valor: number | null;
+        unidade: AreaConstruidaUnidade;
+        m2: number | null;
+      };
       let numericValorCondominio: number | null = null;
       let numericValorIptu: number | null = null;
 
@@ -2129,18 +2220,16 @@ class PropertyController {
           required: true,
           hasField: hasGarageSpots,
         });
-        areaUnidade = normalizeAreaUnidade(
-          typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
-        );
-        const rawAreaInput = parseDecimal(area_construida ?? area);
-        if (rawAreaInput != null) {
-          const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
-          if (Number.isNaN(converted)) {
-            return res.status(400).json({ error: 'Área construída inválida.' });
-          }
-          numericAreaConstruida = converted;
-        }
-        numericAreaTerreno = parseDecimal(area_terreno);
+        areaConstruida = parseAreaWithUnit({
+          value: area_construida ?? area,
+          unidade: area_construida_unidade,
+          label: "Área construída",
+        });
+        areaTerreno = parseAreaWithUnit({
+          value: area_terreno,
+          unidade: area_terreno_unidade,
+          label: "Área do terreno",
+        });
         numericValorCondominio = parseDecimal(valor_condominio);
         numericValorIptu = parseDecimal(valor_iptu);
       } catch (parseError) {
@@ -2151,9 +2240,9 @@ class PropertyController {
       }
 
       if (
-        numericAreaConstruida != null &&
-        numericAreaTerreno != null &&
-        numericAreaConstruida > numericAreaTerreno
+        areaConstruida.m2 != null &&
+        areaTerreno.m2 != null &&
+        areaConstruida.m2 > areaTerreno.m2
       ) {
         return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
       }
@@ -2167,8 +2256,8 @@ class PropertyController {
           validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
-        validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(areaTerreno.m2, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -2226,6 +2315,68 @@ class PropertyController {
           : await allocateNextPropertyCode();
       const { publicId, publicCode } = await allocatePublicPropertyIdentifiers();
 
+      const propertyInsertValues: unknown[] = [
+        null,
+        userId,
+        title,
+        normalizedDescription,
+        normalizedType,
+        normalizedPurpose,
+        'pending_approval',
+        promotionFlag,
+        promotionPercentage,
+        promotionStart,
+        promotionEnd,
+        promotionPercentage,
+        promotionStartDate,
+        promotionEndDate,
+        numericPrice,
+        numericPriceSale,
+        numericPriceRent,
+        numericPromotionPrice,
+        numericPromotionalRentPrice,
+        promotionalRentPercentage,
+        resolvedClientPropertyCode,
+        stringOrNull(owner_name),
+        stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
+        address,
+        effectiveQuadra,
+        semQuadraFlag,
+        effectiveLote,
+        semLoteFlag,
+        numeroNormalizado,
+        stringOrNull(bairro),
+        stringOrNull(complemento),
+        city,
+        state,
+        normalizeCepForPersistence(cep, semCepFlag),
+        semCepFlag,
+        numericBedrooms,
+        numericBathrooms,
+        areaConstruida.m2,
+        areaConstruida.unidade,
+        areaTerreno.m2,
+        areaConstruida.valor,
+        areaConstruida.m2,
+        areaTerreno.valor,
+        areaTerreno.unidade,
+        areaTerreno.m2,
+        numericGarageSpots,
+        normalizedAmenities.length > 0 ? JSON.stringify(normalizedAmenities) : null,
+        hasWifiFlag,
+        temPiscinaFlag,
+        temEnergiaSolarFlag,
+        temAutomacaoFlag,
+        temArCondicionadoFlag,
+        ehMobiliadaFlag,
+        numericValorCondominio,
+        numericValorIptu,
+        videoUrl,
+        publicId,
+        publicCode,
+      ];
+      const propertyInsertPlaceholders = propertyInsertValues.map(() => '?').join(', ');
+
       const result = await runPropertyQuery<ResultSetHeader>(
         `
           INSERT INTO properties (
@@ -2269,6 +2420,11 @@ class PropertyController {
             area_construida,
             area_construida_unidade,
             area_terreno,
+            area_construida_valor,
+            area_construida_m2,
+            area_terreno_valor,
+            area_terreno_unidade,
+            area_terreno_m2,
             garage_spots,
             amenities,
             has_wifi,
@@ -2282,63 +2438,9 @@ class PropertyController {
             video_url,
             public_id,
             public_code
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (${propertyInsertPlaceholders})
         `,
-        [
-          null,
-          userId,
-          title,
-          normalizedDescription,
-          normalizedType,
-          normalizedPurpose,
-          'pending_approval',
-          promotionFlag,
-          promotionPercentage,
-          promotionStart,
-          promotionEnd,
-          promotionPercentage,
-          promotionStartDate,
-          promotionEndDate,
-          numericPrice,
-          numericPriceSale,
-          numericPriceRent,
-          numericPromotionPrice,
-          numericPromotionalRentPrice,
-          promotionalRentPercentage,
-          resolvedClientPropertyCode,
-          stringOrNull(owner_name),
-          stringOrNull(owner_phone)?.replace(/\D/g, '') ?? null,
-          address,
-          effectiveQuadra,
-          semQuadraFlag,
-          effectiveLote,
-          semLoteFlag,
-          numeroNormalizado,
-          stringOrNull(bairro),
-          stringOrNull(complemento),
-          city,
-          state,
-          normalizeCepForPersistence(cep, semCepFlag),
-          semCepFlag,
-          numericBedrooms,
-          numericBathrooms,
-          numericAreaConstruida,
-          areaUnidade,
-          numericAreaTerreno,
-          numericGarageSpots,
-          normalizedAmenities.length > 0 ? JSON.stringify(normalizedAmenities) : null,
-          hasWifiFlag,
-          temPiscinaFlag,
-          temEnergiaSolarFlag,
-          temAutomacaoFlag,
-          temArCondicionadoFlag,
-          ehMobiliadaFlag,
-          numericValorCondominio,
-          numericValorIptu,
-          videoUrl,
-          publicId,
-          publicCode,
-        ]
+        propertyInsertValues
       );
 
       const propertyId = result.insertId;
@@ -2731,12 +2833,34 @@ class PropertyController {
         property.promotional_rent_percentage != null
           ? Number(property.promotional_rent_percentage)
           : null;
-      let nextAreaConstruida =
-        property.area_construida != null ? Number(property.area_construida) : null;
-      let nextAreaTerreno =
-        property.area_terreno != null ? Number(property.area_terreno) : null;
+      let nextAreaConstruida = property.area_construida_valor != null
+        ? Number(property.area_construida_valor)
+        : property.area_construida != null
+          ? Number(property.area_construida)
+          : null;
+      let nextAreaTerreno = property.area_terreno_valor != null
+        ? Number(property.area_terreno_valor)
+        : property.area_terreno != null
+          ? Number(property.area_terreno)
+          : null;
+      let nextAreaConstruidaM2 =
+        property.area_construida_m2 != null
+          ? Number(property.area_construida_m2)
+          : nextAreaConstruida != null
+            ? nextAreaConstruida
+            : null;
+      let nextAreaTerrenoM2 =
+        property.area_terreno_m2 != null
+          ? Number(property.area_terreno_m2)
+          : nextAreaTerreno != null
+            ? nextAreaTerreno
+            : null;
       let nextAreaConstruidaUnidade =
         normalizeAreaUnidade((property as PropertyRow & { area_construida_unidade?: string | null }).area_construida_unidade);
+      let nextAreaTerrenoUnidade =
+        normalizeAreaUnidade((property as PropertyRow & { area_terreno_unidade?: string | null }).area_terreno_unidade);
+      let hasAreaConstruidaPatch = false;
+      let hasAreaTerrenoPatch = false;
 
       // Always allow editing all fields, even if approved
       const updatableFields = new Set([
@@ -2778,6 +2902,7 @@ class PropertyController {
         'area_construida',
         'area_construida_unidade',
         'area_terreno',
+        'area_terreno_unidade',
         'garage_spots',
         'amenities',
         'has_wifi',
@@ -2901,40 +3026,62 @@ class PropertyController {
           case 'area_construida':
           case 'area_construida_unidade':
           case 'area_terreno':
+          case 'area_terreno_unidade': {
+            try {
+              if (key === 'area_construida_unidade') {
+                const nextParsedArea = parseAreaWithUnit({
+                  value: nextAreaConstruida,
+                  unidade: normalizedUpdateBody[key],
+                  label: 'Área construída',
+                });
+                nextAreaConstruidaUnidade = nextParsedArea.unidade;
+                nextAreaConstruidaM2 = nextParsedArea.m2;
+                hasAreaConstruidaPatch = true;
+                break;
+              }
+              if (key === 'area_terreno_unidade') {
+                const nextParsedArea = parseAreaWithUnit({
+                  value: nextAreaTerreno,
+                  unidade: normalizedUpdateBody[key],
+                  label: 'Área do terreno',
+                });
+                nextAreaTerrenoUnidade = nextParsedArea.unidade;
+                nextAreaTerrenoM2 = nextParsedArea.m2;
+                hasAreaTerrenoPatch = true;
+                break;
+              }
+
+              if (key === 'area_terreno') {
+                const parsedArea = parseAreaWithUnit({
+                  value: normalizedUpdateBody[key],
+                  unidade: nextAreaTerrenoUnidade,
+                  label: 'Área do terreno',
+                });
+                nextAreaTerreno = parsedArea.valor;
+                nextAreaTerrenoM2 = parsedArea.m2;
+                hasAreaTerrenoPatch = true;
+                break;
+              }
+
+              const parsedArea = parseAreaWithUnit({
+                value: normalizedUpdateBody[key],
+                unidade: nextAreaConstruidaUnidade,
+                label: 'Área construída',
+              });
+              nextAreaConstruida = parsedArea.valor;
+              nextAreaConstruidaM2 = parsedArea.m2;
+              nextAreaConstruidaUnidade = parsedArea.unidade;
+              hasAreaConstruidaPatch = true;
+              break;
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
           case 'valor_condominio':
           case 'valor_iptu': {
             try {
-              if (key === 'area_construida_unidade') {
-                nextAreaConstruidaUnidade = normalizeAreaUnidade(
-                  (normalizedUpdateBody[key] as string | null | undefined)
-                );
-                fields.push('area_construida_unidade = ?');
-                values.push(nextAreaConstruidaUnidade);
-                break;
-              }
               fields.push(`\`${key}\` = ?`);
-              if (key === 'area_terreno') {
-                nextAreaTerreno = parseDecimal(normalizedUpdateBody[key]);
-                values.push(nextAreaTerreno);
-                break;
-              }
-              if (key === 'area_construida') {
-                const parsedArea = parseDecimal(normalizedUpdateBody[key]);
-                if (parsedArea == null) {
-                  nextAreaConstruida = null;
-                  values.push(null);
-                  break;
-                }
-                nextAreaConstruida = areaInputToSquareMeters(
-                  parsedArea,
-                  nextAreaConstruidaUnidade
-                );
-                if (Number.isNaN(nextAreaConstruida)) {
-                  throw new Error('Area construida invalida.');
-                }
-                values.push(nextAreaConstruida);
-                break;
-              }
               values.push(parseDecimal(normalizedUpdateBody[key]));
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
@@ -3108,6 +3255,27 @@ class PropertyController {
         }
       }
 
+      if (hasAreaConstruidaPatch) {
+        fields.push('area_construida = ?');
+        values.push(nextAreaConstruidaM2);
+        fields.push('area_construida_unidade = ?');
+        values.push(nextAreaConstruidaUnidade);
+        fields.push('area_construida_valor = ?');
+        values.push(nextAreaConstruida);
+        fields.push('area_construida_m2 = ?');
+        values.push(nextAreaConstruidaM2);
+      }
+      if (hasAreaTerrenoPatch) {
+        fields.push('area_terreno = ?');
+        values.push(nextAreaTerrenoM2);
+        fields.push('area_terreno_unidade = ?');
+        values.push(nextAreaTerrenoUnidade);
+        fields.push('area_terreno_valor = ?');
+        values.push(nextAreaTerreno);
+        fields.push('area_terreno_m2 = ?');
+        values.push(nextAreaTerrenoM2);
+      }
+
       if (semNumeroBody === 1 && !bodyKeys.includes('numero')) {
         fields.push('numero = ?');
         values.push(null);
@@ -3142,16 +3310,20 @@ class PropertyController {
           : supportsRent
             ? nextRentPrice
             : nextSalePrice;
-      const hasAreaUpdate = bodyKeys.includes('area_construida') || bodyKeys.includes('area_terreno');
+      const hasAreaUpdate =
+        bodyKeys.includes('area_construida') ||
+        bodyKeys.includes('area_terreno') ||
+        bodyKeys.includes('area_construida_unidade') ||
+        bodyKeys.includes('area_terreno_unidade');
       const nextAreaConstruidaState =
-        bodyKeys.includes('area_construida') || !hasAreaUpdate
-          ? nextAreaConstruida
+        hasAreaUpdate ? nextAreaConstruidaM2 : property.area_construida_m2 != null
+          ? Number(property.area_construida_m2)
           : property.area_construida != null
             ? Number(property.area_construida)
             : null;
       const nextAreaTerrenoState =
-        bodyKeys.includes('area_terreno') || !hasAreaUpdate
-          ? nextAreaTerreno
+        hasAreaUpdate ? nextAreaTerrenoM2 : property.area_terreno_m2 != null
+          ? Number(property.area_terreno_m2)
           : property.area_terreno != null
             ? Number(property.area_terreno)
             : null;
@@ -3194,14 +3366,14 @@ class PropertyController {
               { max: MAX_PROPERTY_COUNT, allowNull: true }
             )
           : null,
-        bodyKeys.includes('area_construida') || !hasAreaUpdate
+        hasAreaUpdate
           ? validatePropertyNumericRange(
               nextAreaConstruidaState,
               'Área construída',
               { max: MAX_PROPERTY_AREA, allowNull: true }
             )
           : null,
-        bodyKeys.includes('area_terreno') || !hasAreaUpdate
+        hasAreaUpdate
           ? validatePropertyNumericRange(
               nextAreaTerrenoState,
               'Área do terreno',
@@ -3231,6 +3403,8 @@ class PropertyController {
       if (
         nextAreaConstruidaState != null &&
         nextAreaTerrenoState != null &&
+        nextAreaConstruidaState > 0 &&
+        nextAreaTerrenoState > 0 &&
         nextAreaConstruidaState > nextAreaTerrenoState
       ) {
         return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
@@ -4077,14 +4251,14 @@ class PropertyController {
     if (minAreaConstruida != null && String(minAreaConstruida).trim() !== '') {
       const value = Number(minAreaConstruida);
       if (!Number.isNaN(value) && value >= 0) {
-        whereClauses.push('p.area_construida >= ?');
+        whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) >= ?');
         params.push(value);
       }
     }
     if (maxAreaConstruida != null && String(maxAreaConstruida).trim() !== '') {
       const value = Number(maxAreaConstruida);
       if (!Number.isNaN(value) && value >= 0) {
-        whereClauses.push('p.area_construida <= ?');
+        whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) <= ?');
         params.push(value);
       }
     }
@@ -4187,7 +4361,7 @@ class PropertyController {
     const allowedSortColumns: Record<string, string> = {
       price: priceColumn,
       created_at: 'p.created_at',
-      area_construida: 'p.area_construida',
+      area_construida: 'COALESCE(p.area_construida_m2, p.area_construida)',
     };
 
     const sortColumn = allowedSortColumns[String(sortByResolved ?? '').toLowerCase()] ?? 'p.created_at';

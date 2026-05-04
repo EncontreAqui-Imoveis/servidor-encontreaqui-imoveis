@@ -14,6 +14,25 @@ export function normalizeAreaUnidade(raw: string | null | undefined): AreaConstr
   return 'm2';
 }
 
+export function parseAreaUnidade(raw: unknown): AreaConstruidaUnidade {
+  if (raw === undefined || raw === null || raw === '') {
+    return 'm2';
+  }
+  const normalized = String(raw)
+    .trim()
+    .toLowerCase();
+  if (normalized === 'ha' || normalized === 'hectare' || normalized === 'hectares') {
+    return 'hectare';
+  }
+  if (normalized === 'alqueire' || normalized === 'alqueires' || normalized === 'alq') {
+    return 'alqueire';
+  }
+  if (normalized === 'm2' || normalized === 'm²' || normalized === 'm2s') {
+    return 'm2';
+  }
+  throw new Error('Unidade de área inválida.');
+}
+
 export function areaInputToSquareMeters(
   value: number,
   unidade: AreaConstruidaUnidade,

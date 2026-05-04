@@ -38,6 +38,23 @@ async function indexExists(tableName: string, indexName: string): Promise<boolea
   return rows.length > 0;
 }
 
+async function hasUniqueIndexOnColumn(tableName: string, columnName: string): Promise<boolean> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      SELECT 1
+      FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND column_name = ?
+        AND non_unique = 0
+      LIMIT 1
+    `,
+    [tableName, columnName]
+  );
+
+  return rows.length > 0;
+}
+
 async function columnExists(tableName: string, columnName: string): Promise<boolean> {
   const [rows] = await connection.query<RowDataPacket[]>(
     `
@@ -367,10 +384,16 @@ async function ensurePropertiesColumns(): Promise<void> {
     await connection.query('ALTER TABLE properties ADD COLUMN amenities JSON NULL');
   }
   if (!(await columnExists('properties', 'public_id'))) {
-    await connection.query("ALTER TABLE properties ADD COLUMN public_id CHAR(36) NULL UNIQUE");
+    await connection.query('ALTER TABLE properties ADD COLUMN public_id CHAR(36) NULL');
   }
   if (!(await columnExists('properties', 'public_code'))) {
-    await connection.query("ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL UNIQUE");
+    await connection.query('ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL');
+  }
+  if (!(await hasUniqueIndexOnColumn('properties', 'public_id'))) {
+    await connection.query('ALTER TABLE properties ADD UNIQUE INDEX idx_properties_public_id (public_id)');
+  }
+  if (!(await hasUniqueIndexOnColumn('properties', 'public_code'))) {
+    await connection.query('ALTER TABLE properties ADD UNIQUE INDEX idx_properties_public_code (public_code)');
   }
   if (!(await columnExists('properties', 'area_construida_valor'))) {
     await connection.query('ALTER TABLE properties ADD COLUMN area_construida_valor DECIMAL(18, 4) NULL');

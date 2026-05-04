@@ -87,13 +87,25 @@ describe('applyMigrations', () => {
 
     expect(
       sqlStatements.some((sql) =>
-        sql.includes("ALTER TABLE properties ADD COLUMN public_id CHAR(36) NULL UNIQUE")
+        sql.includes('ALTER TABLE properties ADD COLUMN public_id CHAR(36) NULL')
       )
     ).toBe(true);
 
     expect(
       sqlStatements.some((sql) =>
-        sql.includes("ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL UNIQUE")
+        sql.includes('ALTER TABLE properties ADD COLUMN public_code CHAR(6) NULL')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE properties ADD UNIQUE INDEX idx_properties_public_id')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE properties ADD UNIQUE INDEX idx_properties_public_code')
       )
     ).toBe(true);
 

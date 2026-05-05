@@ -2,6 +2,7 @@ import {
   isOptionalBairroPropertyType,
   normalizePropertyType,
 } from '../utils/propertyTypes';
+import { areaInputToSquareMeters } from '../utils/propertyAreaUnits';
 
 export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PropertyEditRequestRequesterRole = 'broker' | 'client';
@@ -114,6 +115,12 @@ const EDIT_FIELD_ALIASES = {
     'area_construida_unidade',
     'areaConstruida_unidade',
   ],
+  areaConstruidaValor: ['areaConstruidaValor', 'area_construida_valor'],
+  areaConstruidaM2: ['areaConstruidaM2', 'area_construida_m2'],
+  areaTerrenoUnidade: ['areaTerrenoUnidade', 'area_terreno_unidade'],
+  areaTerrenoValor: ['areaTerrenoValor', 'area_terreno_valor'],
+  areaTerrenoM2: ['areaTerrenoM2', 'area_terreno_m2'],
+  amenities: ['amenities', 'amenidades'],
 } as const;
 
 type AreaConstruidaUnidadeValue = 'm2' | 'alqueire' | 'hectare';
@@ -152,6 +159,11 @@ export type EditablePropertyState = {
   areaConstruidaUnidade: AreaConstruidaUnidadeValue;
   semQuadra: boolean;
   semLote: boolean;
+  areaConstruidaValor: number | null;
+  areaConstruidaM2: number | null;
+  areaTerrenoValor: number | null;
+  areaTerrenoM2: number | null;
+  areaTerrenoUnidade: AreaConstruidaUnidadeValue;
   areaTerreno: number | null;
   garageSpots: number | null;
   hasWifi: boolean;
@@ -160,6 +172,7 @@ export type EditablePropertyState = {
   temAutomacao: boolean;
   temArCondicionado: boolean;
   ehMobiliada: boolean;
+  amenities: string[];
   valorCondominio: number | null;
   priceSale: number | null;
   priceRent: number | null;
@@ -217,6 +230,41 @@ function normalizeCepForPersistence(value: unknown, semCep: boolean): string | n
 
   const digits = normalizeDigits(value);
   return digits.length > 0 ? digits : null;
+}
+
+function normalizeAmenityList(value: unknown): string[] {
+  const values = (() => {
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => String(entry ?? '').trim())
+        .filter((entry) => entry.length > 0);
+    }
+    if (value === null || value === undefined) {
+      return [];
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) {
+        return [];
+      }
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            return parsed
+              .map((entry) => String(entry ?? '').trim())
+              .filter((entry) => entry.length > 0);
+          }
+        } catch {
+          return [];
+        }
+      }
+      return [trimmed];
+    }
+    return [];
+  })();
+
+  return Array.from(new Set(values));
 }
 
 function normalizeDigits(value: unknown): string {
@@ -490,6 +538,17 @@ export function buildEditablePropertyState(
     ),
     semQuadra: parseBoolean((property as Record<string, unknown>).sem_quadra),
     semLote: parseBoolean((property as Record<string, unknown>).sem_lote),
+    areaConstruidaValor: toNullableNumber(property.area_construida_valor),
+    areaConstruidaM2:
+      toNullableNumber(property.area_construida_m2) ??
+      toNullableNumber(property.area_construida),
+    areaTerrenoValor: toNullableNumber(property.area_terreno_valor),
+    areaTerrenoM2:
+      toNullableNumber(property.area_terreno_m2) ??
+      toNullableNumber(property.area_terreno),
+    areaTerrenoUnidade: normalizeAreaConstruidaUnidade(
+      (property as Record<string, unknown>).area_terreno_unidade
+    ),
     areaTerreno: toNullableNumber(property.area_terreno),
     garageSpots: toNullableInteger(property.garage_spots),
     hasWifi: parseBoolean(property.has_wifi),
@@ -498,6 +557,7 @@ export function buildEditablePropertyState(
     temAutomacao: parseBoolean(property.tem_automacao),
     temArCondicionado: parseBoolean(property.tem_ar_condicionado),
     ehMobiliada: parseBoolean(property.eh_mobiliada),
+    amenities: normalizeAmenityList((property as Record<string, unknown>).amenities),
     valorCondominio: toNullableNumber(property.valor_condominio),
     priceSale: salePrice,
     priceRent: rentPrice,
@@ -557,7 +617,11 @@ function validateCurrentState(state: EditablePropertyState): void {
   validateNumericRange('Banheiros', state.bathrooms, MAX_PROPERTY_COUNT);
   validateNumericRange('Garagens', state.garageSpots, MAX_PROPERTY_COUNT);
   validateNumericRange('Area construida', state.areaConstruida, MAX_PROPERTY_AREA);
+  validateNumericRange('Area construida valor', state.areaConstruidaValor, MAX_PROPERTY_AREA);
+  validateNumericRange('Area construida m2', state.areaConstruidaM2, MAX_PROPERTY_AREA);
   validateNumericRange('Area do terreno', state.areaTerreno, MAX_PROPERTY_AREA);
+  validateNumericRange('Area do terreno valor', state.areaTerrenoValor, MAX_PROPERTY_AREA);
+  validateNumericRange('Area do terreno m2', state.areaTerrenoM2, MAX_PROPERTY_AREA);
 
   if (
     state.promotionPrice != null &&
@@ -686,6 +750,16 @@ function buildRequestedPatch(
     patch.areaConstruida = parseDecimal(areaConstruida.value, 'Area construida');
   }
 
+  const areaConstruidaValor = readAlias(payload, EDIT_FIELD_ALIASES.areaConstruidaValor);
+  if (areaConstruidaValor.found) {
+    patch.areaConstruidaValor = parseDecimal(areaConstruidaValor.value, 'Area construida');
+  }
+
+  const areaConstruidaM2 = readAlias(payload, EDIT_FIELD_ALIASES.areaConstruidaM2);
+  if (areaConstruidaM2.found) {
+    patch.areaConstruidaM2 = parseDecimal(areaConstruidaM2.value, 'Area construida');
+  }
+
   const areaTerreno = readAlias(payload, EDIT_FIELD_ALIASES.areaTerreno);
   if (areaTerreno.found) {
     patch.areaTerreno = parseDecimal(areaTerreno.value, 'Area do terreno');
@@ -703,6 +777,26 @@ function buildRequestedPatch(
   );
   if (areaConstruidaUnidade.found) {
     patch.areaConstruidaUnidade = normalizeAreaConstruidaUnidade(areaConstruidaUnidade.value);
+  }
+
+  const areaTerrenoValor = readAlias(payload, EDIT_FIELD_ALIASES.areaTerrenoValor);
+  if (areaTerrenoValor.found) {
+    patch.areaTerrenoValor = parseDecimal(areaTerrenoValor.value, 'Area do terreno');
+  }
+
+  const areaTerrenoM2 = readAlias(payload, EDIT_FIELD_ALIASES.areaTerrenoM2);
+  if (areaTerrenoM2.found) {
+    patch.areaTerrenoM2 = parseDecimal(areaTerrenoM2.value, 'Area do terreno');
+  }
+
+  const areaTerrenoUnidade = readAlias(payload, EDIT_FIELD_ALIASES.areaTerrenoUnidade);
+  if (areaTerrenoUnidade.found) {
+    patch.areaTerrenoUnidade = normalizeAreaConstruidaUnidade(areaTerrenoUnidade.value);
+  }
+
+  const amenities = readAlias(payload, EDIT_FIELD_ALIASES.amenities);
+  if (amenities.found) {
+    patch.amenities = normalizeAmenityList(amenities.value);
   }
 
   const garageSpots = readAlias(payload, EDIT_FIELD_ALIASES.garageSpots);
@@ -957,6 +1051,27 @@ export function buildPropertyEditDbPatch(
       case 'areaConstruida':
         dbPatch.area_construida = finalState.areaConstruida;
         break;
+      case 'areaConstruidaValor':
+        dbPatch.area_construida_valor = finalState.areaConstruidaValor;
+        if (finalState.areaConstruidaValor == null) {
+          dbPatch.area_construida_m2 = null;
+          dbPatch.area_construida = null;
+        } else {
+          const nextAreaConstruidaM2 = areaInputToSquareMeters(
+            finalState.areaConstruidaValor,
+            finalState.areaConstruidaUnidade
+          );
+          dbPatch.area_construida_m2 = nextAreaConstruidaM2;
+          dbPatch.area_construida = nextAreaConstruidaM2;
+        }
+        dbPatch.area_construida_unidade = finalState.areaConstruidaUnidade;
+        break;
+      case 'areaConstruidaM2':
+        dbPatch.area_construida_m2 = finalState.areaConstruidaM2;
+        dbPatch.area_construida = finalState.areaConstruidaM2;
+        dbPatch.area_construida_valor = finalState.areaConstruidaM2;
+        dbPatch.area_construida_unidade = finalState.areaConstruidaUnidade ?? 'm2';
+        break;
       case 'areaConstruidaUnidade':
         dbPatch.area_construida_unidade = finalState.areaConstruidaUnidade;
         break;
@@ -972,6 +1087,30 @@ export function buildPropertyEditDbPatch(
         break;
       case 'areaTerreno':
         dbPatch.area_terreno = finalState.areaTerreno;
+        break;
+      case 'areaTerrenoValor':
+        dbPatch.area_terreno_valor = finalState.areaTerrenoValor;
+        if (finalState.areaTerrenoValor == null) {
+          dbPatch.area_terreno_m2 = null;
+          dbPatch.area_terreno = null;
+        } else {
+          const nextAreaTerrenoM2 = areaInputToSquareMeters(
+            finalState.areaTerrenoValor,
+            finalState.areaTerrenoUnidade
+          );
+          dbPatch.area_terreno_m2 = nextAreaTerrenoM2;
+          dbPatch.area_terreno = nextAreaTerrenoM2;
+        }
+        dbPatch.area_terreno_unidade = finalState.areaTerrenoUnidade;
+        break;
+      case 'areaTerrenoM2':
+        dbPatch.area_terreno_m2 = finalState.areaTerrenoM2;
+        dbPatch.area_terreno = finalState.areaTerrenoM2;
+        dbPatch.area_terreno_valor = finalState.areaTerrenoM2;
+        dbPatch.area_terreno_unidade = finalState.areaTerrenoUnidade ?? 'm2';
+        break;
+      case 'areaTerrenoUnidade':
+        dbPatch.area_terreno_unidade = finalState.areaTerrenoUnidade;
         break;
       case 'garageSpots':
         dbPatch.garage_spots = finalState.garageSpots;
@@ -993,6 +1132,9 @@ export function buildPropertyEditDbPatch(
         break;
       case 'ehMobiliada':
         dbPatch.eh_mobiliada = finalState.ehMobiliada ? 1 : 0;
+        break;
+      case 'amenities':
+        dbPatch.amenities = finalState.amenities.length > 0 ? JSON.stringify(finalState.amenities) : null;
         break;
       case 'valorCondominio':
         dbPatch.valor_condominio = finalState.valorCondominio;

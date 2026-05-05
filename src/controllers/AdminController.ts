@@ -383,6 +383,27 @@ function parseStringArray(value: unknown): string[] {
   return [trimmed];
 }
 
+function normalizeJsonStringArray(value: unknown): string[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+
+  const parsed = parseStringArray(value);
+  if (parsed.length === 0) {
+    return [];
+  }
+
+  const normalized = new Set<string>();
+  for (const entry of parsed) {
+    const normalizedEntry = String(entry).trim();
+    if (normalizedEntry) {
+      normalized.add(normalizedEntry);
+    }
+  }
+
+  return Array.from(normalized);
+}
+
 function parseImageUrlsInput(body: Record<string, unknown>): string[] {
   const fromArrayField = parseStringArray(body.image_urls);
   const fromBracketField = parseStringArray(body['image_urls[]']);
@@ -4266,7 +4287,16 @@ class AdminController {
             code,
             is_promoted,
             promotion_percentage,
-            promotional_rent_percentage
+            promotional_rent_percentage,
+            area_construida,
+            area_terreno,
+            area_construida_m2,
+            area_terreno_m2,
+            area_construida_valor,
+            area_terreno_valor,
+            area_construida_unidade,
+            area_terreno_unidade,
+            amenities
           FROM properties
           WHERE id = ?
         `,
@@ -4373,6 +4403,35 @@ class AdminController {
         }
       }
 
+      const currentAreaConstruidaUnidade = normalizeAreaUnidade(
+        (property as { area_construida_unidade?: string | null }).area_construida_unidade
+      );
+      const currentAreaTerrenoUnidade = normalizeAreaUnidade(
+        (property as { area_terreno_unidade?: string | null }).area_terreno_unidade
+      );
+      let nextAreaConstruidaUnidade = currentAreaConstruidaUnidade;
+      let nextAreaTerrenoUnidade = currentAreaTerrenoUnidade;
+      let nextAreaConstruidaValor = toNullableNumber(
+        (property as { area_construida_valor?: unknown }).area_construida_valor
+      );
+      let nextAreaTerrenoValor = toNullableNumber(
+        (property as { area_terreno_valor?: unknown }).area_terreno_valor
+      );
+      let nextAreaConstruidaM2 = toNullableNumber(
+        (property as { area_construida_m2?: unknown }).area_construida_m2 ??
+          (property as { area_construida?: unknown }).area_construida
+      );
+      let nextAreaTerrenoM2 = toNullableNumber(
+        (property as { area_terreno_m2?: unknown }).area_terreno_m2 ??
+          (property as { area_terreno?: unknown }).area_terreno
+      );
+      let nextAreaConstruidaTouched = false;
+      let nextAreaTerrenoTouched = false;
+      let areaConstruidaValorUpdate = false;
+      let areaTerrenoValorUpdate = false;
+      let areaConstruidaUnidadeTouched = false;
+      let areaTerrenoUnidadeTouched = false;
+
       const nextStatus = normalizeStatus(body.status) ?? (property.status as string);
       const shouldNotifyPriceDrop =
         (nextStatus ?? '').toLowerCase() === 'approved' && (saleTouched || rentTouched);
@@ -4414,6 +4473,12 @@ class AdminController {
         'bathrooms',
         'area_construida',
         'area_terreno',
+        'area_construida_valor',
+        'area_construida_unidade',
+        'area_terreno_valor',
+        'area_terreno_unidade',
+        'area_construida_m2',
+        'area_terreno_m2',
         'garage_spots',
         'has_wifi',
         'tem_piscina',
@@ -4421,6 +4486,7 @@ class AdminController {
         'tem_automacao',
         'tem_ar_condicionado',
         'eh_mobiliada',
+        'amenities',
         'valor_condominio',
         'valor_iptu',
         'video_url',
@@ -4473,8 +4539,6 @@ class AdminController {
           case 'sale_value':
           case 'commission_rate':
           case 'commission_value':
-          case 'area_construida':
-          case 'area_terreno':
           case 'valor_condominio':
           case 'valor_iptu': {
             try {
@@ -4483,6 +4547,84 @@ class AdminController {
             } catch (parseError) {
               return res.status(400).json({ error: (parseError as Error).message });
             }
+            break;
+          }
+          case 'area_construida_valor': {
+            try {
+              const parsed = parseDecimal(value);
+              nextAreaConstruidaValor = parsed;
+              areaConstruidaValorUpdate = true;
+              nextAreaConstruidaTouched = true;
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'area_terreno_valor': {
+            try {
+              const parsed = parseDecimal(value);
+              nextAreaTerrenoValor = parsed;
+              areaTerrenoValorUpdate = true;
+              nextAreaTerrenoTouched = true;
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'area_construida_unidade': {
+            nextAreaConstruidaUnidade = normalizeAreaUnidade(value);
+            areaConstruidaUnidadeTouched = true;
+            break;
+          }
+          case 'area_terreno_unidade': {
+            nextAreaTerrenoUnidade = normalizeAreaUnidade(value);
+            areaTerrenoUnidadeTouched = true;
+            break;
+          }
+          case 'area_construida_m2': {
+            try {
+              const parsed = parseDecimal(value);
+              nextAreaConstruidaM2 = parsed;
+              nextAreaConstruidaValor = parsed;
+              nextAreaConstruidaTouched = true;
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'area_terreno_m2': {
+            try {
+              const parsed = parseDecimal(value);
+              nextAreaTerrenoM2 = parsed;
+              nextAreaTerrenoValor = parsed;
+              nextAreaTerrenoTouched = true;
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'area_construida':
+          case 'area_terreno': {
+            try {
+              const parsed = parseDecimal(value);
+              if (key === 'area_construida') {
+                nextAreaConstruidaValor = parsed;
+                nextAreaConstruidaM2 = parsed;
+                nextAreaConstruidaTouched = true;
+              } else {
+                nextAreaTerrenoValor = parsed;
+                nextAreaTerrenoM2 = parsed;
+                nextAreaTerrenoTouched = true;
+              }
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
+            break;
+          }
+          case 'amenities': {
+            const normalizedAmenities = normalizeJsonStringArray(value);
+            setParts.push('amenities = ?');
+            params.push(normalizedAmenities.length ? JSON.stringify(normalizedAmenities) : null);
             break;
           }
           case 'bedrooms':
@@ -4674,8 +4816,28 @@ class AdminController {
         Object.prototype.hasOwnProperty.call(body, 'area_construida')
           ? validatePropertyNumericRange(parseDecimal(body.area_construida), 'Área construída', { max: MAX_PROPERTY_AREA })
           : null,
+        Object.prototype.hasOwnProperty.call(body, 'area_construida_valor')
+          ? validatePropertyNumericRange(parseDecimal(body.area_construida_valor), 'Área construída', {
+              max: MAX_PROPERTY_AREA,
+            })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'area_construida_m2')
+          ? validatePropertyNumericRange(parseDecimal(body.area_construida_m2), 'Área construída', {
+              max: MAX_PROPERTY_AREA,
+            })
+          : null,
         Object.prototype.hasOwnProperty.call(body, 'area_terreno')
           ? validatePropertyNumericRange(parseDecimal(body.area_terreno), 'Área do terreno', { max: MAX_PROPERTY_AREA })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'area_terreno_valor')
+          ? validatePropertyNumericRange(parseDecimal(body.area_terreno_valor), 'Área do terreno', {
+              max: MAX_PROPERTY_AREA,
+            })
+          : null,
+        Object.prototype.hasOwnProperty.call(body, 'area_terreno_m2')
+          ? validatePropertyNumericRange(parseDecimal(body.area_terreno_m2), 'Área do terreno', {
+              max: MAX_PROPERTY_AREA,
+            })
           : null,
         Object.prototype.hasOwnProperty.call(body, 'valor_condominio')
           ? validatePropertyNumericRange(parseDecimal(body.valor_condominio), 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true })
@@ -4687,6 +4849,54 @@ class AdminController {
 
       if (numericValidationError) {
         return res.status(400).json({ error: numericValidationError });
+      }
+
+      if (nextAreaConstruidaTouched && areaConstruidaValorUpdate) {
+        nextAreaConstruidaM2 =
+          nextAreaConstruidaValor == null
+            ? null
+            : areaInputToSquareMeters(nextAreaConstruidaValor, nextAreaConstruidaUnidade);
+        if (nextAreaConstruidaM2 != null && !Number.isFinite(nextAreaConstruidaM2)) {
+          return res.status(400).json({ error: 'Área construída inválida para a unidade selecionada.' });
+        }
+      }
+
+      if (nextAreaTerrenoTouched && areaTerrenoValorUpdate) {
+        nextAreaTerrenoM2 =
+          nextAreaTerrenoValor == null
+            ? null
+            : areaInputToSquareMeters(nextAreaTerrenoValor, nextAreaTerrenoUnidade);
+        if (nextAreaTerrenoM2 != null && !Number.isFinite(nextAreaTerrenoM2)) {
+          return res.status(400).json({ error: 'Área do terreno inválida para a unidade selecionada.' });
+        }
+      }
+
+      if (nextAreaConstruidaTouched) {
+        setParts.push('area_construida_unidade = ?');
+        params.push(nextAreaConstruidaUnidade);
+        setParts.push('area_construida_valor = ?');
+        params.push(nextAreaConstruidaValor);
+        setParts.push('area_construida_m2 = ?');
+        params.push(nextAreaConstruidaM2);
+        setParts.push('area_construida = ?');
+        params.push(nextAreaConstruidaM2);
+      } else if (areaConstruidaUnidadeTouched) {
+        setParts.push('area_construida_unidade = ?');
+        params.push(nextAreaConstruidaUnidade);
+      }
+
+      if (nextAreaTerrenoTouched) {
+        setParts.push('area_terreno_unidade = ?');
+        params.push(nextAreaTerrenoUnidade);
+        setParts.push('area_terreno_valor = ?');
+        params.push(nextAreaTerrenoValor);
+        setParts.push('area_terreno_m2 = ?');
+        params.push(nextAreaTerrenoM2);
+        setParts.push('area_terreno = ?');
+        params.push(nextAreaTerrenoM2);
+      } else if (areaTerrenoUnidadeTouched) {
+        setParts.push('area_terreno_unidade = ?');
+        params.push(nextAreaTerrenoUnidade);
       }
 
       if (!supportsSale && Object.prototype.hasOwnProperty.call(body, 'promotion_price')) {

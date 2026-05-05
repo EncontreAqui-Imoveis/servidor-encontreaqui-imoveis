@@ -31,6 +31,14 @@ const MAX_CONTRACT_DOCUMENT_FILE_MB = parsePositiveEnvNumber(
   'UPLOAD_MAX_CONTRACT_DOCUMENT_MB',
   5
 );
+const MAX_MEDIA_UPLOAD_FIELDS = parsePositiveEnvNumber(
+  'MEDIA_UPLOAD_MAX_FIELDS',
+  120
+);
+const MAX_MEDIA_UPLOAD_PARTS = parsePositiveEnvNumber(
+  'MEDIA_UPLOAD_MAX_PARTS',
+  160
+);
 
 export const MEDIA_UPLOAD_DIR = path.join(
   os.tmpdir(),
@@ -115,9 +123,9 @@ export const mediaUpload = multer({
   limits: {
     fileSize: MAX_MEDIA_FILE_MB * ONE_MB_IN_BYTES,
     files: 21,
-    fields: 50,
+    fields: MAX_MEDIA_UPLOAD_FIELDS,
     fieldSize: ONE_MB_IN_BYTES,
-    parts: 80,
+    parts: MAX_MEDIA_UPLOAD_PARTS,
   },
   fileFilter: (_req, file, cb: FileFilterCallback) => {
     const field = file.fieldname;

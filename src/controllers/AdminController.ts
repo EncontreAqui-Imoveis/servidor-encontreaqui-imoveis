@@ -5629,9 +5629,9 @@ class AdminController {
           INNER JOIN broker_documents bd
             ON b.id = bd.broker_id
             AND bd.status IN ('pending', 'rejected')
-            AND bd.creci_front_url IS NOT NULL
-            AND bd.creci_back_url IS NOT NULL
-            AND bd.selfie_url IS NOT NULL
+            AND NULLIF(TRIM(bd.creci_front_url), '') IS NOT NULL
+            AND NULLIF(TRIM(bd.creci_back_url), '') IS NOT NULL
+            AND NULLIF(TRIM(bd.selfie_url), '') IS NOT NULL
           WHERE b.status = 'pending_verification'
         `
       );
@@ -6055,8 +6055,8 @@ class AdminController {
         await cleanupPropertyMediaAssets([docs[0][column]], 'admin_delete_broker_doc');
 
         await db.query(
-          `UPDATE broker_documents SET ${column} = NULL, status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?`,
-          [brokerId]
+          `UPDATE broker_documents SET ${column} = ?, status = 'pending', updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?`,
+          ['', brokerId]
         );
       }
 

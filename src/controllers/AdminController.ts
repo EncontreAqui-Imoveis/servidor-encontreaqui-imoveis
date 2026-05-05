@@ -6192,6 +6192,13 @@ class AdminController {
       return res.status(400).json({ error: 'Nenhum documento enviado.' });
     }
 
+    const toUpload: { [field: string]: string } = {};
+    const fileFieldToColumnMap = {
+      creciFront: 'creci_front_url',
+      creciBack: 'creci_back_url',
+      selfie: 'selfie_url',
+    };
+
     const db = await adminDb.getConnection();
     try {
       await db.beginTransaction();
@@ -6202,33 +6209,49 @@ class AdminController {
         return res.status(404).json({ error: 'Corretor não encontrado.' });
       }
 
-      const updates: string[] = [];
-      const values: any[] = [];
-
-      if (files.creciFront) {
-        const result = await uploadToCloudinary(files.creciFront[0], 'brokers/documents');
-        updates.push('creci_front_url = ?');
-        values.push(result.url);
-      }
-      if (files.creciBack) {
-        const result = await uploadToCloudinary(files.creciBack[0], 'brokers/documents');
-        updates.push('creci_back_url = ?');
-        values.push(result.url);
-      }
-      if (files.selfie) {
-        const result = await uploadToCloudinary(files.selfie[0], 'brokers/documents');
-        updates.push('selfie_url = ?');
-        values.push(result.url);
+      const uploadTasks = Object.entries(fileFieldToColumnMap).filter((entry) => !!files[entry[0]]);
+      if (uploadTasks.length === 0) {
+        await db.rollback();
+        return res.status(400).json({ error: 'Nenhum documento válido enviado.' });
       }
 
-      if (updates.length > 0) {
-        await db.query(
-          `INSERT INTO broker_documents (broker_id, ${updates.map((u) => u.split(' = ')[0]).join(', ')}, status)
-           VALUES (?, ${updates.map(() => '?').join(', ')}, 'pending')
-           ON DUPLICATE KEY UPDATE ${updates.join(', ')}, status = 'pending', updated_at = CURRENT_TIMESTAMP`,
-          [brokerId, ...values, ...values]
-        );
+      for (const [fileField, column] of uploadTasks) {
+        const fileList = files[fileField];
+        if (!fileList || fileList.length === 0 || !fileList[0]) {
+          continue;
+        }
+        const result = await uploadToCloudinary(fileList[0], 'brokers/documents');
+        toUpload[column] = result.url;
       }
+
+      if (Object.keys(toUpload).length === 0) {
+        await db.rollback();
+        return res.status(400).json({ error: 'Nenhum documento válido enviado.' });
+      }
+
+      const [docRows] = await db.query<RowDataPacket[]>(
+        'SELECT creci_front_url, creci_back_url, selfie_url FROM broker_documents WHERE broker_id = ?',
+        [brokerId],
+      );
+      const existingDocRow = docRows[0];
+      const normalizeDocumentValue = (value: unknown) =>
+        typeof value === 'string' ? value : '';
+
+      const creciFrontUrl = toUpload.creci_front_url ?? normalizeDocumentValue(existingDocRow?.creci_front_url);
+      const creciBackUrl = toUpload.creci_back_url ?? normalizeDocumentValue(existingDocRow?.creci_back_url);
+      const selfieUrl = toUpload.selfie_url ?? normalizeDocumentValue(existingDocRow?.selfie_url);
+
+      await db.query(
+        `INSERT INTO broker_documents (broker_id, creci_front_url, creci_back_url, selfie_url, status)
+         VALUES (?, ?, ?, ?, 'pending')
+         ON DUPLICATE KEY UPDATE
+           creci_front_url = VALUES(creci_front_url),
+           creci_back_url = VALUES(creci_back_url),
+           selfie_url = VALUES(selfie_url),
+           status = 'pending',
+           updated_at = CURRENT_TIMESTAMP`,
+        [brokerId, creciFrontUrl, creciBackUrl, selfieUrl]
+      );
 
       await db.commit();
       return res.status(200).json({ message: 'Documentos atualizados com sucesso.' });

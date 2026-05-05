@@ -4257,7 +4257,7 @@ class AdminController {
 
   async updateProperty(req: Request, res: Response) {
     const { id } = req.params;
-    const body = req.body ?? {};
+    const body = (req.body ?? {}) as Record<string, unknown>;
 
     try {
       const [propertyRows] = await adminDb.query<RowDataPacket[]>(
@@ -4499,6 +4499,15 @@ class AdminController {
 
       const setParts: string[] = [];
       const params: any[] = [];
+      const toAreaUnitRaw = (value: unknown): string | null | undefined => {
+        if (value === null) {
+          return null;
+        }
+        if (value === undefined) {
+          return undefined;
+        }
+        return String(value);
+      };
 
       for (const [key, value] of Object.entries(body)) {
         if (!allowedFields.has(key)) {
@@ -4572,12 +4581,12 @@ class AdminController {
             break;
           }
           case 'area_construida_unidade': {
-            nextAreaConstruidaUnidade = normalizeAreaUnidade(value);
+            nextAreaConstruidaUnidade = normalizeAreaUnidade(toAreaUnitRaw(value));
             areaConstruidaUnidadeTouched = true;
             break;
           }
           case 'area_terreno_unidade': {
-            nextAreaTerrenoUnidade = normalizeAreaUnidade(value);
+            nextAreaTerrenoUnidade = normalizeAreaUnidade(toAreaUnitRaw(value));
             areaTerrenoUnidadeTouched = true;
             break;
           }

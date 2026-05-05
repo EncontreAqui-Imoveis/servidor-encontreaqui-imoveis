@@ -39,6 +39,18 @@ function normalizeTokenVersion(value: unknown): number {
   return Math.trunc(parsed);
 }
 
+function isTokenExpiredError(error: unknown): error is jwt.TokenExpiredError {
+  if (error instanceof jwt.TokenExpiredError) {
+    return true;
+  }
+
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  return (error as { name?: unknown }).name === 'TokenExpiredError';
+}
+
 function isAdminRoute(req: Request): boolean {
   const baseUrl = String(req.baseUrl ?? '');
   const path = String(req.path ?? '');
@@ -279,6 +291,10 @@ export async function authMiddleware(
 
     return next();
   } catch (error) {
+    if (isTokenExpiredError(error)) {
+      return res.status(401).json({ error: 'Token inválido.' });
+    }
+
     console.error('Erro de autenticação:', error);
     return res.status(401).json({ error: 'Token inválido.' });
   }

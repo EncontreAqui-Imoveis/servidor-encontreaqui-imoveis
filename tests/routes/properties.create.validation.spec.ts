@@ -404,6 +404,32 @@ describe('POST /properties description length contract', () => {
     expect(insertParams).toContain(23320000);
   });
 
+  it('accepts broker create with area_construida_valor and area_terreno_valor', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers WHERE id')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 151, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-area-valor-zero')
+      .send({
+        ...basePayload,
+        area_construida: undefined,
+        area_terreno: undefined,
+        area_construida_valor: 0.0,
+        area_terreno_valor: 2323.0,
+        area_construida_unidade: 'm2',
+        area_terreno_unidade: 'm2',
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBeDefined();
+  });
+
   it('rejects create broker with invalid area unit', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
@@ -441,6 +467,31 @@ describe('POST /properties description length contract', () => {
         bedrooms: 0,
         bathrooms: 0,
         garage_spots: 0,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBeDefined();
+  });
+
+  it('accepts createForClient with area_construida_valor and area_terreno_valor', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 138, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-area-valor-zero')
+      .send({
+        ...basePayload,
+        area_construida: undefined,
+        area_terreno: undefined,
+        area_construida_valor: 0.0,
+        area_terreno_valor: 2323.0,
+        area_construida_unidade: 'm2',
+        area_terreno_unidade: 'm2',
       });
 
     expect(response.status).toBe(201);

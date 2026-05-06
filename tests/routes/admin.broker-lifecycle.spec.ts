@@ -2,7 +2,13 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getConnectionMock, txMock, notifyAdminsMock, notifyUsersMock } = vi.hoisted(() => {
+const {
+  getConnectionMock,
+  queryMock,
+  txMock,
+  notifyAdminsMock,
+  notifyUsersMock,
+} = vi.hoisted(() => {
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
 
   const tx = {
@@ -15,6 +21,7 @@ const { getConnectionMock, txMock, notifyAdminsMock, notifyUsersMock } = vi.hois
 
   return {
     getConnectionMock: vi.fn(),
+    queryMock: vi.fn(),
     txMock: tx,
     notifyAdminsMock: vi.fn(),
     notifyUsersMock: vi.fn(),
@@ -24,7 +31,7 @@ const { getConnectionMock, txMock, notifyAdminsMock, notifyUsersMock } = vi.hois
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
-    query: vi.fn(),
+    query: queryMock,
     getConnection: getConnectionMock,
   },
 }));
@@ -67,6 +74,9 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
   app.post('/admin/clients/:id/demote-broker', (req, res) =>
     adminController.demoteClientBroker(req as any, res),
   );
+  const routeLikeDemoteApp = express();
+  routeLikeDemoteApp.use(express.json());
+  routeLikeDemoteApp.post('/admin/clients/:id/demote-broker', adminController.demoteClientBroker);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -207,6 +217,33 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     const response = await request(app).post('/admin/clients/88/demote-broker').send({});
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      role: 'client',
+      status: 'rejected',
+    });
+  });
+
+  it('works when routed directly with method reference (admin router binding)', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 99,
+            name: 'Broker Router',
+            email: 'broker-router@test.com',
+            broker_id: 99,
+            broker_status: 'approved',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const response = await request(routeLikeDemoteApp).post('/admin/clients/99/demote-broker').send({});
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({

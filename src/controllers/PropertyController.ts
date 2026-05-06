@@ -1273,6 +1273,8 @@ class PropertyController {
       area_construida,
       area_terreno,
       area,
+      area_construida_valor,
+      area_terreno_valor,
           garage_spots,
       amenities,
       amenityIds,
@@ -1591,13 +1593,16 @@ class PropertyController {
           required: true,
           hasField: hasGarageSpots,
         });
-        areaConstruida = parseAreaWithUnit({
-          value: area_construida ?? area,
+      const nextAreaConstruidaInput = area_construida_valor ?? area_construida ?? area;
+      const nextAreaTerrenoInput = area_terreno_valor ?? area_terreno;
+
+      areaConstruida = parseAreaWithUnit({
+        value: nextAreaConstruidaInput,
           unidade: area_construida_unidade,
           label: "Área construída",
         });
         areaTerreno = parseAreaWithUnit({
-          value: area_terreno,
+        value: nextAreaTerrenoInput,
           unidade: area_terreno_unidade,
           label: "Área do terreno",
         });
@@ -1627,7 +1632,7 @@ class PropertyController {
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA, allowNull: true }),
         validatePropertyNumericRange(areaTerreno.m2, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
@@ -1922,6 +1927,8 @@ class PropertyController {
       area_construida,
       area_terreno,
       area,
+      area_construida_valor,
+      area_terreno_valor,
       garage_spots,
       amenities,
       amenityIds,
@@ -2220,13 +2227,16 @@ class PropertyController {
           required: true,
           hasField: hasGarageSpots,
         });
-        areaConstruida = parseAreaWithUnit({
-          value: area_construida ?? area,
+      const nextAreaConstruidaInput = area_construida_valor ?? area_construida ?? area;
+      const nextAreaTerrenoInput = area_terreno_valor ?? area_terreno;
+
+      areaConstruida = parseAreaWithUnit({
+        value: nextAreaConstruidaInput,
           unidade: area_construida_unidade,
           label: "Área construída",
         });
         areaTerreno = parseAreaWithUnit({
-          value: area_terreno,
+        value: nextAreaTerrenoInput,
           unidade: area_terreno_unidade,
           label: "Área do terreno",
         });
@@ -2256,7 +2266,7 @@ class PropertyController {
           validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA }),
+        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA, allowNull: true }),
         validatePropertyNumericRange(areaTerreno.m2, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
@@ -2900,8 +2910,10 @@ class PropertyController {
         'bedrooms',
         'bathrooms',
         'area_construida',
+        'area_construida_valor',
         'area_construida_unidade',
         'area_terreno',
+        'area_terreno_valor',
         'area_terreno_unidade',
         'garage_spots',
         'amenities',
@@ -3023,10 +3035,12 @@ class PropertyController {
             }
             break;
           }
-          case 'area_construida':
-          case 'area_construida_unidade':
-          case 'area_terreno':
-          case 'area_terreno_unidade': {
+        case 'area_construida':
+        case 'area_construida_valor':
+        case 'area_construida_unidade':
+        case 'area_terreno':
+        case 'area_terreno_valor':
+        case 'area_terreno_unidade': {
             try {
               if (key === 'area_construida_unidade') {
                 const nextParsedArea = parseAreaWithUnit({
@@ -3039,6 +3053,13 @@ class PropertyController {
                 hasAreaConstruidaPatch = true;
                 break;
               }
+              if (key === 'area_construida_valor') {
+                const parsedArea = parseDecimal(normalizedUpdateBody[key]);
+                nextAreaConstruida = parsedArea;
+                nextAreaConstruidaM2 = parsedArea == null ? null : Number(areaInputToSquareMeters(parsedArea, nextAreaConstruidaUnidade).toFixed(2));
+                hasAreaConstruidaPatch = true;
+                break;
+              }
               if (key === 'area_terreno_unidade') {
                 const nextParsedArea = parseAreaWithUnit({
                   value: nextAreaTerreno,
@@ -3047,6 +3068,13 @@ class PropertyController {
                 });
                 nextAreaTerrenoUnidade = nextParsedArea.unidade;
                 nextAreaTerrenoM2 = nextParsedArea.m2;
+                hasAreaTerrenoPatch = true;
+                break;
+              }
+              if (key === 'area_terreno_valor') {
+                const parsedArea = parseDecimal(normalizedUpdateBody[key]);
+                nextAreaTerreno = parsedArea;
+                nextAreaTerrenoM2 = parsedArea == null ? null : Number(areaInputToSquareMeters(parsedArea, nextAreaTerrenoUnidade).toFixed(2));
                 hasAreaTerrenoPatch = true;
                 break;
               }

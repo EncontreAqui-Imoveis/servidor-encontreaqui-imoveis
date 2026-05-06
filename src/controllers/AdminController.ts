@@ -3370,12 +3370,12 @@ class AdminController {
 
   async approvePropertyEditRequest(req: AuthRequest, res: Response) {
     req.body = { mode: 'approve_all' };
-    return this.reviewPropertyEditRequest(req, res);
+    return adminController.reviewPropertyEditRequest(req, res);
   }
 
   async rejectPropertyEditRequest(req: AuthRequest, res: Response) {
     req.body = { mode: 'reject_all', reason: req.body?.reason };
-    return this.reviewPropertyEditRequest(req, res);
+    return adminController.reviewPropertyEditRequest(req, res);
   }
 
   async listArchivedProperties(req: Request, res: Response) {
@@ -6087,7 +6087,7 @@ class AdminController {
   }
 
   async demoteClientBroker(req: Request, res: Response) {
-    return this.cleanupBroker(req, res);
+    return adminController.cleanupBroker(req, res);
   }
 
   async updateBrokerStatus(req: Request, res: Response) {
@@ -6694,7 +6694,7 @@ class AdminController {
     }
 
     if (normalizedStatus === 'rejected') {
-      return this.rejectProperty(req, res);
+      return adminController.rejectProperty(req, res);
     }
 
     try {

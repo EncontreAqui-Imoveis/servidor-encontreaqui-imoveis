@@ -621,6 +621,26 @@ function parseAreaWithUnit({
   };
 }
 
+function getAreaValidationMax(unidade: AreaConstruidaUnidade): number | null {
+  return unidade === "m2" ? MAX_PROPERTY_AREA : null;
+}
+
+function validateAreaByInputUnit(
+  parsedArea: ParsedAreaValues,
+  label: string,
+  options: { allowNull: boolean },
+): string | null {
+  const max = getAreaValidationMax(parsedArea.unidade);
+  if (max == null) {
+    return null;
+  }
+
+  return validatePropertyNumericRange(parsedArea.valor, label, {
+    max,
+    allowNull: options.allowNull,
+  });
+}
+
 function parseInteger(
   value: unknown,
   options?: { label?: string },
@@ -1676,8 +1696,8 @@ class PropertyController {
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA, allowNull: true }),
-        validatePropertyNumericRange(areaTerreno.m2, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validateAreaByInputUnit(areaConstruida, 'Área construída', { allowNull: true }),
+        validateAreaByInputUnit(areaTerreno, 'Área do terreno', { allowNull: false }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -2291,8 +2311,8 @@ class PropertyController {
           validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(areaConstruida.m2, 'Área construída', { max: MAX_PROPERTY_AREA, allowNull: true }),
-        validatePropertyNumericRange(areaTerreno.m2, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validateAreaByInputUnit(areaConstruida, 'Área construída', { allowNull: true }),
+        validateAreaByInputUnit(areaTerreno, 'Área do terreno', { allowNull: false }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -3420,17 +3440,25 @@ class PropertyController {
             )
           : null,
         hasAreaUpdate
-          ? validatePropertyNumericRange(
-              nextAreaConstruidaState,
+          ? validateAreaByInputUnit(
+              {
+                valor: nextAreaConstruida,
+                unidade: nextAreaConstruidaUnidade,
+                m2: nextAreaConstruidaM2,
+              },
               'Área construída',
-              { max: MAX_PROPERTY_AREA, allowNull: true }
+              { allowNull: true }
             )
           : null,
         hasAreaUpdate
-          ? validatePropertyNumericRange(
-              nextAreaTerrenoState,
+          ? validateAreaByInputUnit(
+              {
+                valor: nextAreaTerreno,
+                unidade: nextAreaTerrenoUnidade,
+                m2: nextAreaTerrenoM2,
+              },
               'Área do terreno',
-              { max: MAX_PROPERTY_AREA, allowNull: true }
+              { allowNull: true }
             )
           : null,
         bodyKeys.includes('valor_condominio')

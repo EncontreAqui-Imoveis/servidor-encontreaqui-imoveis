@@ -185,6 +185,40 @@ describe('Rotas admin de persistencia', () => {
     expect(updateParams).toContain('m2');
   });
 
+  it('persiste unidade em hectares no PUT /admin/properties/:id', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (
+        sql.includes('SELECT') &&
+        sql.includes('FROM properties') &&
+        sql.includes('WHERE id = ?') &&
+        !sql.includes('LIMIT 1')
+      ) {
+        return [[adminPropertyRow]];
+      }
+      if (sql.includes('UPDATE properties SET')) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const response = await request(adminPropertyApp)
+      .put('/admin/properties/555')
+      .set('x-request-id', 'admin-update-property-area-hectare')
+      .send({
+        area_terreno_valor: 2332,
+        area_terreno_unidade: 'ha',
+      });
+
+    expect(response.status).toBe(200);
+
+    const updateCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('UPDATE properties SET') && String(query).includes('area_terreno_valor')
+    );
+    const updateParams = updateCall?.[1] as unknown[];
+    expect(updateParams).toContain(23320000);
+    expect(updateParams).toContain('hectare');
+  });
+
   it('allow admin createProperty with same base address and different complementos', async () => {
     let duplicateChecks = 0;
     queryMock.mockImplementation(async (sql: string) => {

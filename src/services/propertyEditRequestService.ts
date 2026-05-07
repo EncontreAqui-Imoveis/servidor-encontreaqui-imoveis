@@ -2,7 +2,12 @@ import {
   isOptionalBairroPropertyType,
   normalizePropertyType,
 } from '../utils/propertyTypes';
-import { areaInputToSquareMeters } from '../utils/propertyAreaUnits';
+import {
+  AreaConstruidaUnidade,
+  areaInputToSquareMeters,
+  getAreaUnitMax,
+  parseAreaUnidade,
+} from '../utils/propertyAreaUnits';
 import { toCanonicalAmenity } from '../utils/propertyAmenities';
 
 export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -124,15 +129,10 @@ const EDIT_FIELD_ALIASES = {
   amenities: ['amenities', 'amenidades'],
 } as const;
 
-type AreaConstruidaUnidadeValue = 'm2' | 'alqueire' | 'hectare';
+type AreaConstruidaUnidadeValue = AreaConstruidaUnidade;
 
 function normalizeAreaConstruidaUnidade(value: unknown): AreaConstruidaUnidadeValue {
-  const s = String(value ?? 'm2')
-    .trim()
-    .toLowerCase();
-  if (s === 'hectare' || s === 'ha') return 'hectare';
-  if (s === 'alqueire' || s === 'alq') return 'alqueire';
-  return 'm2';
+  return parseAreaUnidade(value);
 }
 
 export type EditablePropertyState = {
@@ -384,6 +384,26 @@ function validateNumericRange(
   }
 }
 
+function validateAreaByInputUnit(
+  label: string,
+  value: number | null,
+  unidade: AreaConstruidaUnidadeValue,
+  allowNull = true
+): void {
+  const max = getAreaUnitMax(unidade);
+  if (value == null) {
+    if (allowNull) return;
+    throw new Error(`${label} invalido.`);
+  }
+  if (max == null) {
+    if (value < 0) throw new Error(`${label} invalido.`);
+    return;
+  }
+  if (value < 0 || value > max) {
+    throw new Error(`${label} invalido.`);
+  }
+}
+
 function resolveFieldLabel(key: string): string {
   const labels: Record<string, string> = {
     title: 'Titulo',
@@ -626,10 +646,10 @@ function validateCurrentState(state: EditablePropertyState): void {
   validateNumericRange('Banheiros', state.bathrooms, MAX_PROPERTY_COUNT);
   validateNumericRange('Garagens', state.garageSpots, MAX_PROPERTY_COUNT);
   validateNumericRange('Area construida', state.areaConstruida, MAX_PROPERTY_AREA);
-  validateNumericRange('Area construida valor', state.areaConstruidaValor, MAX_PROPERTY_AREA);
+  validateAreaByInputUnit('Area construida valor', state.areaConstruidaValor, state.areaConstruidaUnidade);
   validateNumericRange('Area construida m2', state.areaConstruidaM2, MAX_PROPERTY_AREA);
   validateNumericRange('Area do terreno', state.areaTerreno, MAX_PROPERTY_AREA);
-  validateNumericRange('Area do terreno valor', state.areaTerrenoValor, MAX_PROPERTY_AREA);
+  validateAreaByInputUnit('Area do terreno valor', state.areaTerrenoValor, state.areaTerrenoUnidade);
   validateNumericRange('Area do terreno m2', state.areaTerrenoM2, MAX_PROPERTY_AREA);
 
   if (

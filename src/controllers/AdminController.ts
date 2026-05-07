@@ -41,7 +41,11 @@ import {
 } from '../services/negotiationDocumentStorageService';
 import { saveNegotiationSignedProposalDocument } from '../services/negotiationPersistenceService';
 import { allocateNextPropertyCode } from '../utils/propertyCode';
-import { areaInputToSquareMeters, normalizeAreaUnidade } from '../utils/propertyAreaUnits';
+import {
+  areaInputToSquareMeters,
+  getAreaUnitMax,
+  parseAreaUnidade,
+} from '../utils/propertyAreaUnits';
 import { isOptionalBairroPropertyType } from '../utils/propertyTypes';
 import { normalizePropertyAmenities } from '../utils/propertyAmenities';
 
@@ -134,7 +138,7 @@ const MAX_IMAGES_PER_PROPERTY = 20;
 const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const MAX_PROPERTY_COUNT = 99;
-const MAX_PROPERTY_AREA = 9999999.99;
+const MAX_PROPERTY_AREA = 99999999.99;
 const MAX_PROPERTY_PRICE = 9999999999.99;
 const MAX_PROPERTY_FEE = 99999999.99;
 const IMAGE_UPLOAD_CONCURRENCY = 4;
@@ -335,6 +339,26 @@ function validatePropertyNumericRange(
     return `${label} deve ser no máximo ${options.max}.`;
   }
   return null;
+}
+
+function resolveAreaMaxByUnit(unidade: string): number | null {
+  return getAreaUnitMax((parseAreaUnidade(unidade) as 'm2' | 'hectare' | 'alqueire')) ;
+}
+
+function validateAreaByInputUnit(
+  value: number | null,
+  unidade: string,
+  label: string,
+  allowNull: boolean,
+): string | null {
+  const max = resolveAreaMaxByUnit(unidade);
+  if (max == null) {
+    return null;
+  }
+  return validatePropertyNumericRange(value, label, {
+    max,
+    allowNull,
+  });
 }
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -4416,10 +4440,10 @@ class AdminController {
         }
       }
 
-      const currentAreaConstruidaUnidade = normalizeAreaUnidade(
+      const currentAreaConstruidaUnidade = parseAreaUnidade(
         (property as { area_construida_unidade?: string | null }).area_construida_unidade
       );
-      const currentAreaTerrenoUnidade = normalizeAreaUnidade(
+      const currentAreaTerrenoUnidade = parseAreaUnidade(
         (property as { area_terreno_unidade?: string | null }).area_terreno_unidade
       );
       let nextAreaConstruidaUnidade = currentAreaConstruidaUnidade;
@@ -4594,12 +4618,20 @@ class AdminController {
             break;
           }
           case 'area_construida_unidade': {
-            nextAreaConstruidaUnidade = normalizeAreaUnidade(toAreaUnitRaw(value));
+            try {
+              nextAreaConstruidaUnidade = parseAreaUnidade(toAreaUnitRaw(value));
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
             areaConstruidaUnidadeTouched = true;
             break;
           }
           case 'area_terreno_unidade': {
-            nextAreaTerrenoUnidade = normalizeAreaUnidade(toAreaUnitRaw(value));
+            try {
+              nextAreaTerrenoUnidade = parseAreaUnidade(toAreaUnitRaw(value));
+            } catch (parseError) {
+              return res.status(400).json({ error: (parseError as Error).message });
+            }
             areaTerrenoUnidadeTouched = true;
             break;
           }
@@ -4839,9 +4871,12 @@ class AdminController {
           ? validatePropertyNumericRange(parseDecimal(body.area_construida), 'Área construída', { max: MAX_PROPERTY_AREA })
           : null,
         Object.prototype.hasOwnProperty.call(body, 'area_construida_valor')
-          ? validatePropertyNumericRange(parseDecimal(body.area_construida_valor), 'Área construída', {
-              max: MAX_PROPERTY_AREA,
-            })
+          ? validateAreaByInputUnit(
+              parseDecimal(body.area_construida_valor),
+              nextAreaConstruidaUnidade,
+              'Área construída',
+              true
+            )
           : null,
         Object.prototype.hasOwnProperty.call(body, 'area_construida_m2')
           ? validatePropertyNumericRange(parseDecimal(body.area_construida_m2), 'Área construída', {
@@ -4852,9 +4887,12 @@ class AdminController {
           ? validatePropertyNumericRange(parseDecimal(body.area_terreno), 'Área do terreno', { max: MAX_PROPERTY_AREA })
           : null,
         Object.prototype.hasOwnProperty.call(body, 'area_terreno_valor')
-          ? validatePropertyNumericRange(parseDecimal(body.area_terreno_valor), 'Área do terreno', {
-              max: MAX_PROPERTY_AREA,
-            })
+          ? validateAreaByInputUnit(
+              parseDecimal(body.area_terreno_valor),
+              nextAreaTerrenoUnidade,
+              'Área do terreno',
+              true
+            )
           : null,
         Object.prototype.hasOwnProperty.call(body, 'area_terreno_m2')
           ? validatePropertyNumericRange(parseDecimal(body.area_terreno_m2), 'Área do terreno', {
@@ -5157,6 +5195,7 @@ class AdminController {
         sem_quadra,
         sem_lote,
         area_construida_unidade,
+        area_terreno_unidade,
       } = body;
       const semNumeroFlag = parseBoolean(sem_numero);
       const semQuadraFlag = parseBoolean(sem_quadra);
@@ -5300,19 +5339,30 @@ class AdminController {
       const numericBedrooms = parseInteger(bedrooms);
       const numericBathrooms = parseInteger(bathrooms);
       const numericGarageSpots = parseInteger(garage_spots);
-      const areaUnidade = normalizeAreaUnidade(
+      const areaConstruidaUnidade = parseAreaUnidade(
         typeof area_construida_unidade === 'string' ? area_construida_unidade : 'm2',
+      );
+      const areaTerrenoUnidade = parseAreaUnidade(
+        typeof area_terreno_unidade === 'string' ? area_terreno_unidade : 'm2',
       );
       const rawAreaInput = parseDecimal(area_construida);
       let numericAreaConstruida: number | null = null;
       if (rawAreaInput != null) {
-        const converted = areaInputToSquareMeters(rawAreaInput, areaUnidade);
+        const converted = areaInputToSquareMeters(rawAreaInput, areaConstruidaUnidade);
         if (Number.isNaN(converted)) {
           return res.status(400).json({ error: 'Área construída inválida.' });
         }
         numericAreaConstruida = converted;
       }
-      const numericAreaTerreno = parseDecimal(area_terreno);
+      const rawAreaTerrenoInput = parseDecimal(area_terreno);
+      let numericAreaTerreno: number | null = null;
+      if (rawAreaTerrenoInput != null) {
+        const converted = areaInputToSquareMeters(rawAreaTerrenoInput, areaTerrenoUnidade);
+        if (Number.isNaN(converted)) {
+          return res.status(400).json({ error: 'Área do terreno inválida.' });
+        }
+        numericAreaTerreno = converted;
+      }
       const numericValorCondominio = parseDecimal(valor_condominio);
       const numericValorIptu = parseDecimal(valor_iptu);
       const numericValidationError = [
@@ -5324,8 +5374,8 @@ class AdminController {
         validatePropertyNumericRange(numericBedrooms, 'Quartos', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
-        validatePropertyNumericRange(numericAreaConstruida, 'Área construída', { max: MAX_PROPERTY_AREA }),
-        validatePropertyNumericRange(numericAreaTerreno, 'Área do terreno', { max: MAX_PROPERTY_AREA }),
+        validateAreaByInputUnit(rawAreaInput, areaConstruidaUnidade, 'Área construída', true),
+        validateAreaByInputUnit(rawAreaTerrenoInput, areaTerrenoUnidade, 'Área do terreno', false),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -5497,7 +5547,7 @@ class AdminController {
           numericBedrooms,
           numericBathrooms,
           numericAreaConstruida,
-          areaUnidade,
+          areaConstruidaUnidade,
           numericAreaTerreno,
           numericGarageSpots,
           hasWifiFlag,

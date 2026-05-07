@@ -33,6 +33,10 @@ export function parseAreaUnidade(raw: unknown): AreaConstruidaUnidade {
   throw new Error('Unidade de área inválida.');
 }
 
+export function getAreaUnitMax(unidade: AreaConstruidaUnidade): number | null {
+  return unidade === 'm2' ? 99_999_999.99 : null;
+}
+
 export function areaInputToSquareMeters(
   value: number,
   unidade: AreaConstruidaUnidade,

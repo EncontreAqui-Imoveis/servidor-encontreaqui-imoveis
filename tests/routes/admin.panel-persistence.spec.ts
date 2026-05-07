@@ -1,6 +1,6 @@
 import express from 'express';
 import request from 'supertest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   queryMock,
@@ -47,6 +47,35 @@ vi.mock('../../src/services/userNotificationService', () => ({
 vi.mock('../../src/services/priceDropNotificationService', () => ({
   notifyPriceDropIfNeeded: vi.fn(),
   notifyPromotionStarted: vi.fn(),
+}));
+
+vi.mock('../../src/middlewares/auth', () => ({
+  authMiddleware: (req: any, _res: any, next: () => void) => {
+    req.userId = 30003;
+    req.userRole = 'client';
+    next();
+  },
+  isClient: (_req: any, _res: any, next: () => void) => next(),
+  isBroker: (_req: any, _res: any, next: () => void) => next(),
+}));
+
+vi.mock('../../src/middlewares/uploadMiddleware', () => ({
+  mediaUpload: {
+    fields: () => (req: any, _res: any, next: () => void) => {
+      req.files = {
+        images: [],
+        video: [],
+      };
+      next();
+    },
+  },
+}));
+
+vi.mock('../../src/config/cloudinary', () => ({
+  uploadToCloudinary: vi.fn().mockResolvedValue({
+    url: 'https://res.cloudinary.com/demo/image/upload/property.jpg',
+  }),
+  deleteCloudinaryAsset: vi.fn(),
 }));
 
 import { adminController } from '../../src/controllers/AdminController';
@@ -109,6 +138,25 @@ const adminPropertyRow = {
 };
 
 describe('Rotas admin de persistencia', () => {
+  const allCanonicalAmenities = [
+    'Wi-Fi',
+    'Piscina',
+    'Energia solar',
+    'Automação',
+    'Ar condicionado',
+    'Poço artesiano',
+    'Mobiliada',
+    'Elevador',
+    'Academia',
+    'Churrasqueira',
+    'Salão de festas',
+    'Quadra',
+    'Condomínio fechado',
+    'Aceita pets',
+    'SISTEMA DE SEGURANÇA/CÂMERA',
+    'Sauna',
+  ];
+
   const adminPropertyApp = express();
   adminPropertyApp.use(express.json());
   adminPropertyApp.put('/admin/properties/:id', (req, res) =>
@@ -126,6 +174,24 @@ describe('Rotas admin de persistencia', () => {
   const updateBrokerApp = express();
   updateBrokerApp.use(express.json());
   updateBrokerApp.put('/admin/brokers/:id', (req, res) => adminController.updateBroker(req as any, res));
+  const adminPropertyDetailApp = express();
+  adminPropertyDetailApp.use(express.json());
+  adminPropertyDetailApp.get('/admin/properties/:id', (req, res) =>
+    adminController.getPropertyDetails(req as any, res),
+  );
+
+  let propertyClientApp: express.Express | undefined;
+  let createPropertyRouteInitialized = false;
+
+  beforeAll(async () => {
+    if (!createPropertyRouteInitialized) {
+      const { default: propertyRoutes } = await import('../../src/routes/property.routes');
+      propertyClientApp = express();
+      propertyClientApp.use(express.json());
+      propertyClientApp.use('/properties', propertyRoutes);
+      createPropertyRouteInitialized = true;
+    }
+  });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -317,6 +383,181 @@ describe('Rotas admin de persistencia', () => {
 
     expect(responseFirst.status).toBe(201);
     expect(responseSecond.status).toBe(201);
+  });
+
+  it('registra e retorna no detalhe do painel um imóvel criado por cliente com áreas 0/ preenchidas e 16 comodidades canonicas', async () => {
+    let capturedInsertParams: unknown[] | null = null;
+    let capturedPropertyId: number | null = null;
+
+    queryMock.mockImplementation(async (...args: unknown[]) => {
+      const sql = String(args[0] ?? '');
+      const params = (args[1] as unknown[]) ?? [];
+
+      if (
+        sql.includes('SELECT id, public_id, public_code FROM properties WHERE public_id IS NULL OR public_code IS NULL LIMIT ?')
+      ) {
+        return [[]];
+      }
+
+      if (sql.includes('SELECT 1 FROM properties WHERE public_code')) {
+        return [[]];
+      }
+
+      if (
+        sql.includes('FROM properties p') &&
+        sql.includes('WHERE p.id') &&
+        (sql.includes('LIMIT 1') || sql.includes('LIMIT') || sql.includes('p.id = ?'))
+      ) {
+        if (capturedInsertParams === null || capturedPropertyId === null) {
+          return [[]];
+        }
+        return [[
+          {
+            id: capturedPropertyId,
+            status: 'pending_approval',
+            description: 'Casa para validação do fluxo cliente',
+            price: 250000,
+            price_sale: 250000,
+            price_rent: null,
+            promotion_price: null,
+            promotional_rent_price: null,
+            promotional_rent_percentage: null,
+            promo_percentage: null,
+            promo_start_date: null,
+            promo_end_date: null,
+            promotion_percentage: null,
+            promotion_start: null,
+            promotion_end: null,
+            purpose: 'Venda',
+            code: 'SM-001',
+            title: 'Casa do cliente',
+            public_id: String(capturedInsertParams?.[56] ?? 'ID-0000'),
+            public_code: String(capturedInsertParams?.[57] ?? 'SCODE00'),
+            owner_name: 'Cliente Smoke',
+            owner_phone: '64999990000',
+            address: 'Rua Teste',
+            city: 'Cidade',
+            state: 'GO',
+            bairro: 'Centro',
+            complemento: null,
+            sem_cep: 0,
+            cep: '75900000',
+            quadra: 'Q1',
+            lote: 'L1',
+            sem_quadra: 0,
+            sem_lote: 0,
+            numero: '10',
+            bedrooms: 3,
+            bathrooms: 2,
+            area_construida: capturedInsertParams?.[37] ?? 0,
+            area_terreno: capturedInsertParams?.[39] ?? 2500,
+            area_construida_valor: capturedInsertParams?.[40] ?? 0,
+            area_construida_unidade: String(capturedInsertParams?.[38] ?? 'm2'),
+            area_terreno_valor: capturedInsertParams?.[42] ?? 2500,
+            area_terreno_unidade: String(capturedInsertParams?.[43] ?? 'm2'),
+            area_terreno_m2: capturedInsertParams?.[44],
+            garage_spots: 1,
+            has_wifi: capturedInsertParams?.[47] ?? 0,
+            tem_piscina: capturedInsertParams?.[48] ?? 0,
+            tem_energia_solar: capturedInsertParams?.[49] ?? 0,
+            tem_automacao: capturedInsertParams?.[50] ?? 0,
+            tem_ar_condicionado: capturedInsertParams?.[51] ?? 0,
+            eh_mobiliada: capturedInsertParams?.[52] ?? 0,
+            amenities: capturedInsertParams?.[46] ?? '[]',
+            created_at: '2026-03-01 10:00:00',
+            updated_at: '2026-03-02 10:00:00',
+          },
+        ]];
+      }
+
+      if (sql.includes('SELECT id FROM properties')) {
+        return [[]];
+      }
+
+      if (sql.includes('INSERT INTO properties')) {
+        capturedInsertParams = params;
+        capturedPropertyId = 9012;
+        return [{ insertId: capturedPropertyId, affectedRows: 1 }];
+      }
+
+      if (sql.includes('INSERT INTO property_images')) {
+        return [{ affectedRows: 1 }];
+      }
+
+      if (sql.includes('SELECT id, image_url FROM property_images')) {
+        return [[{ id: 1, image_url: 'https://res.cloudinary.com/demo/image/upload/properties/9012.jpg' }]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(propertyClientApp as express.Express)
+      .post('/properties/client')
+      .set('x-request-id', 'admin-smoke-client-panel-detail')
+      .send({
+        images: ['https://res.cloudinary.com/demo/image/upload/property.jpg'],
+        title: 'Casa do cliente',
+        description: 'Propriedade criada para validar detalhe do painel.',
+        type: 'Casa',
+        purpose: 'Venda',
+        price: 250000,
+        price_sale: 250000,
+        owner_name: 'Cliente Smoke',
+        owner_phone: '649 9 9999-0000',
+        address: 'Rua Teste',
+        city: 'Cidade',
+        state: 'GO',
+        bairro: 'Centro',
+        cep: '75900000',
+        sem_cep: 0,
+        bedrooms: 3,
+        bathrooms: 2,
+        garage_spots: 1,
+        area_construida_valor: 0,
+        area_terreno_valor: 2500,
+        area_construida_unidade: 'm2',
+        area_terreno_unidade: 'm2',
+        has_wifi: 1,
+        tem_piscina: 0,
+        tem_energia_solar: 0,
+        tem_automacao: 0,
+        tem_ar_condicionado: 0,
+        eh_mobiliada: 0,
+        amenities: allCanonicalAmenities,
+      });
+
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBeDefined();
+
+    const insertCall = queryMock.mock.calls.find(([calledSql]) => String(calledSql).includes('INSERT INTO properties'));
+    const insertParams = insertCall?.[1] as unknown[];
+
+    expect(insertParams).toBeDefined();
+    expect(insertParams?.[40]).toBe(0);
+    expect(insertParams?.[42]).toBe(2500);
+    expect(insertParams?.[57]).toBeDefined();
+
+    const amenitiesPayload = typeof insertParams?.[46] === 'string' ? insertParams[46] : JSON.stringify(insertParams?.[46] ?? []);
+    allCanonicalAmenities.forEach((amenity) => {
+      expect(amenitiesPayload).toContain(amenity);
+    });
+
+    const detailResponse = await request(adminPropertyDetailApp).get('/admin/properties/9012');
+    expect(detailResponse.status).toBe(200);
+    expect(detailResponse.body.public_code).toBeDefined();
+    expect(detailResponse.body.public_id).toBeDefined();
+    expect(detailResponse.body.public_code).not.toBe('-');
+    expect(detailResponse.body.owner_name).toBe('Cliente Smoke');
+    expect(detailResponse.body.owner_phone).toBe('64999990000');
+    expect(detailResponse.body.area_construida_valor).toBe(0);
+    expect(detailResponse.body.area_terreno_valor).toBe(2500);
+    expect(detailResponse.body.area_construida_unidade).toBe('m2');
+    expect(detailResponse.body.area_terreno_unidade).toBe('m2');
+    expect(Array.isArray(detailResponse.body.amenities)).toBe(true);
+    const normalizedAmenitiesFromDetail = (detailResponse.body.amenities as string[]).slice().sort();
+    expect(normalizedAmenitiesFromDetail).toHaveLength(allCanonicalAmenities.length);
+    expect(normalizedAmenitiesFromDetail).toEqual(allCanonicalAmenities.slice().sort());
+    expect(normalizedAmenitiesFromDetail).not.toContain('PLANEJADOS');
   });
 
   it('aplica aprovacao de solicitacao de edicao e persiste ALTERACOES', async () => {

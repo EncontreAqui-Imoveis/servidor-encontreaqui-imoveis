@@ -496,6 +496,8 @@ interface PropertyDetailRow extends RowDataPacket {
   id: number;
   broker_id?: number | null;
   owner_id?: number | null;
+  public_id?: string | null;
+  public_code?: string | null;
   owner_name?: string | null;
   owner_phone?: string | null;
   code?: string | null;
@@ -528,6 +530,10 @@ interface PropertyDetailRow extends RowDataPacket {
   bathrooms?: number | string | null;
   area_construida?: number | string | null;
   area_terreno?: number | string | null;
+  area_construida_valor?: number | string | null;
+  area_construida_unidade?: string | null;
+  area_terreno_valor?: number | string | null;
+  area_terreno_unidade?: string | null;
   garage_spots?: number | string | null;
   valor_condominio?: number | string | null;
   valor_iptu?: number | string | null;
@@ -619,6 +625,8 @@ function mapAdminProperty(row: PropertyDetailRow) {
     id: row.id,
     broker_id: row.broker_id ?? null,
     owner_id: row.owner_id ?? null,
+    public_id: row.public_id ?? null,
+    public_code: row.public_code ?? null,
     owner_name: row.owner_name ?? null,
     owner_phone: row.owner_phone ?? null,
     code: row.code ?? null,
@@ -653,7 +661,11 @@ function mapAdminProperty(row: PropertyDetailRow) {
     bedrooms: toNullableNumber(row.bedrooms),
     bathrooms: toNullableNumber(row.bathrooms),
     area_construida: toNullableNumber(row.area_construida),
+    area_construida_valor: toNullableNumber(row.area_construida_valor),
+    area_construida_unidade: row.area_construida_unidade ?? null,
     area_terreno: toNullableNumber(row.area_terreno),
+    area_terreno_valor: toNullableNumber(row.area_terreno_valor),
+    area_terreno_unidade: row.area_terreno_unidade ?? null,
     garage_spots: toNullableNumber(row.garage_spots),
     valor_condominio: toNullableNumber(row.valor_condominio),
     valor_iptu: toNullableNumber(row.valor_iptu),

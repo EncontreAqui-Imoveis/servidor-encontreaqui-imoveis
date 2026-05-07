@@ -221,4 +221,170 @@ describe('POST /properties/client multipart payload with field-count pressure', 
 
     expect(response.status).toBe(201);
   });
+
+  it('permite dois imóveis /properties/client com mesmo endereço base e complemento diferente', async () => {
+    let duplicateChecks = 0;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) {
+        duplicateChecks += 1;
+        return duplicateChecks === 1 ? [[]] : [{ id: 901 }];
+      }
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 7010, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+    uploadToCloudinaryMock.mockResolvedValue({
+      url: 'https://res.cloudinary.com/demo/image/upload/property.jpg',
+    });
+
+    const requestPayload = {
+      title: 'Apartamento urbano',
+      description: 'Descricao para teste de complemento no cliente.',
+      type: 'Apartamento',
+      purpose: 'Venda',
+      price: '150000',
+      owner_name: 'Cliente Teste',
+      owner_phone: '21999990000',
+      address: 'Rua Repetida',
+      city: 'Cidade',
+      state: 'GO',
+      bairro: 'Centro',
+      cep: '75900000',
+      sem_cep: '0',
+      bedrooms: '2',
+      bathrooms: '2',
+      garage_spots: '2',
+      area: '250',
+      area_terreno: '2500',
+      area_construida: '10',
+      area_unidade: 'm2',
+      area_valor: '10',
+      area_terreno_valor: '2500',
+      area_construida_valor: '10',
+      area_terreno_unidade: 'm2',
+      area_construida_unidade: 'm2',
+      has_wifi: '0',
+      tem_piscina: '0',
+      tem_energia_solar: '0',
+      tem_automacao: '0',
+      tem_ar_condicionado: '0',
+      eh_mobiliada: '0',
+      valor_condominio: '100',
+      valor_iptu: '80',
+      quadra: '10A',
+      lote: '20B',
+      numero: '123',
+      sem_quadra: '0',
+      sem_lote: '0',
+      sem_numero: '0',
+      code: 'ABCD1234',
+      video: 'false',
+    };
+
+    const buildMultipartClientRequest = (payload: Record<string, string>, requestId: string) => {
+      let req = request(app)
+        .post('/properties/client')
+        .set('x-request-id', requestId)
+        .attach('images', Buffer.from('image-1'), 'imagem1.jpg');
+
+      for (const [name, value] of Object.entries(payload)) {
+        req = req.field(name, value);
+      }
+
+      return req;
+    };
+
+    const firstResponse = await buildMultipartClientRequest(
+      { ...requestPayload, complemento: 'Bloco A' },
+      'client-multipart-same-address-complemento-1',
+    );
+    const secondResponse = await buildMultipartClientRequest(
+      { ...requestPayload, complemento: 'Bloco B' },
+      'client-multipart-same-address-complemento-2',
+    );
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(201);
+    expect(firstResponse.body.propertyId).toBeDefined();
+    expect(secondResponse.body.propertyId).toBeDefined();
+  });
+
+  it('aceita /properties/client com título repetido para imóveis distintos', async () => {
+    let duplicateChecks = 0;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) {
+        duplicateChecks += 1;
+        return duplicateChecks <= 1 ? [[]] : [{ id: 902 }];
+      }
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 7020, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+    uploadToCloudinaryMock.mockResolvedValue({
+      url: 'https://res.cloudinary.com/demo/image/upload/property.jpg',
+    });
+
+    const buildMultipartClientRequest = (title: string, requestId: string) => {
+      let req = request(app)
+        .post('/properties/client')
+        .set('x-request-id', requestId)
+        .attach('images', Buffer.from('image-1'), 'imagem1.jpg');
+
+      const fields = [
+        ['title', title],
+        ['description', 'Descricao para teste de titulo repetido.'],
+        ['type', 'Casa'],
+        ['purpose', 'Venda'],
+        ['price', '120000'],
+        ['owner_name', 'Cliente Repetido'],
+        ['owner_phone', '21999990000'],
+        ['address', 'Rua Titulo'],
+        ['city', 'Cidade'],
+        ['state', 'GO'],
+        ['bairro', 'Centro'],
+        ['cep', '75900000'],
+        ['sem_cep', '0'],
+        ['bedrooms', '1'],
+        ['bathrooms', '1'],
+        ['garage_spots', '1'],
+        ['area', '120'],
+        ['area_terreno', '250'],
+        ['area_construida', '60'],
+        ['area_unidade', 'm2'],
+        ['area_valor', '120'],
+        ['area_terreno_valor', '250'],
+        ['area_construida_valor', '60'],
+        ['area_terreno_unidade', 'm2'],
+        ['area_construida_unidade', 'm2'],
+        ['has_wifi', '0'],
+        ['tem_piscina', '0'],
+        ['tem_energia_solar', '0'],
+        ['tem_automacao', '0'],
+        ['tem_ar_condicionado', '0'],
+        ['eh_mobiliada', '0'],
+        ['valor_condominio', '100'],
+        ['valor_iptu', '80'],
+        ['complemento', 'Apto 101'],
+        ['quadra', '11A'],
+        ['lote', '22B'],
+        ['numero', '123'],
+        ['sem_quadra', '0'],
+        ['sem_lote', '0'],
+        ['sem_numero', '0'],
+        ['code', 'ABCD5678'],
+      ];
+
+      for (const [name, value] of fields) {
+        req = req.field(name, value);
+      }
+
+      return req;
+    };
+
+    const firstResponse = await buildMultipartClientRequest('Casa com titulo repetido', 'client-multipart-title-1');
+    const secondResponse = await buildMultipartClientRequest('Casa com titulo repetido', 'client-multipart-title-2');
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(201);
+  });
 });

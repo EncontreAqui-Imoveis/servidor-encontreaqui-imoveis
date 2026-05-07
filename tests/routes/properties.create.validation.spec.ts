@@ -676,6 +676,78 @@ describe('POST /properties description length contract', () => {
     expect(response.body.propertyId).toBeDefined();
   });
 
+  it('allows two /properties with the same base address and different complementos (same broker)', async () => {
+    let duplicateCheckCalls = 0;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) {
+        duplicateCheckCalls += 1;
+        return duplicateCheckCalls === 1 ? [[]] : [{ id: 900 }];
+      }
+      if (sql.includes('INSERT INTO properties')) {
+        return [{ insertId: 200 + duplicateCheckCalls, affectedRows: 1 }];
+      }
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const responseFirst = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-same-address-complement-1')
+      .send({
+        ...basePayload,
+        complemento: 'Bloco 1',
+      });
+
+    const responseSecond = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-same-address-complement-2')
+      .send({
+        ...basePayload,
+        complemento: 'Apto 20',
+      });
+
+    expect(responseFirst.status).toBe(201);
+    expect(responseSecond.status).toBe(201);
+    expect(responseFirst.body.propertyId).toBeDefined();
+    expect(responseSecond.body.propertyId).toBeDefined();
+  });
+
+  it('accepts /properties/client with duplicated title when address matches existing records', async () => {
+    let duplicateCheckCalls = 0;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) {
+        duplicateCheckCalls += 1;
+        return duplicateCheckCalls <= 1 ? [[]] : [{ id: 901 }];
+      }
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 201, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const firstResponse = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-duplicate-title-1')
+      .send({
+        ...basePayload,
+        title: 'Título repetido',
+        complemento: 'Unidade 10',
+      });
+
+    const secondResponse = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-duplicate-title-2')
+      .send({
+        ...basePayload,
+        title: 'Título repetido',
+        complemento: 'Unidade 10',
+      });
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(201);
+  });
+
   it('rejects createForClient negative bedroom value', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id FROM properties')) return [[]];

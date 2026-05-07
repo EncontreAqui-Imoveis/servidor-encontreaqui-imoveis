@@ -114,6 +114,11 @@ describe('Rotas admin de persistencia', () => {
   adminPropertyApp.put('/admin/properties/:id', (req, res) =>
     adminController.updateProperty(req as any, res),
   );
+  const adminCreatePropertyApp = express();
+  adminCreatePropertyApp.use(express.json());
+  adminCreatePropertyApp.post('/admin/properties', (req, res) =>
+    adminController.createProperty(req as any, res),
+  );
 
   const editRequestApp = express();
   editRequestApp.use(express.json());
@@ -178,6 +183,106 @@ describe('Rotas admin de persistencia', () => {
     expect(updateParams).toContain(0);
     expect(updateParams).toContain(2323);
     expect(updateParams).toContain('m2');
+  });
+
+  it('allow admin createProperty with same base address and different complementos', async () => {
+    let duplicateChecks = 0;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) {
+        duplicateChecks += 1;
+        return duplicateChecks === 1 ? [[]] : [{ id: 990 }];
+      }
+      if (sql.includes('INSERT INTO properties')) {
+        return [{ insertId: duplicateChecks + 1100, affectedRows: 1 }];
+      }
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    process.env.CLOUDINARY_CLOUD_NAME = 'demo';
+
+    const responseFirst = await request(adminCreatePropertyApp)
+      .post('/admin/properties')
+      .send({
+        title: 'Casa para teste',
+        description: 'Imóvel de teste para validação administrativa',
+        type: 'Casa',
+        purpose: 'Venda',
+        status: 'approved',
+        price_sale: 250000,
+        price: 250000,
+        owner_name: 'Ana',
+        owner_phone: '21999990000',
+        address: 'Rua Admin',
+        quadra: '1',
+        lote: '2',
+        numero: '123',
+        sem_numero: 0,
+        bairro: 'Centro',
+        complemento: 'Bloco A',
+        city: 'Cidade',
+        state: 'GO',
+        cep: '75900000',
+        sem_cep: 0,
+        bedrooms: 2,
+        bathrooms: 2,
+        garage_spots: 1,
+        area_construida: 100,
+        area_terreno: 250,
+        area_construida_unidade: 'm2',
+        has_wifi: 1,
+        tem_piscina: 0,
+        tem_energia_solar: 0,
+        tem_automacao: 0,
+        tem_ar_condicionado: 0,
+        eh_mobiliada: 0,
+        valor_condominio: 120,
+        valor_iptu: 80,
+        image_urls: ['https://res.cloudinary.com/demo/image/upload/conectimovel/properties/admin/foto-1.jpg'],
+      });
+
+    const responseSecond = await request(adminCreatePropertyApp)
+      .post('/admin/properties')
+      .send({
+        title: 'Casa para teste',
+        description: 'Imóvel de teste para validação administrativa',
+        type: 'Casa',
+        purpose: 'Venda',
+        status: 'approved',
+        price_sale: 250000,
+        price: 250000,
+        owner_name: 'Ana',
+        owner_phone: '21999990000',
+        address: 'Rua Admin',
+        quadra: '1',
+        lote: '2',
+        numero: '123',
+        sem_numero: 0,
+        bairro: 'Centro',
+        complemento: 'Bloco B',
+        city: 'Cidade',
+        state: 'GO',
+        cep: '75900000',
+        sem_cep: 0,
+        bedrooms: 2,
+        bathrooms: 2,
+        garage_spots: 1,
+        area_construida: 100,
+        area_terreno: 250,
+        area_construida_unidade: 'm2',
+        has_wifi: 1,
+        tem_piscina: 0,
+        tem_energia_solar: 0,
+        tem_automacao: 0,
+        tem_ar_condicionado: 0,
+        eh_mobiliada: 0,
+        valor_condominio: 120,
+        valor_iptu: 80,
+        image_urls: ['https://res.cloudinary.com/demo/image/upload/conectimovel/properties/admin/foto-2.jpg'],
+      });
+
+    expect(responseFirst.status).toBe(201);
+    expect(responseSecond.status).toBe(201);
   });
 
   it('aplica aprovacao de solicitacao de edicao e persiste ALTERACOES', async () => {

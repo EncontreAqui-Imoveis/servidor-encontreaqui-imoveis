@@ -1605,25 +1605,6 @@ class PropertyController {
       const effectiveQuadra = semQuadraFlag ? null : stringOrNull(quadra);
       const effectiveLote = semLoteFlag ? null : stringOrNull(lote);
 
-      const duplicateRows = await runPropertyQuery<RowDataPacket[]>(
-        `
-          SELECT id FROM properties
-          WHERE address = ?
-            AND COALESCE(quadra, '') = COALESCE(?, '')
-            AND COALESCE(lote, '') = COALESCE(?, '')
-            AND COALESCE(numero, '') = COALESCE(?, '')
-            AND COALESCE(bairro, '') = COALESCE(?, '')
-          LIMIT 1
-        `,
-        [address, effectiveQuadra, effectiveLote, numeroNormalizado, bairro ?? null]
-      );
-
-      if (duplicateRows.length > 0) {
-        return res
-          .status(409)
-          .json({ error: 'Imóvel já cadastrado no sistema.' });
-      }
-
       let numericBedrooms: number | null;
       let numericBathrooms: number | null;
       let numericGarageSpots: number | null;
@@ -2238,25 +2219,6 @@ class PropertyController {
     try {
       const effectiveQuadra = semQuadraFlag ? null : stringOrNull(quadra);
       const effectiveLote = semLoteFlag ? null : stringOrNull(lote);
-
-      const duplicateRows = await runPropertyQuery<RowDataPacket[]>(
-        `
-          SELECT id FROM properties
-          WHERE address = ?
-            AND COALESCE(quadra, '') = COALESCE(?, '')
-            AND COALESCE(lote, '') = COALESCE(?, '')
-            AND COALESCE(numero, '') = COALESCE(?, '')
-            AND COALESCE(bairro, '') = COALESCE(?, '')
-          LIMIT 1
-        `,
-        [address, effectiveQuadra, effectiveLote, numeroNormalizado, bairro ?? null]
-      );
-
-      if (duplicateRows.length > 0) {
-        return res
-          .status(409)
-          .json({ error: 'Imovel ja cadastrado no sistema.' });
-      }
 
       let numericBedrooms: number | null;
       let numericBathrooms: number | null;

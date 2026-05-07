@@ -5381,23 +5381,6 @@ class AdminController {
       const effectiveQuadra = semQuadraFlag ? null : stringOrNull(quadra);
       const effectiveLote = semLoteFlag ? null : stringOrNull(lote);
 
-      const [duplicateRows] = await adminDb.query<RowDataPacket[]>(
-        `
-          SELECT id FROM properties
-          WHERE address = ?
-            AND COALESCE(quadra, '') = COALESCE(?, '')
-            AND COALESCE(lote, '') = COALESCE(?, '')
-            AND COALESCE(numero, '') = COALESCE(?, '')
-            AND COALESCE(bairro, '') = COALESCE(?, '')
-          LIMIT 1
-        `,
-        [address, effectiveQuadra, effectiveLote, normalizedNumero, bairro ?? null]
-      );
-
-      if (duplicateRows.length > 0) {
-        return res.status(409).json({ error: 'Imovel ja cadastrado no sistema.' });
-      }
-
       const uploadImages = files?.images ?? [];
       const bodyRecord = body as Record<string, unknown>;
       const providedImageUrls = parseImageUrlsInput(bodyRecord).filter((url) =>

@@ -386,6 +386,32 @@ function parsePropertyAmenitiesFromRow(value: unknown): string[] | null {
   return null;
 }
 
+const LEGACY_AMENITY_BOOLEAN_FIELDS: Array<{ field: keyof PropertyRow; canonical: string }> = [
+  { field: "has_wifi", canonical: "Wi-Fi" },
+  { field: "tem_piscina", canonical: "Piscina" },
+  { field: "tem_energia_solar", canonical: "Energia solar" },
+  { field: "tem_automacao", canonical: "Automação" },
+  { field: "tem_ar_condicionado", canonical: "Ar condicionado" },
+  { field: "eh_mobiliada", canonical: "Mobiliada" },
+];
+
+function mergePropertyAmenities(row: PropertyAggregateRow): string[] {
+  const jsonAmenities = parsePropertyAmenitiesFromRow(row.amenities) ?? [];
+  const legacyAmenities = LEGACY_AMENITY_BOOLEAN_FIELDS.flatMap(({ field, canonical }) =>
+    toBoolean(row[field]) ? [canonical] : [],
+  );
+
+  const merged = new Set<string>();
+  for (const entry of [...jsonAmenities, ...legacyAmenities]) {
+    const canonical = toCanonicalAmenity(entry);
+    if (canonical !== null) {
+      merged.add(canonical);
+    }
+  }
+
+  return Array.from(merged);
+}
+
 function toPublicAmenityLabel(label: string): string {
   const normalized = String(label ?? "").trim();
   if (!normalized) {
@@ -772,6 +798,7 @@ function validateRequiredBairro(
 
 function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
   const images = row.images ? row.images.split(",").filter(Boolean) : [];
+  const mergedAmenities = mergePropertyAmenities(row);
   const activeNegotiationId = stringOrNull(row.active_negotiation_id);
   const activeNegotiationStatus = stringOrNull(row.active_negotiation_status);
   const activeNegotiationClientName = stringOrNull(
@@ -802,8 +829,6 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
       phone: row.agency_phone,
     }
     : null;
-
-  const rawAmenities = parsePropertyAmenitiesFromRow(row.amenities);
 
   const mapped = {
     id: row.id,
@@ -924,7 +949,7 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
         .area_terreno_unidade,
     ) as AreaConstruidaUnidade,
     garage_spots: row.garage_spots != null ? Number(row.garage_spots) : null,
-    amenities: includeOwnerInfo ? rawAmenities : normalizePublicAmenities(rawAmenities),
+    amenities: includeOwnerInfo ? mergedAmenities : normalizePublicAmenities(mergedAmenities),
     has_wifi: toBoolean(row.has_wifi),
     tem_piscina: toBoolean(row.tem_piscina),
     tem_energia_solar: toBoolean(row.tem_energia_solar),

@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toCanonicalAmenity } from '../../src/utils/propertyAmenities';
 
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -128,6 +129,7 @@ describe('GET /public/properties/:id', () => {
           active_negotiation_status: null,
           active_negotiation_value: null,
           active_negotiation_client_name: null,
+            amenities: '["Wi-Fi","Mobiliada","SISTEMA DE SEGURANÇA/CÂMERA","Wi-Fi"]',
           created_at: '2026-03-01 10:00:00',
           updated_at: '2026-03-02 08:00:00',
         },
@@ -151,6 +153,21 @@ describe('GET /public/properties/:id', () => {
       purpose: 'Venda',
       images: ['https://cdn/1.jpg', 'https://cdn/2.jpg'],
     });
+    const normalizedAmenities = Array.isArray(response.body.amenities)
+      ? response.body.amenities
+          .map((amenity: string) => toCanonicalAmenity(amenity))
+          .filter((amenity: unknown): amenity is string => typeof amenity === 'string')
+      : [];
+    expect(normalizedAmenities).toEqual(
+      expect.arrayContaining([
+        'Wi-Fi',
+        'Piscina',
+        'Automação',
+        'Mobiliada',
+        'SISTEMA DE SEGURANÇA/CÂMERA',
+      ]),
+    );
+    expect(normalizedAmenities).toHaveLength(5);
   });
 
   it('loads public property by slug ending with public_code', async () => {

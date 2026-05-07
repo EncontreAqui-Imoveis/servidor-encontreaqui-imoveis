@@ -110,7 +110,11 @@ describe('POST /properties/client multipart payload with field-count pressure', 
       { name: 'sem_numero', value: '0' },
       { name: 'code', value: 'ABCD1234' },
       { name: 'video', value: 'false' },
-      { name: 'amenities', value: '["mobiliada","sauna"]' },
+      {
+        name: 'amenities',
+        value:
+          '["Wi-Fi","Piscina","Energia solar","Automação","Ar condicionado","Poço artesiano","Mobiliada","Elevador","Academia","Churrasqueira","Salão de festas","Quadra","Condomínio fechado","Aceita pets","SISTEMA DE SEGURANÇA/CÂMERA","Sauna"]',
+      },
     ];
 
     for (let index = 0; index < 22; index += 1) {
@@ -188,9 +192,30 @@ describe('POST /properties/client multipart payload with field-count pressure', 
       .field('sem_quadra', '0')
       .field('sem_lote', '0')
       .field('sem_numero', '0')
-      .field('code', 'ABCD5678')
-      .field('amenities', 'Mobiliada')
-      .field('amenities', 'Sauna');
+      .field('code', 'ABCD5678');
+
+    const repeatedAmenities = [
+      'Wi-Fi',
+      'Piscina',
+      'Energia solar',
+      'Automação',
+      'Ar condicionado',
+      'Poço artesiano',
+      'Mobiliada',
+      'Elevador',
+      'Academia',
+      'Churrasqueira',
+      'Salão de festas',
+      'Quadra',
+      'Condomínio fechado',
+      'Aceita pets',
+      'SISTEMA DE SEGURANÇA/CÂMERA',
+      'Sauna',
+    ];
+
+    for (const amenity of repeatedAmenities) {
+      req = req.field('amenities', amenity);
+    }
 
     const response = await req;
 

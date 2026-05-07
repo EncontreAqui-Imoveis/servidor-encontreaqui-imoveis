@@ -396,6 +396,25 @@ function normalizeJsonStringArray(value: unknown): string[] {
   return normalizePropertyAmenities(parsed);
 }
 
+const ADMIN_AMENITY_BOOLEAN_FIELDS: Array<{ field: keyof PropertyDetailRow; canonical: string }> = [
+  { field: "has_wifi", canonical: "Wi-Fi" },
+  { field: "tem_piscina", canonical: "Piscina" },
+  { field: "tem_energia_solar", canonical: "Energia solar" },
+  { field: "tem_automacao", canonical: "Automação" },
+  { field: "tem_ar_condicionado", canonical: "Ar condicionado" },
+  { field: "eh_mobiliada", canonical: "Mobiliada" },
+];
+
+function buildAdminAmenities(row: PropertyDetailRow): string[] {
+  const merged = new Set<string>([
+    ...normalizeJsonStringArray(row.amenities),
+    ...ADMIN_AMENITY_BOOLEAN_FIELDS.flatMap(({ field, canonical }) =>
+      parseBoolean(row[field]) ? [canonical] : [],
+    ),
+  ]);
+  return Array.from(merged);
+}
+
 function parseImageUrlsInput(body: Record<string, unknown>): string[] {
   const fromArrayField = parseStringArray(body.image_urls);
   const fromBracketField = parseStringArray(body['image_urls[]']);
@@ -495,6 +514,7 @@ interface PropertyDetailRow extends RowDataPacket {
   tem_automacao?: number | boolean | null;
   tem_ar_condicionado?: number | boolean | null;
   eh_mobiliada?: number | boolean | null;
+  amenities?: unknown;
   created_at?: Date | string | null;
   updated_at?: Date | string | null;
   images?: string | string[] | null;
@@ -620,6 +640,7 @@ function mapAdminProperty(row: PropertyDetailRow) {
     tem_automacao: parseBoolean(row.tem_automacao),
     tem_ar_condicionado: parseBoolean(row.tem_ar_condicionado),
     eh_mobiliada: parseBoolean(row.eh_mobiliada),
+    amenities: buildAdminAmenities(row),
     images,
     broker_name: row.broker_name ?? null,
     broker_phone: row.broker_phone ?? null,

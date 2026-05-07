@@ -3,6 +3,7 @@ import {
   normalizePropertyType,
 } from '../utils/propertyTypes';
 import { areaInputToSquareMeters } from '../utils/propertyAreaUnits';
+import { toCanonicalAmenity } from '../utils/propertyAmenities';
 
 export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PropertyEditRequestRequesterRole = 'broker' | 'client';
@@ -264,7 +265,15 @@ function normalizeAmenityList(value: unknown): string[] {
     return [];
   })();
 
-  return Array.from(new Set(values));
+  const normalized = new Set<string>();
+  for (const entry of values) {
+    const canonical = toCanonicalAmenity(entry);
+    if (canonical === null) {
+      throw new Error(`Comodidade inválida: ${entry}`);
+    }
+    normalized.add(canonical);
+  }
+  return Array.from(normalized);
 }
 
 function normalizeDigits(value: unknown): string {

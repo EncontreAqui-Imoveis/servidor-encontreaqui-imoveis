@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toCanonicalAmenity } from '../../src/utils/propertyAmenities';
 
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -95,6 +96,7 @@ describe('Public property response shape contracts', () => {
             tem_automacao: 1,
             tem_ar_condicionado: 0,
             eh_mobiliada: 1,
+            amenities: '["Wi-Fi","MOBILIADA","SISTEMA DE SEGURANÇA/CÂMERA","Wi-Fi"]',
             valor_condominio: 0,
             valor_iptu: 900,
             video_url: 'https://cdn/video.mp4',
@@ -156,6 +158,23 @@ describe('Public property response shape contracts', () => {
       page: 1,
       totalPages: 1,
     });
+
+    const firstProperty = response.body.properties?.[0];
+    const normalizedAmenities = Array.isArray(firstProperty?.amenities)
+      ? firstProperty.amenities
+          .map((amenity: string) => toCanonicalAmenity(amenity))
+          .filter((amenity: unknown): amenity is string => typeof amenity === 'string')
+      : [];
+    expect(normalizedAmenities).toEqual(
+      expect.arrayContaining([
+        'Wi-Fi',
+        'Piscina',
+        'Automação',
+        'Mobiliada',
+        'SISTEMA DE SEGURANÇA/CÂMERA',
+      ]),
+    );
+    expect(normalizedAmenities).toHaveLength(5);
   });
 
   it('returns original area units and derived m² in public listing payload', async () => {

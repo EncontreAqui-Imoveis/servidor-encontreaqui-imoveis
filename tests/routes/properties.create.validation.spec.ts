@@ -139,17 +139,22 @@ const mockPropertyRow = {
 };
 
 const allCanonicalAmenities = [
-  'POÇO ARTESIANO',
-  'MOBILIADA',
-  'ELEVADOR',
-  'ACADEMIA',
-  'CHURRASQUEIRA',
-  'SALÃO DE FESTAS',
-  'QUADRA',
-  'CONDOMÍNIO FECHADO',
-  'ACEITA PETS',
+  'Wi-Fi',
+  'Piscina',
+  'Energia solar',
+  'Automação',
+  'Ar condicionado',
+  'Poço artesiano',
+  'Mobiliada',
+  'Elevador',
+  'Academia',
+  'Churrasqueira',
+  'Salão de festas',
+  'Quadra',
+  'Condomínio fechado',
+  'Aceita pets',
   'SISTEMA DE SEGURANÇA/CÂMERA',
-  'SAUNA',
+  'Sauna',
 ];
 
 describe('POST /properties description length contract', () => {
@@ -323,7 +328,7 @@ describe('POST /properties description length contract', () => {
     );
     const insertParams = insertCall?.[1] as unknown[];
     expect(
-      insertParams.some((value) => typeof value === 'string' && value.includes('MOBILIADA'))
+      insertParams.some((value) => typeof value === 'string' && value.includes('Mobiliada'))
     ).toBe(true);
   });
 
@@ -339,10 +344,7 @@ describe('POST /properties description length contract', () => {
     const response = await request(app)
       .post('/properties')
       .set('x-request-id', 'broker-amenities-all')
-      .send({
-        ...basePayload,
-        amenities: ['poco artesanal', 'Mobiliada', 'elevador', 'academia', 'churrasqueira', 'salao de festas', 'quadra', 'condominio fechado', 'aceita pets', 'sistema de seguranca/camera', 'sauna'],
-      });
+      .send({ ...basePayload, amenities: allCanonicalAmenities });
 
     expect(response.status).toBe(201);
     const insertCall = queryMock.mock.calls.find(([query]) =>
@@ -707,7 +709,7 @@ describe('POST /properties description length contract', () => {
       .set('x-request-id', 'client-amenities-compat')
       .send({
         ...basePayload,
-        amenities: ['mobiliada', '1', 'SAUNA'],
+        amenities: ['mobiliada', '1', 'Sauna'],
       });
 
     expect(response.status).toBe(201);
@@ -716,14 +718,14 @@ describe('POST /properties description length contract', () => {
     );
     const insertParams = insertCall?.[1] as unknown[];
     expect(
-      insertParams.some((value) => typeof value === 'string' && value.includes('MOBILIADA'))
+      insertParams.some((value) => typeof value === 'string' && value.includes('Mobiliada'))
     ).toBe(true);
     expect(
-      insertParams.some((value) => typeof value === 'string' && value.includes('SAUNA'))
+      insertParams.some((value) => typeof value === 'string' && value.includes('Sauna'))
     ).toBe(true);
   });
 
-  it('rejects legacy planned amenity aliases on createForClient', async () => {
+  it('rejects legacy planned amenity aliases (Planejados) on createForClient', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id FROM properties')) return [[]];
       if (sql.includes('INSERT INTO properties')) return [{ insertId: 137, affectedRows: 1 }];
@@ -736,11 +738,11 @@ describe('POST /properties description length contract', () => {
       .set('x-request-id', 'client-amenities-legado-planejados')
       .send({
         ...basePayload,
-        amenities: ['3', 'planejados'],
+        amenities: ['planejados'],
       });
 
     expect(response.status).toBe(400);
-    expect(response.body.error).toContain('Comodidade inválida: 3');
+    expect(response.body.error).toContain('Comodidade inválida: planejados');
   });
 
   it('rejects negative values on createForClient bathrooms/garages', async () => {
@@ -803,7 +805,7 @@ describe('POST /properties description length contract', () => {
     const response = await request(app)
       .patch('/properties/555')
       .set('x-request-id', 'update-patch-amenities')
-      .send({ amenities: ['Mobiliada', '2'] });
+      .send({ amenities: allCanonicalAmenities });
 
     expect(response.status).toBe(200);
     const updateCall = queryMock.mock.calls.find(([query]) =>
@@ -811,11 +813,13 @@ describe('POST /properties description length contract', () => {
     );
     const updateParams = updateCall?.[1] as unknown[];
     expect(typeof updateParams?.[0]).toBe('string');
-    expect(String(updateParams?.[0])).toContain('MOBILIADA');
+    allCanonicalAmenities.forEach((amenity) => {
+      expect(String(updateParams?.[0])).toContain(amenity);
+    });
     expect(updateParams?.[1]).toBe(555);
   });
 
-  it('updates property amenities via PUT /properties/:id with a full set', async () => {
+  it('updates property amenities via PUT /properties/:id removing some', async () => {
     queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
         return [[mockPropertyRow]];
@@ -830,7 +834,7 @@ describe('POST /properties description length contract', () => {
       .put('/properties/555')
       .set('x-request-id', 'update-put-amenities-full')
       .send({
-        amenities: ['SAUNA', 'SISTEMA DE SEGURANÇA/CÂMERA'],
+        amenities: ['Sauna', 'SISTEMA DE SEGURANÇA/CÂMERA'],
       });
 
     expect(response.status).toBe(200);
@@ -839,8 +843,9 @@ describe('POST /properties description length contract', () => {
     );
     const updateParams = updateCall?.[1] as unknown[];
     expect(typeof updateParams?.[0]).toBe('string');
-    expect(String(updateParams?.[0])).toContain('SAUNA');
+    expect(String(updateParams?.[0])).toContain('Sauna');
     expect(String(updateParams?.[0])).toContain('SISTEMA DE SEGURANÇA/CÂMERA');
+    expect(String(updateParams?.[0])).not.toContain('Wi-Fi');
   });
 
   it('removes all amenities when an empty array is sent on PATCH /properties/:id', async () => {

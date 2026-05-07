@@ -134,4 +134,66 @@ describe('POST /properties/client multipart payload with field-count pressure', 
 
     expect(response.status).toBe(201);
   });
+
+  it('accepts amenity values sent as repeated multipart fields', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 701, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+    uploadToCloudinaryMock.mockResolvedValue({
+      url: 'https://res.cloudinary.com/demo/image/upload/property.jpg',
+    });
+
+    let req = request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-multipart-repeated-amenities')
+      .attach('images', Buffer.from('image-1'), 'imagem1.jpg');
+
+    req = req.field('title', 'Casa com áreas')
+      .field('description', 'Descricao para teste de amenities repetidas.')
+      .field('type', 'Casa')
+      .field('purpose', 'Venda')
+      .field('price', '150000')
+      .field('owner_name', 'Cliente Repetido')
+      .field('owner_phone', '21999990000')
+      .field('address', 'Rua Repetida')
+      .field('city', 'Cidade')
+      .field('state', 'GO')
+      .field('bairro', 'Centro')
+      .field('cep', '75900000')
+      .field('sem_cep', '0')
+      .field('bedrooms', '1')
+      .field('bathrooms', '1')
+      .field('garage_spots', '1')
+      .field('area', '250')
+      .field('area_terreno', '2500')
+      .field('area_construida_valor', '10')
+      .field('area_terreno_valor', '2500')
+      .field('area_terreno_unidade', 'm2')
+      .field('area_construida_unidade', 'm2')
+      .field('has_wifi', '0')
+      .field('tem_piscina', '0')
+      .field('tem_energia_solar', '0')
+      .field('tem_automacao', '0')
+      .field('tem_ar_condicionado', '0')
+      .field('eh_mobiliada', '0')
+      .field('valor_condominio', '100')
+      .field('valor_iptu', '80')
+      .field('complemento', 'Bloco B')
+      .field('quadra', '11A')
+      .field('lote', '22B')
+      .field('numero', '123')
+      .field('sem_quadra', '0')
+      .field('sem_lote', '0')
+      .field('sem_numero', '0')
+      .field('code', 'ABCD5678')
+      .field('amenities', 'Mobiliada')
+      .field('amenities', 'Sauna');
+
+    const response = await req;
+
+    expect(response.status).toBe(201);
+  });
 });

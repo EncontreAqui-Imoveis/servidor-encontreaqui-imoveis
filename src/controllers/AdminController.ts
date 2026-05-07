@@ -43,6 +43,7 @@ import { saveNegotiationSignedProposalDocument } from '../services/negotiationPe
 import { allocateNextPropertyCode } from '../utils/propertyCode';
 import { areaInputToSquareMeters, normalizeAreaUnidade } from '../utils/propertyAreaUnits';
 import { isOptionalBairroPropertyType } from '../utils/propertyTypes';
+import { normalizePropertyAmenities } from '../utils/propertyAmenities';
 
 type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 'sold';
 
@@ -392,16 +393,7 @@ function normalizeJsonStringArray(value: unknown): string[] {
   if (parsed.length === 0) {
     return [];
   }
-
-  const normalized = new Set<string>();
-  for (const entry of parsed) {
-    const normalizedEntry = String(entry).trim();
-    if (normalizedEntry) {
-      normalized.add(normalizedEntry);
-    }
-  }
-
-  return Array.from(normalized);
+  return normalizePropertyAmenities(parsed);
 }
 
 function parseImageUrlsInput(body: Record<string, unknown>): string[] {

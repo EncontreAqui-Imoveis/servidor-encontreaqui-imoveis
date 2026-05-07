@@ -1,3 +1,5 @@
+const CANONICAL_CAMERA_AMENITY = "SISTEMA DE SEGURANÇA/CÂMERA";
+
 export const CANONICAL_PROPERTY_AMENITIES = [
   "POÇO ARTESIANO",
   "MOBILIADA",
@@ -8,14 +10,13 @@ export const CANONICAL_PROPERTY_AMENITIES = [
   "QUADRA",
   "CONDOMÍNIO FECHADO",
   "ACEITA PETS",
-  "SISTEMA DE SEGURANÇA/CÂMARA",
+  CANONICAL_CAMERA_AMENITY,
   "SAUNA",
 ] as const;
 
 const CANONICAL_AMENITY_LOOKUP: Record<string, string> = {
   "poco artesanal": "POÇO ARTESIANO",
   "mobiliada": "MOBILIADA",
-  "planejados": "PLANEJADOS",
   "elevador": "ELEVADOR",
   "academia": "ACADEMIA",
   "churrasqueira": "CHURRASQUEIRA",
@@ -24,18 +25,17 @@ const CANONICAL_AMENITY_LOOKUP: Record<string, string> = {
   "quadra": "QUADRA",
   "condominio fechado": "CONDOMÍNIO FECHADO",
   "aceita pets": "ACEITA PETS",
-  "sistema de seguranca/camera": "SISTEMA DE SEGURANÇA/CÂMARA",
-  "sistema de seguranca": "SISTEMA DE SEGURANÇA/CÂMARA",
-  "sistema de seguranca /camera": "SISTEMA DE SEGURANÇA/CÂMARA",
-  "sistema de seguranca / camera": "SISTEMA DE SEGURANÇA/CÂMARA",
-  "sistema de seguranca/camara": "SISTEMA DE SEGURANÇA/CÂMARA",
+  "sistema de seguranca": CANONICAL_CAMERA_AMENITY,
+  "sistema de seguranca/camera": CANONICAL_CAMERA_AMENITY,
+  "sistema de seguranca/camara": CANONICAL_CAMERA_AMENITY,
+  "camera": CANONICAL_CAMERA_AMENITY,
+  "camara": CANONICAL_CAMERA_AMENITY,
   "sauna": "SAUNA",
 };
 
 const AMENITY_ID_TO_CANONICAL: Record<string, string> = {
   "1": "POÇO ARTESIANO",
   "2": "MOBILIADA",
-  "3": "PLANEJADOS",
   "4": "ELEVADOR",
   "5": "ACADEMIA",
   "6": "CHURRASQUEIRA",
@@ -43,7 +43,7 @@ const AMENITY_ID_TO_CANONICAL: Record<string, string> = {
   "8": "QUADRA",
   "9": "CONDOMÍNIO FECHADO",
   "10": "ACEITA PETS",
-  "11": "SISTEMA DE SEGURANÇA/CÂMARA",
+  "11": CANONICAL_CAMERA_AMENITY,
   "12": "SAUNA",
 };
 
@@ -56,7 +56,7 @@ function normalizeAmenityInputValue(value: string): string {
     .toLowerCase();
 }
 
-function toCanonicalAmenity(value: string): string | null {
+export function toCanonicalAmenity(value: string): string | null {
   const cleaned = value.trim();
   if (!cleaned) {
     return null;
@@ -66,7 +66,9 @@ function toCanonicalAmenity(value: string): string | null {
     return AMENITY_ID_TO_CANONICAL[cleaned] ?? null;
   }
 
-  const normalized = normalizeAmenityInputValue(cleaned).replace(/[\u2012\u2013\u2014]/g, "-");
+  const normalized = normalizeAmenityInputValue(cleaned)
+    .replace(/[\u2012\u2013\u2014]/g, "-")
+    .replace(/\s*\/\s*/g, "/");
   const mapped = CANONICAL_AMENITY_LOOKUP[normalized];
   if (mapped) {
     return mapped;

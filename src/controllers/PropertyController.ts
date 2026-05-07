@@ -35,7 +35,10 @@ import {
   parseAreaUnidade,
   type AreaConstruidaUnidade,
 } from "../utils/propertyAreaUnits";
-import { normalizePropertyAmenities } from "../utils/propertyAmenities";
+import {
+  normalizePropertyAmenities,
+  toCanonicalAmenity,
+} from "../utils/propertyAmenities";
 import { stripExpiredPromotionFromPublicPayload } from "../utils/promotionPublicWindow";
 
 interface MulterFiles {
@@ -350,7 +353,13 @@ function parsePropertyAmenitiesFromRow(value: unknown): string[] | null {
     return null;
   }
   if (Array.isArray(value)) {
-    return value.length > 0 ? value.map((item) => String(item)) : null;
+    const normalized = value
+      .map((item) => {
+        const entry = String(item).trim();
+        return toCanonicalAmenity(entry) ?? entry;
+      })
+      .filter((entry) => entry.length > 0);
+    return normalized.length > 0 ? normalized : null;
   }
   if (typeof value === "string") {
     const normalized = value.trim();
@@ -361,10 +370,17 @@ function parsePropertyAmenitiesFromRow(value: unknown): string[] | null {
     try {
       const parsed = JSON.parse(normalized);
       if (Array.isArray(parsed)) {
-        return parsed.length > 0 ? parsed.map((item) => String(item)) : null;
+        const parsedList = parsed
+          .map((item) => {
+            const entry = String(item).trim();
+            return toCanonicalAmenity(entry) ?? entry;
+          })
+          .filter((entry) => entry.length > 0);
+        return parsedList.length > 0 ? parsedList : null;
       }
     } catch {
-      return normalized.length > 0 ? [normalized] : null;
+      const normalizedEntry = toCanonicalAmenity(normalized) ?? normalized;
+      return normalizedEntry.length > 0 ? [normalizedEntry] : null;
     }
   }
   return null;
@@ -390,15 +406,33 @@ function normalizePublicAmenities(
 
   const seen = new Set<string>();
   const normalized = value
-    .map((entry) => String(entry ?? '').trim())
+    .map((entry) => {
+      const normalizedEntry =
+        toCanonicalAmenity(String(entry ?? "")) ?? String(entry ?? "").trim();
+      return toPublicAmenityLabel(normalizedEntry);
+    })
     .filter((entry) => entry.length > 0)
     .filter((entry) => entry.toUpperCase() !== 'PLANEJADOS')
-    .map((entry) => toPublicAmenityLabel(entry));
+    ;
 
   for (const entry of normalized) {
     seen.add(entry);
   }
   return Array.from(seen);
+}
+
+function parseAreaFilterValue(
+  rawValue: unknown,
+  rawUnit: unknown,
+  label: string,
+): ParsedAreaValues {
+  const normalizedValue = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+  const normalizedUnit = Array.isArray(rawUnit) ? rawUnit[0] : rawUnit;
+  return parseAreaWithUnit({
+    value: normalizedValue,
+    unidade: normalizedUnit,
+    label,
+  });
 }
 
 interface PropertyEditRequestRow extends RowDataPacket {
@@ -856,11 +890,13 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     bedrooms: row.bedrooms != null ? Number(row.bedrooms) : null,
     bathrooms: row.bathrooms != null ? Number(row.bathrooms) : null,
     area_construida:
-      row.area_construida_m2 != null
-        ? Number(row.area_construida_m2)
-        : row.area_construida != null
-          ? Number(row.area_construida)
-          : null,
+      row.area_construida_valor != null
+        ? Number(row.area_construida_valor)
+        : row.area_construida_m2 != null
+          ? Number(row.area_construida_m2)
+          : row.area_construida != null
+            ? Number(row.area_construida)
+            : null,
     area_construida_unidade: normalizeAreaUnidade(
       (row as PropertyRow & { area_construida_unidade?: string | null })
         .area_construida_unidade,
@@ -872,11 +908,13 @@ function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
     sem_quadra: toBoolean((row as PropertyRow & { sem_quadra?: unknown }).sem_quadra),
     sem_lote: toBoolean((row as PropertyRow & { sem_lote?: unknown }).sem_lote),
     area_terreno:
-      row.area_terreno_m2 != null
-        ? Number(row.area_terreno_m2)
-        : row.area_terreno != null
-          ? Number(row.area_terreno)
-          : null,
+      row.area_terreno_valor != null
+        ? Number(row.area_terreno_valor)
+        : row.area_terreno_m2 != null
+          ? Number(row.area_terreno_m2)
+          : row.area_terreno != null
+            ? Number(row.area_terreno)
+            : null,
     area_terreno_valor:
       row.area_terreno_valor != null ? Number(row.area_terreno_valor) : null,
     area_terreno_m2:
@@ -4276,19 +4314,60 @@ class PropertyController {
 
     const minAreaConstruida = req.query.min_area_construida ?? req.query.minAreaConstruida;
     const maxAreaConstruida = req.query.max_area_construida ?? req.query.maxAreaConstruida;
-    if (minAreaConstruida != null && String(minAreaConstruida).trim() !== '') {
-      const value = Number(minAreaConstruida);
-      if (!Number.isNaN(value) && value >= 0) {
-        whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) >= ?');
-        params.push(value);
+    const minAreaConstruidaUnidade =
+      req.query.min_area_construida_unidade ??
+      req.query.minAreaConstruidaUnidade ??
+      req.query.min_area_construida_unit ??
+      req.query.minAreaConstruidaUnit;
+    const maxAreaConstruidaUnidade =
+      req.query.max_area_construida_unidade ??
+      req.query.maxAreaConstruidaUnidade ??
+      req.query.max_area_construida_unit ??
+      req.query.maxAreaConstruidaUnit;
+    const minAreaTerreno = req.query.min_area_terreno ?? req.query.minAreaTerreno;
+    const maxAreaTerreno = req.query.max_area_terreno ?? req.query.maxAreaTerreno;
+    const minAreaTerrenoUnidade =
+      req.query.min_area_terreno_unidade ??
+      req.query.minAreaTerrenoUnidade ??
+      req.query.min_area_terreno_unit ??
+      req.query.minAreaTerrenoUnit;
+    const maxAreaTerrenoUnidade =
+      req.query.max_area_terreno_unidade ??
+      req.query.maxAreaTerrenoUnidade ??
+      req.query.max_area_terreno_unit ??
+      req.query.maxAreaTerrenoUnit;
+
+    try {
+      if (minAreaConstruida != null && String(minAreaConstruida).trim() !== '') {
+        const parsed = parseAreaFilterValue(minAreaConstruida, minAreaConstruidaUnidade, 'Filtro de área construída mínima');
+        if (parsed.valor != null && parsed.m2 != null) {
+          whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) >= ?');
+          params.push(parsed.m2);
+        }
       }
-    }
-    if (maxAreaConstruida != null && String(maxAreaConstruida).trim() !== '') {
-      const value = Number(maxAreaConstruida);
-      if (!Number.isNaN(value) && value >= 0) {
-        whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) <= ?');
-        params.push(value);
+      if (maxAreaConstruida != null && String(maxAreaConstruida).trim() !== '') {
+        const parsed = parseAreaFilterValue(maxAreaConstruida, maxAreaConstruidaUnidade, 'Filtro de área construída máxima');
+        if (parsed.valor != null && parsed.m2 != null) {
+          whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) <= ?');
+          params.push(parsed.m2);
+        }
       }
+      if (minAreaTerreno != null && String(minAreaTerreno).trim() !== '') {
+        const parsed = parseAreaFilterValue(minAreaTerreno, minAreaTerrenoUnidade, 'Filtro de área do terreno mínima');
+        if (parsed.valor != null && parsed.m2 != null) {
+          whereClauses.push('COALESCE(p.area_terreno_m2, p.area_terreno) >= ?');
+          params.push(parsed.m2);
+        }
+      }
+      if (maxAreaTerreno != null && String(maxAreaTerreno).trim() !== '') {
+        const parsed = parseAreaFilterValue(maxAreaTerreno, maxAreaTerrenoUnidade, 'Filtro de área do terreno máxima');
+        if (parsed.valor != null && parsed.m2 != null) {
+          whereClauses.push('COALESCE(p.area_terreno_m2, p.area_terreno) <= ?');
+          params.push(parsed.m2);
+        }
+      }
+    } catch (parseError) {
+      return res.status(400).json({ error: (parseError as Error).message });
     }
 
     if (bedrooms) {

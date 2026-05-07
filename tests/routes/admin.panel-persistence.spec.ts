@@ -172,7 +172,7 @@ describe('Rotas admin de persistencia', () => {
     const updateParams = updateCall?.[1] as unknown[];
 
     const hasAmenitiesPayload = updateParams.some(
-      (value) => typeof value === 'string' && value.includes('Mobiliada'),
+      (value) => typeof value === 'string' && value.includes('MOBILIADA'),
     );
     expect(hasAmenitiesPayload).toBe(true);
     expect(updateParams).toContain(0);

@@ -17,6 +17,7 @@ import {
 import {
   buildUserPayload,
   hasCompleteProfile,
+  requiresBrokerDocuments,
   signUserToken,
   type ProfileType,
   withTimeout,
@@ -949,7 +950,8 @@ class AuthController {
           : 'client';
       const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
       const requiresDocuments =
-        profile === 'broker' && (brokerDocsStatus.length === 0 || brokerDocsStatus == 'rejected');
+        profile === 'broker' &&
+        requiresBrokerDocuments(user.broker_status, brokerDocsStatus);
       const token = signUserToken(user.id, profile, user.token_version);
 
       return res.json({
@@ -1037,9 +1039,7 @@ class AuthController {
       }
 
       const brokerStatus = String(row.broker_status ?? '').trim();
-      const brokerDocsStatus = String(row.broker_documents_status ?? '')
-        .trim()
-        .toLowerCase();
+      const brokerDocsStatus = String(row.broker_documents_status ?? '').trim().toLowerCase();
       const blockedBrokerRequest = brokerStatus === 'rejected';
       const isBroker =
         row.broker_id != null &&
@@ -1053,7 +1053,7 @@ class AuthController {
         : 'client';
       const requiresDocuments =
         effectiveProfile === 'broker' &&
-        (brokerDocsStatus.length === 0 || brokerDocsStatus === 'rejected');
+        requiresBrokerDocuments(brokerStatus, brokerDocsStatus);
       const token = signUserToken(row.id, effectiveProfile, row.token_version);
 
       return res.status(200).json({

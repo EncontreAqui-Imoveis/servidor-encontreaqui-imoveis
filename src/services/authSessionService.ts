@@ -5,6 +5,50 @@ const jwtSecret = requireEnv('JWT_SECRET');
 
 export type ProfileType = 'client' | 'broker' | 'auxiliary_administrative';
 
+function normalizeBrokerStatus(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function normalizeDocumentStatus(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+export function resolveBrokerDisplayStatus(
+  brokerStatus: unknown,
+  brokerDocumentsStatus: unknown,
+): string | null {
+  const normalizedBrokerStatus = normalizeBrokerStatus(brokerStatus);
+  if (!normalizedBrokerStatus) {
+    return null;
+  }
+
+  if (normalizedBrokerStatus === 'pending_verification') {
+    const normalizedDocsStatus = normalizeDocumentStatus(brokerDocumentsStatus);
+    if (normalizedDocsStatus.length === 0) {
+      return 'pending_documents';
+    }
+  }
+
+  return String(brokerStatus ?? '').trim();
+}
+
+export function requiresBrokerDocuments(
+  brokerStatus: unknown,
+  brokerDocumentsStatus: unknown,
+): boolean {
+  const normalizedBrokerStatus = normalizeBrokerStatus(brokerStatus);
+  if (!normalizedBrokerStatus) {
+    return false;
+  }
+
+  if (normalizedBrokerStatus !== 'approved' && normalizedBrokerStatus !== 'pending_verification') {
+    return false;
+  }
+
+  const normalizedDocsStatus = normalizeDocumentStatus(brokerDocumentsStatus);
+  return normalizedDocsStatus.length === 0 || normalizedDocsStatus === 'rejected';
+}
+
 function buildBrokerPayload(row: any) {
   const hasBrokerData =
     row?.broker_id != null ||
@@ -17,7 +61,7 @@ function buildBrokerPayload(row: any) {
 
   return {
     id: Number(row.broker_id ?? row.id),
-    status: row.broker_status != null ? String(row.broker_status) : null,
+    status: resolveBrokerDisplayStatus(row.broker_status, row.broker_documents_status),
     creci: row.creci != null ? String(row.creci) : null,
   };
 }
@@ -46,15 +90,22 @@ export function buildUserPayload(row: any, profileType: ProfileType) {
 }
 
 export function hasCompleteProfile(row: any) {
-  // Se for corretor, continua exigindo telefone (para contato/propostas).
-  // Endereço agora é opcional para todos, a menos que o negócio exija futuramente.
   if (row.role === 'broker') {
     return !!(row.phone && String(row.phone).trim().length >= 8);
   }
 
-  // Para clientes, se tiver nome (que vem do Google/Auth), já consideramos apto.
-  // O telefone será solicitado apenas quando for realmente necessário (ex.: abrir chat)
-  return true;
+  const phone = String(row.phone ?? '').trim();
+  if (phone.length < 8) {
+    return false;
+  }
+
+  return (
+    String(row.street ?? '').trim().length > 0 &&
+    String(row.number ?? '').trim().length > 0 &&
+    String(row.bairro ?? '').trim().length > 0 &&
+    String(row.city ?? '').trim().length > 0 &&
+    String(row.state ?? '').trim().length > 0
+  );
 }
 
 function normalizeTokenVersion(value: unknown): number {

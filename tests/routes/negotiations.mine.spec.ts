@@ -148,4 +148,48 @@ describe('GET /negotiations/mine', () => {
     ]);
     expect(queryMock).toHaveBeenCalledTimes(2);
   });
+
+  it('is compatible with GET /negotiations/me as alias of /negotiations/mine', async () => {
+    queryMock
+      .mockResolvedValueOnce([
+        [
+          { column_name: 'buyer_client_id' },
+          { column_name: 'selling_broker_id' },
+          { column_name: 'client_name' },
+          { column_name: 'client_cpf' },
+          { column_name: 'updated_at' },
+          { column_name: 'payment_details' },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-me',
+            property_id: 70110,
+            property_title: 'Casa Alias',
+            property_city: 'Goiânia',
+            property_state: 'GO',
+            property_image: 'https://res.cloudinary.com/demo/image/upload/casa-alias.jpg',
+            status: 'IN_NEGOTIATION',
+            client_name: 'Cliente Alias',
+            client_cpf: '22233344455',
+            proposal_validity_date: '2026-06-01 10:00:00',
+            created_at: '2026-05-01 10:00:00',
+            updated_at: '2026-05-02 12:00:00',
+          },
+        ],
+      ]);
+
+    const response = await request(app).get('/negotiations/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toEqual([
+      expect.objectContaining({
+        id: 'neg-me',
+        propertyId: 70110,
+        propertyTitle: 'Casa Alias',
+        status: 'IN_NEGOTIATION',
+      }),
+    ]);
+  });
 });

@@ -102,6 +102,44 @@ describe('PUT /users/me profile update', () => {
     expect(response.body.needsCompletion).toBe(true);
   });
 
+  it('retorna status derivado pending_documents quando corretor ainda nao enviou documentos reais', async () => {
+    queryMock.mockResolvedValueOnce([
+      [
+        {
+          id: 123,
+          name: 'Corretor Sem Docs',
+          email: 'broker@test.com',
+          email_verified_at: '2026-01-01T00:00:00.000Z',
+          phone: '64999990000',
+          street: 'Rua Broker',
+          number: '100',
+          complement: null,
+          bairro: 'Centro',
+          city: 'Rio Verde',
+          state: 'GO',
+          cep: null,
+        },
+      ],
+    ]);
+    queryMock.mockResolvedValueOnce([
+      [{ status: 'pending_verification', broker_documents_status: null }],
+    ]);
+
+    const response = await request(app).get('/users/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      role: 'broker',
+      status: 'pending_documents',
+      requiresDocuments: true,
+      user: {
+        id: 123,
+        email: 'broker@test.com',
+        phone: '64999990000',
+      },
+    });
+  });
+
   it('allows partial update with only name', async () => {
     queryMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
     queryMock.mockResolvedValueOnce([

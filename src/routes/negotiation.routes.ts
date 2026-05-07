@@ -9,6 +9,9 @@ const negotiationRoutes = Router();
 negotiationRoutes.get('/mine', authMiddleware, (req, res) =>
   negotiationController.listMine(req as any, res)
 );
+negotiationRoutes.get('/me', authMiddleware, (req, res) =>
+  negotiationController.listMine(req as any, res)
+);
 
 negotiationRoutes.get('/client-lookup', authMiddleware, (req, res) =>
   negotiationController.lookupClientByCpf(req as any, res)

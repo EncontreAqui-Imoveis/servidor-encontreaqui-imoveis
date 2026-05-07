@@ -4,7 +4,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import AuthRequest from '../middlewares/auth';
 import { getRequestId } from '../middlewares/requestContext';
 import admin from '../config/firebaseAdmin';
-import { notifyAdmins } from '../services/notificationService';
+import { createAdminNotification } from '../services/notificationService';
 import { resolveUserNotificationRole } from '../services/userNotificationService';
 import { runUserQuery } from '../services/userPersistenceService';
 import { evaluateSupportRequestCooldown } from '../services/supportRequestService';
@@ -13,7 +13,11 @@ import {
   sanitizePartialAddressInput,
   signUserToken,
 } from '../services/userSessionService';
-import { hasCompleteProfile } from '../services/authSessionService';
+import {
+  hasCompleteProfile,
+  requiresBrokerDocuments,
+  resolveBrokerDisplayStatus,
+} from '../services/authSessionService';
 import { upsertFirebaseContextToDraft } from '../services/registrationDraftService';
 import { isDraftRegistrationEnabled } from '../config/featureFlags';
 
@@ -70,6 +74,25 @@ interface FavoriteRow extends RowDataPacket {
 
 function toBoolean(value: unknown): boolean {
   return value === 1 || value === '1' || value === true;
+}
+
+function buildBrokerStateFromRows(rows: RowDataPacket[]) {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const brokerRow: any = rows[0];
+  const derivedStatus = resolveBrokerDisplayStatus(
+    brokerRow.status,
+    brokerRow.broker_documents_status,
+  );
+  const statusValue = String(derivedStatus ?? '').trim().toLowerCase();
+  const isBroker = ['approved', 'pending_verification', 'pending_documents'].includes(statusValue);
+  return {
+    status: derivedStatus,
+    isBroker,
+    requiresDocuments: requiresBrokerDocuments(brokerRow.status, brokerRow.broker_documents_status),
+  };
 }
 
 function toNullableNumber(value: unknown): number | null {
@@ -298,37 +321,29 @@ class UserController {
         `,
         [userId]
       );
-
-      if (brokerRows.length > 0) {
-        const brokerStatus = String(brokerRows[0].status ?? '').trim();
-        const isBroker = ['approved', 'pending_verification'].includes(brokerStatus);
-        if (isBroker) {
-          const docsStatus = String(brokerRows[0].broker_documents_status ?? '')
-            .trim()
-            .toLowerCase();
-          const requiresDocuments = docsStatus.length === 0 || docsStatus === 'rejected';
-          return res.json({
-            role: 'broker',
-            status: brokerStatus,
-            requiresDocuments,
-            needsCompletion: !hasCompleteProfile(user),
-              user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                email_verified: user.email_verified_at != null,
-                email_verified_at: user.email_verified_at ?? null,
-                phone: user.phone,
-                street: user.street ?? null,
-                number: user.number ?? null,
-                bairro: user.bairro ?? null,
-                city: user.city ?? null,
-                state: user.state ?? null,
-                cep: user.cep ?? null,
-                complement: user.complement ?? null,
-            },
-          });
-        }
+      const brokerState = buildBrokerStateFromRows(brokerRows);
+      if (brokerState?.isBroker) {
+        return res.json({
+          role: 'broker',
+          status: brokerState.status,
+          requiresDocuments: brokerState.requiresDocuments,
+          needsCompletion: !hasCompleteProfile(user),
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            email_verified: user.email_verified_at != null,
+            email_verified_at: user.email_verified_at ?? null,
+            phone: user.phone,
+            street: user.street ?? null,
+            number: user.number ?? null,
+            bairro: user.bairro ?? null,
+            city: user.city ?? null,
+            state: user.state ?? null,
+            cep: user.cep ?? null,
+            complement: user.complement ?? null,
+          },
+        });
       }
 
       return res.json({
@@ -523,14 +538,10 @@ class UserController {
         [userId]
       );
 
-      const brokerStatus = brokerRows.length > 0 ? String(brokerRows[0].status) : '';
-      const isBroker = ['approved', 'pending_verification'].includes(brokerStatus);
-      const role = isBroker ? 'broker' : 'client';
-      const status = isBroker ? brokerStatus : undefined;
-      const docsStatus = String(brokerRows[0]?.broker_documents_status ?? '')
-        .trim()
-        .toLowerCase();
-      const requiresDocuments = isBroker && (docsStatus.length === 0 || docsStatus === 'rejected');
+      const brokerState = buildBrokerStateFromRows(brokerRows);
+      const role = brokerState?.isBroker ? 'broker' : 'client';
+      const status = brokerState?.isBroker ? brokerState.status : undefined;
+      const requiresDocuments = brokerState?.isBroker ? brokerState.requiresDocuments : false;
 
       return res.json({
         role,
@@ -1378,17 +1389,30 @@ class UserController {
       );
 
       const rows = await runUserQuery<RowDataPacket[]>(
-        'SELECT name, email FROM users WHERE id = ?',
+        'SELECT name, email, phone FROM users WHERE id = ?',
         [userId]
       );
       const name = rows[0]?.name ? String(rows[0].name) : 'Usuario';
       const email = rows[0]?.email ? String(rows[0].email) : '';
-      const label = email ? `${name} (${email})` : name;
-      await notifyAdmins(
-        `Solicitacao de anuncio recebida de ${label}.`,
-        'announcement',
-        Number(userId)
-      );
+      const rawPhone = rows[0]?.phone ? String(rows[0].phone) : '';
+      const phoneDigits = rawPhone.replace(/\D/g, '');
+      const responseDeadline = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      await createAdminNotification({
+        type: 'announcement',
+        title: 'Solicitacao de contato do cliente',
+        message: `Cliente ${name} (${email}) solicitou contato. Telefone: ${rawPhone || 'Nao informado'}.`,
+        relatedEntityId: Number(userId),
+        metadata: {
+          source: 'support_request',
+          userId: Number(userId),
+          name,
+          email,
+          phone: rawPhone || null,
+          phoneDigits: phoneDigits || null,
+          responseDeadlineAt: responseDeadline,
+          responseWindowHours: 24,
+        },
+      });
       return res.status(201).json({ message: 'Solicitacao enviada.' });
     } catch (error) {
       console.error('Erro ao enviar solicitacao:', error);

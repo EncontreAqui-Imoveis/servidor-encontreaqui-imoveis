@@ -1268,12 +1268,10 @@ class PropertyController {
         (property.broker_id != null && property.broker_id === (req as AuthRequest).userId) ||
         (property.owner_id != null && property.owner_id === (req as AuthRequest).userId);
       const isAdmin = (req as AuthRequest).userRole === 'admin';
-      const isCapturingBrokerOwner =
-        property.broker_id != null && property.broker_id === (req as AuthRequest).userId;
       const isPubliclyVisible =
         property.status === 'approved' &&
         String(property.visibility ?? 'PUBLIC').toUpperCase() === 'PUBLIC';
-      if (property.status === 'pending_approval' && !isAdmin && !isCapturingBrokerOwner) {
+      if (property.status === 'pending_approval' && !isAdmin && !isOwner) {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }
       if (!isOwner && !isAdmin && !isPubliclyVisible) {
@@ -2545,7 +2543,7 @@ class PropertyController {
           : null;
 
         await createAdminNotification({
-          type: 'announcement',
+          type: 'property',
           title: 'Aviso: cliente tentou anunciar imóvel',
           message: `Novo imóvel enviado por cliente: '${title}'.`,
           relatedEntityId: propertyId,

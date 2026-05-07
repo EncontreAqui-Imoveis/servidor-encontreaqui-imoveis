@@ -153,6 +153,48 @@ describe('POST /auth e /users login coverage', () => {
     expect(response.body.needsCompletion).toBe(false);
   });
 
+  it('deriva status do broker para pending_documents no login quando nao ha documentos reais', async () => {
+    queryMock.mockResolvedValueOnce([
+      [
+        {
+          id: 101,
+          name: 'Corretor Sem Docs',
+          email: 'broker@dominio.com',
+          email_verified_at: '2026-01-01T00:00:00.000Z',
+          password_hash: 'bcrypt-hash',
+          phone: '64999998888',
+          street: 'Rua Corretor',
+          number: '100',
+          complement: null,
+          bairro: 'Centro',
+          city: 'Cidade',
+          state: 'GO',
+          cep: '75900000',
+          token_version: 1,
+          role: 'broker',
+          broker_id: 101,
+          broker_status: 'pending_verification',
+          broker_profile_type: 'BROKER',
+          broker_documents_status: null,
+          creci: '12345678-A',
+        },
+      ],
+    ]);
+
+    const response = await request(app).post('/auth/login').send({
+      email: 'broker@dominio.com',
+      password: 'Senha123',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.requiresDocuments).toBe(true);
+    expect(response.body.user.role).toBe('broker');
+    expect(response.body.user.broker).toMatchObject({
+      status: 'pending_documents',
+    });
+    expect(response.body.user.broker_status).toBe('pending_verification');
+  });
+
   it('rejeita /users/login com usuario inexistente', async () => {
     queryMock.mockResolvedValueOnce([[]]);
 

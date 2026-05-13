@@ -525,10 +525,64 @@ function parseOptionalPrice(value: unknown): Nullable<number> {
 }
 
 function parsePrice(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  const parsed = parseLocalizedDecimal(value);
+  if (parsed === null || parsed < 0) {
     throw new Error("Preço inválido.");
   }
+  return parsed;
+}
+
+function parseLocalizedDecimal(value: unknown): Nullable<number> {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw
+    .replace(/R\$\s*/gi, "")
+    .replace(/[^\d.,+-]/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const hasMinus = normalized.startsWith("-");
+  const unsigned = hasMinus || normalized.startsWith("+") ? normalized.slice(1) : normalized;
+  const hasComma = unsigned.includes(",");
+  const hasDot = unsigned.includes(".");
+
+  let numericLike = unsigned;
+  if (hasComma && hasDot) {
+    const commaIndex = unsigned.lastIndexOf(",");
+    const dotIndex = unsigned.lastIndexOf(".");
+    const decimalSeparator = commaIndex > dotIndex ? "," : ".";
+    const thousandsSeparator = decimalSeparator === "," ? "." : ",";
+    numericLike = unsigned
+      .split(thousandsSeparator)
+      .join("")
+      .replace(decimalSeparator, ".");
+  } else if (hasComma) {
+    const commaIndex = unsigned.lastIndexOf(",");
+    const decimalPart = unsigned.slice(commaIndex + 1);
+    if (decimalPart.length <= 2) {
+      numericLike = `${unsigned.slice(0, commaIndex)}.${decimalPart}`;
+    } else {
+      numericLike = unsigned.split(",").join("");
+    }
+  }
+
+  const parsed = Number(`${hasMinus ? "-" : ""}${numericLike}`);
+  if (!Number.isFinite(parsed)) {
+    throw new Error("Preço inválido.");
+  }
+
   return parsed;
 }
 
@@ -576,7 +630,10 @@ function parseDecimal(value: unknown): Nullable<number> {
   if (value === undefined || value === null || value === "") {
     return null;
   }
-  const parsed = Number(value);
+  const parsed = parseLocalizedDecimal(value);
+  if (parsed === null) {
+    throw new Error("Valor numérico inválido.");
+  }
   if (!Number.isFinite(parsed)) {
     throw new Error("Valor numérico inválido.");
   }
@@ -3601,7 +3658,11 @@ class PropertyController {
         }
       }
 
-      if (nextStatus && NOTIFY_ON_STATUS.has(nextStatus)) {
+      const isTerminalStatusTransition =
+        nextStatus !== null &&
+        NOTIFY_ON_STATUS.has(nextStatus) &&
+        nextStatus !== property.status;
+      if (isTerminalStatusTransition) {
         if (brokerId == null) {
           return res.status(403).json({ error: 'Apenas corretores podem fechar negocio.' });
         }

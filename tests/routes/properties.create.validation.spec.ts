@@ -531,6 +531,79 @@ describe('POST /properties description length contract', () => {
     expect(response.body.error).toContain('Unidade de área inválida.');
   });
 
+  it('returns structured required-field error on broker create', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 152, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-required-error')
+      .send({
+        ...basePayload,
+        title: '',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Campos obrigatórios não informados.');
+    expect(response.body.code).toBe('PROPERTY_REQUIRED_FIELDS');
+    expect(response.body.field).toBe('title');
+    expect(response.body.requestId).toBe('broker-required-error');
+  });
+
+  it('returns conflict error for duplicated code on broker create', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[{ id: 999 }]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 153, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-code-conflict')
+      .send({
+        ...basePayload,
+        code: 'CODIGO-001',
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('Já existe um imóvel com esse código.');
+    expect(response.body.code).toBe('PROPERTY_CODE_ALREADY_EXISTS');
+    expect(response.body.field).toBe('code');
+    expect(response.body.requestId).toBe('broker-code-conflict');
+  });
+
+  it('returns structured area validation error on create with structured response', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 154, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-area-error')
+      .send({
+        ...basePayload,
+        area_construida: 200,
+        area_terreno: 100,
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Área construída não pode ser maior que a área do terreno.');
+    expect(response.body.code).toBe('PROPERTY_AREA_RELATION_INVALID');
+    expect(response.body.field).toBe('area_terreno');
+    expect(response.body.requestId).toBe('broker-area-error');
+  });
+
   it('accepts createForClient with bedrooms/bathrooms/garage_spots as 0', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT id FROM properties')) return [[]];
@@ -675,6 +748,52 @@ describe('POST /properties description length contract', () => {
 
     expect(response.status).toBe(201);
     expect(response.body.propertyId).toBeDefined();
+  });
+
+  it('returns structured required-field error on client create', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 155, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-required-error')
+      .send({
+        ...basePayload,
+        title: '',
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Campos obrigatórios não informados.');
+    expect(response.body.code).toBe('PROPERTY_REQUIRED_FIELDS');
+    expect(response.body.field).toBe('title');
+    expect(response.body.requestId).toBe('client-required-error');
+  });
+
+  it('returns conflict error for duplicated code on client create', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[{ id: 1000 }]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 156, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-code-conflict')
+      .send({
+        ...basePayload,
+        code: 'CODIGO-001',
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toBe('Já existe um imóvel com esse código.');
+    expect(response.body.code).toBe('PROPERTY_CODE_ALREADY_EXISTS');
+    expect(response.body.field).toBe('code');
+    expect(response.body.requestId).toBe('client-code-conflict');
   });
 
   it('allows two /properties with the same base address and different complementos (same broker)', async () => {
@@ -1022,6 +1141,49 @@ describe('POST /properties description length contract', () => {
       });
 
     expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Área construída não pode ser maior que a área do terreno.');
+    expect(response.body.code).toBe('PROPERTY_AREA_RELATION_INVALID');
+    expect(response.body.field).toBe('area_terreno');
+    expect(response.body.requestId).toBe('update-patch-area-incoerente');
+  });
+
+  it('returns structured mandatory-data error on PATCH /properties/:id with empty body', async () => {
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
+        return [[mockPropertyRow]];
+      }
+      return [[]];
+    });
+
+    const response = await request(app)
+      .patch('/properties/555')
+      .set('x-request-id', 'update-patch-empty-body')
+      .send({});
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Nenhum dado fornecido para atualizacao.');
+    expect(response.body.code).toBe('PROPERTY_NO_UPDATE_DATA');
+    expect(response.body.requestId).toBe('update-patch-empty-body');
+  });
+
+  it('returns structured owner phone validation error on PATCH /properties/:id', async () => {
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
+        return [[mockPropertyRow]];
+      }
+      return [[]];
+    });
+
+    const response = await request(app)
+      .patch('/properties/555')
+      .set('x-request-id', 'update-patch-owner-phone-invalid')
+      .send({ owner_phone: 'abc' });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toBe('Telefone do proprietário inválido.');
+    expect(response.body.code).toBe('PROPERTY_OWNER_PHONE_INVALID');
+    expect(response.body.field).toBe('owner_phone');
+    expect(response.body.requestId).toBe('update-patch-owner-phone-invalid');
   });
 
   it('accepts PATCH /properties/:id with área construída 0 m² e terreno 2332 ha', async () => {

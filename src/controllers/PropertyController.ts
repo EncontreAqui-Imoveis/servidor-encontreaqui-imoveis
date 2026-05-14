@@ -234,6 +234,133 @@ function logPropertyCreateValidationFailure(
   });
 }
 
+const PROPERTY_ERROR_CODES = {
+  AMENITY_PARSE_ERROR: "PROPERTY_AMENITY_INVALID",
+  REQUIRED_FIELDS: "PROPERTY_REQUIRED_FIELDS",
+  DESCRIPTION_LENGTH_INVALID: "PROPERTY_DESCRIPTION_INVALID",
+  INVALID_TYPE: "PROPERTY_TYPE_INVALID",
+  INVALID_PURPOSE: "PROPERTY_PURPOSE_INVALID",
+  REQUIRED_BAIRRO: "PROPERTY_BAIRRO_REQUIRED",
+  TEXT_VALIDATION_FAILED: "PROPERTY_FIELD_VALIDATION_FAILED",
+  INVALID_OWNER_PHONE: "PROPERTY_OWNER_PHONE_INVALID",
+  PROMOTION_PARSE_ERROR: "PROPERTY_PROMOTION_PARSE_FAILED",
+  PRICE_INVALID: "PROPERTY_PRICE_INVALID",
+  PROMOTION_PRICE_INVALID: "PROPERTY_PROMOTION_PRICE_INVALID",
+  PRICE_MISSING_FOR_PURPOSE: "PROPERTY_PRICE_REQUIRED",
+  NUMERIC_PARSE_ERROR: "PROPERTY_NUMERIC_PARSE_ERROR",
+  NUMERIC_RANGE_ERROR: "PROPERTY_NUMERIC_RANGE_EXCEEDED",
+  NUMERIC_RANGE_MISMATCH: "PROPERTY_NUMERIC_RANGE_INVALID",
+  AREA_RELATION_ERROR: "PROPERTY_AREA_RELATION_INVALID",
+  IMAGE_REQUIRED: "PROPERTY_IMAGES_REQUIRED",
+  IMAGE_LIMIT_EXCEEDED: "PROPERTY_IMAGES_LIMIT_EXCEEDED",
+  IMAGE_UPLOAD_TOO_LARGE: "PROPERTY_IMAGE_TOO_LARGE",
+  CODE_ALREADY_EXISTS: "PROPERTY_CODE_ALREADY_EXISTS",
+  PENDING_APPROVAL_BLOCKED: "PROPERTY_PENDING_APPROVAL",
+  PENDING_EDIT_BLOCKED: "PROPERTY_PENDING_EDIT_REQUEST",
+  NO_UPDATE_DATA: "PROPERTY_NO_UPDATE_DATA",
+  INVALID_FIELD: "PROPERTY_INVALID_FIELD",
+  DUPLICATE_CONFLICT: "PROPERTY_DUPLICATE",
+  PUBLIC_IDENTIFIER_CONFLICT: "PROPERTY_PUBLIC_IDENTIFIER_CONFLICT",
+  REQUEST_TOO_LARGE: "PROPERTY_REQUEST_TOO_LARGE",
+  INVALID_SCHEMA: "PROPERTY_SCHEMA_INVALID",
+  INVALID_STATUS: "PROPERTY_STATUS_INVALID",
+  UNAUTHORIZED: "PROPERTY_ACCESS_DENIED",
+  CODE_PARSE_ERROR: "PROPERTY_CODE_PARSE_ERROR",
+  COMMISSION_PARSE_ERROR: "PROPERTY_COMMISSION_INVALID",
+  AREA_INVALID: "PROPERTY_AREA_INVALID",
+  REPEAT_REQUEST_FIELD_LIMIT: "PROPERTY_UPLOAD_FIELD_LIMIT_EXCEEDED",
+  FIELD_COUNT_LIMIT: "PROPERTY_UPLOAD_FIELD_COUNT_EXCEEDED",
+  FIELD_VALUE_LIMIT: "PROPERTY_UPLOAD_FIELD_VALUE_EXCEEDED",
+  PART_COUNT_LIMIT: "PROPERTY_UPLOAD_PART_COUNT_EXCEEDED",
+  INVALID_UPLOAD_FIELD_NAME: "PROPERTY_UPLOAD_FIELD_NAME_INVALID",
+} as const;
+
+type PropertyErrorCode = (typeof PROPERTY_ERROR_CODES)[keyof typeof PROPERTY_ERROR_CODES];
+
+function propertyErrorPayload(
+  req: Request,
+  params: { error: string; code: PropertyErrorCode; field?: string }
+): Record<string, string> {
+  const requestId = getRequestId(req);
+  return {
+    error: params.error,
+    code: params.code,
+    ...(params.field ? { field: params.field } : {}),
+    ...(requestId ? { requestId } : {}),
+  };
+}
+
+function sendPropertyError(
+  res: Response,
+  req: Request,
+  statusCode: number,
+  params: { error: string; code: PropertyErrorCode; field?: string }
+): Response {
+  return res.status(statusCode).json(propertyErrorPayload(req, params));
+}
+
+function resolveValidationFieldFromMessage(message: string): string | undefined {
+  const fieldByLabel: Array<{ key: string; field: string }> = [
+    { key: "Quartos", field: "bedrooms" },
+    { key: "Banheiros", field: "bathrooms" },
+    { key: "Garagens", field: "garage_spots" },
+    { key: "Área construída", field: "area_construida" },
+    { key: "Área do terreno", field: "area_terreno" },
+    { key: "Área de construção", field: "area_construida" },
+    { key: "Preço base", field: "price" },
+    { key: "Preço de venda", field: "price_sale" },
+    { key: "Preço de aluguel", field: "price_rent" },
+    { key: "Preço promocional de venda", field: "promotion_price" },
+    { key: "Preço promocional de aluguel", field: "promotional_rent_price" },
+    { key: "Valor de condomínio", field: "valor_condominio" },
+    { key: "Valor de IPTU", field: "valor_iptu" },
+    { key: "Título", field: "title" },
+    { key: "Nome do proprietário", field: "owner_name" },
+    { key: "Endereço", field: "address" },
+    { key: "Número", field: "numero" },
+    { key: "Bairro", field: "bairro" },
+    { key: "Complemento", field: "complemento" },
+    { key: "Cidade", field: "city" },
+    { key: "Quadra", field: "quadra" },
+    { key: "Lote", field: "lote" },
+    { key: "Código", field: "code" },
+  ];
+
+  const normalized = String(message ?? "");
+  const entry = fieldByLabel.find((candidate) =>
+    normalized.includes(candidate.key)
+  );
+  return entry?.field;
+}
+
+function resolveRequiredField(payload: Record<string, unknown>): string {
+  if (!payload.title) return "title";
+  if (!payload.description) return "description";
+  if (!payload.type) return "type";
+  if (!payload.purpose) return "purpose";
+  if (!payload.address) return "address";
+  if (!payload.city) return "city";
+  if (!payload.state) return "state";
+  return "title";
+}
+
+async function findPropertyIdByCode(
+  rawCode: unknown
+): Promise<number | null> {
+  const normalizedCode = stringOrNull(rawCode);
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const rows = await runPropertyQuery<RowDataPacket[]>(`SELECT id FROM properties WHERE code = ? LIMIT 1`, [normalizedCode]);
+  if (!rows || rows.length === 0) {
+    return null;
+  }
+
+  const first = rows[0] as RowDataPacket;
+  return Number(first.id);
+}
+
 async function cleanupPropertyMediaAssets(
   urls: Array<string | null | undefined>,
   context: string,
@@ -1456,7 +1583,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "broker", "amenity_parse_error", {
         error: (amenityError as Error).message,
       });
-      return res.status(400).json({ error: (amenityError as Error).message });
+      return sendPropertyError(res, req, 400, {
+        error: (amenityError as Error).message,
+        code: PROPERTY_ERROR_CODES.AMENITY_PARSE_ERROR,
+        field: "amenities",
+      });
     }
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
@@ -1471,7 +1602,23 @@ class PropertyController {
         city: Boolean(city),
         state: Boolean(state),
       });
-      return res.status(400).json({ error: "Campos obrigatórios não informados." });
+      return sendPropertyError(res, req, 400, {
+        error: "Campos obrigatórios não informados.",
+        code: PROPERTY_ERROR_CODES.REQUIRED_FIELDS,
+        field: resolveRequiredField(createPayload as Record<string, unknown>),
+      });
+    }
+
+    const normalizedCode = stringOrNull(code);
+    if (normalizedCode != null && normalizedCode.length > 0) {
+      const duplicateIdByCode = await findPropertyIdByCode(normalizedCode);
+      if (duplicateIdByCode != null) {
+        return sendPropertyError(res, req, 409, {
+          error: "Já existe um imóvel com esse código.",
+          code: PROPERTY_ERROR_CODES.CODE_ALREADY_EXISTS,
+          field: "code",
+        });
+      }
     }
 
     if (!hasValidPropertyDescription(description)) {
@@ -1479,24 +1626,38 @@ class PropertyController {
         descriptionLength: normalizedDescription.length,
         rawDescriptionLength: String(description ?? "").trim().length,
       });
-      return res.status(400).json({
-        error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
-      });
+        return sendPropertyError(res, req, 400, {
+          error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
+          code: PROPERTY_ERROR_CODES.DESCRIPTION_LENGTH_INVALID,
+          field: "description",
+        });
     }
 
     const normalizedType = normalizePropertyType(type);
     if (!normalizedType) {
-      return res.status(400).json({ error: "Tipo de imóvel inválido." });
+      return sendPropertyError(res, req, 400, {
+        error: "Tipo de imóvel inválido.",
+        code: PROPERTY_ERROR_CODES.INVALID_TYPE,
+        field: "type",
+      });
     }
 
     const normalizedPurpose = normalizePurpose(purpose);
     if (!normalizedPurpose) {
-      return res.status(400).json({ error: "Finalidade do imóvel invalida." });
+      return sendPropertyError(res, req, 400, {
+        error: "Finalidade do imóvel invalida.",
+        code: PROPERTY_ERROR_CODES.INVALID_PURPOSE,
+        field: "purpose",
+      });
     }
 
     const requiredBairroError = validateRequiredBairro(bairro, normalizedType);
     if (requiredBairroError) {
-      return res.status(400).json({ error: requiredBairroError });
+      return sendPropertyError(res, req, 400, {
+        error: requiredBairroError,
+        code: PROPERTY_ERROR_CODES.REQUIRED_BAIRRO,
+        field: "bairro",
+      });
     }
 
     const createTextValidationError = [
@@ -1516,7 +1677,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "broker", "text_validation_error", {
         error: createTextValidationError,
       });
-      return res.status(400).json({ error: createTextValidationError });
+      return sendPropertyError(res, req, 400, {
+        error: createTextValidationError,
+        code: PROPERTY_ERROR_CODES.TEXT_VALIDATION_FAILED,
+        field: resolveValidationFieldFromMessage(createTextValidationError),
+      });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
@@ -1525,8 +1690,10 @@ class PropertyController {
         logPropertyCreateValidationFailure(req, "broker", "invalid_owner_phone", {
           digitsLength: ownerPhoneDigits.length,
         });
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: "Telefone do proprietário inválido.",
+          code: PROPERTY_ERROR_CODES.INVALID_OWNER_PHONE,
+          field: "owner_phone",
         });
       }
     }
@@ -1565,7 +1732,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "broker", "promotion_parse_error", {
         message: (parseError as Error).message,
       });
-      return res.status(400).json({ error: (parseError as Error).message });
+      return sendPropertyError(res, req, 400, {
+        error: (parseError as Error).message,
+        code: PROPERTY_ERROR_CODES.PROMOTION_PARSE_ERROR,
+        field: "promotion",
+      });
     }
 
     let numericPrice: number;
@@ -1584,8 +1755,10 @@ class PropertyController {
         numericPriceSale = parseOptionalPrice(price_sale);
         numericPriceRent = parseOptionalPrice(price_rent);
         if (numericPriceSale == null || numericPriceRent == null) {
-          return res.status(400).json({
+          return sendPropertyError(res, req, 400, {
             error: "Informe os precos de venda e aluguel para esta finalidade.",
+            code: PROPERTY_ERROR_CODES.PRICE_MISSING_FOR_PURPOSE,
+            field: "price",
           });
         }
         numericPrice = numericPriceSale;
@@ -1628,8 +1801,10 @@ class PropertyController {
         numericPriceSale != null &&
         numericPromotionPrice >= numericPriceSale
       ) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: "Preço promocional de venda deve ser menor que o preço de venda.",
+          code: PROPERTY_ERROR_CODES.PROMOTION_PRICE_INVALID,
+          field: "promotion_price",
         });
       }
 
@@ -1638,9 +1813,10 @@ class PropertyController {
         numericPriceRent != null &&
         numericPromotionalRentPrice >= numericPriceRent
       ) {
-        return res.status(400).json({
-          error:
-            "Preço promocional de aluguel deve ser menor que o preço de aluguel.",
+        return sendPropertyError(res, req, 400, {
+          error: "Preço promocional de aluguel deve ser menor que o preço de aluguel.",
+          code: PROPERTY_ERROR_CODES.PROMOTION_PRICE_INVALID,
+          field: "promotional_rent_price",
         });
       }
 
@@ -1654,7 +1830,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "broker", "price_parse_error", {
         message: (parseError as Error).message,
       });
-      return res.status(400).json({ error: (parseError as Error).message });
+      return sendPropertyError(res, req, 400, {
+        error: (parseError as Error).message,
+        code: PROPERTY_ERROR_CODES.PRICE_INVALID,
+        field: resolveValidationFieldFromMessage((parseError as Error).message),
+      });
     }
 
     try {
@@ -1731,7 +1911,11 @@ class PropertyController {
         logPropertyCreateValidationFailure(req, "broker", "numeric_parse_error", {
           message: (parseError as Error).message,
         });
-        return res.status(400).json({ error: (parseError as Error).message });
+        return sendPropertyError(res, req, 400, {
+          error: (parseError as Error).message,
+          code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+          field: resolveValidationFieldFromMessage((parseError as Error).message),
+        });
       }
 
       if (
@@ -1739,7 +1923,11 @@ class PropertyController {
         areaTerreno.m2 != null &&
         areaConstruida.m2 > areaTerreno.m2
       ) {
-        return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
+        return sendPropertyError(res, req, 400, {
+          error: 'Área construída não pode ser maior que a área do terreno.',
+          code: PROPERTY_ERROR_CODES.AREA_RELATION_ERROR,
+          field: "area_terreno",
+        });
       }
 
       const numericValidationError = [
@@ -1761,7 +1949,11 @@ class PropertyController {
         logPropertyCreateValidationFailure(req, "broker", "numeric_validation_error", {
           error: numericValidationError,
         });
-        return res.status(400).json({ error: numericValidationError });
+        return sendPropertyError(res, req, 400, {
+          error: numericValidationError,
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: resolveValidationFieldFromMessage(numericValidationError),
+        });
       }
 
       const hasWifiFlag = parseBoolean(has_wifi);
@@ -1782,11 +1974,17 @@ class PropertyController {
 
       if (imageFiles.length + bodyImages.length < 1) {
         logPropertyCreateValidationFailure(req, "broker", "missing_images");
-        return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imóvel.' });
+        return sendPropertyError(res, req, 400, {
+          error: 'Envie pelo menos 1 imagem do imóvel.',
+          code: PROPERTY_ERROR_CODES.IMAGE_REQUIRED,
+          field: "images",
+        });
       }
       if (imageFiles.length + bodyImages.length > MAX_IMAGES_PER_PROPERTY) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel.`,
+          code: PROPERTY_ERROR_CODES.IMAGE_LIMIT_EXCEEDED,
+          field: "images",
         });
       }
 
@@ -1981,19 +2179,41 @@ class PropertyController {
       const knownError = error as { statusCode?: number } | null;
       const message = error instanceof Error ? error.message : '';
       if (knownError?.statusCode === 413) {
-        return res.status(413).json({
+        return sendPropertyError(res, req, 413, {
           error: 'Arquivo muito grande. Reduza o tamanho das imagens e tente novamente.',
+          code: PROPERTY_ERROR_CODES.IMAGE_UPLOAD_TOO_LARGE,
+          field: "images",
         });
       }
       if (message.includes("Out of range value for column 'price'")) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Preço fora do limite permitido para o banco de dados. Reduza o valor e tente novamente.',
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: "price",
         });
       }
       if (message.includes("Data truncated for column 'type'")) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'O tipo do imóvel não é aceito pelo schema atual do banco. Reinicie o backend para aplicar as migrations.',
+          code: PROPERTY_ERROR_CODES.INVALID_SCHEMA,
+          field: "type",
         });
+      }
+      if (message.includes('ER_DUP_ENTRY')) {
+        if (message.includes('code')) {
+          return sendPropertyError(res, req, 409, {
+            error: 'Já existe um imóvel com esse código.',
+            code: PROPERTY_ERROR_CODES.CODE_ALREADY_EXISTS,
+            field: "code",
+          });
+        }
+        if (message.includes('uq_public_code') || message.includes('public_code')) {
+          return sendPropertyError(res, req, 409, {
+            error: 'Já existe um imóvel com esse identificador público.',
+            code: PROPERTY_ERROR_CODES.PUBLIC_IDENTIFIER_CONFLICT,
+            field: "public_code",
+          });
+        }
       }
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
@@ -2003,7 +2223,10 @@ class PropertyController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return sendPropertyError(res, req, 401, {
+        error: 'Usuario nao autenticado.',
+        code: PROPERTY_ERROR_CODES.UNAUTHORIZED,
+      });
     }
 
     const createClientPayload = req.body ?? {};
@@ -2091,7 +2314,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "client", "amenity_parse_error", {
         error: (amenityError as Error).message,
       });
-      return res.status(400).json({ error: (amenityError as Error).message });
+      return sendPropertyError(res, req, 400, {
+        error: (amenityError as Error).message,
+        code: PROPERTY_ERROR_CODES.AMENITY_PARSE_ERROR,
+        field: "amenities",
+      });
     }
 
     const normalizedDescription = normalizePropertyDescription(String(description ?? ""));
@@ -2106,7 +2333,23 @@ class PropertyController {
         city: Boolean(city),
         state: Boolean(state),
       });
-      return res.status(400).json({ error: 'Campos obrigatórios não informados.' });
+      return sendPropertyError(res, req, 400, {
+        error: 'Campos obrigatórios não informados.',
+        code: PROPERTY_ERROR_CODES.REQUIRED_FIELDS,
+        field: resolveRequiredField(createClientPayload as Record<string, unknown>),
+      });
+    }
+
+    const normalizedCode = stringOrNull(code);
+    if (normalizedCode != null && normalizedCode.length > 0) {
+      const duplicateIdByCode = await findPropertyIdByCode(normalizedCode);
+      if (duplicateIdByCode != null) {
+        return sendPropertyError(res, req, 409, {
+          error: "Já existe um imóvel com esse código.",
+          code: PROPERTY_ERROR_CODES.CODE_ALREADY_EXISTS,
+          field: "code",
+        });
+      }
     }
 
     if (!hasValidPropertyDescription(description)) {
@@ -2114,24 +2357,38 @@ class PropertyController {
         descriptionLength: normalizedDescription.length,
         rawDescriptionLength: String(description ?? "").trim().length,
       });
-      return res.status(400).json({
+      return sendPropertyError(res, req, 400, {
         error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
+        code: PROPERTY_ERROR_CODES.DESCRIPTION_LENGTH_INVALID,
+        field: "description",
       });
     }
 
     const normalizedType = normalizePropertyType(type);
     if (!normalizedType) {
-      return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
+      return sendPropertyError(res, req, 400, {
+        error: 'Tipo de imóvel inválido.',
+        code: PROPERTY_ERROR_CODES.INVALID_TYPE,
+        field: "type",
+      });
     }
 
     const normalizedPurpose = normalizePurpose(purpose);
     if (!normalizedPurpose) {
-      return res.status(400).json({ error: 'Finalidade do imovel invalida.' });
+      return sendPropertyError(res, req, 400, {
+        error: 'Finalidade do imovel invalida.',
+        code: PROPERTY_ERROR_CODES.INVALID_PURPOSE,
+        field: "purpose",
+      });
     }
 
     const requiredBairroError = validateRequiredBairro(bairro, normalizedType);
     if (requiredBairroError) {
-      return res.status(400).json({ error: requiredBairroError });
+      return sendPropertyError(res, req, 400, {
+        error: requiredBairroError,
+        code: PROPERTY_ERROR_CODES.REQUIRED_BAIRRO,
+        field: "bairro",
+      });
     }
 
     const createClientTextValidationError = [
@@ -2151,7 +2408,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "client", "text_validation_error", {
         error: createClientTextValidationError,
       });
-      return res.status(400).json({ error: createClientTextValidationError });
+      return sendPropertyError(res, req, 400, {
+        error: createClientTextValidationError,
+        code: PROPERTY_ERROR_CODES.TEXT_VALIDATION_FAILED,
+        field: resolveValidationFieldFromMessage(createClientTextValidationError),
+      });
     }
 
     if (owner_phone && String(owner_phone).trim().length > 0) {
@@ -2160,8 +2421,10 @@ class PropertyController {
         logPropertyCreateValidationFailure(req, "client", "invalid_owner_phone", {
           digitsLength: ownerPhoneDigits.length,
         });
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Telefone do proprietário inválido.',
+          code: PROPERTY_ERROR_CODES.INVALID_OWNER_PHONE,
+          field: "owner_phone",
         });
       }
     }
@@ -2200,7 +2463,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "client", "promotion_parse_error", {
         message: (parseError as Error).message,
       });
-      return res.status(400).json({ error: (parseError as Error).message });
+      return sendPropertyError(res, req, 400, {
+        error: (parseError as Error).message,
+        code: PROPERTY_ERROR_CODES.PROMOTION_PARSE_ERROR,
+        field: "promotion",
+      });
     }
 
     let numericPrice: number;
@@ -2219,8 +2486,10 @@ class PropertyController {
         numericPriceSale = parseOptionalPrice(price_sale);
         numericPriceRent = parseOptionalPrice(price_rent);
         if (numericPriceSale == null || numericPriceRent == null) {
-          return res.status(400).json({
+          return sendPropertyError(res, req, 400, {
             error: 'Informe os precos de venda e aluguel para esta finalidade.',
+            code: PROPERTY_ERROR_CODES.PRICE_MISSING_FOR_PURPOSE,
+            field: "price",
           });
         }
         numericPrice = numericPriceSale;
@@ -2263,8 +2532,10 @@ class PropertyController {
         numericPriceSale != null &&
         numericPromotionPrice >= numericPriceSale
       ) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Preço promocional de venda deve ser menor que o preço de venda.',
+          code: PROPERTY_ERROR_CODES.PROMOTION_PRICE_INVALID,
+          field: "promotion_price",
         });
       }
 
@@ -2273,8 +2544,10 @@ class PropertyController {
         numericPriceRent != null &&
         numericPromotionalRentPrice >= numericPriceRent
       ) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Preço promocional de aluguel deve ser menor que o preço de aluguel.',
+          code: PROPERTY_ERROR_CODES.PROMOTION_PRICE_INVALID,
+          field: "promotional_rent_price",
         });
       }
 
@@ -2288,7 +2561,11 @@ class PropertyController {
       logPropertyCreateValidationFailure(req, "client", "price_parse_error", {
         message: (parseError as Error).message,
       });
-      return res.status(400).json({ error: (parseError as Error).message });
+      return sendPropertyError(res, req, 400, {
+        error: (parseError as Error).message,
+        code: PROPERTY_ERROR_CODES.PRICE_INVALID,
+        field: resolveValidationFieldFromMessage((parseError as Error).message),
+      });
     }
 
     try {
@@ -2346,7 +2623,11 @@ class PropertyController {
         logPropertyCreateValidationFailure(req, "client", "numeric_parse_error", {
           message: (parseError as Error).message,
         });
-        return res.status(400).json({ error: (parseError as Error).message });
+        return sendPropertyError(res, req, 400, {
+          error: (parseError as Error).message,
+          code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+          field: resolveValidationFieldFromMessage((parseError as Error).message),
+        });
       }
 
       if (
@@ -2354,7 +2635,11 @@ class PropertyController {
         areaTerreno.m2 != null &&
         areaConstruida.m2 > areaTerreno.m2
       ) {
-        return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
+        return sendPropertyError(res, req, 400, {
+          error: 'Área construída não pode ser maior que a área do terreno.',
+          code: PROPERTY_ERROR_CODES.AREA_RELATION_ERROR,
+          field: "area_terreno",
+        });
       }
 
       const numericValidationError = [
@@ -2376,7 +2661,11 @@ class PropertyController {
         logPropertyCreateValidationFailure(req, "client", "numeric_validation_error", {
           error: numericValidationError,
         });
-        return res.status(400).json({ error: numericValidationError });
+        return sendPropertyError(res, req, 400, {
+          error: numericValidationError,
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: resolveValidationFieldFromMessage(numericValidationError),
+        });
       }
 
       const hasWifiFlag = parseBoolean(has_wifi);
@@ -2397,11 +2686,17 @@ class PropertyController {
 
       if (imageFiles.length + bodyImages.length < 1) {
         logPropertyCreateValidationFailure(req, "client", "missing_images");
-        return res.status(400).json({ error: 'Envie pelo menos 1 imagem do imovel.' });
+        return sendPropertyError(res, req, 400, {
+          error: 'Envie pelo menos 1 imagem do imovel.',
+          code: PROPERTY_ERROR_CODES.IMAGE_REQUIRED,
+          field: "images",
+        });
       }
       if (imageFiles.length + bodyImages.length > MAX_IMAGES_PER_PROPERTY) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: `Limite maximo de ${MAX_IMAGES_PER_PROPERTY} imagens por imovel.`,
+          code: PROPERTY_ERROR_CODES.IMAGE_LIMIT_EXCEEDED,
+          field: "images",
         });
       }
 
@@ -2632,19 +2927,41 @@ class PropertyController {
       const knownError = error as { statusCode?: number } | null;
       const message = error instanceof Error ? error.message : '';
       if (knownError?.statusCode === 413) {
-        return res.status(413).json({
+        return sendPropertyError(res, req, 413, {
           error: 'Arquivo muito grande. Reduza o tamanho das imagens e tente novamente.',
+          code: PROPERTY_ERROR_CODES.IMAGE_UPLOAD_TOO_LARGE,
+          field: "images",
         });
       }
       if (message.includes("Out of range value for column 'price'")) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Preço fora do limite permitido para o banco de dados. Reduza o valor e tente novamente.',
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: "price",
         });
       }
       if (message.includes("Data truncated for column 'type'")) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'O tipo do imóvel não é aceito pelo schema atual do banco. Reinicie o backend para aplicar as migrations.',
+          code: PROPERTY_ERROR_CODES.INVALID_SCHEMA,
+          field: "type",
         });
+      }
+      if (message.includes('ER_DUP_ENTRY')) {
+        if (message.includes('code')) {
+          return sendPropertyError(res, req, 409, {
+            error: 'Já existe um imóvel com esse código.',
+            code: PROPERTY_ERROR_CODES.CODE_ALREADY_EXISTS,
+            field: "code",
+          });
+        }
+        if (message.includes('uq_public_code') || message.includes('public_code')) {
+          return sendPropertyError(res, req, 409, {
+            error: 'Já existe um imóvel com esse identificador público.',
+            code: PROPERTY_ERROR_CODES.PUBLIC_IDENTIFIER_CONFLICT,
+            field: "public_code",
+          });
+        }
       }
       return res.status(500).json({ error: 'Erro interno do servidor.' });
     }
@@ -2655,11 +2972,18 @@ class PropertyController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return sendPropertyError(res, req, 401, {
+        error: 'Usuario nao autenticado.',
+        code: PROPERTY_ERROR_CODES.UNAUTHORIZED,
+      });
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
+      return sendPropertyError(res, req, 400, {
+        error: 'Identificador de imóvel invalido.',
+        code: PROPERTY_ERROR_CODES.INVALID_FIELD,
+        field: 'id',
+      });
     }
 
     const payload = (req.body ?? {}) as Record<string, unknown>;
@@ -2675,7 +2999,11 @@ class PropertyController {
 
       if (!propertyRows || propertyRows.length === 0) {
         await db.rollback();
-        return res.status(404).json({ error: 'Imóvel nao encontrado.' });
+        return sendPropertyError(res, req, 404, {
+          error: 'Imóvel nao encontrado.',
+          code: PROPERTY_ERROR_CODES.INVALID_FIELD,
+          field: 'id',
+        });
       }
 
       const property = propertyRows[0];
@@ -2685,13 +3013,18 @@ class PropertyController {
 
       if (!isOwner) {
         await db.rollback();
-        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+        return sendPropertyError(res, req, 403, {
+          error: 'Acesso nao autorizado a este imovel.',
+          code: PROPERTY_ERROR_CODES.UNAUTHORIZED,
+          field: 'userId',
+        });
       }
 
       if (property.status === 'pending_approval') {
         await db.rollback();
-        return res.status(409).json({
+        return sendPropertyError(res, req, 409, {
           error: 'Imóveis pendentes não podem solicitar edição até o fim da análise.',
+          code: PROPERTY_ERROR_CODES.PENDING_EDIT_BLOCKED,
         });
       }
 
@@ -2708,8 +3041,9 @@ class PropertyController {
 
       if (pendingRows.length > 0) {
         await db.rollback();
-        return res.status(409).json({
+        return sendPropertyError(res, req, 409, {
           error: 'Este imóvel já possui uma solicitação de edição pendente.',
+          code: PROPERTY_ERROR_CODES.PENDING_EDIT_BLOCKED,
         });
       }
 
@@ -2718,8 +3052,9 @@ class PropertyController {
 
       if (Object.keys(preparedPatch.diff).length === 0) {
         await db.rollback();
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Nenhuma alteração válida foi identificada para enviar à aprovação.',
+          code: PROPERTY_ERROR_CODES.NO_UPDATE_DATA,
         });
       }
 
@@ -2794,7 +3129,10 @@ class PropertyController {
       await db.rollback();
       const message = error instanceof Error ? error.message : '';
       if (message) {
-        return res.status(400).json({ error: message });
+        return sendPropertyError(res, req, 400, {
+          error: message,
+          code: PROPERTY_ERROR_CODES.INVALID_FIELD,
+        });
       }
       console.error('Erro ao criar solicitacao de edicao do imovel:', error);
       return res.status(500).json({ error: 'Erro interno do servidor.' });
@@ -2808,18 +3146,26 @@ class PropertyController {
     const userId = req.userId;
 
     if (!userId) {
-      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+      return sendPropertyError(res, req, 401, {
+        error: 'Usuario nao autenticado.',
+        code: PROPERTY_ERROR_CODES.UNAUTHORIZED,
+      });
     }
 
     if (req.userRole === 'client') {
-      return res.status(403).json({
+      return sendPropertyError(res, req, 403, {
         error:
           'Clientes nao podem editar imovel diretamente. Envie uma solicitacao de edicao para aprovacao.',
+        code: PROPERTY_ERROR_CODES.UNAUTHORIZED,
       });
     }
 
     if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: 'Identificador de imóvel invalido.' });
+      return sendPropertyError(res, req, 400, {
+        error: 'Identificador de imóvel invalido.',
+        code: PROPERTY_ERROR_CODES.INVALID_FIELD,
+        field: 'id',
+      });
     }
 
     try {
@@ -2829,7 +3175,11 @@ class PropertyController {
       );
 
       if (!propertyRows || propertyRows.length === 0) {
-        return res.status(404).json({ error: 'Imóvel nao encontrado.' });
+        return sendPropertyError(res, req, 404, {
+          error: 'Imóvel nao encontrado.',
+          code: PROPERTY_ERROR_CODES.INVALID_FIELD,
+          field: 'id',
+        });
       }
 
       const property = propertyRows[0];
@@ -2839,11 +3189,16 @@ class PropertyController {
         (property.broker_id != null && property.broker_id === userId) ||
         (property.owner_id != null && property.owner_id === userId);
       if (!isOwner) {
-        return res.status(403).json({ error: 'Acesso nao autorizado a este imovel.' });
+        return sendPropertyError(res, req, 403, {
+          error: 'Acesso nao autorizado a este imovel.',
+          code: PROPERTY_ERROR_CODES.UNAUTHORIZED,
+          field: 'userId',
+        });
       }
       if (property.status === 'pending_approval') {
-        return res.status(409).json({
+        return sendPropertyError(res, req, 409, {
           error: 'Imóveis pendentes não podem ser editados até o fim da análise.',
+          code: PROPERTY_ERROR_CODES.PENDING_EDIT_BLOCKED,
         });
       }
 
@@ -2887,8 +3242,10 @@ class PropertyController {
         String(normalizedUpdateBody.description ?? property.description ?? '')
       );
       if (!hasValidPropertyDescription(nextDescription)) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: `Descrição deve ter entre 1 e ${MAX_PROPERTY_DESCRIPTION_LENGTH} caracteres.`,
+          code: PROPERTY_ERROR_CODES.DESCRIPTION_LENGTH_INVALID,
+          field: "description",
         });
       }
 
@@ -2898,7 +3255,11 @@ class PropertyController {
         nextType
       );
       if (requiredBairroError) {
-        return res.status(400).json({ error: requiredBairroError });
+        return sendPropertyError(res, req, 400, {
+          error: requiredBairroError,
+          code: PROPERTY_ERROR_CODES.REQUIRED_BAIRRO,
+          field: 'bairro',
+        });
       }
 
       const updateTextValidationError = [
@@ -2915,7 +3276,11 @@ class PropertyController {
       ].find(Boolean);
 
       if (updateTextValidationError) {
-        return res.status(400).json({ error: updateTextValidationError });
+        return sendPropertyError(res, req, 400, {
+          error: updateTextValidationError,
+          code: PROPERTY_ERROR_CODES.TEXT_VALIDATION_FAILED,
+          field: resolveValidationFieldFromMessage(updateTextValidationError),
+        });
       }
 
       const nextPurpose = normalizePurpose(normalizedUpdateBody.purpose) ?? property.purpose;
@@ -3041,7 +3406,11 @@ class PropertyController {
           case 'status': {
             const normalized = normalizeStatus(normalizedUpdateBody.status);
             if (!normalized) {
-              return res.status(400).json({ error: 'Status informado invalido.' });
+              return sendPropertyError(res, req, 400, {
+                error: 'Status informado invalido.',
+                code: PROPERTY_ERROR_CODES.INVALID_STATUS,
+                field: 'status',
+              });
             }
             nextStatus = normalized;
             fields.push('status = ?');
@@ -3051,7 +3420,11 @@ class PropertyController {
           case 'purpose': {
             const normalized = normalizePurpose(normalizedUpdateBody.purpose);
             if (!normalized) {
-              return res.status(400).json({ error: 'Finalidade informada e invalida.' });
+              return sendPropertyError(res, req, 400, {
+                error: 'Finalidade informada e invalida.',
+                code: PROPERTY_ERROR_CODES.INVALID_PURPOSE,
+                field: 'purpose',
+              });
             }
             fields.push('purpose = ?');
             values.push(normalized);
@@ -3060,7 +3433,11 @@ class PropertyController {
           case 'type': {
             const normalized = normalizePropertyType(normalizedUpdateBody.type);
             if (!normalized) {
-              return res.status(400).json({ error: 'Tipo de imóvel inválido.' });
+              return sendPropertyError(res, req, 400, {
+                error: 'Tipo de imóvel inválido.',
+                code: PROPERTY_ERROR_CODES.INVALID_TYPE,
+                field: 'type',
+              });
             }
             fields.push('type = ?');
             values.push(normalized);
@@ -3082,7 +3459,11 @@ class PropertyController {
                 saleTouched = true;
               }
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.PRICE_INVALID,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3100,7 +3481,11 @@ class PropertyController {
                 rentTouched = true;
               }
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.PRICE_INVALID,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3117,7 +3502,11 @@ class PropertyController {
               });
               values.push(parsed);
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3131,7 +3520,11 @@ class PropertyController {
                   : null
               );
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.AMENITY_PARSE_ERROR,
+                field: "amenities",
+              });
             }
             break;
           }
@@ -3202,7 +3595,11 @@ class PropertyController {
               hasAreaConstruidaPatch = true;
               break;
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3212,7 +3609,11 @@ class PropertyController {
               fields.push(`\`${key}\` = ?`);
               values.push(parseDecimal(normalizedUpdateBody[key]));
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3266,7 +3667,11 @@ class PropertyController {
               fields.push('promotion_percentage = ?');
               values.push(parsed);
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3288,7 +3693,11 @@ class PropertyController {
                 nextPromotionFlag = 1;
               }
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3302,7 +3711,11 @@ class PropertyController {
                 nextPromotionFlag = 1;
               }
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3325,7 +3738,11 @@ class PropertyController {
                 values.push(parsedDateTime);
               }
             } catch (parseError) {
-              return res.status(400).json({ error: (parseError as Error).message });
+              return sendPropertyError(res, req, 400, {
+                error: (parseError as Error).message,
+                code: PROPERTY_ERROR_CODES.PROMOTION_PARSE_ERROR,
+                field: resolveValidationFieldFromMessage((parseError as Error).message),
+              });
             }
             break;
           }
@@ -3334,7 +3751,11 @@ class PropertyController {
             if (text.length > 0) {
               const digits = text.replace(/\D/g, '');
               if (digits.length < 10 || digits.length > 13) {
-                return res.status(400).json({ error: 'Telefone do proprietário inválido.' });
+                return sendPropertyError(res, req, 400, {
+                  error: 'Telefone do proprietário inválido.',
+                  code: PROPERTY_ERROR_CODES.INVALID_OWNER_PHONE,
+                  field: 'owner_phone',
+                });
               }
               fields.push('owner_phone = ?');
               values.push(digits);
@@ -3357,7 +3778,11 @@ class PropertyController {
             const rawNumero = String(normalizedUpdateBody.numero ?? '').trim();
             const numeroDigits = rawNumero.replace(/\D/g, '');
             if (rawNumero.length > 0 && numeroDigits.length === 0) {
-              return res.status(400).json({ error: 'Número do endereço deve conter apenas dígitos.' });
+              return sendPropertyError(res, req, 400, {
+                error: 'Número do endereço deve conter apenas dígitos.',
+                code: PROPERTY_ERROR_CODES.INVALID_FIELD,
+                field: 'numero',
+              });
             }
             fields.push('numero = ?');
             values.push(stringOrNull(numeroDigits));
@@ -3533,7 +3958,11 @@ class PropertyController {
       ].find(Boolean);
 
       if (numericValidationError) {
-        return res.status(400).json({ error: numericValidationError });
+        return sendPropertyError(res, req, 400, {
+          error: numericValidationError,
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: resolveValidationFieldFromMessage(numericValidationError),
+        });
       }
 
       if (
@@ -3543,7 +3972,11 @@ class PropertyController {
         nextAreaTerrenoState > 0 &&
         nextAreaConstruidaState > nextAreaTerrenoState
       ) {
-        return res.status(400).json({ error: 'Área construída não pode ser maior que a área do terreno.' });
+        return sendPropertyError(res, req, 400, {
+          error: 'Área construída não pode ser maior que a área do terreno.',
+          code: PROPERTY_ERROR_CODES.AREA_RELATION_ERROR,
+          field: "area_terreno",
+        });
       }
 
       if (
@@ -3551,8 +3984,10 @@ class PropertyController {
         nextSalePrice != null &&
         Number(nextPromotionPrice) >= Number(nextSalePrice)
       ) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Preço promocional de venda deve ser menor que o preço de venda.',
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: 'promotion_price',
         });
       }
 
@@ -3561,8 +3996,10 @@ class PropertyController {
         nextRentPrice != null &&
         Number(nextPromotionalRentPrice) >= Number(nextRentPrice)
       ) {
-        return res.status(400).json({
+        return sendPropertyError(res, req, 400, {
           error: 'Preço promocional de aluguel deve ser menor que o preço de aluguel.',
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: 'promotional_rent_price',
         });
       }
 
@@ -3602,7 +4039,10 @@ class PropertyController {
       }
 
       if (fields.length === 0) {
-        return res.status(400).json({ error: 'Nenhum dado fornecido para atualizacao.' });
+        return sendPropertyError(res, req, 400, {
+          error: 'Nenhum dado fornecido para atualizacao.',
+          code: PROPERTY_ERROR_CODES.NO_UPDATE_DATA,
+        });
       }
 
       values.push(propertyId);

@@ -279,13 +279,19 @@ type PropertyErrorCode = (typeof PROPERTY_ERROR_CODES)[keyof typeof PROPERTY_ERR
 
 function propertyErrorPayload(
   req: Request,
-  params: { error: string; code: PropertyErrorCode; field?: string }
-): Record<string, string> {
+  params: {
+    error: string;
+    code: PropertyErrorCode;
+    field?: string;
+    details?: Record<string, unknown> | string | number | boolean;
+  }
+): Record<string, unknown> {
   const requestId = getRequestId(req);
   return {
     error: params.error,
     code: params.code,
     ...(params.field ? { field: params.field } : {}),
+    ...(params.details !== undefined ? { details: params.details } : {}),
     ...(requestId ? { requestId } : {}),
   };
 }
@@ -294,7 +300,12 @@ function sendPropertyError(
   res: Response,
   req: Request,
   statusCode: number,
-  params: { error: string; code: PropertyErrorCode; field?: string }
+  params: {
+    error: string;
+    code: PropertyErrorCode;
+    field?: string;
+    details?: Record<string, unknown> | string | number | boolean;
+  }
 ): Response {
   return res.status(statusCode).json(propertyErrorPayload(req, params));
 }
@@ -342,6 +353,38 @@ function resolveRequiredField(payload: Record<string, unknown>): string {
   if (!payload.city) return "city";
   if (!payload.state) return "state";
   return "title";
+}
+
+function hasOwnPayloadField(
+  payload: Record<string, unknown>,
+  field: string
+): boolean {
+  return Object.prototype.hasOwnProperty.call(payload, field);
+}
+
+function hasAnyOwnPayloadField(
+  payload: Record<string, unknown>,
+  fields: string[]
+): boolean {
+  return fields.some((field) => hasOwnPayloadField(payload, field));
+}
+
+function resolveCanonicalAreaInput(
+  payload: Record<string, unknown>,
+  canonicalField: string,
+  legacyFields: string[]
+): unknown {
+  if (hasOwnPayloadField(payload, canonicalField)) {
+    return payload[canonicalField];
+  }
+
+  for (const legacyField of legacyFields) {
+    if (hasOwnPayloadField(payload, legacyField)) {
+      return payload[legacyField];
+    }
+  }
+
+  return undefined;
 }
 
 async function findPropertyIdByCode(
@@ -521,6 +564,46 @@ const LEGACY_AMENITY_BOOLEAN_FIELDS: Array<{ field: keyof PropertyRow; canonical
   { field: "tem_ar_condicionado", canonical: "Ar condicionado" },
   { field: "eh_mobiliada", canonical: "Mobiliada" },
 ];
+
+const PROPERTY_TYPES_REQUIRING_LAND_AREA = new Set([
+  "Terreno",
+  "Área rural",
+  "Rancho",
+  "Chácara",
+  "Fazenda",
+  "Área comercial",
+]);
+
+function isTerrainAreaRequiredForType(type: unknown): boolean {
+  const normalized = normalizePropertyType(type);
+  return normalized != null && PROPERTY_TYPES_REQUIRING_LAND_AREA.has(normalized);
+}
+
+function deriveLegacyAmenityFlagsFromCanonicalAmenities(amenities: string[]): {
+  hasWifi: 0 | 1;
+  temPiscina: 0 | 1;
+  temEnergiaSolar: 0 | 1;
+  temAutomacao: 0 | 1;
+  temArCondicionado: 0 | 1;
+  ehMobiliada: 0 | 1;
+} {
+  const canonicalAmenities = new Set<string>();
+  for (const amenity of amenities) {
+    const canonical = toCanonicalAmenity(amenity);
+    if (canonical) {
+      canonicalAmenities.add(canonical);
+    }
+  }
+
+  return {
+    hasWifi: canonicalAmenities.has("Wi-Fi") ? 1 : 0,
+    temPiscina: canonicalAmenities.has("Piscina") ? 1 : 0,
+    temEnergiaSolar: canonicalAmenities.has("Energia solar") ? 1 : 0,
+    temAutomacao: canonicalAmenities.has("Automação") ? 1 : 0,
+    temArCondicionado: canonicalAmenities.has("Ar condicionado") ? 1 : 0,
+    ehMobiliada: canonicalAmenities.has("Mobiliada") ? 1 : 0,
+  };
+}
 
 function mergePropertyAmenities(row: PropertyAggregateRow): string[] {
   const jsonAmenities = parsePropertyAmenitiesFromRow(row.amenities) ?? [];
@@ -1892,8 +1975,16 @@ class PropertyController {
           required: true,
           hasField: hasGarageSpots,
         });
-      const nextAreaConstruidaInput = area_construida_valor ?? area_construida ?? area;
-      const nextAreaTerrenoInput = area_terreno_valor ?? area_terreno;
+      const nextAreaConstruidaInput = resolveCanonicalAreaInput(
+        createPayload as Record<string, unknown>,
+        'area_construida_valor',
+        ['area_construida', 'area']
+      );
+      const nextAreaTerrenoInput = resolveCanonicalAreaInput(
+        createPayload as Record<string, unknown>,
+        'area_terreno_valor',
+        ['area_terreno']
+      );
 
       areaConstruida = parseAreaWithUnit({
         value: nextAreaConstruidaInput,
@@ -1915,6 +2006,20 @@ class PropertyController {
           error: (parseError as Error).message,
           code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
           field: resolveValidationFieldFromMessage((parseError as Error).message),
+        });
+      }
+
+      const requiresTerrainArea = isTerrainAreaRequiredForType(normalizedType);
+
+      if (requiresTerrainArea && areaTerreno.valor == null) {
+        return sendPropertyError(res, req, 400, {
+          error: "Área do terreno é obrigatória para o tipo de imóvel informado.",
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: "area_terreno",
+          details: {
+            propertyType: normalizedType,
+            requiredAreaField: "area_terreno_valor",
+          },
         });
       }
 
@@ -1940,7 +2045,7 @@ class PropertyController {
         validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
         validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
         validateAreaByInputUnit(areaConstruida, 'Área construída', { allowNull: true }),
-        validateAreaByInputUnit(areaTerreno, 'Área do terreno', { allowNull: false }),
+        validateAreaByInputUnit(areaTerreno, 'Área do terreno', { allowNull: !requiresTerrainArea }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -1956,12 +2061,29 @@ class PropertyController {
         });
       }
 
-      const hasWifiFlag = parseBoolean(has_wifi);
-      const temPiscinaFlag = parseBoolean(tem_piscina);
-      const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
-      const temAutomacaoFlag = parseBoolean(tem_automacao);
-      const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
-      const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+      const hasAmenityPayload = hasAnyOwnPayloadField(
+        createPayload as Record<string, unknown>,
+        ["amenities", "amenityIds", "amenity_ids", "featureIds", "feature_ids", "features"]
+      );
+      const amenityLegacyFlags = deriveLegacyAmenityFlagsFromCanonicalAmenities(
+        normalizedAmenities
+      );
+      const hasWifiFlag = hasAmenityPayload ? amenityLegacyFlags.hasWifi : parseBoolean(has_wifi);
+      const temPiscinaFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temPiscina
+        : parseBoolean(tem_piscina);
+      const temEnergiaSolarFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temEnergiaSolar
+        : parseBoolean(tem_energia_solar);
+      const temAutomacaoFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temAutomacao
+        : parseBoolean(tem_automacao);
+      const temArCondicionadoFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temArCondicionado
+        : parseBoolean(tem_ar_condicionado);
+      const ehMobiliadaFlag = hasAmenityPayload
+        ? amenityLegacyFlags.ehMobiliada
+        : parseBoolean(eh_mobiliada);
 
       const imageUrls: string[] = [];
       const files = req.files ?? {};
@@ -2604,8 +2726,16 @@ class PropertyController {
           required: true,
           hasField: hasGarageSpots,
         });
-      const nextAreaConstruidaInput = area_construida_valor ?? area_construida ?? area;
-      const nextAreaTerrenoInput = area_terreno_valor ?? area_terreno;
+      const nextAreaConstruidaInput = resolveCanonicalAreaInput(
+        createClientPayload as Record<string, unknown>,
+        'area_construida_valor',
+        ['area_construida', 'area']
+      );
+      const nextAreaTerrenoInput = resolveCanonicalAreaInput(
+        createClientPayload as Record<string, unknown>,
+        'area_terreno_valor',
+        ['area_terreno']
+      );
 
       areaConstruida = parseAreaWithUnit({
         value: nextAreaConstruidaInput,
@@ -2627,6 +2757,20 @@ class PropertyController {
           error: (parseError as Error).message,
           code: PROPERTY_ERROR_CODES.NUMERIC_PARSE_ERROR,
           field: resolveValidationFieldFromMessage((parseError as Error).message),
+        });
+      }
+
+      const requiresTerrainArea = isTerrainAreaRequiredForType(normalizedType);
+
+      if (requiresTerrainArea && areaTerreno.valor == null) {
+        return sendPropertyError(res, req, 400, {
+          error: "Área do terreno é obrigatória para o tipo de imóvel informado.",
+          code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
+          field: "area_terreno",
+          details: {
+            propertyType: normalizedType,
+            requiredAreaField: "area_terreno_valor",
+          },
         });
       }
 
@@ -2652,7 +2796,7 @@ class PropertyController {
           validatePropertyNumericRange(numericBathrooms, 'Banheiros', { max: MAX_PROPERTY_COUNT }),
           validatePropertyNumericRange(numericGarageSpots, 'Garagens', { max: MAX_PROPERTY_COUNT }),
         validateAreaByInputUnit(areaConstruida, 'Área construída', { allowNull: true }),
-        validateAreaByInputUnit(areaTerreno, 'Área do terreno', { allowNull: false }),
+        validateAreaByInputUnit(areaTerreno, 'Área do terreno', { allowNull: !requiresTerrainArea }),
         validatePropertyNumericRange(numericValorCondominio, 'Valor de condomínio', { max: MAX_PROPERTY_FEE, allowNull: true }),
         validatePropertyNumericRange(numericValorIptu, 'Valor de IPTU', { max: MAX_PROPERTY_FEE, allowNull: true }),
       ].find(Boolean);
@@ -2668,12 +2812,29 @@ class PropertyController {
         });
       }
 
-      const hasWifiFlag = parseBoolean(has_wifi);
-      const temPiscinaFlag = parseBoolean(tem_piscina);
-      const temEnergiaSolarFlag = parseBoolean(tem_energia_solar);
-      const temAutomacaoFlag = parseBoolean(tem_automacao);
-      const temArCondicionadoFlag = parseBoolean(tem_ar_condicionado);
-      const ehMobiliadaFlag = parseBoolean(eh_mobiliada);
+      const hasAmenityPayload = hasAnyOwnPayloadField(
+        createClientPayload as Record<string, unknown>,
+        ["amenities", "amenityIds", "amenity_ids", "featureIds", "feature_ids", "features"]
+      );
+      const amenityLegacyFlags = deriveLegacyAmenityFlagsFromCanonicalAmenities(
+        normalizedAmenities
+      );
+      const hasWifiFlag = hasAmenityPayload ? amenityLegacyFlags.hasWifi : parseBoolean(has_wifi);
+      const temPiscinaFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temPiscina
+        : parseBoolean(tem_piscina);
+      const temEnergiaSolarFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temEnergiaSolar
+        : parseBoolean(tem_energia_solar);
+      const temAutomacaoFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temAutomacao
+        : parseBoolean(tem_automacao);
+      const temArCondicionadoFlag = hasAmenityPayload
+        ? amenityLegacyFlags.temArCondicionado
+        : parseBoolean(tem_ar_condicionado);
+      const ehMobiliadaFlag = hasAmenityPayload
+        ? amenityLegacyFlags.ehMobiliada
+        : parseBoolean(eh_mobiliada);
 
       const imageUrls: string[] = [];
       const files = req.files ?? {};
@@ -3513,12 +3674,26 @@ class PropertyController {
           case 'amenities': {
             try {
               const normalizedAmenityList = normalizePropertyAmenities(normalizedUpdateBody.amenities);
+              const legacyAmenityFlags =
+                deriveLegacyAmenityFlagsFromCanonicalAmenities(normalizedAmenityList);
               fields.push('amenities = ?');
               values.push(
                 normalizedAmenityList.length > 0
                   ? JSON.stringify(normalizedAmenityList)
                   : null
               );
+              fields.push('has_wifi = ?');
+              values.push(legacyAmenityFlags.hasWifi);
+              fields.push('tem_piscina = ?');
+              values.push(legacyAmenityFlags.temPiscina);
+              fields.push('tem_energia_solar = ?');
+              values.push(legacyAmenityFlags.temEnergiaSolar);
+              fields.push('tem_automacao = ?');
+              values.push(legacyAmenityFlags.temAutomacao);
+              fields.push('tem_ar_condicionado = ?');
+              values.push(legacyAmenityFlags.temArCondicionado);
+              fields.push('eh_mobiliada = ?');
+              values.push(legacyAmenityFlags.ehMobiliada);
             } catch (parseError) {
               return sendPropertyError(res, req, 400, {
                 error: (parseError as Error).message,
@@ -3865,7 +4040,9 @@ class PropertyController {
             : nextSalePrice;
       const hasAreaUpdate =
         bodyKeys.includes('area_construida') ||
+        bodyKeys.includes('area_construida_valor') ||
         bodyKeys.includes('area_terreno') ||
+        bodyKeys.includes('area_terreno_valor') ||
         bodyKeys.includes('area_construida_unidade') ||
         bodyKeys.includes('area_terreno_unidade');
       const nextAreaConstruidaState =

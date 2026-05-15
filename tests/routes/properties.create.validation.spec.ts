@@ -510,6 +510,36 @@ describe('POST /properties description length contract', () => {
     expect(response.body.propertyId).toBeDefined();
   });
 
+  it('accepts broker create with area_construida_valor null (sem área construída)', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers WHERE id')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 157, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-area-construida-null')
+      .send({
+        ...basePayload,
+        area_construida: undefined,
+        area_construida_valor: null,
+        area_construida_unidade: 'm2',
+        area_terreno: undefined,
+        area_terreno_valor: 2332,
+        area_terreno_unidade: 'ha',
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams).toContain(23320000);
+  });
+
   it('rejects create broker with invalid area unit', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
@@ -649,6 +679,35 @@ describe('POST /properties description length contract', () => {
 
     expect(response.status).toBe(201);
     expect(response.body.propertyId).toBeDefined();
+  });
+
+  it('accepts createForClient with area_construida_valor ausente (sem área construída)', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) return [{ insertId: 158, affectedRows: 1 }];
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const response = await request(app)
+      .post('/properties/client')
+      .set('x-request-id', 'client-area-construida-absent')
+      .send({
+        ...basePayload,
+        area_construida: undefined,
+        area_construida_valor: undefined,
+        area_construida_unidade: 'm2',
+        area_terreno: undefined,
+        area_terreno_valor: 2332,
+        area_terreno_unidade: 'ha',
+      });
+
+    expect(response.status).toBe(201);
+    const insertCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('INSERT INTO properties')
+    );
+    const insertParams = insertCall?.[1] as unknown[];
+    expect(insertParams).toContain(23320000);
   });
 
   it('creates client property with all amenities and area in hectares preserving unit and m²', async () => {
@@ -833,6 +892,39 @@ describe('POST /properties description length contract', () => {
     expect(responseSecond.body.propertyId).toBeDefined();
   });
 
+  it('allows duplicated title on /properties when structured data is valid', async () => {
+    let createCount = 0;
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
+      if (sql.includes('SELECT id FROM properties')) return [[]];
+      if (sql.includes('INSERT INTO properties')) {
+        createCount += 1;
+        return [{ insertId: 300 + createCount, affectedRows: 1 }];
+      }
+      if (sql.includes('INSERT INTO property_images')) return [{ affectedRows: 1 }];
+      return [[]];
+    });
+
+    const firstResponse = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-duplicate-title-1')
+      .send({
+        ...basePayload,
+        title: 'Título repetido broker',
+      });
+
+    const secondResponse = await request(app)
+      .post('/properties')
+      .set('x-request-id', 'broker-duplicate-title-2')
+      .send({
+        ...basePayload,
+        title: 'Título repetido broker',
+      });
+
+    expect(firstResponse.status).toBe(201);
+    expect(secondResponse.status).toBe(201);
+  });
+
   it('accepts /properties/client with duplicated title when address matches existing records', async () => {
     let duplicateCheckCalls = 0;
     queryMock.mockImplementation(async (sql: string) => {
@@ -1008,7 +1100,7 @@ describe('POST /properties description length contract', () => {
     allCanonicalAmenities.forEach((amenity) => {
       expect(String(updateParams?.[0])).toContain(amenity);
     });
-    expect(updateParams?.[1]).toBe(555);
+    expect(updateParams?.[updateParams.length - 1]).toBe(555);
   });
 
   it('updates property amenities via PUT /properties/:id removing some', async () => {
@@ -1292,6 +1384,37 @@ describe('POST /properties description length contract', () => {
     const updateParams = updateCall?.[1] as unknown[];
     expect(updateParams).toContain('hectare');
     expect(updateParams).toContain(20000);
+  });
+
+  it('updates area_construida_valor + unidade via PATCH /properties/:id sem exigir *_m2 no request', async () => {
+    queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
+        return [[mockPropertyRow]];
+      }
+      if (sql.includes('UPDATE properties SET')) {
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const response = await request(app)
+      .patch('/properties/555')
+      .set('x-request-id', 'update-patch-area-valor-unidade-canonica')
+      .send({
+        area_construida_valor: 2,
+        area_construida_unidade: 'ha',
+        area_terreno_valor: 2332,
+        area_terreno_unidade: 'ha',
+      });
+
+    expect(response.status).toBe(200);
+    const updateCall = queryMock.mock.calls.find(([query]) =>
+      String(query).includes('UPDATE properties SET')
+    );
+    const updateParams = updateCall?.[1] as unknown[];
+    expect(updateParams).toContain('hectare');
+    expect(updateParams).toContain(20000);
+    expect(updateParams).toContain(23320000);
   });
 
   it('rejects area update with invalid unit via PATCH /properties/:id', async () => {

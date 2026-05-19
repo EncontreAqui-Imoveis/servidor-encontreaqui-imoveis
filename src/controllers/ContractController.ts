@@ -881,6 +881,7 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const ownerInfo = parseStoredJsonObject(row.seller_info);
   const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
   const ownerInfoForViewer = redactOwnerInfoByRole(ownerInfo, canViewSensitiveData);
+  const viewerSide = resolveContractViewerSide(req, row);
   return {
     id: row.id,
     negotiationId: row.negotiation_id,
@@ -912,6 +913,8 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     propertyPurpose: row.property_purpose ?? null,
     agencyName: row.capturing_agency_name ?? null,
     agencyAddress: row.capturing_agency_address ?? null,
+    responsibleUserIds: parseResponsibleUserIds(row.responsible_user_ids),
+    viewerSide,
     documentRequirements,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
@@ -1424,6 +1427,65 @@ function isNegotiationResponsibleUser(contract: ContractRow, userId: number): bo
     .split(',')
     .map((value) => Number(value))
     .some((value) => Number.isInteger(value) && value === userId);
+}
+
+function parseResponsibleUserIds(raw: unknown): number[] | null {
+  const normalized = String(raw ?? '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const ids = normalized
+    .split(',')
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0);
+
+  return ids.length > 0 ? Array.from(new Set(ids)) : null;
+}
+
+function resolveContractViewerSide(
+  req: AuthRequest | null,
+  contract: ContractRow
+): 'seller' | 'buyer' | 'both' | 'none' | null {
+  if (!req) {
+    return null;
+  }
+
+  const role = String(req.userRole ?? '').trim().toLowerCase();
+  const userId = Number(req.userId ?? 0);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return 'none';
+  }
+
+  if (role === 'admin') {
+    return 'both';
+  }
+
+  if (
+    isNegotiationResponsibleUser(contract, userId) &&
+    (role === 'broker' || role === 'auxiliary_administrative')
+  ) {
+    return 'both';
+  }
+
+  const isCapturingBroker = userId === Number(contract.capturing_broker_id ?? 0);
+  const isSellingBroker = userId === Number(contract.selling_broker_id ?? 0);
+  const isOwner = userId === Number(contract.property_owner_id ?? 0);
+  const isBuyer = userId === Number(contract.buyer_client_id ?? 0);
+
+  if (isCapturingBroker && isSellingBroker) {
+    return 'both';
+  }
+
+  if (isCapturingBroker || isOwner) {
+    return 'seller';
+  }
+
+  if (isSellingBroker || isBuyer) {
+    return 'buyer';
+  }
+
+  return 'none';
 }
 
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {

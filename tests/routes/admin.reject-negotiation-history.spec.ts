@@ -150,7 +150,7 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
     expect(params).toHaveLength(4);
     expect(params[0]).toBe('neg-rej-1');
     expect(params[1]).toBe('PROPOSAL_SENT');
-    expect(params[2]).toBe(42);
+    expect(params[2]).toBeNull();
     const meta = JSON.parse(String(params[3]));
     expect(meta.action).toBe('admin_rejected');
     expect(meta.adminId).toBe(42);

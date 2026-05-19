@@ -1955,7 +1955,7 @@ class AdminController {
         [
           negotiationId,
           currentStatus,
-          actorId,
+          null,
           JSON.stringify({
             action: 'admin_approved',
             adminId: actorId,
@@ -2047,7 +2047,7 @@ class AdminController {
 
       if (competingRows.length > 0) {
         const valuesClause = competingRows.map(() => '(UUID(), ?, ?, ?, ?, CAST(? AS JSON), CURRENT_TIMESTAMP)').join(', ');
-        const historyParams: Array<string | number> = [];
+        const historyParams: Array<string | number | null> = [];
         for (const row of competingRows) {
           const rawComp = String(row.status ?? '')
             .trim()
@@ -2059,9 +2059,10 @@ class AdminController {
             String(row.id ?? ''),
             fromCompeting,
             'REFUSED',
-            actorId,
+            null,
             JSON.stringify({
               action: 'admin_approved_other_negotiation',
+              adminId: actorId,
               approvedNegotiationId: negotiationId,
               propertyId: Number(negotiation.property_id),
             })
@@ -2219,7 +2220,7 @@ class AdminController {
         [
           negotiationId,
           fromStatusForHistory,
-          actorId,
+          null,
           JSON.stringify({
             action: 'admin_rejected',
             reason,
@@ -2374,10 +2375,11 @@ class AdminController {
         [
           negotiationId,
           currentStatus,
-          actorId,
+          null,
           JSON.stringify({
             action: 'admin_cancelled',
             reason,
+            adminId: actorId,
           }),
         ]
       );

@@ -192,7 +192,7 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
       expect(params).toHaveLength(4);
       expect(params[0]).toBe('neg-1');
       expect(params[1]).toBe('DOCUMENTATION_PHASE');
-      expect(params[2]).toBe(1);
+      expect(params[2]).toBeNull();
       const metadata = JSON.parse(String(params[3]));
       expect(metadata).toMatchObject({
         action: 'admin_approved',

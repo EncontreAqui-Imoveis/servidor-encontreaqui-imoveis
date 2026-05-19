@@ -67,6 +67,7 @@ describe('Contract response shape contracts', () => {
             selling_broker_name: 'Vendedor',
             capturing_agency_name: 'Encontre Aqui',
             capturing_agency_address: 'Rua Central, 100 - Centro',
+            responsible_user_ids: '30003,30005',
           },
         ]];
       }
@@ -111,6 +112,8 @@ describe('Contract response shape contracts', () => {
         propertyPurpose: 'Aluguel',
         agencyName: 'Encontre Aqui',
         agencyAddress: 'Rua Central, 100 - Centro',
+        responsibleUserIds: [30003, 30005],
+        viewerSide: 'both',
       },
       documents: [
         {
@@ -158,6 +161,7 @@ describe('Contract response shape contracts', () => {
             selling_broker_name: 'Vendedor',
             capturing_agency_name: 'Encontre Aqui',
             capturing_agency_address: 'Av. Brasil, 200',
+            responsible_user_ids: '30003,30005',
           },
         ]];
       }
@@ -182,6 +186,8 @@ describe('Contract response shape contracts', () => {
           propertyPurpose: 'Venda',
           agencyName: 'Encontre Aqui',
           agencyAddress: 'Av. Brasil, 200',
+          viewerSide: 'both',
+          responsibleUserIds: [30003, 30005],
         },
       ],
       total: 1,
@@ -234,6 +240,7 @@ describe('Contract response shape contracts', () => {
             selling_broker_name: 'Legado',
             capturing_agency_name: 'Encontre Aqui',
             capturing_agency_address: 'Rua Sul, 12',
+            responsible_user_ids: '30003,30005',
           },
         ]];
       }
@@ -273,11 +280,72 @@ describe('Contract response shape contracts', () => {
     expect(response.body.contract.ownerInfo).toEqual({ nome: 'Proprietario' });
     expect(response.body.contract.sellerInfo).toEqual({ nome: 'Proprietario' });
     expect(response.body.contract.commissionData).toEqual({});
+    expect(response.body.contract.responsibleUserIds).toEqual([30003, 30005]);
     expect(response.body.documents).toEqual([
       expect.objectContaining({
         id: 7002,
         side: 'buyer',
       }),
     ]);
+  });
+
+  it('returns both-side visibility for responsible brokers in the contract detail', async () => {
+    const responsibleApp = express();
+    responsibleApp.use(express.json());
+    responsibleApp.use((req, _res, next) => {
+      (req as any).userId = 30005;
+      (req as any).userRole = 'broker';
+      next();
+    });
+    responsibleApp.get('/contracts/:id', (req, res) =>
+      contractController.getById(req as any, res)
+    );
+
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
+        return [[
+          {
+            id: 'contract-responsible-1',
+            negotiation_id: 'neg-responsible-1',
+            property_id: 404,
+            status: 'AWAITING_DOCS',
+            seller_info: JSON.stringify({}),
+            buyer_info: JSON.stringify({}),
+            commission_data: JSON.stringify({}),
+            workflow_metadata: JSON.stringify({}),
+            seller_approval_status: 'PENDING',
+            buyer_approval_status: 'PENDING',
+            seller_approval_reason: JSON.stringify({}),
+            buyer_approval_reason: JSON.stringify({}),
+            created_at: '2026-03-03 10:00:00',
+            updated_at: '2026-03-03 10:00:00',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30004,
+            buyer_client_id: 90001,
+            property_owner_id: 80001,
+            property_title: 'Casa Responsável',
+            property_purpose: 'Venda',
+            property_code: 'CR-404',
+            capturing_broker_name: 'Captador',
+            selling_broker_name: 'Vendedor',
+            capturing_agency_name: 'Encontre Aqui',
+            capturing_agency_address: 'Rua Responsável, 10',
+            responsible_user_ids: '30005,30006',
+          },
+        ]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(responsibleApp).get('/contracts/contract-responsible-1');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.responsibleUserIds).toEqual([30005, 30006]);
+    expect(response.body.contract.viewerSide).toBe('both');
   });
 });

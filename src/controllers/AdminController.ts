@@ -894,6 +894,7 @@ interface AdminNegotiationDecisionRow extends RowDataPacket {
   id: string;
   status: string;
   property_id: number;
+  property_broker_id: number | null;
   capturing_broker_id: number | null;
   buyer_client_id: number | null;
   property_title: string | null;
@@ -1877,6 +1878,7 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            p.broker_id AS property_broker_id,
             n.capturing_broker_id,
             p.title AS property_title,
             p.code AS property_code,
@@ -1936,7 +1938,7 @@ class AdminController {
           UPDATE negotiations
           SET
             status = 'IN_NEGOTIATION',
-            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id),
+            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id),
             version = version + 1
           WHERE id = ?
         `,
@@ -2153,6 +2155,7 @@ class AdminController {
             n.id,
             n.status,
             n.property_id,
+            p.broker_id AS property_broker_id,
             n.capturing_broker_id,
             n.buyer_client_id,
             p.title AS property_title,
@@ -2204,7 +2207,7 @@ class AdminController {
           UPDATE negotiations
           SET
             status = 'REFUSED',
-            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id),
+            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id),
             version = version + 1
           WHERE id = ?
         `,

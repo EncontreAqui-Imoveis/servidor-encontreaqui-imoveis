@@ -96,10 +96,12 @@ interface ContractRow extends RowDataPacket {
   property_title: string | null;
   property_purpose: string | null;
   property_code: string | null;
+  property_image_url: string | null;
   property_owner_id: number | null;
   property_owner_name: string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
+  buyer_client_name: string | null;
   capturing_agency_name: string | null;
   capturing_agency_address: string | null;
   responsible_user_ids: string | null;
@@ -910,9 +912,11 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ownerName: row.property_owner_name ?? null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
+    propertyImageUrl: row.property_image_url ?? null,
     propertyPurpose: row.property_purpose ?? null,
     agencyName: row.capturing_agency_name ?? null,
     agencyAddress: row.capturing_agency_address ?? null,
+    buyerClientName: row.buyer_client_name ?? null,
     responsibleUserIds: parseResponsibleUserIds(row.responsible_user_ids),
     viewerSide,
     documentRequirements,
@@ -1634,10 +1638,18 @@ const CONTRACT_SELECT_BASE_SQL = `
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,
+    (
+      SELECT pi.image_url
+      FROM property_images pi
+      WHERE pi.property_id = p.id
+      ORDER BY pi.id ASC
+      LIMIT 1
+    ) AS property_image_url,
     p.owner_id AS property_owner_id,
     COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
     capture_user.name AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
+    buyer_user.name AS buyer_client_name,
     capture_agency.name AS capturing_agency_name,
     NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address,
     __RESPONSIBLE_USERS_SELECT__
@@ -1647,6 +1659,7 @@ const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN brokers capture_broker ON capture_broker.id = n.capturing_broker_id
   LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
+  LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
   LEFT JOIN users u_owner ON u_owner.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;

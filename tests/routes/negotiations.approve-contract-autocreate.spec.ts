@@ -114,6 +114,7 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
             id: 'neg-1',
             status: negotiationStatus,
             property_id: 101,
+            property_broker_id: 30005,
             capturing_broker_id: 30003,
             property_title: 'Casa Centro',
             property_code: 'RV-101',
@@ -203,7 +204,9 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     const statusUpdateCall = txMock.query.mock.calls.find(([sql]) =>
       String(sql).includes("UPDATE negotiations") &&
       String(sql).includes("SET") &&
-      String(sql).includes("selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id)") &&
+      String(sql).includes(
+        "selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id)"
+      ) &&
       String(sql).includes("status = 'IN_NEGOTIATION'")
     );
     expect(statusUpdateCall).toBeTruthy();

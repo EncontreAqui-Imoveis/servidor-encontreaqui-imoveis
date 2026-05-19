@@ -113,6 +113,9 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
         expect(params.metadataJson.side).toBe('seller');
         expect(String(params.metadataJson.originalFileName ?? '')).toBe('identidade.pdf');
       }
+      if (String(params.documentType ?? '') === 'cliente_outro_01') {
+        expect(params.metadataJson.documentCategory).toBe('outro');
+      }
       return 999;
     });
 
@@ -150,6 +153,40 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       documentType: 'doc_identidade',
       side: 'seller',
       originalFileName: 'identidade.pdf',
+    });
+  });
+
+  it('accepts outro slots for seller in AWAITING_DOCS', async () => {
+    const response = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'cliente_outro_01')
+      .field('documentCategory', 'outro')
+      .field('side', 'seller')
+      .attach('file', Buffer.alloc(2048, 'c'), 'outro.pdf');
+
+    expect(response.status).toBe(201);
+    expect(response.body.document).toMatchObject({
+      documentType: 'cliente_outro_01',
+      documentCategory: 'outro',
+      side: 'seller',
+      originalFileName: 'outro.pdf',
+    });
+  });
+
+  it('accepts outro slots for buyer in AWAITING_DOCS', async () => {
+    const response = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'cliente_outro_01')
+      .field('documentCategory', 'outro')
+      .field('side', 'buyer')
+      .attach('file', Buffer.alloc(2048, 'd'), 'outro-comprador.pdf');
+
+    expect(response.status).toBe(201);
+    expect(response.body.document).toMatchObject({
+      documentType: 'cliente_outro_01',
+      documentCategory: 'outro',
+      side: 'buyer',
+      originalFileName: 'outro-comprador.pdf',
     });
   });
 

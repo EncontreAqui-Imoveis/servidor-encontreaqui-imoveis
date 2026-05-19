@@ -1940,8 +1940,6 @@ class AdminController {
         [negotiationId]
       );
 
-      // admin JWT não aponta para users.id em todos os ambientes; manter actor_id nulo
-      // evita FK quebrando a aprovação e preserva o admin real em metadata.
       await tx.query(
         `
           INSERT INTO negotiation_history (
@@ -1952,11 +1950,12 @@ class AdminController {
             actor_id,
             metadata_json,
             created_at
-          ) VALUES (UUID(), ?, ?, 'IN_NEGOTIATION', NULL, CAST(? AS JSON), CURRENT_TIMESTAMP)
+          ) VALUES (UUID(), ?, ?, 'IN_NEGOTIATION', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
         `,
         [
           negotiationId,
           currentStatus,
+          actorId,
           JSON.stringify({
             action: 'admin_approved',
             adminId: actorId,
@@ -2205,7 +2204,6 @@ class AdminController {
         [negotiationId]
       );
 
-      // actor_id referencia users.id; JWT admin usa id da tabela admins — gravar NULL e registrar admin em metadata.
       await tx.query(
         `
           INSERT INTO negotiation_history (
@@ -2216,11 +2214,12 @@ class AdminController {
             actor_id,
             metadata_json,
             created_at
-          ) VALUES (UUID(), ?, ?, 'REFUSED', NULL, CAST(? AS JSON), CURRENT_TIMESTAMP)
+          ) VALUES (UUID(), ?, ?, 'REFUSED', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
         `,
         [
           negotiationId,
           fromStatusForHistory,
+          actorId,
           JSON.stringify({
             action: 'admin_rejected',
             reason,

@@ -147,11 +147,11 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
     const [, params] = historyCalls[0] as [string, unknown[]];
     const sql = String(historyCalls[0][0]);
     expect(sql).toContain('REFUSED');
-    expect(sql).toContain('NULL');
-    expect(params).toHaveLength(3);
+    expect(params).toHaveLength(4);
     expect(params[0]).toBe('neg-rej-1');
     expect(params[1]).toBe('PROPOSAL_SENT');
-    const meta = JSON.parse(String(params[2]));
+    expect(params[2]).toBe(42);
+    const meta = JSON.parse(String(params[3]));
     expect(meta.action).toBe('admin_rejected');
     expect(meta.adminId).toBe(42);
     expect(meta.reason).toBe('Documentação incompleta para seguir.');

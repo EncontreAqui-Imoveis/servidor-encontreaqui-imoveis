@@ -189,12 +189,11 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     expect(historyCall).toBeTruthy();
     if (historyCall) {
       const [, params] = historyCall as [string, unknown[]];
-      const sql = String(historyCall[0]);
-      expect(sql).toContain("NULL");
-      expect(params).toHaveLength(3);
+      expect(params).toHaveLength(4);
       expect(params[0]).toBe('neg-1');
       expect(params[1]).toBe('DOCUMENTATION_PHASE');
-      const metadata = JSON.parse(String(params[2]));
+      expect(params[2]).toBe(1);
+      const metadata = JSON.parse(String(params[3]));
       expect(metadata).toMatchObject({
         action: 'admin_approved',
         adminId: 1,

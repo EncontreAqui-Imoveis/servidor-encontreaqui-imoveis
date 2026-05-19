@@ -58,6 +58,7 @@ describe('GET /admin/contracts response shape contracts', () => {
             workflow_metadata: JSON.stringify({
               signatureMethod: 'online',
             }),
+            responsible_user_ids: '30003,30005',
             seller_approval_status: 'APPROVED_WITH_RES',
             buyer_approval_status: 'PENDING',
             seller_approval_reason: JSON.stringify({
@@ -128,6 +129,7 @@ describe('GET /admin/contracts response shape contracts', () => {
           sellingBrokerName: 'Vendedor',
           sellerApprovalStatus: 'APPROVED_WITH_RES',
           buyerApprovalStatus: 'PENDING',
+          responsibleUserIds: [30003, 30005],
           sellerApprovalReason: {
             reason: 'Documento legível.',
           },

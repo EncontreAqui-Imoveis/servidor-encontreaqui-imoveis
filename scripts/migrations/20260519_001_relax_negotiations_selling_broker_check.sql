@@ -2,7 +2,7 @@
 SET @has_constraint := (
   SELECT COUNT(*)
   FROM information_schema.tidb_check_constraints
-  WHERE table_schema = DATABASE()
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
     AND table_name = 'negotiations'
     AND constraint_name = 'chk_negotiations_selling_broker_required'
 );
@@ -26,7 +26,7 @@ ALTER TABLE negotiations
 SET @has_constraint := (
   SELECT COUNT(*)
   FROM information_schema.tidb_check_constraints
-  WHERE table_schema = DATABASE()
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
     AND table_name = 'negotiations'
     AND constraint_name = 'chk_negotiations_selling_broker_required'
 );

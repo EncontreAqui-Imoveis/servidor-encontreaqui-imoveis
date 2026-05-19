@@ -1992,6 +1992,13 @@ class NegotiationController {
 
     const userId = Number(req.userId);
     const cpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(n.client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
+    const flags = await getNegotiationColumnFlags();
+    const updatedAtSort = flags.hasUpdatedAt
+      ? 'n.updated_at DESC,'
+      : '';
+    const createdAtSort = flags.hasCreatedAt
+      ? 'n.created_at DESC,'
+      : '';
     const rows = await queryNegotiationRows<RowDataPacket>(
       `
         SELECT
@@ -2002,9 +2009,7 @@ class NegotiationController {
         LEFT JOIN users u ON u.id = n.buyer_client_id
         WHERE n.capturing_broker_id = ?
           AND ${cpfExpr} = ?
-        ORDER BY
-          n.updated_at DESC,
-          n.id DESC
+        ORDER BY ${updatedAtSort} ${createdAtSort} n.id DESC
         LIMIT 1
       `,
       [userId, cpfKey],

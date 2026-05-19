@@ -52,6 +52,15 @@ describe('applyMigrations', () => {
         normalizedSql.includes('SELECT column_type')
       ) {
         const [tableName, columnName] = params as [string, string];
+        if (tableName === 'negotiation_history' && columnName === 'actor_id') {
+          return [[{
+            column_type: 'int(10) unsigned',
+            data_type: 'int',
+            is_nullable: 'NO',
+            character_set_name: null,
+            collation_name: null,
+          }]];
+        }
         if (tableName === 'properties' && columnName === 'purpose') {
           return [[{ column_type: "enum('Venda','Aluguel','Venda e Aluguel')" }]];
         }
@@ -112,6 +121,12 @@ describe('applyMigrations', () => {
     expect(
       sqlStatements.some((sql) =>
         sql.includes('ALTER TABLE admins ADD COLUMN token_version INT NOT NULL DEFAULT 1')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE negotiation_history MODIFY COLUMN actor_id int(10) unsigned NULL')
       )
     ).toBe(true);
 

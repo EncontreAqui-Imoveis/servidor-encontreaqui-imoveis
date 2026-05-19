@@ -155,5 +155,12 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
     expect(meta.action).toBe('admin_rejected');
     expect(meta.adminId).toBe(42);
     expect(meta.reason).toBe('Documentação incompleta para seguir.');
+
+    const statusUpdateCall = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE negotiations") &&
+      String(sql).includes("selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id)") &&
+      String(sql).includes("status = 'REFUSED'")
+    );
+    expect(statusUpdateCall).toBeTruthy();
   });
 });

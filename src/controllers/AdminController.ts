@@ -1934,7 +1934,10 @@ class AdminController {
       await tx.query(
         `
           UPDATE negotiations
-          SET status = 'IN_NEGOTIATION', version = version + 1
+          SET
+            status = 'IN_NEGOTIATION',
+            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id),
+            version = version + 1
           WHERE id = ?
         `,
         [negotiationId]
@@ -2199,7 +2202,10 @@ class AdminController {
       await tx.query(
         `
           UPDATE negotiations
-          SET status = 'REFUSED', version = version + 1
+          SET
+            status = 'REFUSED',
+            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id),
+            version = version + 1
           WHERE id = ?
         `,
         [negotiationId]

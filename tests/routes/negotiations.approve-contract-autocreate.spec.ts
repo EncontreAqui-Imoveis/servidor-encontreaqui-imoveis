@@ -131,7 +131,7 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
         return [[{ id: 501 }]];
       }
 
-      if (sql.includes('UPDATE negotiations') && sql.includes("SET status = 'IN_NEGOTIATION'")) {
+      if (sql.includes('UPDATE negotiations') && sql.includes("status = 'IN_NEGOTIATION'")) {
         negotiationStatus = 'IN_NEGOTIATION';
         return [{ affectedRows: 1 }];
       }
@@ -199,6 +199,14 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
         adminId: 1,
       });
     }
+
+    const statusUpdateCall = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE negotiations") &&
+      String(sql).includes("SET") &&
+      String(sql).includes("selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id)") &&
+      String(sql).includes("status = 'IN_NEGOTIATION'")
+    );
+    expect(statusUpdateCall).toBeTruthy();
   });
 
   it('is idempotent and keeps only one contract when approve is called twice', async () => {

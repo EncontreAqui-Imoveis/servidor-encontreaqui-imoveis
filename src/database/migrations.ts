@@ -92,6 +92,7 @@ type ColumnMetadata = {
   columnName: string;
   columnType: string;
   dataType: string;
+  isNullable: string | null;
   characterSetName: string | null;
   collationName: string | null;
 };
@@ -102,7 +103,7 @@ async function getColumnMetadata(
 ): Promise<ColumnMetadata | null> {
   const [rows] = await connection.query<RowDataPacket[]>(
     `
-      SELECT column_type, data_type, character_set_name, collation_name
+      SELECT column_type, data_type, is_nullable, character_set_name, collation_name
       FROM information_schema.columns
       WHERE table_schema = DATABASE()
         AND table_name = ?
@@ -120,6 +121,7 @@ async function getColumnMetadata(
     columnName,
     columnType: String(row.column_type),
     dataType: String(row.data_type),
+    isNullable: row.is_nullable == null ? null : String(row.is_nullable),
     characterSetName: row.character_set_name == null ? null : String(row.character_set_name),
     collationName: row.collation_name == null ? null : String(row.collation_name),
   };
@@ -1158,6 +1160,13 @@ async function ensureNegotiationResponsiblesAndBrokerProfileType(): Promise<void
  */
 async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
   if (await tableExists('negotiation_history')) {
+    const actorMeta = await getColumnMetadata('negotiation_history', 'actor_id');
+    if (actorMeta && String(actorMeta.isNullable ?? '').toUpperCase() === 'NO') {
+      await connection.query(
+        `ALTER TABLE negotiation_history MODIFY COLUMN actor_id ${formatFkColumnType(actorMeta, actorMeta.columnType)} NULL`
+      );
+    }
+
     for (const col of ['from_status', 'to_status'] as const) {
       if (!(await columnExists('negotiation_history', col))) continue;
       const t = (await getColumnType('negotiation_history', col)) ?? '';

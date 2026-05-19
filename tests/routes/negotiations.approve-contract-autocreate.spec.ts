@@ -182,6 +182,24 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
       String(sql).includes("SET status = 'negociacao'")
     );
     expect(propertyMoveCalls).toHaveLength(1);
+
+    const historyCall = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO negotiation_history')
+    );
+    expect(historyCall).toBeTruthy();
+    if (historyCall) {
+      const [, params] = historyCall as [string, unknown[]];
+      const sql = String(historyCall[0]);
+      expect(sql).toContain("NULL");
+      expect(params).toHaveLength(3);
+      expect(params[0]).toBe('neg-1');
+      expect(params[1]).toBe('DOCUMENTATION_PHASE');
+      const metadata = JSON.parse(String(params[2]));
+      expect(metadata).toMatchObject({
+        action: 'admin_approved',
+        adminId: 1,
+      });
+    }
   });
 
   it('is idempotent and keeps only one contract when approve is called twice', async () => {

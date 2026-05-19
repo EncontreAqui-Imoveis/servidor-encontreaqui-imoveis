@@ -100,13 +100,10 @@ async function executeSqlBlock(sqlBlock: string): Promise<void> {
 
   const db = await connection.getConnection();
   try {
-    await db.beginTransaction();
     for (const statement of statements) {
       await db.query(statement);
     }
-    await db.commit();
   } catch (error) {
-    await db.rollback();
     throw error;
   } finally {
     db.release();

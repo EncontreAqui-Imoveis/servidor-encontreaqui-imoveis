@@ -896,6 +896,7 @@ interface AdminNegotiationDecisionRow extends RowDataPacket {
   property_id: number;
   property_broker_id: number | null;
   capturing_broker_id: number | null;
+  responsible_broker_id: number | null;
   buyer_client_id: number | null;
   property_title: string | null;
   property_code: string | null;
@@ -963,6 +964,50 @@ async function hasNegotiationResponsiblesTable(): Promise<boolean> {
   }
 
   return negotiationResponsiblesTableCache;
+}
+
+async function resolveNegotiationOperationalBrokerId(
+  tx: { query: (...args: unknown[]) => Promise<unknown> },
+  negotiationId: string,
+  capturingBrokerId: number | null,
+  propertyBrokerId: number | null
+): Promise<number | null> {
+  const normalizedCapturingBrokerId =
+    Number.isInteger(capturingBrokerId) && Number(capturingBrokerId) > 0
+      ? Number(capturingBrokerId)
+      : null;
+  const normalizedPropertyBrokerId =
+    Number.isInteger(propertyBrokerId) && Number(propertyBrokerId) > 0
+      ? Number(propertyBrokerId)
+      : null;
+
+  if (normalizedCapturingBrokerId != null) {
+    return normalizedCapturingBrokerId;
+  }
+  if (normalizedPropertyBrokerId != null) {
+    return normalizedPropertyBrokerId;
+  }
+
+  try {
+    const [rows] = (await tx.query(
+      `
+        SELECT nr.user_id
+        FROM negotiation_responsibles nr
+        JOIN brokers b ON b.id = nr.user_id
+        WHERE nr.negotiation_id = ?
+          AND b.status = 'approved'
+          AND COALESCE(b.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
+        ORDER BY nr.created_at ASC, nr.id ASC
+        LIMIT 1
+      `,
+      [negotiationId]
+    )) as [RowDataPacket[]];
+
+    const resolved = Number(rows[0]?.user_id ?? 0);
+    return Number.isInteger(resolved) && resolved > 0 ? resolved : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
@@ -1880,6 +1925,16 @@ class AdminController {
             n.property_id,
             p.broker_id AS property_broker_id,
             n.capturing_broker_id,
+            (
+              SELECT nr.user_id
+              FROM negotiation_responsibles nr
+              JOIN brokers b ON b.id = nr.user_id
+              WHERE nr.negotiation_id = n.id
+                AND b.status = 'approved'
+                AND COALESCE(b.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
+              ORDER BY nr.created_at ASC, nr.id ASC
+              LIMIT 1
+            ) AS responsible_broker_id,
             p.title AS property_title,
             p.code AS property_code,
             CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
@@ -1901,6 +1956,18 @@ class AdminController {
 
       const negotiation = rows[0];
       const currentStatus = String(negotiation.status ?? '').toUpperCase();
+      const resolvedSellingBrokerId = Number(
+        negotiation.capturing_broker_id ??
+          negotiation.property_broker_id ??
+          negotiation.responsible_broker_id ??
+          0
+      );
+      if (!resolvedSellingBrokerId) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Não foi possível identificar o responsável operacional da negociação.',
+        });
+      }
 
       if (
         currentStatus === 'CANCELLED' ||
@@ -1938,11 +2005,11 @@ class AdminController {
           UPDATE negotiations
           SET
             status = 'IN_NEGOTIATION',
-            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id),
+            selling_broker_id = ?,
             version = version + 1
           WHERE id = ?
         `,
-        [negotiationId]
+        [resolvedSellingBrokerId, negotiationId]
       );
 
       await tx.query(
@@ -2157,6 +2224,16 @@ class AdminController {
             n.property_id,
             p.broker_id AS property_broker_id,
             n.capturing_broker_id,
+            (
+              SELECT nr.user_id
+              FROM negotiation_responsibles nr
+              JOIN brokers b ON b.id = nr.user_id
+              WHERE nr.negotiation_id = n.id
+                AND b.status = 'approved'
+                AND COALESCE(b.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
+              ORDER BY nr.created_at ASC, nr.id ASC
+              LIMIT 1
+            ) AS responsible_broker_id,
             n.buyer_client_id,
             p.title AS property_title,
             p.code AS property_code,
@@ -2182,6 +2259,18 @@ class AdminController {
       const fromStatusForHistory = NEGOTIATION_INTERNAL_STATUSES.has(currentStatus)
         ? currentStatus
         : 'PROPOSAL_SENT';
+      const resolvedSellingBrokerId = Number(
+        negotiation.capturing_broker_id ??
+          negotiation.property_broker_id ??
+          negotiation.responsible_broker_id ??
+          0
+      );
+      if (!resolvedSellingBrokerId) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Não foi possível identificar o responsável operacional da negociação.',
+        });
+      }
 
       if (currentStatus === 'SOLD' || currentStatus === 'RENTED') {
         await tx.rollback();
@@ -2207,11 +2296,11 @@ class AdminController {
           UPDATE negotiations
           SET
             status = 'REFUSED',
-            selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id),
+            selling_broker_id = ?,
             version = version + 1
           WHERE id = ?
         `,
-        [negotiationId]
+        [resolvedSellingBrokerId, negotiationId]
       );
 
       await tx.query(

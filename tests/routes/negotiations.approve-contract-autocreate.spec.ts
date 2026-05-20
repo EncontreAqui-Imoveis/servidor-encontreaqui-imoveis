@@ -204,12 +204,14 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     const statusUpdateCall = txMock.query.mock.calls.find(([sql]) =>
       String(sql).includes("UPDATE negotiations") &&
       String(sql).includes("SET") &&
-      String(sql).includes(
-        "selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id)"
-      ) &&
+      String(sql).includes("selling_broker_id = ?") &&
       String(sql).includes("status = 'IN_NEGOTIATION'")
     );
     expect(statusUpdateCall).toBeTruthy();
+    if (statusUpdateCall) {
+      const [, params] = statusUpdateCall as [string, unknown[]];
+      expect(params[0]).toBe(30003);
+    }
   });
 
   it('is idempotent and keeps only one contract when approve is called twice', async () => {

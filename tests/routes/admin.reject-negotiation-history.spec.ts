@@ -75,8 +75,11 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
     adminController.rejectNegotiation(req as any, res)
   );
 
+  let useResponsiblesFallback = false;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    useResponsiblesFallback = false;
     getConnectionMock.mockResolvedValue(txMock);
     createUserNotificationMock.mockResolvedValue(undefined);
 
@@ -93,8 +96,9 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
               id: 'neg-rej-1',
               status: 'PROPOSAL_SENT',
               property_id: 101,
-              property_broker_id: 30002,
-              capturing_broker_id: 30003,
+              property_broker_id: useResponsiblesFallback ? null : 30002,
+              capturing_broker_id: useResponsiblesFallback ? null : 30003,
+              responsible_broker_id: useResponsiblesFallback ? 30007 : null,
               buyer_client_id: null,
               property_title: 'Casa Centro',
               property_code: 'RV-101',
@@ -159,11 +163,34 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
 
     const statusUpdateCall = txMock.query.mock.calls.find(([sql]) =>
       String(sql).includes("UPDATE negotiations") &&
-      String(sql).includes(
-        "selling_broker_id = COALESCE(selling_broker_id, capturing_broker_id, property_broker_id)"
-      ) &&
+      String(sql).includes("selling_broker_id = ?") &&
       String(sql).includes("status = 'REFUSED'")
     );
     expect(statusUpdateCall).toBeTruthy();
+    if (statusUpdateCall) {
+      const [, params] = statusUpdateCall as [string, unknown[]];
+      expect(params[0]).toBe(30003);
+    }
+  });
+
+  it('falls back to a designated responsible broker when the negotiation has no primary broker', async () => {
+    useResponsiblesFallback = true;
+
+    const response = await request(app)
+      .put('/admin/negotiations/neg-rej-1/reject')
+      .send({ reason: 'Documento expirado.' });
+
+    expect(response.status).toBe(200);
+
+    const statusUpdateCall = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE negotiations") &&
+      String(sql).includes("selling_broker_id = ?") &&
+      String(sql).includes("status = 'REFUSED'")
+    );
+    expect(statusUpdateCall).toBeTruthy();
+    if (statusUpdateCall) {
+      const [, params] = statusUpdateCall as [string, unknown[]];
+      expect(params[0]).toBe(30007);
+    }
   });
 });

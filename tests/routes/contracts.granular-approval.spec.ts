@@ -190,6 +190,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
     expect(response.body.contract.sellerApprovalStatus).toBe('APPROVED');
     expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
+    expect(response.body.contract.approvalProgress).toMatchObject({
+      status: 'IN_PROGRESS',
+      label: 'Em análise',
+      nextStep: 'Aguardando aprovação do comprador',
+    });
   });
 
   it('moves to IN_DRAFT only when both sides are approved', async () => {
@@ -218,6 +223,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(secondResponse.body.contract.buyerApprovalStatus).toBe(
       'APPROVED_WITH_RES'
     );
+    expect(secondResponse.body.contract.approvalProgress).toMatchObject({
+      status: 'APPROVED_WITH_RES',
+      label: 'Aprovado com ressalvas',
+      nextStep: 'Aguardando liberação para minuta',
+    });
     expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -452,6 +452,68 @@ function approvalStatusAllowsEditing(status: ContractApprovalStatus): boolean {
   return status === 'PENDING' || status === 'REJECTED';
 }
 
+type ContractApprovalProgressSummary = {
+  status: 'PENDING' | 'IN_PROGRESS' | 'APPROVED' | 'APPROVED_WITH_RES' | 'REJECTED';
+  label: string;
+  nextStep: string;
+};
+
+function summarizeContractApprovalProgress(row: ContractRow): ContractApprovalProgressSummary {
+  const sellerStatus = resolveContractApprovalStatus(row.seller_approval_status);
+  const buyerStatus = resolveContractApprovalStatus(row.buyer_approval_status);
+  const sellerProgress = approvalStatusAllowsProgress(sellerStatus);
+  const buyerProgress = approvalStatusAllowsProgress(buyerStatus);
+  const hasSellerDecision = sellerStatus !== 'PENDING';
+  const hasBuyerDecision = buyerStatus !== 'PENDING';
+
+  if (sellerStatus === 'REJECTED' || buyerStatus === 'REJECTED') {
+    return {
+      status: 'REJECTED',
+      label: 'Rejeitado',
+      nextStep: 'Aguardando correção do lado rejeitado',
+    };
+  }
+
+  if (sellerProgress && buyerProgress) {
+    const hasRes = sellerStatus === 'APPROVED_WITH_RES' || buyerStatus === 'APPROVED_WITH_RES';
+    const nextStep =
+      resolveContractStatus(row.status) === 'IN_DRAFT'
+        ? 'Minuta liberada'
+        : 'Aguardando liberação para minuta';
+    return {
+      status: hasRes ? 'APPROVED_WITH_RES' : 'APPROVED',
+      label: hasRes ? 'Aprovado com ressalvas' : 'Aprovado',
+      nextStep,
+    };
+  }
+
+  if (sellerProgress || buyerProgress) {
+    return {
+      status: 'IN_PROGRESS',
+      label: 'Em análise',
+      nextStep: sellerProgress && !buyerProgress
+        ? 'Aguardando aprovação do comprador'
+        : !sellerProgress && buyerProgress
+          ? 'Aguardando aprovação do captador'
+          : 'Aguardando avaliação do outro lado',
+    };
+  }
+
+  if (hasSellerDecision || hasBuyerDecision) {
+    return {
+      status: 'IN_PROGRESS',
+      label: 'Em análise',
+      nextStep: 'Aguardando avaliação do outro lado',
+    };
+  }
+
+  return {
+    status: 'PENDING',
+    label: 'Pendente',
+    nextStep: 'Aguardando avaliação dos dois lados',
+  };
+}
+
 function isSignedDocumentType(value: string): boolean {
   return (
     value === 'contrato_assinado' ||
@@ -919,6 +981,7 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     buyerClientName: row.buyer_client_name ?? null,
     responsibleUserIds: parseResponsibleUserIds(row.responsible_user_ids),
     viewerSide,
+    approvalProgress: summarizeContractApprovalProgress(row),
     documentRequirements,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),

@@ -129,6 +129,11 @@ describe('GET /admin/contracts response shape contracts', () => {
           sellingBrokerName: 'Vendedor',
           sellerApprovalStatus: 'APPROVED_WITH_RES',
           buyerApprovalStatus: 'PENDING',
+          approvalProgress: {
+            status: 'IN_PROGRESS',
+            label: 'Em análise',
+            nextStep: 'Aguardando aprovação do comprador',
+          },
           responsibleUserIds: [30003, 30005],
           sellerApprovalReason: {
             reason: 'Documento legível.',

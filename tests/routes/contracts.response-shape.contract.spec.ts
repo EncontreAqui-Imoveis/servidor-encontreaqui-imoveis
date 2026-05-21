@@ -110,6 +110,11 @@ describe('Contract response shape contracts', () => {
         },
         sellerApprovalStatus: 'APPROVED',
         buyerApprovalStatus: 'APPROVED_WITH_RES',
+        approvalProgress: {
+          status: 'APPROVED_WITH_RES',
+          label: 'Aprovado com ressalvas',
+          nextStep: 'Aguardando liberação para minuta',
+        },
         propertyTitle: 'Casa Centro',
         propertyImageUrl: 'https://cdn.example.com/property-101.jpg',
         propertyPurpose: 'Aluguel',
@@ -190,6 +195,11 @@ describe('Contract response shape contracts', () => {
           propertyPurpose: 'Venda',
           agencyName: 'Encontre Aqui',
           agencyAddress: 'Av. Brasil, 200',
+          approvalProgress: {
+            status: 'PENDING',
+            label: 'Pendente',
+            nextStep: 'Aguardando avaliação dos dois lados',
+          },
           viewerSide: 'both',
           responsibleUserIds: [30003, 30005],
         },

@@ -66,6 +66,23 @@ const APPROVAL_GRANTS_PROGRESS = new Set<ContractApprovalStatus>([
   'APPROVED_WITH_RES',
 ]);
 
+function readBooleanLike(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes';
+  }
+
+  return false;
+}
+
 interface NegotiationForContractRow extends RowDataPacket {
   id: string;
   property_id: number;
@@ -3039,8 +3056,10 @@ class ContractController {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
     }
 
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const reuseCurrentDraft = readBooleanLike(body.reuseCurrentDraft);
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
-    if (!uploadedFile?.buffer || uploadedFile.buffer.length === 0) {
+    if (!reuseCurrentDraft && (!uploadedFile?.buffer || uploadedFile.buffer.length === 0)) {
       return res.status(400).json({ error: 'Arquivo PDF da minuta é obrigatório.' });
     }
 
@@ -3062,19 +3081,46 @@ class ContractController {
         });
       }
 
-      await storeNegotiationDocumentToR2({
-        executor: tx,
-        negotiationId: contract.negotiation_id,
-        type: 'contract',
-        documentType: 'contrato_minuta',
-        content: uploadedFile.buffer,
-        metadataJson: {
-          contractId,
-          originalFileName: uploadedFile.originalname ?? null,
-          uploadedAt: new Date().toISOString(),
-          uploadedVia: 'admin',
-        },
-      });
+      const existingDraftDocuments = (
+        await fetchDocumentsForContractScope(tx, contract, 'linked_or_legacy')
+      ).filter(
+        (document) =>
+          String(document.document_type ?? '').trim().toLowerCase() === 'contrato_minuta'
+      );
+
+      if (reuseCurrentDraft && existingDraftDocuments.length === 0) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'Não há minuta atual para prosseguir.',
+        });
+      }
+
+      if (uploadedFile?.buffer && uploadedFile.buffer.length > 0) {
+        await storeNegotiationDocumentToR2({
+          executor: tx,
+          negotiationId: contract.negotiation_id,
+          type: 'contract',
+          documentType: 'contrato_minuta',
+          content: uploadedFile.buffer,
+          metadataJson: {
+            contractId,
+            originalFileName: uploadedFile.originalname ?? null,
+            uploadedAt: new Date().toISOString(),
+            uploadedVia: 'admin',
+          },
+        });
+
+        if (existingDraftDocuments.length > 0) {
+          const existingDraftIds = existingDraftDocuments.map((document) => Number(document.id));
+          await tx.query(
+            `
+              DELETE FROM negotiation_documents
+              WHERE id IN (${existingDraftIds.map(() => '?').join(', ')})
+            `,
+            existingDraftIds
+          );
+        }
+      }
 
       await tx.query(
         `
@@ -3087,6 +3133,22 @@ class ContractController {
 
       const updatedContract = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
+
+      if (uploadedFile?.buffer && uploadedFile.buffer.length > 0 && existingDraftDocuments.length > 0) {
+        const cleanupStats = await cleanupContractDocumentAssets(existingDraftDocuments, {
+          action: 'replace_contract_draft',
+          contractId,
+          negotiationId: contract.negotiation_id,
+        });
+        if (cleanupStats.failed > 0) {
+          console.warn('Falha ao limpar minuta anterior do contrato:', {
+            contractId,
+            negotiationId: contract.negotiation_id,
+            attempted: cleanupStats.attempted,
+            failed: cleanupStats.failed,
+          });
+        }
+      }
 
       const propertyTitle =
         (contract.property_title ?? '').trim() || 'Imóvel sem título';

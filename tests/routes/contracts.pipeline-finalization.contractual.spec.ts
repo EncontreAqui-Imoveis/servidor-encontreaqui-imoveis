@@ -25,6 +25,10 @@ const { storeNegotiationDocumentToR2Mock } = vi.hoisted(() => ({
   storeNegotiationDocumentToR2Mock: vi.fn(),
 }));
 
+const { deleteNegotiationDocumentObjectMock } = vi.hoisted(() => ({
+  deleteNegotiationDocumentObjectMock: vi.fn(),
+}));
+
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
@@ -42,7 +46,7 @@ vi.mock('../../src/services/notificationService', () => ({
 vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
   readNegotiationDocumentObject: vi.fn(),
-  deleteNegotiationDocumentObject: vi.fn(),
+  deleteNegotiationDocumentObject: deleteNegotiationDocumentObjectMock,
   parseNegotiationDocumentMetadata: (value: unknown) =>
     value && typeof value === 'object' ? value : {},
 }));
@@ -119,6 +123,18 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     paymentReceipt: number;
     inspectionBoleto: number;
   };
+  let draftDocumentsState: Array<{
+    id: number;
+    type: string;
+    document_type: string | null;
+    metadata_json: Record<string, unknown>;
+    storage_provider: string | null;
+    storage_bucket: string | null;
+    storage_key: string | null;
+    storage_content_type: string | null;
+    storage_size_bytes: number | null;
+    storage_etag: string | null;
+  }>;
   let draftInsertCount: number;
   let negotiationStatusUpdate: string | null;
   let propertyStatusUpdate: {
@@ -136,6 +152,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       paymentReceipt: 0,
       inspectionBoleto: 0,
     };
+    draftDocumentsState = [];
     draftInsertCount = 0;
     negotiationStatusUpdate = null;
     propertyStatusUpdate = null;
@@ -175,6 +192,22 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
               inspection_boleto_total: evidenceCounts.inspectionBoleto,
             },
           ]];
+        }
+
+        if (
+          sql.includes('FROM negotiation_documents') &&
+          sql.includes('storage_provider') &&
+          sql.includes('ORDER BY id DESC')
+        ) {
+          return [draftDocumentsState];
+        }
+
+        if (sql.includes('DELETE FROM negotiation_documents') && sql.includes('id IN (')) {
+          const ids = params.map((value) => Number(value));
+          draftDocumentsState = draftDocumentsState.filter(
+            (document) => !ids.includes(Number(document.id))
+          );
+          return [{ affectedRows: ids.length }];
         }
 
         if (
@@ -225,6 +258,73 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       })
     );
     expect(createUserNotificationMock).toHaveBeenCalled();
+  });
+
+  it('permite prosseguir com a mesma minuta sem reenviar arquivo quando já existe PDF', async () => {
+    contractState = createContractState({
+      status: 'IN_DRAFT',
+      property_purpose: 'Venda',
+    });
+    draftDocumentsState = [
+      {
+        id: 7101,
+        type: 'contract',
+        document_type: 'contrato_minuta',
+        metadata_json: {
+          contractId: 'contract-1',
+          originalFileName: 'minuta_atual.pdf',
+        },
+        storage_provider: 'R2',
+        storage_bucket: 'contracts',
+        storage_key: 'neg-1/contrato_minuta/7101',
+        storage_content_type: 'application/pdf',
+        storage_size_bytes: 128,
+        storage_etag: 'etag-1',
+      },
+    ];
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .field('reuseCurrentDraft', 'true');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+    expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
+  });
+
+  it('substitui a minuta antiga ao anexar um novo PDF', async () => {
+    contractState = createContractState({
+      status: 'IN_DRAFT',
+      property_purpose: 'Venda',
+    });
+    draftDocumentsState = [
+      {
+        id: 7201,
+        type: 'contract',
+        document_type: 'contrato_minuta',
+        metadata_json: {
+          contractId: 'contract-1',
+          originalFileName: 'minuta_antiga.pdf',
+        },
+        storage_provider: 'R2',
+        storage_bucket: 'contracts',
+        storage_key: 'neg-1/contrato_minuta/7201',
+        storage_content_type: 'application/pdf',
+        storage_size_bytes: 256,
+        storage_etag: 'etag-old',
+      },
+    ];
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 nova minuta%'), 'nova_minuta.pdf');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
+    expect(deleteNegotiationDocumentObjectMock).toHaveBeenCalledTimes(1);
+    expect(draftDocumentsState).toHaveLength(0);
   });
 
   it('blocks finalization when signed contract or payment proof is missing', async () => {
@@ -280,7 +380,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.contract.status).toBe('FINALIZED');
-    expect(response.body.contract.commissionData).toEqual({
+    expect(contractState.commission_data).toEqual({
       valorVenda: 10000,
       comissaoCaptador: 600,
       comissaoVendedor: 400,

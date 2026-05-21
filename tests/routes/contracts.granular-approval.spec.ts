@@ -197,6 +197,22 @@ describe('Contract granular approval and signed docs endpoints', () => {
     });
   });
 
+  it('does not mirror seller rejection onto buyer', async () => {
+    const response = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'seller',
+        status: 'REJECTED',
+        reason: 'Documento do captador inconsistente.',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.sellerApprovalStatus).toBe('REJECTED');
+    expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
+    expect(response.body.contract.status).toBe('AWAITING_DOCS');
+    expect(response.body.movedToDraft).toBe(false);
+  });
+
   it('moves to IN_DRAFT only when both sides are approved', async () => {
     const firstResponse = await request(app)
       .put('/admin/contracts/contract-1/evaluate-side')

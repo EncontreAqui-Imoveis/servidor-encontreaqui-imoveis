@@ -856,7 +856,6 @@ async function fetchContractCategoryValidationRows(
 
 function hasRequiredCategoryGateApproval(input: {
   rows: ContractDocumentRow[];
-  doubleEnded: boolean;
   contract: ContractRow;
 }): boolean {
   const mapped = input.rows.map((row) => mapDocument(row));
@@ -881,9 +880,6 @@ function hasRequiredCategoryGateApproval(input: {
       }
     );
   const sellerReady = sideReady(progress.seller);
-  if (input.doubleEnded) {
-    return sellerReady;
-  }
   return sellerReady && sideReady(progress.buyer);
 }
 
@@ -1642,11 +1638,6 @@ function shouldMoveToDraft(
   if (currentStatus !== 'AWAITING_DOCS') {
     return false;
   }
-
-  if (isDoubleEndedDeal(contract)) {
-    return approvalStatusAllowsProgress(sellerStatus);
-  }
-
   return (
     approvalStatusAllowsProgress(sellerStatus) &&
     approvalStatusAllowsProgress(buyerStatus)
@@ -1669,14 +1660,8 @@ function resolveApprovalStatusesForProgress(
   sellerStatus: ContractApprovalStatus;
   buyerStatus: ContractApprovalStatus;
 } {
-  if (isDoubleEndedDeal(contract) || !shouldTreatContractAsSingleClientFlow(contract)) {
-    return input;
-  }
-
-  return {
-    sellerStatus: input.sellerStatus,
-    buyerStatus: approvalStatusAllowsProgress(input.buyerStatus) ? input.buyerStatus : 'APPROVED',
-  };
+  void contract;
+  return input;
 }
 
 const CONTRACT_SELECT_BASE_SQL = `
@@ -2520,12 +2505,7 @@ class ContractController {
       let nextBuyerReason = parseStoredJsonObject(contract.buyer_approval_reason);
 
       const sideReason = reasonPayload ?? {};
-      if (isDoubleEndedDeal(contract)) {
-        nextSellerStatus = nextSideStatus;
-        nextBuyerStatus = nextSideStatus;
-        nextSellerReason = sideReason;
-        nextBuyerReason = sideReason;
-      } else if (side === 'seller') {
+      if (side === 'seller') {
         nextSellerStatus = nextSideStatus;
         nextSellerReason = sideReason;
       } else {
@@ -2533,9 +2513,7 @@ class ContractController {
         nextBuyerReason = sideReason;
       }
 
-      const targetSides: ContractDocumentSide[] = isDoubleEndedDeal(contract)
-        ? ['seller', 'buyer']
-        : [side as ContractDocumentSide];
+      const targetSides: ContractDocumentSide[] = [side as ContractDocumentSide];
       const normalizedCategoryStatus: ContractDocumentCategoryStatus =
         nextSideStatus === 'REJECTED'
           ? 'REJECTED'
@@ -2597,7 +2575,6 @@ class ContractController {
       const categoryRows = await fetchContractCategoryValidationRows(tx, contract);
       const mustMoveToDraftByCategories = hasRequiredCategoryGateApproval({
         rows: categoryRows,
-        doubleEnded: isDoubleEndedDeal(contract),
         contract,
       });
       const mustMoveToDraft = mustMoveToDraftBySide && mustMoveToDraftByCategories;
@@ -2866,9 +2843,7 @@ class ContractController {
       );
 
       const nextSellerStatus = resolveSideApprovalFromCategoryProgress(progress.seller);
-      const nextBuyerStatus = isDoubleEndedDeal(contract)
-        ? nextSellerStatus
-        : resolveSideApprovalFromCategoryProgress(progress.buyer);
+      const nextBuyerStatus = resolveSideApprovalFromCategoryProgress(progress.buyer);
       const effectiveStatuses = resolveApprovalStatusesForProgress(contract, {
         sellerStatus: nextSellerStatus,
         buyerStatus: nextBuyerStatus,
@@ -2880,7 +2855,6 @@ class ContractController {
       );
       const mustMoveByCategories = hasRequiredCategoryGateApproval({
         rows: updatedRows,
-        doubleEnded: isDoubleEndedDeal(contract),
         contract,
       });
       const nextContractStatus: ContractStatus =

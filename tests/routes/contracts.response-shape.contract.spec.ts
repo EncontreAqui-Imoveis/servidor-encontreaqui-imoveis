@@ -210,6 +210,72 @@ describe('Contract response shape contracts', () => {
     });
   });
 
+  it('keeps rejected documents visible in the contract payload', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
+        return [[
+          {
+            id: 'contract-rejected-doc',
+            negotiation_id: 'neg-rejected-doc',
+            property_id: 303,
+            status: 'AWAITING_DOCS',
+            seller_info: JSON.stringify({}),
+            buyer_info: JSON.stringify({}),
+            commission_data: JSON.stringify({}),
+            workflow_metadata: JSON.stringify({}),
+            seller_approval_status: 'PENDING',
+            buyer_approval_status: 'PENDING',
+            seller_approval_reason: null,
+            buyer_approval_reason: null,
+            created_at: '2026-03-02 10:00:00',
+            updated_at: '2026-03-02 10:05:00',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30004,
+            property_title: 'Casa Documento Rejeitado',
+            property_purpose: 'Venda',
+            property_code: 'RV-303',
+            capturing_broker_name: 'Captador',
+            selling_broker_name: 'Vendedor',
+            buyer_client_name: 'Cliente Comprador',
+            capturing_agency_name: 'Encontre Aqui',
+            capturing_agency_address: 'Rua Central, 100',
+            responsible_user_ids: '30003',
+          },
+        ]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[
+          {
+            id: 77,
+            type: 'other',
+            document_type: 'doc_identidade',
+            metadata_json: JSON.stringify({
+              side: 'seller',
+              originalFileName: 'identidade_rejeitada.pdf',
+              status: 'REJECTED',
+              reviewStatus: 'REJECTED',
+            }),
+            created_at: '2026-03-02 10:01:00',
+          },
+        ]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(app).get('/contracts/contract-rejected-doc');
+
+    expect(response.status).toBe(200);
+    expect(response.body.documents).toHaveLength(1);
+    expect(response.body.documents[0]).toMatchObject({
+      id: 77,
+      documentType: 'doc_identidade',
+      side: 'seller',
+      originalFileName: 'identidade_rejeitada.pdf',
+    });
+  });
+
   it('redacts owner sensitive fields for client viewers', async () => {
     const clientApp = express();
     clientApp.use(express.json());

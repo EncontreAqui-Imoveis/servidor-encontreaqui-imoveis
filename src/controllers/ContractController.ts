@@ -1136,7 +1136,6 @@ function mapContractWithDocumentProgress(
   const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
   const documents = documentRows
     .filter((document) => !isProposalDocument(document))
-    .filter((document) => !isRejectedNegotiationDocumentRow(document))
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${row.negotiation_id}/documents/${document.id}/download`,
@@ -2567,17 +2566,11 @@ class ContractController {
         sellerStatus: nextSellerStatus,
         buyerStatus: nextBuyerStatus,
       });
-      const mustMoveToDraftBySide = shouldMoveToDraft(
+      const mustMoveToDraft = shouldMoveToDraft(
         contract,
         effectiveStatuses.sellerStatus,
         effectiveStatuses.buyerStatus
       );
-      const categoryRows = await fetchContractCategoryValidationRows(tx, contract);
-      const mustMoveToDraftByCategories = hasRequiredCategoryGateApproval({
-        rows: categoryRows,
-        contract,
-      });
-      const mustMoveToDraft = mustMoveToDraftBySide && mustMoveToDraftByCategories;
       const nextContractStatus: ContractStatus = mustMoveToDraft
         ? 'IN_DRAFT'
         : 'AWAITING_DOCS';
@@ -2631,7 +2624,7 @@ class ContractController {
               AND lifecycle_status NOT IN ('SOLD', 'RENTED')
               AND status NOT IN ('sold', 'rented')
           `,
-          [contract.property_id]
+            [contract.property_id]
         );
       }
 
@@ -2698,9 +2691,22 @@ class ContractController {
         }
       }
 
+      const contractForResponse = updated
+        ? mapContract(
+            {
+              ...updated,
+              status: nextContractStatus,
+              seller_approval_status: nextSellerStatus,
+              buyer_approval_status: nextBuyerStatus,
+              seller_approval_reason: JSON.stringify(nextSellerReason),
+              buyer_approval_reason: JSON.stringify(nextBuyerReason),
+            } as ContractRow,
+            req
+          )
+        : null;
       return res.status(200).json({
         message: 'Avaliação do lado atualizada com sucesso.',
-        contract: updated ? mapContract(updated, req) : null,
+        contract: contractForResponse,
         movedToDraft: mustMoveToDraft,
       });
     } catch (error) {
@@ -3845,7 +3851,6 @@ class ContractController {
       const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
       const mappedDocuments = documents
         .filter((document) => !isProposalDocument(document))
-        .filter((document) => !isRejectedNegotiationDocumentRow(document))
         .map((document) => ({
           ...mapDocument(document),
           downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
@@ -3992,7 +3997,6 @@ class ContractController {
       const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
       const mappedDocuments = documents
         .filter((document) => !isProposalDocument(document))
-        .filter((document) => !isRejectedNegotiationDocumentRow(document))
         .map((document) => ({
           ...mapDocument(document),
           downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,

@@ -153,15 +153,8 @@ describe('Contract granular approval and signed docs endpoints', () => {
           contractState.buyer_approval_reason = JSON.parse(
             String(params[3] ?? 'null')
           );
-          contractState.status = String(params[4]);
-          return [{ affectedRows: 1 }];
-        }
-
-        if (
-          sql.includes('UPDATE contracts') &&
-          sql.includes('workflow_metadata = CAST(? AS JSON)')
-        ) {
-          contractState.workflow_metadata = JSON.parse(String(params[0] ?? '{}'));
+          contractState.workflow_metadata = JSON.parse(String(params[4] ?? '{}'));
+          contractState.status = String(params[5]);
           return [{ affectedRows: 1 }];
         }
 

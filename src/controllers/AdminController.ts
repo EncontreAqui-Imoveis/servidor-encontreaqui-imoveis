@@ -3051,6 +3051,8 @@ class AdminController {
       const requestedSearchColumn = String(req.query.searchColumn ?? '').trim();
       const status = normalizeStatus(req.query.status);
       const city = String(req.query.city ?? '').trim();
+      const purpose = String(req.query.purpose ?? '').trim().toLowerCase();
+      const paginate = String(req.query.paginate ?? 'true').trim().toLowerCase() !== 'false';
       const sortBy = String(req.query.sortBy ?? 'p.created_at');
       const sortOrder = String(req.query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
@@ -3134,8 +3136,18 @@ class AdminController {
       }
 
       if (city) {
-        whereClauses.push('p.city = ?');
+        whereClauses.push("LOWER(TRIM(COALESCE(p.city, ''))) = LOWER(TRIM(?))");
         params.push(city);
+      }
+
+      if (purpose) {
+        if (purpose.includes('vend')) {
+          whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
+          params.push('%vend%');
+        } else if (purpose.includes('alug')) {
+          whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
+          params.push('%alug%');
+        }
       }
 
       const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -3153,8 +3165,7 @@ class AdminController {
       );
       const total = totalRows[0]?.total ?? 0;
 
-      const [rows] = await adminDb.query<RowDataPacket[]>(
-        `
+      const dataQuery = `
           SELECT
             p.id,
             p.code,
@@ -3169,9 +3180,26 @@ class AdminController {
             p.promotional_rent_price,
             p.promotional_rent_percentage,
             p.city,
+            p.state,
             p.bairro,
             p.cep,
             p.purpose,
+            p.updated_at,
+            p.area_construida,
+            p.area_construida_unidade,
+            p.area_construida_valor,
+            p.area_construida_m2,
+            p.area_terreno,
+            p.area_terreno_unidade,
+            p.area_terreno_valor,
+            p.area_terreno_m2,
+            p.amenities,
+            p.has_wifi,
+            p.tem_piscina,
+            p.tem_energia_solar,
+            p.tem_automacao,
+            p.tem_ar_condicionado,
+            p.eh_mobiliada,
             p.created_at,
             p.broker_id,
             p.owner_id,
@@ -3194,10 +3222,11 @@ class AdminController {
           LEFT JOIN users u_owner ON u_owner.id = p.owner_id
           ${where}
           ORDER BY ${safeSortBy} ${sortOrder}
-          LIMIT ? OFFSET ?
-        `,
-        [...params, limit, offset]
-      );
+          ${paginate ? 'LIMIT ? OFFSET ?' : ''}
+        `;
+
+      const dataParams = paginate ? [...params, limit, offset] : params;
+      const [rows] = await adminDb.query<RowDataPacket[]>(dataQuery, dataParams);
 
       return res.json({ data: rows, total });
     } catch (error) {

@@ -6982,7 +6982,25 @@ class AdminController {
         await adminDb.query('INSERT INTO property_images (property_id, image_url) VALUES ?', [values]);
       }
 
-      return res.status(201).json({ message: 'Imagens adicionadas com sucesso.', images: uploadedUrls });
+      let uploadedImages: Array<{ id: number; url: string }> = [];
+      if (uploadedUrls.length > 0) {
+        const [uploadedImageRows] = await adminDb.query<RowDataPacket[]>(
+          `
+            SELECT id, image_url
+            FROM property_images
+            WHERE property_id = ?
+              AND image_url IN (${uploadedUrls.map(() => '?').join(', ')})
+            ORDER BY FIELD(image_url, ${uploadedUrls.map(() => '?').join(', ')})
+          `,
+          [propertyId, ...uploadedUrls, ...uploadedUrls]
+        );
+        uploadedImages = uploadedImageRows.map((row) => ({
+          id: Number(row.id),
+          url: String(row.image_url),
+        }));
+      }
+
+      return res.status(201).json({ message: 'Imagens adicionadas com sucesso.', images: uploadedImages });
     } catch (error) {
       console.error('Erro ao adicionar imagens:', error);
       const knownError = error as { statusCode?: number; message?: string } | null;

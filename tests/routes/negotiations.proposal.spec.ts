@@ -85,7 +85,7 @@ describe('POST /negotiations/proposal', () => {
     storeNegotiationDocumentToR2Mock.mockResolvedValue(91001);
   });
 
-  it('persists negotiation as proposal sent and returns generated PDF', async () => {
+  it('persists negotiation as proposal sent and returns generated proposal reference', async () => {
     txMock.query
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
@@ -126,14 +126,16 @@ describe('POST /negotiations/proposal', () => {
 
     expect(response.status).toBe(201);
     expect(response.body).toMatchObject({
-      message: 'Fila de processamento desativada. Proposta gerada de forma síncrona.',
+      message: 'Proposta gerada com sucesso.',
       negotiationId: expect.any(String),
+      documentId: 91001,
     });
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
       expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledTimes(1);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
     expect(txMock.commit).toHaveBeenCalledTimes(1);
   });
 
@@ -376,6 +378,61 @@ describe('POST /negotiations/proposal', () => {
 
     expect(response.status).toBe(403);
     expect(String(response.body.error ?? '')).toContain('proprio anuncio');
+  });
+
+  it('allows client to create proposal when property has no responsible broker', async () => {
+    authState.userId = 90002;
+    authState.userRole = 'client';
+
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: null,
+            owner_id: 90001,
+            status: 'approved',
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: null,
+            lote: null,
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-no-broker',
+      propertyId: 101,
+      clientName: 'Cliente Comprador',
+      clientCpf: '111.222.333-44',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(201);
+    expect(txMock.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO negotiations'),
+      expect.arrayContaining([101, null, null, 90002, 'PROPOSAL_SENT'])
+    );
+    expect(generateProposalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        brokerName: 'Corretor a definir',
+        sellingBrokerName: null,
+      })
+    );
   });
 
   it('maps PDF dependency failures to DEPENDENCY_UNAVAILABLE', async () => {

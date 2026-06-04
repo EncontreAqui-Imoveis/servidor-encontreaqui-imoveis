@@ -4,11 +4,13 @@ import type { Request, Response } from 'express';
 vi.mock('../../../../src/services/negotiationPersistenceService', () => ({
   queryNegotiationRows: vi.fn(),
   findNegotiationDocumentById: vi.fn(),
+  findLatestNegotiationDocumentByType: vi.fn(),
 }));
 
 import { negotiationController } from '../../../../src/controllers/NegotiationController';
 import {
   findNegotiationDocumentById,
+  findLatestNegotiationDocumentByType,
   queryNegotiationRows,
 } from '../../../../src/services/negotiationPersistenceService';
 
@@ -134,5 +136,86 @@ describe('NegotiationController.downloadDocument', () => {
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(findNegotiationDocumentById).not.toHaveBeenCalled();
+  });
+});
+
+describe('NegotiationController.downloadLatestProposal', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should set PDF headers and send latest proposal buffer when negotiation has a stored proposal', async () => {
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        capturing_broker_id: 55,
+        selling_broker_id: null,
+        buyer_client_id: null,
+      },
+    ] as any);
+
+    const fileContent = Buffer.from('%PDF-1.4 proposal');
+    vi.mocked(findLatestNegotiationDocumentByType).mockResolvedValue({
+      id: 987,
+      negotiationId: 'neg-1',
+      fileContent,
+      type: 'proposal',
+      documentType: 'proposal',
+      metadataJson: {},
+    });
+
+    const req = {
+      params: {
+        id: 'neg-1',
+      },
+      userId: 55,
+      userRole: 'broker',
+    } as unknown as Request;
+    const res = createMockResponse();
+
+    await negotiationController.downloadLatestProposal(req, res);
+
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename="proposta.pdf"'
+    );
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Length',
+      fileContent.length.toString()
+    );
+    expect(res.setHeader).toHaveBeenCalledWith('X-Document-Id', '987');
+    expect(res.end).toHaveBeenCalledWith(fileContent);
+  });
+
+  it('should return 404 when no proposal document exists for the negotiation', async () => {
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        capturing_broker_id: 55,
+        selling_broker_id: null,
+        buyer_client_id: null,
+      },
+    ] as any);
+
+    vi.mocked(findLatestNegotiationDocumentByType).mockResolvedValue(null);
+
+    const req = {
+      params: {
+        id: 'neg-1',
+      },
+      userId: 55,
+      userRole: 'broker',
+    } as unknown as Request;
+    const res = createMockResponse();
+
+    await negotiationController.downloadLatestProposal(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringContaining('Nenhuma proposta encontrada'),
+      })
+    );
   });
 });

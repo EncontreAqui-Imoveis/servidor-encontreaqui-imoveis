@@ -27,7 +27,7 @@ interface NegotiationUploadRow extends RowDataPacket {
   id: string;
   property_id: number;
   status: string;
-  capturing_broker_id: number;
+  capturing_broker_id: number | null;
   selling_broker_id: number | null;
   buyer_client_id: number | null;
   property_title: string | null;
@@ -110,6 +110,13 @@ interface ProposalIdempotencyRow extends RowDataPacket {
   negotiation_id: string | null;
   document_id: number | null;
 }
+
+type BrokerProposalContext = {
+  capturingBrokerId: number | null;
+  sellerBrokerId: number | null;
+  capturingBrokerName: string;
+  sellingBrokerName: string | null;
+};
 
 interface PropertyRow extends RowDataPacket {
   id: number;
@@ -405,22 +412,38 @@ function resolvePropertyValue(row: PropertyRow): number {
   return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
 }
 
-async function resolveSellerBrokerContext(
+function normalizeOptionalPositiveId(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function resolveBrokerProposalContext(
   tx: PoolConnection,
-  capturingBrokerId: number,
+  capturingBrokerId: number | null,
   requestedSellerBrokerId: number | null
-): Promise<{
-  capturingBrokerName: string;
-  sellerBrokerId: number;
-  sellingBrokerName: string;
-}> {
-  if (!Number.isFinite(capturingBrokerId) || capturingBrokerId <= 0) {
-    throw new Error('Corretor captador inválido.');
+): Promise<BrokerProposalContext> {
+  const normalizedCapturingBrokerId = normalizeOptionalPositiveId(capturingBrokerId);
+
+  if (normalizedCapturingBrokerId === null) {
+    if (requestedSellerBrokerId !== null) {
+      console.warn('Ignorando selling broker sem corretor captador em proposta.', {
+        requestedSellerBrokerId,
+      });
+    }
+    return {
+      capturingBrokerId: null,
+      sellerBrokerId: null,
+      capturingBrokerName: 'Corretor a definir',
+      sellingBrokerName: null,
+    };
   }
 
   const [capturingRows] = await tx.query<BrokerRow[]>(
     'SELECT name FROM users WHERE id = ? LIMIT 1',
-    [capturingBrokerId]
+    [normalizedCapturingBrokerId]
   );
   const capturingBrokerName = String(capturingRows[0]?.name ?? '').trim();
   if (!capturingBrokerName) {
@@ -429,17 +452,18 @@ async function resolveSellerBrokerContext(
 
   if (
     requestedSellerBrokerId != null &&
-    requestedSellerBrokerId !== capturingBrokerId
+    requestedSellerBrokerId !== normalizedCapturingBrokerId
   ) {
     console.warn('Ignorando selling broker legado em proposta.', {
-      capturingBrokerId,
+      capturingBrokerId: normalizedCapturingBrokerId,
       requestedSellerBrokerId,
     });
   }
 
   return {
+    capturingBrokerId: normalizedCapturingBrokerId,
     capturingBrokerName,
-    sellerBrokerId: capturingBrokerId,
+    sellerBrokerId: normalizedCapturingBrokerId,
     sellingBrokerName: capturingBrokerName,
   };
 }
@@ -1379,10 +1403,6 @@ class NegotiationController {
           await tx.rollback();
           return res.status(403).json({ error: 'Nao e possivel enviar proposta no proprio anuncio.' });
         }
-        if (!property.broker_id) {
-          await tx.rollback();
-          return res.status(400).json({ error: 'Imovel sem corretor responsavel.' });
-        }
       }
       if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
         await tx.rollback();
@@ -1425,21 +1445,19 @@ class NegotiationController {
         });
       }
 
-      const capturingBrokerId = isClientUser ? Number(property.broker_id ?? 0) : Number(req.userId ?? 0);
-      if (!Number.isFinite(capturingBrokerId) || capturingBrokerId <= 0) {
+      const requestedCapturingBrokerId = isClientUser
+        ? normalizeOptionalPositiveId(property.broker_id)
+        : normalizeOptionalPositiveId(req.userId);
+      if (isBrokerUser && requestedCapturingBrokerId === null) {
         await tx.rollback();
         return res.status(400).json({ error: 'Corretor captador invalido para esta proposta.' });
       }
 
-      let brokerContext: {
-        capturingBrokerName: string;
-        sellerBrokerId: number;
-        sellingBrokerName: string;
-      };
+      let brokerContext: BrokerProposalContext;
       try {
-        brokerContext = await resolveSellerBrokerContext(
+        brokerContext = await resolveBrokerProposalContext(
           tx,
-          capturingBrokerId,
+          requestedCapturingBrokerId,
           payload.sellerBrokerId
         );
       } catch (error) {
@@ -1458,6 +1476,7 @@ class NegotiationController {
 
       const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
 
+      const capturingBrokerId = brokerContext.capturingBrokerId;
       const sellerBrokerId = brokerContext.sellerBrokerId;
       const sellingBrokerName = brokerContext.sellingBrokerName;
 
@@ -1586,61 +1605,33 @@ class NegotiationController {
         validityDays: payload.validadeDias,
       };
 
-      try {
-        await addPdfJob({
-          negotiationId,
-          proposalData,
-          documentType: 'proposal',
-          userId: Number(req.userId),
-        });
-      } catch (queueError) {
-        if (!this.isPdfQueueDispatchFallbackError(queueError)) {
-          throw queueError;
+      const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
+      const documentId = await saveNegotiationProposalDocument(
+        negotiationId,
+        pdfBuffer,
+        tx,
+        {
+          originalFileName: 'proposta.pdf',
+          generated: true,
+          metadata: { source: 'mobile_proposal_wizard' },
         }
+      );
 
-        console.warn('Fila de PDF indisponível. Usando fallback síncrono para proposta.', {
-          negotiationId,
-          queueError: queueError instanceof Error ? queueError.message : String(queueError),
-        });
-
-        try {
-          await this.fallbackGenerateProposalSynchronously(negotiationId, proposalData);
-          await tx.commit();
-          return res.status(201).json({
-            message: 'Fila de processamento desativada. Proposta gerada de forma síncrona.',
-            negotiationId,
-          });
-        } catch (fallbackError) {
-          console.error('Falha no fallback síncrono de geração de proposta:', fallbackError);
-          if (isDependencyUnavailableError(fallbackError)) {
-            return this.respondWithCode(
-              req,
-              res,
-              503,
-              'DEPENDENCY_UNAVAILABLE',
-              'Servico temporariamente indisponivel. Tente novamente em instantes.',
-              true
-            );
-          }
-          if (fallbackError instanceof Error) {
-            return this.respondWithCode(
-              req,
-              res,
-              500,
-              'INTERNAL_SERVER_ERROR',
-              fallbackError.message,
-              false
-            );
-          }
-          throw fallbackError;
-        }
-      }
+      await tx.execute(
+        `
+          UPDATE negotiation_proposal_idempotency
+          SET negotiation_id = ?, document_id = ?
+          WHERE user_id = ? AND idempotency_key = ?
+        `,
+        [negotiationId, documentId, req.userId, idempotencyKey]
+      );
 
       await tx.commit();
 
-      return res.status(202).json({
-        message: 'Proposta enviada! Estamos gerando o documento PDF agora. Você será notificado em instantes.',
+      return res.status(201).json({
+        message: 'Proposta gerada com sucesso.',
         negotiationId,
+        documentId,
       });
     } catch (error: any) {
       if (tx) {
@@ -2242,17 +2233,6 @@ class NegotiationController {
             false
           );
         }
-        if (!property.broker_id) {
-          await tx.rollback();
-          return this.respondWithCode(
-            req,
-            res,
-            400,
-            'PROPOSAL_VALIDATION_FAILED',
-            'Imovel sem corretor responsavel.',
-            false
-          );
-        }
       }
       if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
         await tx.rollback();
@@ -2313,10 +2293,10 @@ class NegotiationController {
           { propertyValue: proposalValue, paymentTotal }
         );
       }
-      const capturingBrokerId = isClientUser
-        ? Number(property.broker_id ?? 0)
-        : Number(req.userId ?? 0);
-      if (!Number.isFinite(capturingBrokerId) || capturingBrokerId <= 0) {
+      const requestedCapturingBrokerId = isClientUser
+        ? normalizeOptionalPositiveId(property.broker_id)
+        : normalizeOptionalPositiveId(req.userId);
+      if (isBrokerUser && requestedCapturingBrokerId === null) {
         await tx.rollback();
         return this.respondWithCode(
           req,
@@ -2327,7 +2307,7 @@ class NegotiationController {
           false
         );
       }
-      if (Number(nRow.capturing_broker_id ?? 0) !== capturingBrokerId) {
+      if (normalizeOptionalPositiveId(nRow.capturing_broker_id) !== requestedCapturingBrokerId) {
         await tx.rollback();
         return this.respondWithCode(
           req,
@@ -2339,15 +2319,11 @@ class NegotiationController {
         );
       }
 
-      let brokerContext: {
-        capturingBrokerName: string;
-        sellerBrokerId: number;
-        sellingBrokerName: string;
-      };
+      let brokerContext: BrokerProposalContext;
       try {
-        brokerContext = await resolveSellerBrokerContext(
+        brokerContext = await resolveBrokerProposalContext(
           tx,
-          capturingBrokerId,
+          requestedCapturingBrokerId,
           payload.sellerBrokerId
         );
       } catch (error) {
@@ -2362,6 +2338,7 @@ class NegotiationController {
         );
       }
       const brokerName = brokerContext.capturingBrokerName;
+      const capturingBrokerId = brokerContext.capturingBrokerId;
       const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
       if (
         nRow.buyer_client_id != null &&

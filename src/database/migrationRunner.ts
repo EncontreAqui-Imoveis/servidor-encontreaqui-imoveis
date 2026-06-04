@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { RowDataPacket } from 'mysql2';
 import connection from './connection';
 
@@ -13,6 +12,23 @@ type MigrationFile = {
   downSql: string;
 };
 
+type StatementContext = {
+  migrationName: string;
+  migrationPath: string;
+  direction: MigrationDirection;
+  statementIndex: number;
+  statementCount: number;
+  statement: string;
+};
+
+type NegotiationConstraintViolationRow = RowDataPacket & {
+  id: number;
+  property_id: number | null;
+  selling_broker_id: number | null;
+  buyer_client_id: number | null;
+  status: string | null;
+};
+
 type AppliedMigrationRow = RowDataPacket & {
   id: number;
   name: string;
@@ -21,6 +37,8 @@ type AppliedMigrationRow = RowDataPacket & {
 
 const MIGRATION_MARKER_UP = '-- +migrate Up';
 const MIGRATION_MARKER_DOWN = '-- +migrate Down';
+const MIGRATION_DEBUG_ENABLED = ['1', 'true', 'yes'].includes(String(process.env.MIGRATION_DEBUG || '').toLowerCase());
+const NEGOTIATIONS_SELLING_BROKER_CONSTRAINT = 'chk_negotiations_selling_broker_required';
 
 function resolveMigrationsDir(): string {
   const currentDir = __dirname;
@@ -32,6 +50,48 @@ function splitSqlStatements(sql: string): string[] {
     .split(/;\s*(?:\r?\n|$)/g)
     .map((statement) => statement.trim())
     .filter((statement) => statement.length > 0);
+}
+
+function statementSummary(statement: string): string {
+  return statement.replace(/\s+/g, ' ').slice(0, 240);
+}
+
+function isKnownNegotiationsConstraintStatement(statement: string): boolean {
+  const normalized = statement.toLowerCase();
+  return (
+    normalized.includes('add constraint') &&
+    normalized.includes(NEGOTIATIONS_SELLING_BROKER_CONSTRAINT.toLowerCase()) &&
+    normalized.includes('check')
+  );
+}
+
+async function auditNegotiationsSellingBrokerConstraint(): Promise<NegotiationConstraintViolationRow[]> {
+  const [rows] = await connection.query<NegotiationConstraintViolationRow[]>(
+    `
+      SELECT id, property_id, selling_broker_id, buyer_client_id, status
+      FROM negotiations
+      WHERE selling_broker_id IS NULL
+        AND buyer_client_id IS NULL
+        AND COALESCE(UPPER(TRIM(status)), '') NOT IN ('REFUSED', 'CANCELLED')
+      ORDER BY id ASC
+      LIMIT 20
+    `
+  );
+
+  return rows;
+}
+
+function formatMigrationError(error: unknown, context: StatementContext): Error {
+  const baseMessage = error instanceof Error ? error.message : String(error);
+  const formatted = [
+    `Falha na migration ${context.migrationName} (${context.direction})`,
+    `Arquivo: ${context.migrationPath}`,
+    `Statement ${context.statementIndex + 1}/${context.statementCount}: ${statementSummary(context.statement)}`,
+    `Erro original: ${baseMessage}`,
+  ].join(' | ');
+  const wrapped = new Error(formatted);
+  (wrapped as Error & { cause?: unknown }).cause = error;
+  return wrapped;
 }
 
 function parseMigrationContent(name: string, fullPath: string, content: string): MigrationFile {
@@ -92,7 +152,7 @@ async function getAppliedMigrations(): Promise<AppliedMigrationRow[]> {
   return rows;
 }
 
-async function executeSqlBlock(sqlBlock: string): Promise<void> {
+async function executeSqlBlock(sqlBlock: string, context?: Omit<StatementContext, 'statement' | 'statementIndex' | 'statementCount'>): Promise<void> {
   const statements = splitSqlStatements(sqlBlock);
   if (statements.length === 0) {
     return;
@@ -100,8 +160,46 @@ async function executeSqlBlock(sqlBlock: string): Promise<void> {
 
   const db = await connection.getConnection();
   try {
-    for (const statement of statements) {
-      await db.query(statement);
+    for (let index = 0; index < statements.length; index += 1) {
+      const statement = statements[index];
+      const statementContext: StatementContext | undefined = context
+        ? {
+            ...context,
+            statement,
+            statementIndex: index,
+            statementCount: statements.length,
+          }
+        : undefined;
+
+      if (MIGRATION_DEBUG_ENABLED) {
+        const prefix = statementContext
+          ? `[migration-debug] ${statementContext.migrationName} ${statementContext.direction} ${index + 1}/${statements.length}`
+          : '[migration-debug] statement';
+        console.log(`${prefix}: ${statementSummary(statement)}`);
+      }
+
+      if (statementContext && isKnownNegotiationsConstraintStatement(statement)) {
+        const violations = await auditNegotiationsSellingBrokerConstraint();
+        if (violations.length > 0) {
+          const preview = JSON.stringify(violations.slice(0, 5), null, 2);
+          throw new Error(
+            [
+              `Constraint preflight failed for ${NEGOTIATIONS_SELLING_BROKER_CONSTRAINT}`,
+              `Violating rows: ${violations.length}`,
+              `Sample: ${preview}`,
+            ].join(' | ')
+          );
+        }
+      }
+
+      try {
+        await db.query(statement);
+      } catch (error) {
+        if (statementContext) {
+          throw formatMigrationError(error, statementContext);
+        }
+        throw error;
+      }
     }
   } catch (error) {
     throw error;
@@ -126,7 +224,11 @@ async function applyUpMigrations(): Promise<void> {
   for (const migration of pending) {
     console.log(`Aplicando migration: ${migration.name}`);
     console.log('SQL:', migration.upSql.substring(0, 500) + '...');
-    await executeSqlBlock(migration.upSql);
+    await executeSqlBlock(migration.upSql, {
+      migrationName: migration.name,
+      migrationPath: migration.path,
+      direction: 'up',
+    });
     await connection.query('INSERT INTO schema_migrations (name) VALUES (?)', [migration.name]);
   }
 
@@ -159,7 +261,11 @@ async function applyDownMigration(targetName?: string): Promise<void> {
   }
 
   console.log(`Fazendo rollback da migration: ${target.name}`);
-  await executeSqlBlock(migrationFile.downSql);
+  await executeSqlBlock(migrationFile.downSql, {
+    migrationName: migrationFile.name,
+    migrationPath: migrationFile.path,
+    direction: 'down',
+  });
   await connection.query('DELETE FROM schema_migrations WHERE name = ?', [target.name]);
   console.log('Rollback concluido.');
 }

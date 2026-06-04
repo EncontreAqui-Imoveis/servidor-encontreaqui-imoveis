@@ -18,9 +18,11 @@ export class ContractDraftingState extends NegotiationState {
   }
 
   protected assertCanEnter(): void {
-    const { sellingBrokerId } = this.context.negotiation;
-    if (!sellingBrokerId) {
-      throw new ValidationError('selling_broker_id is required before Contract Drafting.');
+    const { sellingBrokerId, sellerClientId } = this.context.negotiation;
+    if (!sellingBrokerId && !sellerClientId) {
+      throw new ValidationError(
+        'selling_broker_id or seller_client_id is required before Contract Drafting.'
+      );
     }
   }
 

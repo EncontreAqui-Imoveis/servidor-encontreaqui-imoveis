@@ -11,6 +11,7 @@ interface NegotiationRow {
   final_value: number | string | null;
   capturing_broker_id: number;
   selling_broker_id: number | null;
+  seller_client_id?: number | null;
 }
 
 const toRows = <T>(result: T[] | [T[], unknown]): T[] => {
@@ -94,7 +95,13 @@ export class CommissionService {
     const totalPercentage = rule.totalPercentage;
 
     if (negotiation.selling_broker_id === null) {
-      throw new ValidationError('selling_broker_id is required to calculate commissions.');
+      return [
+        {
+          brokerId: negotiation.capturing_broker_id,
+          role: 'CAPTURING',
+          amount: Number(((finalValue * totalPercentage) / 100).toFixed(2)),
+        },
+      ];
     }
 
     if (negotiation.capturing_broker_id === negotiation.selling_broker_id) {

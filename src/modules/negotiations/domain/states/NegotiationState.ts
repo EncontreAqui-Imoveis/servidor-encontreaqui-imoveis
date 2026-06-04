@@ -48,6 +48,7 @@ export interface NegotiationSnapshot {
   propertyId: number;
   capturingBrokerId: number;
   sellingBrokerId: number | null;
+  sellerClientId?: number | null;
   buyerClientId: number | null;
   finalValue: number | null;
   paymentDetails: PaymentDetails | null;

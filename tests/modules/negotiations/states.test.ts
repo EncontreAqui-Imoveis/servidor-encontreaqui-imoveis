@@ -4,6 +4,7 @@ import { mock } from 'vitest-mock-extended';
 import { NegotiationEventBus } from '../../../src/modules/negotiations/domain/events/NegotiationEventBus';
 import { ConflictError } from '../../../src/modules/negotiations/domain/errors/ConflictError';
 import { ValidationError } from '../../../src/modules/negotiations/domain/errors/ValidationError';
+import { ContractDraftingState } from '../../../src/modules/negotiations/domain/states/ContractDraftingState';
 import { AwaitingSignaturesState } from '../../../src/modules/negotiations/domain/states/AwaitingSignaturesState';
 import { DocumentationPhaseState } from '../../../src/modules/negotiations/domain/states/DocumentationPhaseState';
 import { ProposalSentState } from '../../../src/modules/negotiations/domain/states/ProposalSentState';
@@ -22,6 +23,7 @@ const createBaseSnapshot = (): NegotiationSnapshot => ({
   propertyId: 10,
   capturingBrokerId: 101,
   sellingBrokerId: 202,
+  sellerClientId: 404,
   buyerClientId: 303,
   finalValue: 100000,
   paymentDetails: { method: 'MONEY', amount: 100000 },
@@ -133,6 +135,44 @@ describe('DocumentationPhaseState', () => {
       })
     );
     expect(result.status).toBe('CONTRACT_DRAFTING');
+  });
+
+  it('allows moveToContractDrafting when only sellerClientId is present', async () => {
+    const { context, trx, repositories } = createContext({
+      negotiation: {
+        ...createBaseSnapshot(),
+        status: 'DOCUMENTATION_PHASE',
+        sellingBrokerId: null,
+        sellerClientId: 404,
+      },
+    });
+
+    const state = new DocumentationPhaseState(context);
+    const result = await state.moveToContractDrafting(1);
+
+    expect(repositories.negotiations.updateStatusWithOptimisticLock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: context.negotiation.id,
+        toStatus: 'CONTRACT_DRAFTING',
+        trx,
+      })
+    );
+    expect(result.status).toBe('CONTRACT_DRAFTING');
+  });
+});
+
+describe('ContractDraftingState', () => {
+  it('allows entering when sellerClientId exists', () => {
+    const { context } = createContext({
+      negotiation: {
+        ...createBaseSnapshot(),
+        status: 'CONTRACT_DRAFTING',
+        sellingBrokerId: null,
+        sellerClientId: 404,
+      },
+    });
+
+    expect(() => new ContractDraftingState(context)).not.toThrow();
   });
 });
 

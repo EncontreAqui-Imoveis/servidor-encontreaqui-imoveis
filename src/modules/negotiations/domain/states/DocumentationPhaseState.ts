@@ -14,8 +14,10 @@ export class DocumentationPhaseState extends NegotiationState {
     const { negotiation, repositories, transactionManager } = this.context;
 
     return transactionManager.run(async (trx) => {
-      if (!negotiation.sellingBrokerId) {
-        throw new ValidationError('selling_broker_id is required before Contract Drafting.');
+      if (!negotiation.sellingBrokerId && !negotiation.sellerClientId) {
+        throw new ValidationError(
+          'selling_broker_id or seller_client_id is required before Contract Drafting.'
+        );
       }
 
       const { pendingOrRejected, approved } =

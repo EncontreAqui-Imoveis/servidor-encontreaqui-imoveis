@@ -29,6 +29,7 @@ interface NegotiationUploadRow extends RowDataPacket {
   status: string;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
+  seller_client_id: number | null;
   buyer_client_id: number | null;
   property_title: string | null;
   broker_name: string | null;
@@ -50,6 +51,7 @@ interface NegotiationListRow extends RowDataPacket {
   payment_details?: unknown;
   capturing_broker_id?: number | null;
   selling_broker_id?: number | null;
+  seller_client_id?: number | null;
   buyer_client_id?: number | null;
   last_draft_edit_at?: Date | string | null;
   final_value?: number | null;
@@ -87,6 +89,7 @@ type NegotiationSummaryPayload = {
   } | null;
   propertyBrokerId: number | null;
   sellerBrokerId: number | null;
+  sellerClientId: number | null;
   contractId: string | null;
   contractStatus: string | null;
   buyerApprovalStatus: string | null;
@@ -97,6 +100,7 @@ interface NegotiationAccessRow extends RowDataPacket {
   id: string;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
+  seller_client_id: number | null;
   buyer_client_id: number | null;
   status?: string | null;
 }
@@ -577,6 +581,7 @@ function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPa
     paymentBreakdown: null,
     propertyBrokerId: null,
     sellerBrokerId: null,
+    sellerClientId: null,
     contractId: null,
     contractStatus: null,
     buyerApprovalStatus: null,
@@ -672,6 +677,10 @@ function buildMineNegotiationSummary(
       row.selling_broker_id != null && Number.isFinite(Number(row.selling_broker_id))
         ? Number(row.selling_broker_id)
         : null,
+    sellerClientId:
+      row.seller_client_id != null && Number.isFinite(Number(row.seller_client_id))
+        ? Number(row.seller_client_id)
+        : null,
     contractId:
       row.contract_id != null && String(row.contract_id).trim().length > 0
         ? String(row.contract_id).trim()
@@ -695,6 +704,7 @@ function buildMineNegotiationSummary(
 
 type NegotiationColumnFlags = {
   hasSellingBrokerId: boolean;
+  hasSellerClientId: boolean;
   hasBuyerClientId: boolean;
   hasClientName: boolean;
   hasClientCpf: boolean;
@@ -715,6 +725,7 @@ async function getNegotiationColumnFlags(): Promise<NegotiationColumnFlags> {
         AND table_name = 'negotiations'
         AND column_name IN (
           'selling_broker_id',
+          'seller_client_id',
           'buyer_client_id',
           'client_name',
           'client_cpf',
@@ -735,6 +746,7 @@ async function getNegotiationColumnFlags(): Promise<NegotiationColumnFlags> {
 
   return {
     hasSellingBrokerId: columns.has('selling_broker_id'),
+    hasSellerClientId: columns.has('seller_client_id'),
     hasBuyerClientId: columns.has('buyer_client_id'),
     hasClientName: columns.has('client_name'),
     hasClientCpf: columns.has('client_cpf'),
@@ -779,6 +791,7 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
         n.updated_at,
         n.capturing_broker_id,
         n.selling_broker_id,
+        n.seller_client_id,
         n.buyer_client_id,
         n.last_draft_edit_at,
         n.final_value,
@@ -798,7 +811,11 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
       JOIN properties p ON p.id = n.property_id
       LEFT JOIN property_images pi ON pi.property_id = p.id
       LEFT JOIN contracts c ON c.negotiation_id = n.id
-      WHERE (n.capturing_broker_id = ? OR n.buyer_client_id = ?)
+      WHERE (
+        n.capturing_broker_id = ?
+        OR n.buyer_client_id = ?
+        OR n.seller_client_id = ?
+      )
         AND UPPER(TRIM(n.status)) IN (${visiblePlaceholders})
       GROUP BY
         n.id,
@@ -815,6 +832,7 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
         n.updated_at,
         n.capturing_broker_id,
         n.selling_broker_id,
+        n.seller_client_id,
         n.buyer_client_id,
         n.last_draft_edit_at,
         n.final_value,
@@ -825,7 +843,7 @@ async function queryMineNegotiationsCurrent(userId: number): Promise<Negotiation
         c.seller_approval_status
       ORDER BY n.updated_at DESC, n.created_at DESC
     `,
-    [userId, userId, ...PROPOSAL_LIST_VISIBLE_STATUSES]
+    [userId, userId, userId, ...PROPOSAL_LIST_VISIBLE_STATUSES]
   );
 
   return rows.map((row) => buildMineNegotiationSummary(userId, row));
@@ -862,6 +880,7 @@ async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationS
         ${selectPaymentDetails} AS payment_details,
         n.capturing_broker_id,
         NULL AS selling_broker_id,
+        NULL AS seller_client_id,
         NULL AS buyer_client_id,
         NULL AS last_draft_edit_at,
         NULL AS final_value,
@@ -918,8 +937,13 @@ async function queryMineNegotiationsSchemaAware(
     whereClauses.push('n.buyer_client_id = ?');
     params.push(userId);
   }
+  if (flags.hasSellerClientId) {
+    whereClauses.push('n.seller_client_id = ?');
+    params.push(userId);
+  }
 
   const selectSelling = flags.hasSellingBrokerId ? 'n.selling_broker_id' : 'NULL';
+  const selectSellerClient = flags.hasSellerClientId ? 'n.seller_client_id' : 'NULL';
   const selectBuyer = flags.hasBuyerClientId ? 'n.buyer_client_id' : 'NULL';
 
   const rows = await queryNegotiationRows<NegotiationListRow>(
@@ -947,6 +971,7 @@ async function queryMineNegotiationsSchemaAware(
         ${selectPaymentDetails} AS payment_details,
         n.capturing_broker_id,
         ${selectSelling} AS selling_broker_id,
+        ${selectSellerClient} AS seller_client_id,
         ${selectBuyer} AS buyer_client_id,
         ${selectLastDraft} AS last_draft_edit_at,
         ${selectFinalValue} AS final_value,
@@ -1013,6 +1038,7 @@ function canAccessNegotiationByOwnership(
   return (
     userId === Number(negotiation.capturing_broker_id ?? 0) ||
     userId === Number(negotiation.selling_broker_id ?? 0) ||
+    userId === Number(negotiation.seller_client_id ?? 0) ||
     userId === Number(negotiation.buyer_client_id ?? 0)
   );
 }
@@ -1024,7 +1050,10 @@ function canManageOwnProposal(
 ): boolean {
   const normalizedRole = String(role ?? '').trim().toLowerCase();
   if (normalizedRole === 'client') {
-    return userId === Number(negotiation.buyer_client_id ?? 0);
+    return (
+      userId === Number(negotiation.buyer_client_id ?? 0) ||
+      userId === Number(negotiation.seller_client_id ?? 0)
+    );
   }
   if (normalizedRole === 'broker') {
     return userId === Number(negotiation.capturing_broker_id ?? 0);
@@ -1475,6 +1504,7 @@ class NegotiationController {
       }
 
       const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
+      const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
       const capturingBrokerId = brokerContext.capturingBrokerId;
       const sellerBrokerId = brokerContext.sellerBrokerId;
@@ -1535,6 +1565,7 @@ class NegotiationController {
             property_id,
             capturing_broker_id,
             selling_broker_id,
+            seller_client_id,
             buyer_client_id,
             client_name,
             client_cpf,
@@ -1550,6 +1581,7 @@ class NegotiationController {
           payload.propertyId,
           capturingBrokerId,
           sellerBrokerId,
+          sellerClientId,
           buyerClientId,
           payload.clientName,
           payload.clientCpf,
@@ -1581,6 +1613,7 @@ class NegotiationController {
             source: 'mobile_proposal_wizard',
             payment: payload.pagamento,
             sellerBrokerId,
+            sellerClientId,
             capturingBrokerId,
             buyerClientId,
             clientName: payload.clientName,
@@ -1855,7 +1888,7 @@ class NegotiationController {
     try {
       const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
         `
-          SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
+          SELECT id, capturing_broker_id, selling_broker_id, seller_client_id, buyer_client_id
           FROM negotiations
           WHERE id = ?
           LIMIT 1
@@ -1925,7 +1958,7 @@ class NegotiationController {
     try {
       const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
         `
-          SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id
+          SELECT id, capturing_broker_id, selling_broker_id, seller_client_id, buyer_client_id
           FROM negotiations
           WHERE id = ?
           LIMIT 1
@@ -2340,6 +2373,7 @@ class NegotiationController {
       const brokerName = brokerContext.capturingBrokerName;
       const capturingBrokerId = brokerContext.capturingBrokerId;
       const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
+      const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
       if (
         nRow.buyer_client_id != null &&
         Number(nRow.buyer_client_id) !== Number(buyerClientId ?? 0)
@@ -2376,6 +2410,7 @@ class NegotiationController {
           SET
             capturing_broker_id = ?,
             selling_broker_id = ?,
+            seller_client_id = ?,
             buyer_client_id = ?,
             client_name = ?,
             client_cpf = ?,
@@ -2390,6 +2425,7 @@ class NegotiationController {
         [
           capturingBrokerId,
           brokerContext.sellerBrokerId,
+          sellerClientId,
           buyerClientId,
           payload.clientName,
           payload.clientCpf,
@@ -2425,6 +2461,7 @@ class NegotiationController {
             source: 'mobile_proposal_wizard_update',
             payment: payload.pagamento,
             sellerBrokerId,
+            sellerClientId,
             capturingBrokerId,
             buyerClientId,
             clientName: payload.clientName,
@@ -2522,7 +2559,7 @@ class NegotiationController {
       tx = await getNegotiationDbConnection();
       await tx.beginTransaction();
       const [rows] = await tx.query<NegotiationAccessRow[]>(
-        'SELECT id, capturing_broker_id, selling_broker_id, buyer_client_id, status FROM negotiations WHERE id = ? FOR UPDATE',
+        'SELECT id, capturing_broker_id, selling_broker_id, seller_client_id, buyer_client_id, status FROM negotiations WHERE id = ? FOR UPDATE',
         [negotiationId]
       );
       const row = rows[0];

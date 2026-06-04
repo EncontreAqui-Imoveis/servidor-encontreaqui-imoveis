@@ -41,8 +41,8 @@ export class DraftState extends NegotiationState {
         ? negotiation.capturingBrokerId
         : input.sellingBrokerId ?? null;
 
-      if (!input.selfAsSellingBroker && !resolvedSellingBrokerId) {
-        throw new ValidationError('Selling broker is required when not self-assigned.');
+      if (!input.selfAsSellingBroker && !resolvedSellingBrokerId && !negotiation.sellerClientId) {
+        throw new ValidationError('Selling broker or seller client is required when not self-assigned.');
       }
 
       const updatedRows = await repositories.negotiations.updateDraftWithOptimisticLock({

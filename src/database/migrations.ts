@@ -652,6 +652,10 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
     return;
   }
 
+  if (!(await columnExists('negotiations', 'seller_client_id'))) {
+    await connection.query('ALTER TABLE negotiations ADD COLUMN seller_client_id INT NULL AFTER selling_broker_id');
+  }
+
   if (!(await columnExists('negotiations', 'client_name'))) {
     await connection.query('ALTER TABLE negotiations ADD COLUMN client_name VARCHAR(255) NULL');
   }
@@ -685,6 +689,29 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
     WHERE (client_cpf IS NULL OR client_cpf = '')
       AND payment_details IS NOT NULL
   `);
+
+  await connection.query(`
+    UPDATE negotiations n
+    JOIN properties p ON p.id = n.property_id
+    SET n.seller_client_id = p.owner_id
+    WHERE n.seller_client_id IS NULL
+      AND p.owner_id IS NOT NULL
+      AND COALESCE(UPPER(TRIM(n.status)), '') NOT IN ('REFUSED', 'CANCELLED')
+  `);
+
+  if (!(await hasForeignKeyConstraint('negotiations', 'fk_negotiations_seller_client'))) {
+    await connection.query(
+      `ALTER TABLE negotiations
+       ADD CONSTRAINT fk_negotiations_seller_client
+       FOREIGN KEY (seller_client_id) REFERENCES users(id) ON DELETE SET NULL`
+    );
+  }
+
+  if (!(await indexExists('negotiations', 'idx_negotiations_seller_client'))) {
+    await connection.query(
+      'ALTER TABLE negotiations ADD INDEX idx_negotiations_seller_client (seller_client_id)'
+    );
+  }
 }
 
 async function ensureUserAddressColumns(): Promise<void> {

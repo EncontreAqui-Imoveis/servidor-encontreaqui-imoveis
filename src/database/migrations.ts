@@ -199,6 +199,36 @@ async function hasForeignKeyConstraint(
   return rows.length > 0;
 }
 
+type ForeignKeyMetadata = {
+  deleteRule: string;
+  updateRule: string;
+};
+
+async function getForeignKeyMetadata(
+  tableName: string,
+  constraintName: string,
+): Promise<ForeignKeyMetadata | null> {
+  const [rows] = await connection.query<RowDataPacket[]>(
+    `
+      SELECT DELETE_RULE, UPDATE_RULE
+      FROM information_schema.REFERENTIAL_CONSTRAINTS
+      WHERE CONSTRAINT_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+        AND CONSTRAINT_NAME = ?
+      LIMIT 1
+    `,
+    [tableName, constraintName],
+  );
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+  return {
+    deleteRule: String(row.DELETE_RULE ?? '').toUpperCase(),
+    updateRule: String(row.UPDATE_RULE ?? '').toUpperCase(),
+  };
+}
+
 const CONTRACT_DOCUMENT_TYPE_VALUES = CONTRACT_DOCUMENT_TYPES;
 
 const CONTRACT_DOCUMENT_TYPE_ENUM_SQL = CONTRACT_DOCUMENT_TYPE_VALUES.map(
@@ -699,11 +729,19 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
       AND COALESCE(UPPER(TRIM(n.status)), '') NOT IN ('REFUSED', 'CANCELLED')
   `);
 
+  const sellerClientFk = await getForeignKeyMetadata(
+    'negotiations',
+    'fk_negotiations_seller_client',
+  );
+  if (sellerClientFk && (sellerClientFk.deleteRule !== 'RESTRICT' || sellerClientFk.updateRule !== 'RESTRICT')) {
+    await connection.query('ALTER TABLE negotiations DROP FOREIGN KEY fk_negotiations_seller_client');
+  }
+
   if (!(await hasForeignKeyConstraint('negotiations', 'fk_negotiations_seller_client'))) {
     await connection.query(
       `ALTER TABLE negotiations
        ADD CONSTRAINT fk_negotiations_seller_client
-       FOREIGN KEY (seller_client_id) REFERENCES users(id) ON DELETE SET NULL`
+       FOREIGN KEY (seller_client_id) REFERENCES users(id) ON DELETE RESTRICT`
     );
   }
 

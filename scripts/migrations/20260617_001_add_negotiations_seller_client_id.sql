@@ -25,8 +25,41 @@ WHERE n.seller_client_id IS NULL
 UPDATE negotiations
 SET status = 'CANCELLED'
 WHERE seller_client_id IS NULL
-  AND selling_broker_id IS NULL
-  AND COALESCE(UPPER(TRIM(status)), '') NOT IN ('REFUSED', 'CANCELLED');
+AND selling_broker_id IS NULL
+AND COALESCE(UPPER(TRIM(status)), '') NOT IN ('REFUSED', 'CANCELLED');
+
+SET @fk_delete_rule := (
+  SELECT DELETE_RULE
+  FROM information_schema.REFERENTIAL_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'negotiations'
+    AND CONSTRAINT_NAME = 'fk_negotiations_seller_client'
+  LIMIT 1
+);
+SET @drop_fk_sql := IF(
+  @fk_delete_rule IS NOT NULL AND UPPER(@fk_delete_rule) <> 'RESTRICT',
+  'ALTER TABLE negotiations DROP FOREIGN KEY fk_negotiations_seller_client',
+  'SELECT 1'
+);
+PREPARE stmt FROM @drop_fk_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_fk := (
+  SELECT COUNT(*)
+  FROM information_schema.REFERENTIAL_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'negotiations'
+    AND CONSTRAINT_NAME = 'fk_negotiations_seller_client'
+);
+SET @add_fk_sql := IF(
+  @has_fk = 0,
+  'ALTER TABLE negotiations ADD CONSTRAINT fk_negotiations_seller_client FOREIGN KEY (seller_client_id) REFERENCES users(id) ON DELETE RESTRICT',
+  'SELECT 1'
+);
+PREPARE stmt FROM @add_fk_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 SET @has_constraint := (
   SELECT COUNT(*)
@@ -66,6 +99,22 @@ SET @drop_sql := IF(
   'SELECT 1'
 );
 PREPARE stmt FROM @drop_sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @has_fk := (
+  SELECT COUNT(*)
+  FROM information_schema.REFERENTIAL_CONSTRAINTS
+  WHERE CONSTRAINT_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'negotiations'
+    AND CONSTRAINT_NAME = 'fk_negotiations_seller_client'
+);
+SET @drop_fk_sql := IF(
+  @has_fk = 1,
+  'ALTER TABLE negotiations DROP FOREIGN KEY fk_negotiations_seller_client',
+  'SELECT 1'
+);
+PREPARE stmt FROM @drop_fk_sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 

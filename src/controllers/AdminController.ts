@@ -855,6 +855,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   property_id: number;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
+  seller_client_id: number | null;
   property_status: string | null;
   property_code: string | null;
   property_title: string | null;
@@ -864,6 +865,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   proposal_validity_date: Date | string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
+  seller_client_name: string | null;
   client_name: string | null;
   client_cpf: string | null;
   payment_dinheiro: number | string | null;
@@ -1360,9 +1362,11 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyImageUrl: row.property_image_url ?? null,
     capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
+    sellerClientId: row.seller_client_id != null ? Number(row.seller_client_id) : null,
     brokerName: row.capturing_broker_name ?? row.selling_broker_name ?? null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
+    sellerClientName: row.seller_client_name ?? null,
     clientName: row.client_name ?? null,
     clientCpf: row.client_cpf ?? null,
     value: toNullableNumber(row.final_value),
@@ -1576,6 +1580,7 @@ class AdminController {
             n.property_id,
             n.capturing_broker_id,
             n.selling_broker_id,
+            n.seller_client_id,
             p.status AS property_status,
             p.code AS property_code,
             p.title AS property_title,
@@ -1591,6 +1596,7 @@ class AdminController {
             n.proposal_validity_date,
             capture_user.name AS capturing_broker_name,
             seller_user.name AS selling_broker_name,
+            seller_client_user.name AS seller_client_name,
             ${clientSql.clientName} AS client_name,
             ${clientSql.clientCpf} AS client_cpf,
             ${clientSql.paymentDinheiro} AS payment_dinheiro,
@@ -1605,6 +1611,7 @@ class AdminController {
           JOIN properties p ON p.id = n.property_id
           LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
           LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
+          LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
           LEFT JOIN (
             SELECT
               h.negotiation_id,
@@ -1836,6 +1843,7 @@ class AdminController {
             n.property_id,
             n.capturing_broker_id,
             n.selling_broker_id,
+            n.seller_client_id,
             p.status AS property_status,
             p.code AS property_code,
             p.title AS property_title,
@@ -1844,6 +1852,7 @@ class AdminController {
             n.proposal_validity_date,
             capture_user.name AS capturing_broker_name,
             seller_user.name AS selling_broker_name,
+            seller_client_user.name AS seller_client_name,
             ${clientSql.clientName} AS client_name,
             ${clientSql.clientCpf} AS client_cpf,
             ${clientSql.paymentDinheiro} AS payment_dinheiro,
@@ -1858,6 +1867,7 @@ class AdminController {
           JOIN properties p ON p.id = n.property_id
           LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
           LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
+          LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
           LEFT JOIN (
             SELECT
               d.negotiation_id,

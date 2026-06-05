@@ -158,6 +158,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
           return [{ affectedRows: 1 }];
         }
 
+        if (sql.includes('UPDATE contracts') && sql.includes('workflow_metadata = CAST(? AS JSON)')) {
+          contractState.workflow_metadata = JSON.parse(String(params[0] ?? '{}'));
+          return [{ affectedRows: 1 }];
+        }
+
         if (
           sql.includes('UPDATE contracts') &&
           sql.includes('updated_at = CURRENT_TIMESTAMP')

@@ -28,7 +28,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - $env:MIGRATION_DEBUG = '0'
+      - MIGRATION_DEBUG=${MIGRATION_DEBUG:-0}
 
     ports:
       - "3333:3333"

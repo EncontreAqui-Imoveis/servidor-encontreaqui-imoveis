@@ -109,6 +109,7 @@ interface ContractRow extends RowDataPacket {
   updated_at: Date | string | null;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
+  seller_client_id: number | null;
   buyer_client_id: number | null;
   property_title: string | null;
   property_purpose: string | null;
@@ -118,6 +119,7 @@ interface ContractRow extends RowDataPacket {
   property_owner_name: string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
+  seller_client_name: string | null;
   buyer_client_name: string | null;
   capturing_agency_name: string | null;
   capturing_agency_address: string | null;
@@ -980,6 +982,8 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
       row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
       row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
+    sellerClientId:
+      row.seller_client_id !== null ? Number(row.seller_client_id) : null,
     buyerClientId: row.buyer_client_id !== null ? Number(row.buyer_client_id) : null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
@@ -991,6 +995,7 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     propertyPurpose: row.property_purpose ?? null,
     agencyName: row.capturing_agency_name ?? null,
     agencyAddress: row.capturing_agency_address ?? null,
+    sellerClientName: row.seller_client_name ?? null,
     buyerClientName: row.buyer_client_name ?? null,
     responsibleUserIds: parseResponsibleUserIds(row.responsible_user_ids),
     viewerSide,
@@ -1549,6 +1554,7 @@ function resolveContractViewerSide(
 
   const isCapturingBroker = userId === Number(contract.capturing_broker_id ?? 0);
   const isSellingBroker = userId === Number(contract.selling_broker_id ?? 0);
+  const isSellerClient = userId === Number(contract.seller_client_id ?? 0);
   const isOwner = userId === Number(contract.property_owner_id ?? 0);
   const isBuyer = userId === Number(contract.buyer_client_id ?? 0);
 
@@ -1560,7 +1566,7 @@ function resolveContractViewerSide(
     return 'seller';
   }
 
-  if (isSellingBroker || isBuyer) {
+  if (isSellingBroker || isSellerClient || isBuyer) {
     return 'buyer';
   }
 
@@ -1586,7 +1592,8 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   if (role === 'client') {
     return (
       userId === Number(contract.buyer_client_id ?? 0) ||
-      userId === Number(contract.property_owner_id ?? 0)
+      userId === Number(contract.property_owner_id ?? 0) ||
+      userId === Number(contract.seller_client_id ?? 0)
     );
   }
 
@@ -1596,7 +1603,8 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
 
   return (
     userId === Number(contract.capturing_broker_id ?? 0) ||
-    userId === Number(contract.selling_broker_id ?? 0)
+    userId === Number(contract.selling_broker_id ?? 0) ||
+    userId === Number(contract.seller_client_id ?? 0)
   );
 }
 
@@ -1614,7 +1622,10 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
     return false;
   }
   if (role === 'client') {
-    return userId === Number(contract.property_owner_id ?? 0);
+    return (
+      userId === Number(contract.property_owner_id ?? 0) ||
+      userId === Number(contract.seller_client_id ?? 0)
+    );
   }
   return userId === Number(contract.capturing_broker_id ?? 0);
 }
@@ -1662,8 +1673,9 @@ function shouldMoveToDraft(
 
 function shouldTreatContractAsSingleClientFlow(contract: ContractRow): boolean {
   const ownerId = Number(contract.property_owner_id ?? 0);
+  const sellerClientId = Number(contract.seller_client_id ?? 0);
   const buyerId = Number(contract.buyer_client_id ?? 0);
-  return ownerId > 0 && buyerId > 0 && ownerId !== buyerId;
+  return ownerId > 0 && buyerId > 0 && ownerId !== buyerId && sellerClientId !== buyerId;
 }
 
 function resolveApprovalStatusesForProgress(
@@ -1698,6 +1710,7 @@ const CONTRACT_SELECT_BASE_SQL = `
     c.updated_at,
     n.capturing_broker_id,
     n.selling_broker_id,
+    n.seller_client_id,
     n.buyer_client_id,
     p.title AS property_title,
     p.purpose AS property_purpose,
@@ -1713,6 +1726,7 @@ const CONTRACT_SELECT_BASE_SQL = `
     COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
     capture_user.name AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
+    seller_client_user.name AS seller_client_name,
     buyer_user.name AS buyer_client_name,
     capture_agency.name AS capturing_agency_name,
     NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address,
@@ -1724,6 +1738,7 @@ const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
   LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
+  LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
   LEFT JOIN users u_owner ON u_owner.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;
@@ -2207,26 +2222,26 @@ class ContractController {
           SELECT COUNT(*) AS total
           FROM contracts c
           JOIN negotiations n ON n.id = c.negotiation_id
-          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
+          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.seller_client_id = ? OR n.buyer_client_id = ?)
             AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
             AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
           ${statusClause}
         `,
-        [userId, userId, userId, ...statusParams]
+        [userId, userId, userId, userId, ...statusParams]
       );
       const total = Number(countRows[0]?.total ?? 0);
 
       const rows = await queryContractRows<ContractRow>(
         `
           ${contractSelectSql}
-          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.buyer_client_id = ?)
+          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.seller_client_id = ? OR n.buyer_client_id = ?)
             AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
             AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
           ${statusClause}
           ORDER BY c.updated_at DESC, c.created_at DESC
           LIMIT ? OFFSET ?
         `,
-        [userId, userId, userId, ...statusParams, limit, offset]
+        [userId, userId, userId, userId, ...statusParams, limit, offset]
       );
 
       if (rows.length === 0) {

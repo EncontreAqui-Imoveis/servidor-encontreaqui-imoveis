@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { adminController, sendNotification, getDashboardStats } from '../controllers/AdminController';
+import { adminController } from '../controllers/AdminController';
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
 import { requireAdminReauth } from '../middlewares/adminReauth';
@@ -9,6 +9,8 @@ import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
 import { contractDraftUpload } from '../middlewares/uploadMiddleware';
 import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 import { signedProposalUpload } from '../middlewares/uploadMiddleware';
+import { loadAdminDashboardStats } from '../services/adminDashboardService';
+import { sendAdminNotification } from '../services/adminNotificationService';
 
 const adminRoutes = Router();
 
@@ -37,7 +39,15 @@ adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
 adminRoutes.post('/logout', adminController.logout);
 adminRoutes.post('/reauth', adminController.reauth);
 
-adminRoutes.post('/notifications/send', sendNotification);
+adminRoutes.post('/notifications/send', async (req, res) => {
+  try {
+    const result = await sendAdminNotification(req.body as Record<string, unknown>);
+    return res.status(result.statusCode).json(result.body);
+  } catch (error) {
+    console.error('Erro ao enviar notificacao:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
 adminRoutes.delete('/notifications/announcements', adminController.clearAnnouncementNotifications);
 adminRoutes.delete('/notifications/:id', adminController.deleteNotification);
 adminRoutes.delete('/notifications', adminController.clearNotifications);
@@ -197,8 +207,24 @@ adminRoutes.delete('/properties/:id/images/:imageId', adminController.deleteProp
 adminRoutes.get('/notifications', adminController.getNotifications);
 adminRoutes.post('/brokers/:id/cleanup', adminController.cleanupBroker);
 
-adminRoutes.get('/dashboard/stats', getDashboardStats);
-adminRoutes.get('/stats/dashboard', getDashboardStats);
+adminRoutes.get('/dashboard/stats', async (_req, res) => {
+  try {
+    const payload = await loadAdminDashboardStats();
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao buscar estatisticas do dashboard:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
+adminRoutes.get('/stats/dashboard', async (req, res) => {
+  try {
+    const payload = await loadAdminDashboardStats();
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao buscar estatisticas do dashboard:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
 
 export default adminRoutes;
 

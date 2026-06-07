@@ -34,7 +34,7 @@ export class ExternalPdfService implements ProposalPdfService {
     this.timeoutMs =
       Number.isFinite(configuredTimeout) && configuredTimeout > 0
         ? Math.trunc(configuredTimeout)
-        : 10000;
+        : 30000;
   }
 
   async generateProposal(data: ProposalData): Promise<Buffer> {

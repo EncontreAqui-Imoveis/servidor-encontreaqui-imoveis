@@ -4,8 +4,16 @@ const { runPropertyQueryMock } = vi.hoisted(() => ({
   runPropertyQueryMock: vi.fn(),
 }));
 
+const { runFeaturedPropertiesScopeMigrationMock } = vi.hoisted(() => ({
+  runFeaturedPropertiesScopeMigrationMock: vi.fn(),
+}));
+
 vi.mock('../../src/services/propertyPersistenceService', () => ({
   runPropertyQuery: runPropertyQueryMock,
+}));
+
+vi.mock('../../src/database/migrations', () => ({
+  runFeaturedPropertiesScopeMigration: runFeaturedPropertiesScopeMigrationMock,
 }));
 
 import {
@@ -77,6 +85,7 @@ describe('propertyDiscoveryService', () => {
   });
 
   it('maps featured properties and totals', async () => {
+    runFeaturedPropertiesScopeMigrationMock.mockResolvedValue(undefined);
     runPropertyQueryMock
       .mockResolvedValueOnce([
         {
@@ -110,6 +119,7 @@ describe('propertyDiscoveryService', () => {
 
     const result = await listFeaturedProperties({ scope: 'sale', limit: 5, page: 1 });
 
+    expect(runFeaturedPropertiesScopeMigrationMock).toHaveBeenCalledTimes(1);
     expect(result.total).toBe(1);
     expect(result.page).toBe(1);
     expect(result.totalPages).toBe(1);

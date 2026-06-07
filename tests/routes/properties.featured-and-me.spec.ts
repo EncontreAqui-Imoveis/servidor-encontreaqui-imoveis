@@ -204,7 +204,7 @@ describe('GET /properties/featured e /properties/me', () => {
       code: 'RV-9001',
       broker_name: 'Corretor Público',
     });
-    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock).toHaveBeenCalledTimes(3);
   });
 
   it('returns user properties for authenticated requests', async () => {

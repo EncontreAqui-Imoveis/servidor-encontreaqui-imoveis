@@ -1,6 +1,7 @@
 import { RowDataPacket } from 'mysql2';
 
 import { runPropertyQuery } from './propertyPersistenceService';
+import { runFeaturedPropertiesScopeMigration } from '../database/migrations';
 import {
   normalizeAreaUnidade,
   type AreaConstruidaUnidade,
@@ -616,6 +617,7 @@ export async function listFeaturedProperties(params: {
   page?: string | number;
   limit?: string | number;
 }) {
+  await runFeaturedPropertiesScopeMigration();
   const limit = Math.min(Math.max(Number(params.limit) || 20, 1), 20);
   const page = Math.max(Number(params.page) || 1, 1);
   const offset = (page - 1) * limit;

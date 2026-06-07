@@ -131,7 +131,12 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
     });
 
     expect(response.status).toBe(201);
-    expect(response.header['content-type']).toContain('application/pdf');
+    expect(response.header['content-type']).toContain('application/json');
+    expect(response.body).toMatchObject({
+      message: 'Proposta gerada com sucesso.',
+      negotiationId: expect.any(String),
+      documentId: expect.any(Number),
+    });
 
     const insertCall = txMock.execute.mock.calls.find(([sql]) =>
       String(sql).includes('INSERT INTO negotiations')

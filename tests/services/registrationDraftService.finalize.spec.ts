@@ -451,6 +451,7 @@ describe('finalizeRegistrationDraft', () => {
       ),
     ).rejects.toMatchObject({
       code: 'DRAFT_CRICI_INVALID',
+      appCode: 'INVALID_INPUT',
     });
 
     expect(updateDraftByDraftIdMock).not.toHaveBeenCalled();

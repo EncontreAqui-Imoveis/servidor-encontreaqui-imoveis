@@ -234,7 +234,7 @@ describe('Admin management for finalized contracts', () => {
     readNegotiationDocumentObjectMock.mockResolvedValue(Buffer.from('%PDF-1.4 fake'));
 
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
-      if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
+      if (sql.includes('FROM contracts') && sql.includes('FOR UPDATE')) {
         return contractState ? [[{ ...contractState }]] : [[]];
       }
 
@@ -365,11 +365,45 @@ describe('Admin management for finalized contracts', () => {
     });
   });
 
+  it('rejects invalid commission_data payloads', async () => {
+    const response = await request(app)
+      .put('/admin/contracts/contract-final-1/commission-data')
+      .send({
+        commissionData: {
+          valorVenda: 10000,
+          comissaoCaptador: 6000,
+          comissaoVendedor: 4000,
+          taxaPlataforma: 500,
+        },
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('soma de comissões e taxa');
+  });
+
   it('deletes commission_data for a finalized contract', async () => {
     const response = await request(app).delete('/admin/contracts/contract-final-1/commission-data');
 
     expect(response.status).toBe(200);
     expect(contractState?.commission_data).toBeNull();
+  });
+
+  it('returns 404 when commission data target contract is missing', async () => {
+    contractState = null;
+
+    const response = await request(app)
+      .put('/admin/contracts/contract-final-1/commission-data')
+      .send({
+        commissionData: {
+          valorVenda: 10000,
+          comissaoCaptador: 4000,
+          comissaoVendedor: 3000,
+          taxaPlataforma: 3000,
+        },
+      });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('Contrato não encontrado.');
   });
 
   it('uploads and deletes finalized contract documents', async () => {

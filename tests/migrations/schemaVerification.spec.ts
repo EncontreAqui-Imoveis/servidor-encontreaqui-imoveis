@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CONTRACT_DOCUMENT_TYPES } from '../../src/modules/contracts/domain/contract.types';
 
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -46,8 +47,7 @@ describe('verifyCriticalSchemaState', () => {
 
         if (tableName === 'negotiation_documents' && columnName === 'document_type') {
           return [[{
-            column_type:
-              "enum('doc_identidade','comprovante_endereco','certidao_casamento_nascimento','certidao_inteiro_teor','certidao_onus_acoes','comprovante_renda','contrato_minuta','contrato_assinado','comprovante_pagamento','boleto_vistoria')",
+            column_type: `enum(${CONTRACT_DOCUMENT_TYPES.map((value) => `'${value}'`).join(',')})`,
           }]];
         }
 
@@ -55,6 +55,12 @@ describe('verifyCriticalSchemaState', () => {
           return [[{
             column_type:
               "enum('PENDING','APPROVED','REJECTED','PARTIALLY_APPROVED')",
+          }]];
+        }
+
+        if (tableName === 'brokers' && columnName === 'profile_type') {
+          return [[{
+            column_type: "enum('BROKER','AUXILIARY_ADMINISTRATIVE')",
           }]];
         }
 
@@ -68,9 +74,9 @@ describe('verifyCriticalSchemaState', () => {
     const result = await verifyCriticalSchemaState();
 
     expect(result).toEqual({
-      checkedTables: 8,
+      checkedTables: 10,
       checkedColumns: 38,
-      checkedEnums: 4,
+      checkedEnums: 5,
     });
   });
 

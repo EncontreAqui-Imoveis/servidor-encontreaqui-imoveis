@@ -17,10 +17,71 @@ import {
   discardRegistrationDraft,
 } from '../services/registrationDraftService';
 
+function draftErrorCodeToHttpStatus(code: string): number {
+  switch (code) {
+    case 'DRAFT_NOT_FOUND':
+    case 'DRAFT_TOKEN_REQUIRED':
+      return 401;
+    case 'DRAFT_EXPIRED':
+    case 'EMAIL_CODE_EXPIRED':
+    case 'DRAFT_PASSWORD_EXPIRED':
+    case 'PHONE_OTP_EXPIRED':
+      return 410;
+    case 'DRAFT_NOT_OPEN':
+      return 409;
+    case 'TERMS_ACCEPTANCE_REQUIRED':
+    case 'PRIVACY_ACCEPTANCE_REQUIRED':
+    case 'BROKER_AGREEMENT_REQUIRED':
+    case 'DRAFT_INVALID_ACTION':
+    case 'DRAFT_INVALID_INPUT':
+    case 'DRAFT_PASSWORD_INVALID':
+    case 'DRAFT_CRICI_INVALID':
+    case 'DRAFT_ADDRESS_INVALID':
+    case 'EMAIL_CODE_INVALID':
+    case 'EMAIL_CODE_MISSING':
+    case 'PHONE_REQUIRED':
+    case 'PHONE_FIREBASE_TOKEN_REQUIRED':
+    case 'PHONE_FIREBASE_TOKEN_MISSING_PHONE':
+    case 'PHONE_OTP_INVALID':
+    case 'DRAFT_DOCUMENTS_REQUIRED':
+    case 'DRAFT_DOCUMENTS_INVALID':
+    case 'DRAFT_PASSWORD_REQUIRED':
+    case 'DRAFT_CRICI_REQUIRED':
+    case 'DRAFT_DOCUMENTS_MISSING':
+      return 400;
+    case 'EMAIL_ALREADY_EXISTS':
+    case 'DRAFT_ALREADY_EXISTS':
+    case 'CRECI_ALREADY_EXISTS':
+    case 'DRAFT_DUPLICATE_ACCOUNT':
+      return 409;
+    case 'EMAIL_CODE_LOCKED':
+    case 'PHONE_OTP_LOCKED':
+      return 423;
+    case 'PHONE_OTP_RATE_LIMITED':
+      return 429;
+    case 'BROKER_ONLY':
+      return 403;
+    case 'PHONE_SESSION_NOT_FOUND':
+      return 404;
+    case 'EMAIL_CODE_CHALLENGE_FAILED':
+    case 'EMAIL_PROVIDER_ERROR':
+    case 'PHONE_VERIFICATION_UNAVAILABLE':
+    case 'PHONE_OTP_DELIVERY_FAILED':
+    case 'DRAFT_FLOW_DISABLED':
+      return 503;
+    case 'DRAFT_DOCUMENTS_STORAGE_FAILED':
+      return 502;
+    case 'EMAIL_CODE_CONFIRM_FAILED':
+      return 503;
+    default:
+      return 500;
+  }
+}
+
 class RegistrationDraftController {
   private ensureDraftFlowEnabled() {
     if (!isDraftRegistrationEnabled()) {
-      throw new DraftFlowError(503, 'DRAFT_FLOW_DISABLED', 'Fluxo de rascunho está temporariamente desativado.');
+      throw new DraftFlowError('UNAVAILABLE', 'DRAFT_FLOW_DISABLED', 'Fluxo de rascunho está temporariamente desativado.');
     }
   }
 
@@ -79,7 +140,7 @@ class RegistrationDraftController {
 
   private handleError(req: Request, res: Response, error: unknown) {
     if (error instanceof DraftFlowError) {
-      return res.status(error.statusCode).json({
+      return res.status(draftErrorCodeToHttpStatus(error.code)).json({
         status: 'error',
         code: error.code,
         error: error.message,
@@ -146,7 +207,7 @@ class RegistrationDraftController {
     if (action) {
       return action;
     }
-    throw new DraftFlowError(400, 'DRAFT_INVALID_ACTION', 'Acao de finalizacao invalida.');
+    throw new DraftFlowError('INVALID_INPUT', 'DRAFT_INVALID_ACTION', 'Acao de finalizacao invalida.');
   }
 
   private logDraftFinalizeRequest(
@@ -267,7 +328,7 @@ class RegistrationDraftController {
 
         if (!creciFrontUrl || !creciBackUrl || !selfieUrl) {
           throw new DraftFlowError(
-            400,
+            'INVALID_INPUT',
             'DRAFT_DOCUMENTS_REQUIRED',
             'Envie fotos da frente/verso do creci e selfie.',
           );
@@ -288,7 +349,7 @@ class RegistrationDraftController {
           throw error;
         }
         throw new DraftFlowError(
-          502,
+          'UNAVAILABLE',
           'DRAFT_DOCUMENTS_STORAGE_FAILED',
           'Falha ao enviar documentos de corretor.',
         );

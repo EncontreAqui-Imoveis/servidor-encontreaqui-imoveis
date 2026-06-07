@@ -159,7 +159,7 @@ describe('createRegistrationDraft', () => {
       }),
     ).rejects.toMatchObject({
       code: 'DRAFT_ADDRESS_INVALID',
-      statusCode: 400,
+      appCode: 'INVALID_INPUT',
     });
 
     expect(createDraftMock).not.toHaveBeenCalled();
@@ -283,7 +283,7 @@ describe('createRegistrationDraft', () => {
       }),
     ).rejects.toMatchObject({
       code: 'DRAFT_ADDRESS_INVALID',
-      statusCode: 400,
+      appCode: 'INVALID_INPUT',
       fields: ['cep'],
     });
 

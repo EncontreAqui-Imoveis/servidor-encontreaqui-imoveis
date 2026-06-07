@@ -3,6 +3,8 @@ import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getConnectionMock, txMock, deleteCloudinaryAssetMock } = vi.hoisted(() => {
+  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -21,6 +23,13 @@ const { getConnectionMock, txMock, deleteCloudinaryAssetMock } = vi.hoisted(() =
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
+    getConnection: getConnectionMock,
+    query: vi.fn(),
+  },
+}));
+
+vi.mock('../../src/services/adminPersistenceService', () => ({
+  adminDb: {
     getConnection: getConnectionMock,
     query: vi.fn(),
   },

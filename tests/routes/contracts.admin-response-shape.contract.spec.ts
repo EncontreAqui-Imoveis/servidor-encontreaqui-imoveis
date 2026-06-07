@@ -163,4 +163,24 @@ describe('GET /admin/contracts response shape contracts', () => {
       limit: 20,
     });
   });
+
+  it('returns 400 for invalid status filter', async () => {
+    const response = await request(app).get('/admin/contracts?status=INVALIDO');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      error: 'Status de contrato inválido.',
+    });
+  });
+
+  it('returns 500 when the listing service fails', async () => {
+    queryMock.mockRejectedValueOnce(new Error('db down'));
+
+    const response = await request(app).get('/admin/contracts');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({
+      error: 'Falha ao listar contratos.',
+    });
+  });
 });

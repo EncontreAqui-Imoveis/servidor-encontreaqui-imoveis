@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
-import JSZip from 'jszip';
-import { ResultSetHeader, RowDataPacket } from 'mysql2';
+import { RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
 import { deleteCloudinaryAsset } from '../config/cloudinary';
@@ -14,11 +13,67 @@ import {
   getContractDbConnection,
   queryContractRows,
 } from '../services/contractPersistenceService';
+import { listCommissionSummary } from '../services/contractCommissionService';
 import {
   deleteNegotiationDocumentObject,
   readNegotiationDocumentObject,
   storeNegotiationDocumentToR2,
 } from '../services/negotiationDocumentStorageService';
+import {
+  listContractsForAdmin,
+  listMyContractsForUser,
+} from '../services/contractListingService';
+import {
+  createContractFromApprovedNegotiation,
+  isContractCreationError,
+} from '../services/contractCreationService';
+import {
+  deleteContractCommissionData,
+  isContractCommissionMutationError,
+  updateContractCommissionData,
+} from '../services/contractCommissionMutationService';
+import {
+  deleteFinalizedContractDocument,
+  isContractFinalizedDocumentMutationError,
+  uploadFinalizedContractDocument,
+} from '../services/contractFinalizedDocumentMutationService';
+import {
+  deleteFinalizedContract,
+  isContractFinalizedDeletionError,
+} from '../services/contractFinalizedDeletionService';
+import {
+  isContractOperationalResponsibleError,
+  updateContractOperationalResponsible,
+} from '../services/contractOperationalResponsibleService';
+import {
+  isContractDataUpdateError,
+  updateContractData,
+} from '../services/contractDataUpdateService';
+import {
+  isContractSignatureMethodError,
+  setContractSignatureMethod,
+} from '../services/contractSignatureMethodService';
+import {
+  buildContractDocumentPayload,
+  buildContractDocumentsZip,
+} from '../services/contractDocumentService';
+import {
+  deleteContractDocument,
+  isContractDocumentMutationError,
+  uploadContractDocument,
+} from '../services/contractDocumentMutationService';
+import {
+  isContractWorkflowError,
+  transitionContractStatus,
+} from '../services/contractWorkflowService';
+import {
+  evaluateContractSide,
+  isContractSideReviewError,
+} from '../services/contractSideReviewService';
+import {
+  evaluateContractCategory,
+  isContractCategoryReviewError,
+} from '../services/contractCategoryReviewService';
 import {
   isContractApprovalStatus,
   isContractDocumentCategoryStatus,
@@ -92,7 +147,7 @@ interface NegotiationForContractRow extends RowDataPacket {
   property_title: string | null;
 }
 
-interface ContractRow extends RowDataPacket {
+export interface ContractRow extends RowDataPacket {
   id: string;
   negotiation_id: string;
   property_id: number;
@@ -126,7 +181,7 @@ interface ContractRow extends RowDataPacket {
   responsible_user_ids: string | null;
 }
 
-interface ContractDocumentRow extends RowDataPacket {
+export interface ContractDocumentRow extends RowDataPacket {
   id: number;
   type: string;
   document_type: string | null;
@@ -143,9 +198,8 @@ interface ContractDocumentDownloadRow extends ContractDocumentRow {
   storage_etag: string | null;
 }
 
-interface ContractDocumentForDeleteRow extends RowDataPacket {
+interface ContractDocumentAssetRow {
   id: number;
-  type: string;
   document_type: string | null;
   metadata_json: unknown;
   storage_provider: string | null;
@@ -156,7 +210,11 @@ interface ContractDocumentForDeleteRow extends RowDataPacket {
   storage_etag: string | null;
 }
 
-interface ContractDocumentListRow extends ContractDocumentRow {
+interface ContractDocumentForDeleteRow extends RowDataPacket, ContractDocumentAssetRow {
+  type: string;
+}
+
+export interface ContractDocumentListRow extends ContractDocumentRow {
   negotiation_id: string;
 }
 
@@ -339,7 +397,7 @@ function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
-function buildContractDocumentRuleContextFromRow(
+export function buildContractDocumentRuleContextFromRow(
   row: ContractRow
 ): ContractDocumentRuleContext {
   return {
@@ -398,7 +456,7 @@ function appendContractWorkflowAuditEvent(
   };
 }
 
-function toIsoString(value: Date | string | null): string | null {
+export function toIsoString(value: Date | string | null): string | null {
   if (!value) {
     return null;
   }
@@ -406,7 +464,7 @@ function toIsoString(value: Date | string | null): string | null {
   return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
 }
 
-function resolveContractStatus(value: unknown): ContractStatus {
+export function resolveContractStatus(value: unknown): ContractStatus {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (isContractStatus(normalized)) {
     return normalized;
@@ -419,7 +477,7 @@ function parseSignatureMethodInput(value: unknown): 'in_person' | null {
   return normalized === 'in_person' ? 'in_person' : null;
 }
 
-function parseContractStatusFilter(value: unknown): ContractStatus | null {
+export function parseContractStatusFilter(value: unknown): ContractStatus | null {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (!normalized) {
     return null;
@@ -953,7 +1011,7 @@ function shouldExposeOwnerSensitiveDocument(
   return !(input.side === 'seller' && input.documentCategory === 'dados_bancarios');
 }
 
-function mapContract(row: ContractRow, req: AuthRequest | null = null) {
+export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const documentRequirements = resolveDocumentRequirementsForContract(
     buildContractDocumentRuleContextFromRow(row)
   );
@@ -1006,7 +1064,7 @@ function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   };
 }
 
-function mapDocument(row: ContractDocumentRow) {
+export function mapDocument(row: ContractDocumentRow) {
   const metadata = parseStoredJsonObject(row.metadata_json);
   const sideValue = String(metadata.side ?? '').trim().toLowerCase();
   const side: ContractDocumentSide | null =
@@ -1135,7 +1193,7 @@ function summarizeCategorySide(
   };
 }
 
-function buildContractDocumentProgress(
+export function buildContractDocumentProgress(
   mappedDocuments: Array<
     ReturnType<typeof mapDocument> & { metadata: Record<string, unknown> }
   >,
@@ -1298,7 +1356,7 @@ function logContractAdminAudit(
 }
 
 function extractCloudinaryAssetReference(
-  document: Pick<ContractDocumentForDeleteRow, 'metadata_json'>
+  document: Pick<ContractDocumentAssetRow, 'metadata_json'>
 ): CloudinaryAssetReference | null {
   const metadata = parseStoredJsonObject(document.metadata_json);
   const publicId = readMetadataText(metadata, [
@@ -1438,7 +1496,7 @@ async function fetchDocumentsForStepBackCleanup(
 }
 
 async function cleanupContractDocumentAssets(
-  documents: ContractDocumentForDeleteRow[],
+  documents: ContractDocumentAssetRow[],
   context: {
     action: string;
     contractId: string;
@@ -1692,7 +1750,7 @@ function resolveApprovalStatusesForProgress(
   return input;
 }
 
-const CONTRACT_SELECT_BASE_SQL = `
+export const CONTRACT_SELECT_BASE_SQL = `
   SELECT
     c.id,
     c.negotiation_id,
@@ -1848,1112 +1906,143 @@ async function fetchContractForUpdate(
 
 class ContractController {
   async listCommissions(req: Request, res: Response): Promise<Response> {
-    const now = new Date();
-    const monthInput = String(req.query.month ?? '').trim();
-    const yearInput = String(req.query.year ?? '').trim();
-
-    const month = monthInput ? Number(monthInput) : now.getMonth() + 1;
-    const year = yearInput ? Number(yearInput) : now.getFullYear();
-
-    if (!Number.isInteger(month) || month < 1 || month > 12) {
-      return res.status(400).json({ error: 'Mês inválido. Use valores entre 1 e 12.' });
-    }
-
-    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
-      return res.status(400).json({ error: 'Ano inválido. Use um valor entre 2000 e 2100.' });
-    }
-
     try {
-      const rows = await queryContractRows<CommissionContractRow>(
-        `
-          SELECT
-            c.id,
-            c.negotiation_id,
-            c.property_id,
-            c.commission_data,
-            c.updated_at,
-            p.title AS property_title,
-            p.code AS property_code,
-            p.purpose AS property_purpose,
-            (
-              SELECT nd.id
-              FROM negotiation_documents nd
-              WHERE nd.negotiation_id = c.negotiation_id
-                AND nd.type = 'other'
-                AND nd.document_type = 'contrato_assinado'
-              ORDER BY nd.created_at DESC, nd.id DESC
-              LIMIT 1
-            ) AS signed_proposal_document_id
-          FROM contracts c
-          JOIN properties p ON p.id = c.property_id
-          WHERE c.status = 'FINALIZED'
-            AND YEAR(c.updated_at) = ?
-            AND MONTH(c.updated_at) = ?
-          ORDER BY c.updated_at DESC, c.id DESC
-        `,
-        [year, month]
-      );
-
-      let totalVGV = 0;
-      let totalCaptadores = 0;
-      let totalVendedores = 0;
-      let totalPlataforma = 0;
-
-      const transactions = rows.flatMap((row) => {
-        const commissionData = parseStoredJsonObject(row.commission_data);
-        const valorVenda = readCommissionValue(commissionData, 'valorVenda');
-        const comissaoCaptador = readCommissionValue(
-          commissionData,
-          'comissaoCaptador'
-        );
-        const comissaoVendedor = readCommissionValue(
-          commissionData,
-          'comissaoVendedor'
-        );
-        const taxaPlataforma = readCommissionValue(
-          commissionData,
-          'taxaPlataforma'
-        );
-
-        if (valorVenda <= 0) {
-          return [];
-        }
-
-        totalVGV += valorVenda;
-        totalCaptadores += comissaoCaptador;
-        totalVendedores += comissaoVendedor;
-        totalPlataforma += taxaPlataforma;
-
-        const signedId = row.signed_proposal_document_id;
-        return [{
-          contractId: row.id,
-          negotiationId: row.negotiation_id,
-          propertyId: Number(row.property_id),
-          propertyTitle: row.property_title ?? null,
-          propertyCode: row.property_code ?? null,
-          propertyPurpose: row.property_purpose ?? null,
-          finalizedAt: toIsoString(row.updated_at),
-          signedProposalDocumentId:
-            signedId != null && Number.isFinite(Number(signedId)) ? Number(signedId) : null,
-          signedProposalDocumentSource:
-            signedId != null && Number.isFinite(Number(signedId))
-              ? 'negotiation_documents'
-              : null,
-          commissionData: {
-            valorVenda,
-            comissaoCaptador,
-            comissaoVendedor,
-            taxaPlataforma,
-          },
-        }];
-      });
-
+      const commissionSummary = await listCommissionSummary(req.query.month, req.query.year);
       return res.status(200).json({
-        month,
-        year,
-        summary: {
-          totalVGV: Number(totalVGV.toFixed(2)),
-          totalCaptadores: Number(totalCaptadores.toFixed(2)),
-          totalVendedores: Number(totalVendedores.toFixed(2)),
-          totalPlataforma: Number(totalPlataforma.toFixed(2)),
-        },
-        transactions,
+        ...commissionSummary,
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Falha ao listar comissões.';
+      if (message.includes('inválido')) {
+        return res.status(400).json({ error: message });
+      }
       console.error('Erro ao listar comissões por período:', error);
       return res.status(500).json({ error: 'Falha ao listar comissões.' });
     }
   }
 
   async createFromApprovedNegotiation(req: Request, res: Response): Promise<Response> {
-    const negotiationId = String(req.params.id ?? '').trim();
-    if (!negotiationId) {
-      return res.status(400).json({ error: 'ID da negociação inválido.' });
-    }
-
-    const tx = await getContractDbConnection();
     try {
-      await tx.beginTransaction();
-
-      const [negotiationRows] = await tx.query<NegotiationForContractRow[]>(
-        `
-          SELECT
-            n.id,
-            n.property_id,
-            n.status,
-            n.capturing_broker_id,
-            n.selling_broker_id,
-            p.title AS property_title
-          FROM negotiations n
-          JOIN properties p ON p.id = n.property_id
-          WHERE n.id = ?
-          LIMIT 1
-          FOR UPDATE
-        `,
-        [negotiationId]
-      );
-
-      const negotiation = negotiationRows[0];
-      if (!negotiation) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Negociação não encontrada.' });
-      }
-
-      const negotiationStatus = String(negotiation.status ?? '').toUpperCase();
-      if (!ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT.has(negotiationStatus)) {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'A negociação precisa estar aprovada antes da criação do contrato.',
-        });
-      }
-
-      const [existingRows] = await tx.query<ExistingContractRow[]>(
-        `
-          SELECT id, status
-          FROM contracts
-          WHERE negotiation_id = ?
-          LIMIT 1
-          FOR UPDATE
-        `,
-        [negotiationId]
-      );
-
-      if (existingRows.length > 0) {
-        await tx.commit();
-        return res.status(200).json({
-          message: 'Contrato já existente para esta negociação.',
-          contract: {
-            id: existingRows[0].id,
-            negotiationId,
-            propertyId: Number(negotiation.property_id),
-            status: resolveContractStatus(existingRows[0].status),
-          },
-        });
-      }
-
-      await tx.query(
-        `
-          INSERT INTO contracts (
-            id,
-            negotiation_id,
-            property_id,
-            status,
-            seller_info,
-            buyer_info,
-            commission_data,
-            seller_approval_status,
-            buyer_approval_status,
-            seller_approval_reason,
-            buyer_approval_reason,
-            created_at,
-            updated_at
-          ) VALUES (
-            UUID(),
-            ?,
-            ?,
-            'AWAITING_DOCS',
-            NULL,
-            NULL,
-            NULL,
-            'PENDING',
-            'PENDING',
-            NULL,
-            NULL,
-            CURRENT_TIMESTAMP,
-            CURRENT_TIMESTAMP
-          )
-        `,
-        [negotiationId, negotiation.property_id]
-      );
-
-      const [createdRows] = await tx.query<ContractRow[]>(
-        `
-          SELECT
-            c.id,
-            c.negotiation_id,
-            c.property_id,
-            c.status,
-            c.seller_info,
-            c.buyer_info,
-            c.commission_data,
-            c.seller_approval_status,
-            c.buyer_approval_status,
-            c.seller_approval_reason,
-            c.buyer_approval_reason,
-            c.created_at,
-            c.updated_at,
-            n.capturing_broker_id,
-            n.selling_broker_id,
-            p.title AS property_title,
-            p.purpose AS property_purpose
-          FROM contracts c
-          JOIN negotiations n ON n.id = c.negotiation_id
-          JOIN properties p ON p.id = c.property_id
-          WHERE c.negotiation_id = ?
-          LIMIT 1
-        `,
-        [negotiationId]
-      );
-
-      await tx.commit();
-
-      return res.status(201).json({
-        message: 'Contrato criado com sucesso.',
-        contract: createdRows[0] ? mapContract(createdRows[0], req) : null,
+      const result = await createContractFromApprovedNegotiation(req.params.id, req);
+      return res.status(result.created ? 201 : 200).json({
+        message: result.created
+          ? 'Contrato criado com sucesso.'
+          : 'Contrato já existente para esta negociação.',
+        contract: mapContract(result.contract, req as AuthRequest),
       });
     } catch (error) {
-      await tx.rollback();
+      if (isContractCreationError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao criar contrato a partir da negociação:', error);
       return res.status(500).json({ error: 'Falha ao criar contrato.' });
-    } finally {
-      tx.release();
     }
   }
 
   async listForAdmin(req: Request, res: Response): Promise<Response> {
-    const statusFilter = parseContractStatusFilter(req.query.status);
-    if (req.query.status != null && statusFilter == null) {
-      return res.status(400).json({ error: 'Status de contrato inválido.' });
-    }
-
-    const page = Math.max(Number(req.query.page ?? 1) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 20) || 20, 1), 100);
-    const offset = (page - 1) * limit;
-
-    const whereClause = statusFilter ? 'WHERE c.status = ?' : '';
-    const whereParams = statusFilter ? [statusFilter] : [];
-
     try {
-      const contractSelectSql = await getContractSelectSql();
-      const countRows = await queryContractRows<RowDataPacket>(
-        `
-          SELECT COUNT(*) AS total
-          FROM contracts c
-          ${whereClause}
-        `,
-        whereParams
-      );
-      const total = Number(countRows[0]?.total ?? 0);
-
-      const rows = await queryContractRows<ContractRow>(
-        `
-          ${contractSelectSql}
-          ${whereClause}
-          ORDER BY c.updated_at DESC, c.created_at DESC
-          LIMIT ? OFFSET ?
-        `,
-        [...whereParams, limit, offset]
-      );
-
-      if (rows.length === 0) {
-        return res.status(200).json({
-          data: [],
-          total,
-          page,
-          limit,
-        });
-      }
-
-      const negotiationIds = rows.map((row) => row.negotiation_id);
-      const placeholders = negotiationIds.map(() => '?').join(', ');
-      const documentRows = await queryContractRows<ContractDocumentListRow>(
-        `
-          SELECT id, negotiation_id, type, document_type, metadata_json, created_at
-          FROM negotiation_documents
-          WHERE negotiation_id IN (${placeholders})
-            AND COALESCE(document_type, '') <> 'proposal'
-            AND COALESCE(type, '') <> 'proposal'
-          ORDER BY created_at DESC, id DESC
-        `,
-        negotiationIds
-      );
-
-      const documentsByNegotiation = new Map<string, AdminContractDocument[]>();
-      for (const documentRow of documentRows) {
-        if (isProposalDocument(documentRow)) {
-          continue;
-        }
-        const negotiationId = String(documentRow.negotiation_id);
-        const docs = documentsByNegotiation.get(negotiationId) ?? [];
-        docs.push({
-          ...mapDocument(documentRow),
-          downloadUrl: `/negotiations/${negotiationId}/documents/${documentRow.id}/download`,
-        });
-        documentsByNegotiation.set(negotiationId, docs);
-      }
-
-      return res.status(200).json({
-        data: rows.map((row) => ({
-          ...mapContract(row, req),
-          documents: documentsByNegotiation.get(row.negotiation_id) ?? [],
-        })),
-        total,
-        page,
-        limit,
-      });
+      const payload = await listContractsForAdmin(req);
+      return res.status(200).json(payload);
     } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('Status de contrato inválido')) {
+        return res.status(400).json({ error: message });
+      }
       console.error('Erro ao listar contratos para admin:', error);
       return res.status(500).json({ error: 'Falha ao listar contratos.' });
     }
   }
 
   async listMyContracts(req: AuthRequest, res: Response): Promise<Response> {
-    const userId = Number(req.userId);
-    if (!Number.isFinite(userId) || userId <= 0) {
-      return res.status(401).json({ error: 'Usuário não autenticado.' });
-    }
-
-    const statusFilter = parseContractStatusFilter(req.query.status);
-    if (req.query.status != null && statusFilter == null) {
-      return res.status(400).json({ error: 'Status de contrato inválido.' });
-    }
-
-    const page = Math.max(Number(req.query.page ?? 1) || 1, 1);
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 20) || 20, 1), 100);
-    const offset = (page - 1) * limit;
-
-    const statusClause = statusFilter ? 'AND c.status = ?' : '';
-    const statusParams = statusFilter ? [statusFilter] : [];
-
     try {
-      const contractSelectSql = await getContractSelectSql();
-      const countRows = await queryContractRows<RowDataPacket>(
-        `
-          SELECT COUNT(*) AS total
-          FROM contracts c
-          JOIN negotiations n ON n.id = c.negotiation_id
-          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.seller_client_id = ? OR n.buyer_client_id = ?)
-            AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
-            AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
-          ${statusClause}
-        `,
-        [userId, userId, userId, userId, ...statusParams]
-      );
-      const total = Number(countRows[0]?.total ?? 0);
-
-      const rows = await queryContractRows<ContractRow>(
-        `
-          ${contractSelectSql}
-          WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.seller_client_id = ? OR n.buyer_client_id = ?)
-            AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
-            AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
-          ${statusClause}
-          ORDER BY c.updated_at DESC, c.created_at DESC
-          LIMIT ? OFFSET ?
-        `,
-        [userId, userId, userId, userId, ...statusParams, limit, offset]
-      );
-
-      if (rows.length === 0) {
-        return res.status(200).json({
-          data: [],
-          total,
-          page,
-          limit,
-        });
-      }
-
-      const negotiationIds = rows.map((row) => row.negotiation_id);
-      const placeholders = negotiationIds.map(() => '?').join(', ');
-      const documentRows = await queryContractRows<ContractDocumentListRow>(
-        `
-          SELECT id, negotiation_id, type, document_type, metadata_json, created_at
-          FROM negotiation_documents
-          WHERE negotiation_id IN (${placeholders})
-            AND COALESCE(document_type, '') <> 'proposal'
-            AND COALESCE(type, '') <> 'proposal'
-          ORDER BY created_at DESC, id DESC
-        `,
-        negotiationIds
-      );
-
-      const documentsByNegotiation = new Map<string, ContractDocumentRow[]>();
-      for (const row of documentRows) {
-        const negotiationId = String(row.negotiation_id);
-        const docs = documentsByNegotiation.get(negotiationId) ?? [];
-        docs.push(row);
-        documentsByNegotiation.set(negotiationId, docs);
-      }
-
-      return res.status(200).json({
-        data: rows.map((row) => ({
-          ...mapContract(row, req),
-          documentProgress: buildContractDocumentProgress(
-            (documentsByNegotiation.get(row.negotiation_id) ?? []).map((doc) => {
-              const mapped = mapDocument(doc);
-              return {
-                ...mapped,
-                metadata: mapped.metadata as Record<string, unknown>,
-              };
-            }),
-            buildContractDocumentRuleContextFromRow(row)
-          ),
-        })),
-        total,
-        page,
-        limit,
-      });
+      const payload = await listMyContractsForUser(req);
+      return res.status(200).json(payload);
     } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('Status de contrato inválido')) {
+        return res.status(400).json({ error: message });
+      }
+      if (message.includes('Usuário não autenticado')) {
+        return res.status(401).json({ error: message });
+      }
       console.error('Erro ao listar contratos do corretor:', error);
       return res.status(500).json({ error: 'Falha ao listar contratos.' });
     }
   }
 
   async transitionStatus(req: Request, res: Response): Promise<Response> {
-    const contractId = String(req.params.id ?? '').trim();
-    if (!contractId) {
-      return res.status(400).json({ error: 'ID do contrato inválido.' });
-    }
-
-    const body = (req.body ?? {}) as TransitionBody;
-    const direction = String(body.direction ?? '').trim().toLowerCase();
-    if (direction !== 'next' && direction !== 'previous') {
-      return res.status(400).json({ error: 'Direção inválida. Use next ou previous.' });
-    }
-
-    const tx = await getContractDbConnection();
     try {
-      await tx.beginTransaction();
-
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-
-      const currentStatus = resolveContractStatus(contract.status);
-      const currentIndex = CONTRACT_STATUS_FLOW.indexOf(currentStatus);
-      if (currentIndex < 0) {
-        await tx.rollback();
-        return res.status(400).json({ error: 'Status atual do contrato inválido.' });
-      }
-
-      if (currentStatus === 'FINALIZED' && direction === 'previous') {
-        await tx.rollback();
-        return res.status(400).json({
-          error:
-            'Retrocesso de contratos finalizados está bloqueado por segurança financeira.',
-        });
-      }
-
-      if (currentStatus === 'AWAITING_DOCS' && direction === 'next') {
-        await tx.rollback();
-        return res.status(400).json({
-          error:
-            'Use a avaliação por lado para avançar de AWAITING_DOCS para IN_DRAFT.',
-        });
-      }
-
-      const targetIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
-      if (targetIndex < 0 || targetIndex >= CONTRACT_STATUS_FLOW.length) {
-        await tx.rollback();
-        return res.status(400).json({
-          error:
-            direction === 'next'
-              ? 'Contrato já está na etapa final.'
-              : 'Contrato já está na primeira etapa.',
-        });
-      }
-
-      const nextStatus = CONTRACT_STATUS_FLOW[targetIndex];
-      const documentsToCleanup =
-        direction === 'previous'
-          ? await fetchDocumentsForStepBackCleanup(tx, contract, nextStatus)
-          : [];
-
-      if (nextStatus === 'FINALIZED') {
-        await tx.rollback();
-        return res.status(400).json({
-          error:
-            'Use o endpoint de finalização para concluir o contrato com validações obrigatórias.',
-        });
-      }
-
-      if (nextStatus === 'AWAITING_SIGNATURES') {
-        const documentCounts = await fetchContractDocumentGateCounts(tx, contract);
-        if (documentCounts.draftTotal <= 0) {
-          await tx.rollback();
-          return res.status(400).json({
-            error:
-              'Transição bloqueada: anexe uma minuta válida (contrato_minuta) vinculada a este contrato antes de avançar.',
-          });
-        }
-      }
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET status = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [nextStatus, contractId]
-      );
-
-      if (direction === 'previous' && nextStatus === 'AWAITING_DOCS') {
-        await tx.query(
-          `
-            UPDATE contracts
-            SET
-              seller_approval_status = 'PENDING',
-              buyer_approval_status = 'PENDING',
-              seller_approval_reason = NULL,
-              buyer_approval_reason = NULL,
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `,
-          [contractId]
-        );
-      }
-
-      if (direction === 'previous' && documentsToCleanup.length > 0) {
-        const placeholders = documentsToCleanup.map(() => '?').join(', ');
-        await tx.query(
-          `
-            DELETE FROM negotiation_documents
-            WHERE id IN (${placeholders})
-          `,
-          documentsToCleanup.map((document) => Number(document.id))
-        );
-      }
-
-      if (direction === 'previous') {
-        const nextWorkflowMetadata = resetWorkflowMetadataForStepBack(
-          contract.workflow_metadata
-        );
-
-        if (nextWorkflowMetadata) {
-          await tx.query(
-            `
-              UPDATE contracts
-              SET workflow_metadata = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP
-              WHERE id = ?
-            `,
-            [JSON.stringify(nextWorkflowMetadata), contractId]
-          );
-        } else {
-          await tx.query(
-            `
-              UPDATE contracts
-              SET workflow_metadata = NULL, updated_at = CURRENT_TIMESTAMP
-              WHERE id = ?
-            `,
-            [contractId]
-          );
-        }
-      }
-
-      const updated = await fetchContractForUpdate(tx, contractId);
-      await tx.commit();
-
-      if (direction === 'previous' && documentsToCleanup.length > 0) {
-        await cleanupContractDocumentAssets(documentsToCleanup, {
-          action: 'contract_step_back_cleanup',
-          contractId,
-          negotiationId: contract.negotiation_id,
-        });
-      }
-
-      const message =
-        direction === 'previous' && nextStatus === 'AWAITING_DOCS'
-          ? 'Contrato atualizado para a aba de documentos pendentes.'
-          : direction === 'previous' && nextStatus === 'IN_DRAFT'
-            ? 'Contrato atualizado para a aba de confecção da minuta.'
-            : `Contrato atualizado para ${nextStatus}.`;
+      const result = await transitionContractStatus({
+        contractIdInput: req.params.id,
+        directionInput: (req.body ?? {}).direction,
+        loadContractForUpdate: fetchContractForUpdate,
+      });
 
       return res.status(200).json({
-        message,
-        contract: updated ? mapContract(updated, req) : null,
+        message: result.message,
+        contract: result.contract ? mapContract(result.contract as ContractRow, req) : null,
       });
     } catch (error) {
-      await tx.rollback();
+      if (isContractWorkflowError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao transicionar etapa do contrato:', error);
       return res.status(500).json({ error: 'Falha ao atualizar etapa do contrato.' });
-    } finally {
-      tx.release();
     }
   }
 
   async evaluateSide(req: AuthRequest, res: Response): Promise<Response> {
-    const contractId = String(req.params.id ?? '').trim();
-    if (!contractId) {
-      return res.status(400).json({ error: 'ID do contrato inválido.' });
-    }
-
-    const body = (req.body ?? {}) as EvaluateSideBody;
-    const side = String(body.side ?? '').trim().toLowerCase();
-    if (side !== 'seller' && side !== 'buyer') {
-      return res.status(400).json({ error: "Lado inválido. Use 'seller' ou 'buyer'." });
-    }
-
-    const nextSideStatus = parseContractApprovalStatusInput(body.status);
-    if (!nextSideStatus) {
-      return res.status(400).json({
-        error:
-          "Status inválido. Use PENDING, APPROVED, APPROVED_WITH_RES ou REJECTED.",
-      });
-    }
-
-    const reasonText = String(body.reason ?? '').trim();
-    if (
-      (nextSideStatus === 'APPROVED_WITH_RES' || nextSideStatus === 'REJECTED') &&
-      reasonText.length < 3
-    ) {
-      return res.status(400).json({
-        error: 'Motivo é obrigatório para aprovação com ressalvas e rejeição.',
-      });
-    }
-
-    const evaluatedBy = Number(req.userId);
-    const reasonPayload = normalizeApprovalReason(
-      reasonText,
-      Number.isFinite(evaluatedBy) ? evaluatedBy : null
-    );
-
-    const tx = await getContractDbConnection();
     try {
-      await tx.beginTransaction();
-
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-
-      if (resolveContractStatus(contract.status) !== 'AWAITING_DOCS') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'A avaliação granular só é permitida em AWAITING_DOCS.',
-        });
-      }
-
-      let nextSellerStatus = resolveContractApprovalStatus(
-        contract.seller_approval_status
-      );
-      let nextBuyerStatus = resolveContractApprovalStatus(
-        contract.buyer_approval_status
-      );
-      let nextSellerReason = parseStoredJsonObject(contract.seller_approval_reason);
-      let nextBuyerReason = parseStoredJsonObject(contract.buyer_approval_reason);
-
-      const sideReason = reasonPayload ?? {};
-      if (side === 'seller') {
-        nextSellerStatus = nextSideStatus;
-        nextSellerReason = sideReason;
-      } else {
-        nextBuyerStatus = nextSideStatus;
-        nextBuyerReason = sideReason;
-      }
-
-      const targetSides: ContractDocumentSide[] = [side as ContractDocumentSide];
-      const normalizedCategoryStatus: ContractDocumentCategoryStatus =
-        nextSideStatus === 'REJECTED'
-          ? 'REJECTED'
-          : nextSideStatus === 'PENDING'
-            ? 'PENDING'
-            : 'APPROVED';
-      const reviewAuditEvent: ContractAuditEvent = {
-        action: 'admin_side_review',
-        at: new Date().toISOString(),
-        by: Number.isFinite(evaluatedBy) ? evaluatedBy : null,
-        role: String(req.userRole ?? '').trim().toLowerCase() || null,
-        details: {
-          side,
-          status: nextSideStatus,
-          reason: reasonText || null,
-        },
-      };
-      for (const targetSide of targetSides) {
-        const [docRows] = await tx.query<ContractDocumentRow[]>(
-          `
-            SELECT id, type, document_type, metadata_json, created_at
-            FROM negotiation_documents
-            WHERE negotiation_id = ?
-              AND COALESCE(document_type, '') <> 'proposal'
-              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
-              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.side')) = ?
-            ORDER BY id DESC
-          `,
-          [contract.negotiation_id, contractId, targetSide]
-        );
-        for (const docRow of docRows) {
-          const metadata = parseStoredJsonObject(docRow.metadata_json);
-          const nextMetadata = appendAuditTrailEvent(metadata, reviewAuditEvent);
-          nextMetadata.categoryStatus = normalizedCategoryStatus;
-          nextMetadata.reviewStatus = nextSideStatus;
-          nextMetadata.reviewReason = reasonText || null;
-          nextMetadata.reviewedAt = reviewAuditEvent.at;
-          nextMetadata.reviewedBy = reviewAuditEvent.by;
-          await tx.query(
-            `
-              UPDATE negotiation_documents
-              SET metadata_json = CAST(? AS JSON)
-              WHERE id = ?
-            `,
-            [JSON.stringify(nextMetadata), Number(docRow.id)]
-          );
-        }
-      }
-
-      const effectiveStatuses = resolveApprovalStatusesForProgress(contract, {
-        sellerStatus: nextSellerStatus,
-        buyerStatus: nextBuyerStatus,
+      const result = await evaluateContractSide({
+        contractIdInput: req.params.id,
+        sideInput: req.body?.side,
+        statusInput: req.body?.status,
+        reasonInput: req.body?.reason,
+        userIdInput: req.userId,
+        userRoleInput: req.userRole,
+        loadContractForUpdate: fetchContractForUpdate,
       });
-      const mustMoveToDraft = shouldMoveToDraft(
-        contract,
-        effectiveStatuses.sellerStatus,
-        effectiveStatuses.buyerStatus
-      );
-      const nextContractStatus: ContractStatus = mustMoveToDraft
-        ? 'IN_DRAFT'
-        : 'AWAITING_DOCS';
-      const shouldReleasePropertyAvailability = nextSideStatus === 'REJECTED';
-      const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
-        contract.workflow_metadata,
-        reviewAuditEvent
-      );
 
-      await tx.query(
-        `
-          UPDATE contracts
-          SET
-            seller_approval_status = ?,
-            buyer_approval_status = ?,
-            seller_approval_reason = CAST(? AS JSON),
-            buyer_approval_reason = CAST(? AS JSON),
-            workflow_metadata = CAST(? AS JSON),
-            status = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [
-          nextSellerStatus,
-          nextBuyerStatus,
-          JSON.stringify(nextSellerReason),
-          JSON.stringify(nextBuyerReason),
-          JSON.stringify(nextWorkflowMetadata),
-          nextContractStatus,
-          contractId,
-        ]
-      );
-
-      if (shouldReleasePropertyAvailability) {
-        await tx.query(
-          `
-            UPDATE negotiations
-            SET status = 'IN_NEGOTIATION'
-            WHERE id = ?
-          `,
-          [contract.negotiation_id]
-        );
-        await tx.query(
-          `
-            UPDATE properties
-            SET
-              status = 'approved',
-              visibility = 'PUBLIC',
-              lifecycle_status = 'AVAILABLE'
-            WHERE id = ?
-              AND lifecycle_status NOT IN ('SOLD', 'RENTED')
-              AND status NOT IN ('sold', 'rented')
-          `,
-            [contract.property_id]
-        );
-      }
-
-      const updated = await fetchContractForUpdate(tx, contractId);
-      await tx.commit();
-
-      if (nextSideStatus === 'APPROVED_WITH_RES' && reasonText.length > 0) {
-        const recipientIds = resolveContractNotificationRecipientIds(contract);
-        const propertyTitle = resolveContractPropertyTitle(contract);
-        const sideLabel = resolveApprovalSideLabel(contract, side as 'seller' | 'buyer');
-
-        for (const recipientId of recipientIds) {
-          try {
-            await createUserNotification({
-              type: 'negotiation',
-              title: 'Contrato aprovado com ressalvas',
-              message: `O admin aprovou com ressalvas a ${sideLabel} do contrato do imóvel "${propertyTitle}". Observação: ${reasonText}`,
-              recipientId,
-              relatedEntityId: Number(contract.property_id),
-              metadata: {
-                contractId,
-                negotiationId: contract.negotiation_id,
-                side: isDoubleEndedDeal(contract) ? 'both' : side,
-                status: nextSideStatus,
-                reason: reasonText,
-              },
-            });
-          } catch (notificationError) {
-            console.error(
-              'Falha ao notificar sobre aprovação com ressalvas do contrato:',
-              notificationError
-            );
-          }
-        }
-      }
-
-      if (nextSideStatus === 'REJECTED' && reasonText.length > 0) {
-        const recipientIds = resolveContractNotificationRecipientIds(contract);
-        const propertyTitle = resolveContractPropertyTitle(contract);
-        const sideLabel = resolveApprovalSideLabel(contract, side as 'seller' | 'buyer');
-
-        for (const recipientId of recipientIds) {
-          try {
-            await createUserNotification({
-              type: 'negotiation',
-              title: 'Documentação rejeitada',
-              message: `A documentação (${sideLabel}) do contrato do imóvel "${propertyTitle}" foi rejeitada. Motivo: ${reasonText}. O contrato não aparecerá mais na sua lista até nova análise, se aplicável.`,
-              recipientId,
-              relatedEntityId: Number(contract.property_id),
-              metadata: {
-                contractId,
-                negotiationId: contract.negotiation_id,
-                side: isDoubleEndedDeal(contract) ? 'both' : side,
-                status: nextSideStatus,
-                reason: reasonText,
-              },
-            });
-          } catch (notificationError) {
-            console.error(
-              'Falha ao notificar sobre rejeição da documentação do contrato:',
-              notificationError
-            );
-          }
-        }
-      }
-
-      const contractForResponse = updated
-        ? mapContract(
-            {
-              ...updated,
-              status: nextContractStatus,
-              seller_approval_status: nextSellerStatus,
-              buyer_approval_status: nextBuyerStatus,
-              seller_approval_reason: JSON.stringify(nextSellerReason),
-              buyer_approval_reason: JSON.stringify(nextBuyerReason),
-            } as ContractRow,
-            req
-          )
-        : null;
       return res.status(200).json({
-        message: 'Avaliação do lado atualizada com sucesso.',
-        contract: contractForResponse,
-        movedToDraft: mustMoveToDraft,
+        message: result.message,
+        contract: result.contract ? mapContract(result.contract, req) : null,
+        movedToDraft: result.movedToDraft,
       });
     } catch (error) {
-      await tx.rollback();
+      if (isContractSideReviewError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao avaliar lado do contrato:', error);
       return res.status(500).json({ error: 'Falha ao avaliar documentação.' });
-    } finally {
-      tx.release();
     }
   }
 
   async evaluateCategory(req: AuthRequest, res: Response): Promise<Response> {
-    const contractId = String(req.params.id ?? '').trim();
-    if (!contractId) {
-      return res.status(400).json({ error: 'ID do contrato inválido.' });
-    }
-
-    const body = (req.body ?? {}) as EvaluateCategoryBody;
-    const side = parseDocumentSide(body.side);
-    const category = normalizeContractDocumentCategory(body.category);
-    const status = resolveCategoryStatus(body.status);
-    const reasonText = String(body.reason ?? '').trim();
-    const reasonCode = String(body.reasonCode ?? '').trim().toUpperCase();
-    if (!side) {
-      return res.status(400).json({ error: "Lado inválido. Use 'seller' ou 'buyer'." });
-    }
-    if (!category) {
-      return res.status(400).json({ error: 'Categoria documental inválida.' });
-    }
-    if (!isContractDocumentCategoryStatus(status)) {
-      return res.status(400).json({ error: 'Status categorial inválido.' });
-    }
-    if (status === 'REJECTED' && reasonText.length < 3) {
-      return res.status(400).json({
-        error: 'Motivo obrigatório para rejeição por categoria.',
-      });
-    }
-
-    const tx = await getContractDbConnection();
     try {
-      await tx.beginTransaction();
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-      if (resolveContractStatus(contract.status) !== 'AWAITING_DOCS') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Revisão por categoria só é permitida em AWAITING_DOCS.',
-        });
-      }
-
-      const ruleContext = buildContractDocumentRuleContextFromRow(contract);
-      const categoryRule = findCategoryRequirement(side, category, ruleContext);
-      if (!categoryRule) {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Categoria inválida para o lado informado.',
-        });
-      }
-      if (categoryRule.applicability === 'not_applicable') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Esta categoria não se aplica ao contrato atual (perfil/finalidade).',
-        });
-      }
-
-      const rows = await fetchContractCategoryValidationRows(tx, contract);
-      const targetDocs = rows.filter((row) => {
-        const mapped = mapDocument(row);
-        return mapped.side === side && mapped.documentCategory === category;
+      const result = await evaluateContractCategory({
+        contractIdInput: req.params.id,
+        sideInput: req.body?.side,
+        categoryInput: req.body?.category,
+        statusInput: req.body?.status,
+        reasonInput: req.body?.reason,
+        reasonCodeInput: req.body?.reasonCode,
+        userIdInput: req.userId,
+        userRoleInput: req.userRole,
+        loadContractForUpdate: fetchContractForUpdate,
       });
-      if (targetDocs.length === 0) {
-        await tx.rollback();
-        return res.status(404).json({
-          error: 'Nenhum documento encontrado para a categoria e lado informados.',
-        });
-      }
 
-      const actorId = Number(req.userId ?? 0);
-      const actorRole = String(req.userRole ?? '').trim().toLowerCase() || null;
-      const auditEvent: ContractAuditEvent = {
-        action: 'admin_category_review',
-        at: new Date().toISOString(),
-        by: Number.isFinite(actorId) && actorId > 0 ? actorId : null,
-        role: actorRole,
-        details: {
-          side,
-          category,
-          status,
-          reason: reasonText || null,
-          reasonCode: reasonCode || null,
-        },
-      };
-
-      for (const row of targetDocs) {
-        const metadata = parseStoredJsonObject(row.metadata_json);
-        const nextMetadata = appendAuditTrailEvent(metadata, auditEvent);
-        nextMetadata.categoryStatus = status;
-        nextMetadata.reviewStatus = status;
-        nextMetadata.reviewReason = reasonText || null;
-        nextMetadata.reviewReasonCode = reasonCode || null;
-        nextMetadata.reviewedAt = auditEvent.at;
-        nextMetadata.reviewedBy = auditEvent.by;
-        nextMetadata.validationResult = {
-          isValid: status !== 'REJECTED',
-          status,
-          issues:
-            status === 'REJECTED'
-              ? [
-                  {
-                    code: reasonCode || 'CATEGORY_INVALID',
-                    message: reasonText || 'Categoria rejeitada na revisão.',
-                  },
-                ]
-              : [],
-        };
-        await tx.query(
-          `
-            UPDATE negotiation_documents
-            SET metadata_json = CAST(? AS JSON)
-            WHERE id = ?
-          `,
-          [JSON.stringify(nextMetadata), Number(row.id)]
-        );
-      }
-
-      const updatedRows = await fetchContractCategoryValidationRows(tx, contract);
-      const matrixContext = buildContractDocumentRuleContextFromRow(contract);
-      const progress = buildContractDocumentProgress(
-        updatedRows.map((row) => {
-          const mapped = mapDocument(row);
-          return {
-            ...mapped,
-            metadata: mapped.metadata as Record<string, unknown>,
-          };
-        }),
-        matrixContext
-      );
-
-      const nextSellerStatus = resolveSideApprovalFromCategoryProgress(progress.seller);
-      const nextBuyerStatus = resolveSideApprovalFromCategoryProgress(progress.buyer);
-      const effectiveStatuses = resolveApprovalStatusesForProgress(contract, {
-        sellerStatus: nextSellerStatus,
-        buyerStatus: nextBuyerStatus,
-      });
-      const mustMoveBySide = shouldMoveToDraft(
-        contract,
-        effectiveStatuses.sellerStatus,
-        effectiveStatuses.buyerStatus
-      );
-      const mustMoveByCategories = hasRequiredCategoryGateApproval({
-        rows: updatedRows,
-        contract,
-      });
-      const nextContractStatus: ContractStatus =
-        mustMoveBySide && mustMoveByCategories ? 'IN_DRAFT' : 'AWAITING_DOCS';
-
-      const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
-        contract.workflow_metadata,
-        auditEvent
-      );
-      const sellerReason =
-        side === 'seller'
-          ? normalizeApprovalReason(reasonText, auditEvent.by)
-          : parseStoredJsonObject(contract.seller_approval_reason);
-      const buyerReason =
-        side === 'buyer'
-          ? normalizeApprovalReason(reasonText, auditEvent.by)
-          : parseStoredJsonObject(contract.buyer_approval_reason);
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET
-            seller_approval_status = ?,
-            buyer_approval_status = ?,
-            seller_approval_reason = CAST(? AS JSON),
-            buyer_approval_reason = CAST(? AS JSON),
-            workflow_metadata = CAST(? AS JSON),
-            status = ?,
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [
-          nextSellerStatus,
-          nextBuyerStatus,
-          JSON.stringify(sellerReason),
-          JSON.stringify(buyerReason),
-          JSON.stringify(nextWorkflowMetadata),
-          nextContractStatus,
-          contractId,
-        ]
-      );
-
-      const updatedContract = await fetchContractForUpdate(tx, contractId);
-      await tx.commit();
       return res.status(200).json({
-        message: 'Revisão por categoria atualizada com sucesso.',
-        contract: updatedContract
-          ? {
-              ...mapContract(updatedContract, req),
-              documentProgress: progress,
-            }
-          : null,
+        message: result.message,
+        contract: result.contract ? mapContract(result.contract, req) : null,
       });
     } catch (error) {
-      await tx.rollback();
+      if (isContractCategoryReviewError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao revisar categoria documental:', error);
       return res.status(500).json({
         error: 'Falha ao revisar categoria documental.',
       });
-    } finally {
-      tx.release();
     }
   }
 
@@ -3472,80 +2561,35 @@ class ContractController {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
     }
 
-    const body = (req.body ?? {}) as UpdateCommissionDataBody;
-    const rawCommissionData = body.commission_data ?? body.commissionData;
-    let commissionData: NormalizedCommissionData;
-    try {
-      commissionData = normalizeCommissionData(rawCommissionData);
-    } catch (error) {
-      return res.status(400).json({
-        error: error instanceof Error ? error.message : 'commission_data inválido.',
-      });
-    }
-
     const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
+      const result = await updateContractCommissionData(tx, {
+        req,
+        contractId,
+        body: req.body as UpdateCommissionDataBody,
+      });
 
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
+      await tx.commit();
 
-      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Somente contratos finalizados podem ter o VGV editado.',
+      const contract = result.contract;
+      if (contract) {
+        logContractAdminAudit(req, 'update_commission_data', {
+          contractId,
+          negotiationId: contract.negotiation_id,
+          propertyId: Number(contract.property_id),
         });
       }
 
-      const normalizedPurpose = String(contract.property_purpose ?? '')
-        .trim()
-        .toLowerCase();
-      const isRentalOnly =
-        normalizedPurpose.includes('alug') && !normalizedPurpose.includes('venda');
-      if (!isRentalOnly) {
-        const totalSplits = Number(
-          (
-            commissionData.comissaoCaptador +
-            commissionData.comissaoVendedor +
-            commissionData.taxaPlataforma
-          ).toFixed(2)
-        );
-        if (Math.abs(totalSplits - commissionData.valorVenda) > 0.01) {
-          await tx.rollback();
-          return res.status(400).json({
-            error:
-              'Na venda, a soma de comissões e taxa precisa fechar exatamente 100% do valor.',
-          });
-        }
-      }
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET commission_data = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [JSON.stringify(commissionData), contractId]
-      );
-
-      const updatedContract = await fetchContractForUpdate(tx, contractId);
-      await tx.commit();
-
-      logContractAdminAudit(req, 'update_commission_data', {
-        contractId,
-        negotiationId: contract.negotiation_id,
-        propertyId: Number(contract.property_id),
-      });
-
       return res.status(200).json({
         message: 'VGV atualizado com sucesso.',
-        contract: updatedContract ? mapContract(updatedContract, req) : null,
+        contract: contract ? mapContract(contract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractCommissionMutationError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao atualizar VGV do contrato:', error);
       return res.status(500).json({ error: 'Falha ao atualizar o VGV.' });
     } finally {
@@ -3563,35 +2607,18 @@ class ContractController {
     try {
       await tx.beginTransaction();
 
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-
-      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Somente contratos finalizados podem ter o VGV excluído.',
-        });
-      }
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET commission_data = NULL, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
-      );
+      const result = await deleteContractCommissionData(tx, { contractId });
 
       await tx.commit();
 
-      logContractAdminAudit(req, 'delete_commission_data', {
-        contractId,
-        negotiationId: contract.negotiation_id,
-        propertyId: Number(contract.property_id),
-      });
+      const contract = result.contract;
+      if (contract) {
+        logContractAdminAudit(req, 'delete_commission_data', {
+          contractId,
+          negotiationId: contract.negotiation_id,
+          propertyId: Number(contract.property_id),
+        });
+      }
 
       return res.status(200).json({
         message: 'VGV excluído com sucesso.',
@@ -3599,6 +2626,9 @@ class ContractController {
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractCommissionMutationError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao excluir VGV do contrato:', error);
       return res.status(500).json({ error: 'Falha ao excluir o VGV.' });
     } finally {
@@ -3610,30 +2640,6 @@ class ContractController {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
-    }
-
-    const body = (req.body ?? {}) as UploadContractDocumentBody;
-    const documentCategoryInput = normalizeContractDocumentCategory(
-      body.documentCategory ?? body.document_category
-    );
-    const documentTypeRaw = String(
-      body.documentType ?? body.document_type ?? ''
-    ).trim();
-    const normalizedDocumentType = (
-      documentTypeRaw ||
-      (documentCategoryInput
-        ? resolveFallbackDocumentTypeByCategory(documentCategoryInput)
-        : '')
-    ).toLowerCase();
-    const requestedSide = parseDocumentSide(body.side);
-    if (!isContractDocumentType(normalizedDocumentType)) {
-      return res.status(400).json({ error: 'Tipo de documento inválido.' });
-    }
-
-    if (documentTypeRequiresSide(normalizedDocumentType) && requestedSide == null) {
-      return res.status(400).json({
-        error: 'Informe o lado do documento (seller ou buyer) para este tipo.',
-      });
     }
 
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
@@ -3658,30 +2664,13 @@ class ContractController {
         });
       }
 
-      const documentId = await storeNegotiationDocumentToR2({
-        executor: tx,
-        negotiationId: contract.negotiation_id,
-        type: resolveDocumentStorageType(normalizedDocumentType),
-        documentType: normalizedDocumentType,
-        content: uploadedFile.buffer,
-        metadataJson: {
-          contractId,
-          side: requestedSide,
-          originalFileName: uploadedFile.originalname ?? null,
-          uploadedBy: Number(req.userId ?? 0) || null,
-          uploadedAt: new Date().toISOString(),
-          uploadedVia: 'admin-finalized',
-        },
+      const result = await uploadFinalizedContractDocument(tx, {
+        req,
+        contract,
+        contractId,
+        body: req.body as UploadContractDocumentBody,
+        uploadedFile,
       });
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
-      );
 
       await tx.commit();
 
@@ -3689,24 +2678,20 @@ class ContractController {
         contractId,
         negotiationId: contract.negotiation_id,
         propertyId: Number(contract.property_id),
-        documentType: normalizedDocumentType,
-        side: requestedSide,
-        documentId,
+        documentType: result.document.documentType,
+        side: result.document.side,
+        documentId: result.document.id,
       });
 
       return res.status(201).json({
         message: 'Documento anexado com sucesso ao contrato finalizado.',
-        document: {
-          id: documentId,
-          contractId,
-          documentType: normalizedDocumentType,
-          side: requestedSide,
-          originalFileName: uploadedFile.originalname ?? null,
-          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${documentId}/download`,
-        },
+        document: result.document,
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractFinalizedDocumentMutationError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao anexar documento no contrato finalizado:', error);
       return res.status(500).json({ error: 'Falha ao anexar documento.' });
     } finally {
@@ -3742,55 +2727,15 @@ class ContractController {
         });
       }
 
-      const [documentRows] = await tx.query<ContractDocumentForDeleteRow[]>(
-        `
-          SELECT
-            id,
-            type,
-            document_type,
-            metadata_json,
-            storage_provider,
-            storage_bucket,
-            storage_key,
-            storage_content_type,
-            storage_size_bytes,
-            storage_etag
-          FROM negotiation_documents
-          WHERE id = ?
-            AND ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
-          LIMIT 1
-          FOR UPDATE
-        `,
-        [documentId, contract.negotiation_id, contract.id]
-      );
-
-      const document = documentRows[0];
-      if (!document) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Documento não encontrado para este contrato.' });
-      }
-
-      await tx.query(
-        `
-          DELETE FROM negotiation_documents
-          WHERE id = ? AND ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
-          LIMIT 1
-        `,
-        [documentId, contract.negotiation_id, contract.id]
-      );
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
-      );
+      const result = await deleteFinalizedContractDocument(tx, {
+        contract,
+        contractId,
+        documentId,
+      });
 
       await tx.commit();
 
-      const cleanupStats = await cleanupContractDocumentAssets([document], {
+      const cleanupStats = await cleanupContractDocumentAssets([result.document], {
         action: 'delete_finalized_document',
         contractId,
         negotiationId: contract.negotiation_id,
@@ -3801,7 +2746,7 @@ class ContractController {
         negotiationId: contract.negotiation_id,
         propertyId: Number(contract.property_id),
         documentId,
-        documentType: document.document_type ?? null,
+        documentType: result.document.document_type ?? null,
         cloudinaryCleanupAttempted: cleanupStats.attempted,
         cloudinaryCleanupFailed: cleanupStats.failed,
       });
@@ -3812,6 +2757,9 @@ class ContractController {
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractFinalizedDocumentMutationError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao remover documento do contrato finalizado:', error);
       return res.status(500).json({ error: 'Falha ao remover documento.' });
     } finally {
@@ -3828,58 +2776,21 @@ class ContractController {
     const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
-
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-
-      if (resolveContractStatus(contract.status) !== 'FINALIZED') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Somente contratos finalizados podem ser excluídos nesta área.',
-        });
-      }
-
-      const contractDocuments = await fetchDocumentsForContractScope(
-        tx,
-        contract,
-        'linked_or_legacy'
-      );
-
-      if (contractDocuments.length > 0) {
-        await tx.query(
-          `
-            DELETE FROM negotiation_documents
-            WHERE ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
-          `,
-          [contract.negotiation_id, contract.id]
-        );
-      }
-
-      await tx.query(
-        `
-          DELETE FROM contracts
-          WHERE id = ?
-          LIMIT 1
-        `,
-        [contractId]
-      );
+      const result = await deleteFinalizedContract(tx, { contractId });
 
       await tx.commit();
 
-      const cleanupStats = await cleanupContractDocumentAssets(contractDocuments, {
+      const cleanupStats = await cleanupContractDocumentAssets(result.documents, {
         action: 'delete_finalized_contract',
         contractId,
-        negotiationId: contract.negotiation_id,
+        negotiationId: result.contract.negotiation_id,
       });
 
       logContractAdminAudit(req, 'delete_finalized_contract', {
         contractId,
-        negotiationId: contract.negotiation_id,
-        propertyId: Number(contract.property_id),
-        deletedDocumentCount: contractDocuments.length,
+        negotiationId: result.contract.negotiation_id,
+        propertyId: Number(result.contract.property_id),
+        deletedDocumentCount: result.documents.length,
         cloudinaryCleanupAttempted: cleanupStats.attempted,
         cloudinaryCleanupFailed: cleanupStats.failed,
       });
@@ -3890,6 +2801,9 @@ class ContractController {
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractFinalizedDeletionError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao excluir contrato finalizado:', error);
       return res.status(500).json({ error: 'Falha ao excluir contrato finalizado.' });
     } finally {
@@ -3913,47 +2827,11 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const documents = await queryContractRows<ContractDocumentRow>(
-        `
-          SELECT id, type, document_type, metadata_json, created_at
-          FROM negotiation_documents
-          WHERE negotiation_id = ?
-            AND COALESCE(document_type, '') <> 'proposal'
-            AND COALESCE(type, '') <> 'proposal'
-          ORDER BY created_at DESC, id DESC
-        `,
-        [contract.negotiation_id]
-      );
-
-      const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
-      const mappedDocuments = documents
-        .filter((document) => !isProposalDocument(document))
-        .map((document) => ({
-          ...mapDocument(document),
-          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
-        }))
-        .filter((document) =>
-          shouldExposeOwnerSensitiveDocument(
-            {
-              side: document.side,
-              documentCategory: document.documentCategory,
-            },
-            canViewSensitiveData
-          )
-        );
+      const payload = await buildContractDocumentPayload(contract, req);
 
       return res.status(200).json({
-        contract: {
-          ...mapContract(contract, req),
-          documentProgress: buildContractDocumentProgress(
-            mappedDocuments.map((document) => ({
-              ...document,
-              metadata: document.metadata as Record<string, unknown>,
-            })),
-            buildContractDocumentRuleContextFromRow(contract)
-          ),
-        },
-        documents: mappedDocuments,
+        contract: payload.contract,
+        documents: payload.documents,
       });
     } catch (error) {
       console.error('Erro ao buscar contrato:', error);
@@ -3977,66 +2855,20 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const documents = await queryContractRows<ContractDocumentDownloadRow>(
-        `
-          SELECT
-            id,
-            type,
-            document_type,
-            metadata_json,
-            created_at,
-            storage_provider,
-            storage_bucket,
-            storage_key,
-            storage_content_type,
-            storage_size_bytes,
-            storage_etag
-          FROM negotiation_documents
-          WHERE ${buildContractDocumentDeleteWhereClause('linked_or_legacy')}
-          ORDER BY created_at DESC, id DESC
-        `,
-        [contract.negotiation_id, contract.id]
-      );
-
-      const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
-      const visibleDocuments = documents.filter((document) => {
-        const mapped = mapDocument(document);
-        return shouldExposeOwnerSensitiveDocument(
-          {
-            side: mapped.side,
-            documentCategory: mapped.documentCategory,
-          },
-          canViewSensitiveData
-        );
-      });
-
-      if (visibleDocuments.length === 0) {
+      const zipPayload = await buildContractDocumentsZip(contract, req);
+      if (!zipPayload) {
         return res.status(404).json({
           error: 'Nenhum documento vinculado a este contrato foi encontrado.',
         });
       }
 
-      const zip = new JSZip();
-      for (const document of visibleDocuments) {
-        const mapped = mapDocument(document);
-        const fallbackName =
-          mapped.originalFileName ??
-          `${String(mapped.documentType ?? 'documento').trim() || 'documento'}_${mapped.id}.bin`;
-        zip.file(fallbackName, await readNegotiationDocumentObject(document));
-      }
-
-      const fileNameBase =
-        String(contract.property_code ?? '').trim() ||
-        `contrato_${contract.id}`;
-      const fileBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${fileNameBase}_documentos.zip"`
+        `attachment; filename="${zipPayload.fileNameBase}_documentos.zip"`
       );
-      res.setHeader('Content-Length', String(fileBuffer.length));
-      return res.status(200).send(fileBuffer);
+      res.setHeader('Content-Length', String(zipPayload.fileBuffer.length));
+      return res.status(200).send(zipPayload.fileBuffer);
     } catch (error) {
       console.error('Erro ao gerar ZIP dos documentos do contrato:', error);
       return res.status(500).json({ error: 'Falha ao gerar o arquivo ZIP.' });
@@ -4059,47 +2891,13 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const documents = await queryContractRows<ContractDocumentRow>(
-        `
-          SELECT id, type, document_type, metadata_json, created_at
-          FROM negotiation_documents
-          WHERE negotiation_id = ?
-            AND COALESCE(document_type, '') <> 'proposal'
-            AND COALESCE(type, '') <> 'proposal'
-          ORDER BY created_at DESC, id DESC
-        `,
-        [contract.negotiation_id]
-      );
-
-      const canViewSensitiveData = canViewOwnerSensitiveData(req, contract);
-      const mappedDocuments = documents
-        .filter((document) => !isProposalDocument(document))
-        .map((document) => ({
-          ...mapDocument(document),
-          downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
-        }))
-        .filter((document) =>
-          shouldExposeOwnerSensitiveDocument(
-            {
-              side: document.side,
-              documentCategory: document.documentCategory,
-            },
-            canViewSensitiveData
-          )
-        );
+      const payload = await buildContractDocumentPayload(contract, req);
 
       return res.status(200).json({
         contract: {
-          ...mapContract(contract, req),
-          documentProgress: buildContractDocumentProgress(
-            mappedDocuments.map((document) => ({
-              ...document,
-              metadata: document.metadata as Record<string, unknown>,
-            })),
-            buildContractDocumentRuleContextFromRow(contract)
-          ),
+          ...payload.contract,
         },
-        documents: mappedDocuments,
+        documents: payload.documents,
       });
     } catch (error) {
       console.error('Erro ao buscar contrato por negociação:', error);
@@ -4123,59 +2921,18 @@ class ContractController {
       body.sameAsCapturing === true || String(body.sameAsCapturing ?? '').toLowerCase() === 'true';
     const sellingBrokerIdRaw =
       body.sellingBrokerId ?? body.sellerBrokerId ?? body.selling_broker_id;
-    const userId = Number(req.userId ?? 0);
-    if (!Number.isFinite(userId) || userId <= 0) {
-      return res.status(401).json({ error: 'Usuário não autenticado.' });
-    }
-
+    let result: Awaited<ReturnType<typeof updateContractOperationalResponsible>> | null = null;
     const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
-
-      const contract = await fetchContractByNegotiationIdForUpdate(tx, negotiationId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado para esta negociação.' });
-      }
-
-      if (!canAccessContract(req, contract)) {
-        await tx.rollback();
-        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
-      }
-
-      const capturingId = Number(contract.capturing_broker_id ?? 0);
-      if (userId !== capturingId) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o corretor captador pode ajustar o responsável operacional.',
-        });
-      }
-
-      const contractStatus = resolveContractStatus(contract.status);
-      if (contractStatus !== 'AWAITING_DOCS' && contractStatus !== 'IN_DRAFT') {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'O responsável operacional só pode ser alterado na fase de documentação.',
-        });
-      }
-
-      if (!sameAsCapturing || sellingBrokerIdRaw != null) {
-        console.warn('Ignorando configuração legada de papel secundário.', {
-          negotiationId,
-          userId,
-          requestedSellingBrokerId: sellingBrokerIdRaw ?? null,
-        });
-      }
-
-      await tx.query(
-        `
-          UPDATE negotiations
-          SET selling_broker_id = ?, version = version + 1
-          WHERE id = ?
-        `,
-        [capturingId, negotiationId]
-      );
-
+      result = await updateContractOperationalResponsible(tx, {
+        req,
+        negotiationId,
+        body: {
+          sameAsCapturing,
+          sellingBrokerId: sellingBrokerIdRaw,
+        },
+      });
       await tx.commit();
     } catch (error) {
       try {
@@ -4183,16 +2940,18 @@ class ContractController {
       } catch (rollbackError) {
         console.error('Erro ao reverter transação (responsável operacional):', rollbackError);
       }
+      if (isContractOperationalResponsibleError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao atualizar responsável operacional:', error);
       return res.status(500).json({ error: 'Falha ao atualizar responsável operacional.' });
     } finally {
       tx.release();
     }
 
-    const updated = await fetchContractByNegotiationId(negotiationId);
     return res.status(200).json({
       message: 'Responsável operacional sincronizado com o captador.',
-      contract: updated ? mapContract(updated, req) : null,
+      contract: result?.contract ? mapContract(result.contract, req) : null,
     });
   }
 
@@ -4220,60 +2979,16 @@ class ContractController {
     const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
-
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-
-      if (!canAccessContract(req, contract)) {
-        await tx.rollback();
-        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
-      }
-
-      if (resolveContractStatus(contract.status) !== 'AWAITING_SIGNATURES') {
-        await tx.rollback();
-        return res.status(400).json({
-          error:
-            'A escolha do método de assinatura só pode ser feita em AWAITING_SIGNATURES.',
-        });
-      }
-
-      const brokerName = resolveActingBrokerName(req, contract);
-      const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
-        signatureMethod: method,
-        signatureMethodDeclaredAt: new Date().toISOString(),
-        signatureMethodDeclaredBy: Number(req.userId ?? 0) || null,
-        signatureMethodDeclaredByName: brokerName,
+      const result = await setContractSignatureMethod(tx, {
+        req,
+        contractId,
+        body: { method },
       });
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET
-            workflow_metadata = CAST(? AS JSON),
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [JSON.stringify(nextWorkflowMetadata), contractId]
-      );
-
-      const updatedContract = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
 
       try {
         await createAdminNotification({
-          type: 'negotiation',
-          title: 'Assinatura presencial informada',
-          message: `O corretor ${brokerName} informou que o contrato ${contractId} será assinado presencialmente.`,
-          relatedEntityId: Number(contract.property_id),
-          metadata: {
-            contractId,
-            negotiationId: contract.negotiation_id,
-            brokerId: Number(req.userId ?? 0) || null,
-            method,
-          },
+          ...result.notification,
         });
       } catch (notificationError) {
         console.error(
@@ -4285,10 +3000,13 @@ class ContractController {
       return res.status(200).json({
         message:
           'Assinatura presencial informada com sucesso. A administração foi notificada.',
-        contract: updatedContract ? mapContract(updatedContract, req) : null,
+        contract: result.contract ? mapContract(result.contract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractSignatureMethodError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao registrar método de assinatura do contrato:', error);
       return res
         .status(500)
@@ -4302,24 +3020,6 @@ class ContractController {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
-    }
-
-    const body = (req.body ?? {}) as UploadContractDocumentBody;
-    const documentCategoryInput = normalizeContractDocumentCategory(
-      body.documentCategory ?? body.document_category
-    );
-    const documentTypeRaw = String(
-      body.documentType ?? body.document_type ?? ''
-    ).trim();
-    const normalizedDocumentType = (
-      documentTypeRaw ||
-      (documentCategoryInput
-        ? resolveFallbackDocumentTypeByCategory(documentCategoryInput)
-        : '')
-    ).toLowerCase();
-    const requestedSide = parseDocumentSide(body.side);
-    if (!isContractDocumentType(normalizedDocumentType)) {
-      return res.status(400).json({ error: 'Tipo de documento inválido.' });
     }
 
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
@@ -4342,262 +3042,28 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const currentStatus = resolveContractStatus(contract.status);
-      const role = String(req.userRole ?? '').toLowerCase();
-      const isSupplementalOther = normalizedDocumentType === 'outro';
-      const isAdminSupplemental =
-        role === 'admin' && isAdminSupplementalDocumentType(normalizedDocumentType);
-      if (isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental) {
-        if (currentStatus !== 'AWAITING_SIGNATURES') {
-          await tx.rollback();
-          return res.status(400).json({
-            error:
-              'Documentos assinados, comprovantes e anexos complementares só podem ser enviados em AWAITING_SIGNATURES.',
-          });
-        }
-      }
-      const resolvedDocumentCategory =
-        documentCategoryInput ??
-        resolveDocumentCategoryFromType(normalizedDocumentType);
-      if (!isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental) {
-        if (currentStatus !== 'AWAITING_DOCS' && currentStatus !== 'IN_DRAFT') {
-          await tx.rollback();
-          return res.status(400).json({
-            error:
-              'Categorias documentais só podem ser enviadas na etapa de documentação.',
-          });
-        }
-        if (!resolvedDocumentCategory) {
-          await tx.rollback();
-          return res.status(400).json({
-            error:
-              'documentCategory é obrigatório para documentos da etapa AWAITING_DOCS.',
-          });
-        }
-      }
-
-      const doubleEnded = isDoubleEndedDeal(contract);
-      const canEditSeller = canEditSellerSide(req, contract);
-      const canEditBuyer = canEditBuyerSide(req, contract);
-
-      const resolvedSide: 'seller' | 'buyer' | null = (
-        isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental
-      )
-        ? requestedSide
-        : (() => {
-            if (requestedSide) {
-              return requestedSide;
-            }
-            if (doubleEnded) {
-              return 'seller';
-            }
-            if (canEditSeller && !canEditBuyer) {
-              return 'seller';
-            }
-            if (canEditBuyer && !canEditSeller) {
-              return 'buyer';
-            }
-            return null;
-          })();
-
-      if (
-        !isSignedDocumentType(normalizedDocumentType) &&
-        !isAdminSupplemental &&
-        resolvedSide == null
-      ) {
-        await tx.rollback();
-        return res.status(400).json({
-          error:
-            'Informe o lado do documento (side: seller|buyer) para documentos de AWAITING_DOCS.',
-        });
-      }
-
-      if (resolvedSide === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o proprietário pode anexar documentos do lado owner.',
-        });
-      }
-
-      if (resolvedSide === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o comprador pode anexar documentos do lado buyer.',
-        });
-      }
-
-      if (!isSignedDocumentType(normalizedDocumentType) && role !== 'admin') {
-        const sellerStatus = resolveContractApprovalStatus(
-          contract.seller_approval_status
-        );
-        const buyerStatus = resolveContractApprovalStatus(
-          contract.buyer_approval_status
-        );
-
-        if (
-          resolvedSide === 'seller' &&
-          !approvalStatusAllowsEditing(sellerStatus)
-        ) {
-          await tx.rollback();
-          return res.status(403).json({
-            error: 'Documentos do lado seller não podem ser enviados após aprovação.',
-          });
-        }
-
-        if (
-          resolvedSide === 'buyer' &&
-          !approvalStatusAllowsEditing(buyerStatus)
-        ) {
-          await tx.rollback();
-          return res.status(403).json({
-            error: 'Documentos do lado buyer não podem ser enviados após aprovação.',
-          });
-        }
-      }
-
-      if (
-        resolvedDocumentCategory &&
-        resolvedSide &&
-        !isSignedDocumentType(normalizedDocumentType) &&
-        !isAdminSupplemental
-      ) {
-        const notApplicable = isUploadBlockedForNotApplicableCategory(
-          resolvedSide,
-          resolvedDocumentCategory,
-          buildContractDocumentRuleContextFromRow(contract)
-        );
-        if (notApplicable.blocked && !isSupplementalOther) {
-          await tx.rollback();
-          return res.status(422).json({
-            error: 'Categoria documental não se aplica a este contrato ou lado.',
-            code: 'CATEGORY_NOT_APPLICABLE',
-            reasonCode: notApplicable.reasonCode,
-            validationResult: {
-              isValid: false,
-              status: 'REJECTED',
-              issues: [
-                {
-                  code: 'CATEGORY_NOT_APPLICABLE' as const,
-                  field: 'documentCategory',
-                  message:
-                    'Esta categoria não é exigida para a finalidade e perfil atuais.',
-                },
-              ],
-            },
-          });
-        }
-      }
-
-      const uploadValidation = validateContractDocumentUpload({
-        file: {
-          mimetype: uploadedFile.mimetype ?? '',
-          originalname: uploadedFile.originalname ?? '',
-          size: Number(uploadedFile.size ?? uploadedFile.buffer.length ?? 0),
-        },
-        documentType: normalizedDocumentType as ContractDocumentType,
-        category: resolvedDocumentCategory,
-        side: resolvedSide,
-        requiresSide: !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental,
-        requiresCategory:
-          !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental,
+      const result = await uploadContractDocument(tx, {
+        req,
+        contract,
+        contractId,
+        body: req.body as UploadContractDocumentBody,
+        uploadedFile,
       });
-      if (!uploadValidation.isValid) {
-        await tx.rollback();
-        return res.status(422).json({
-          error: 'Documento inválido para a categoria informada.',
-          validationResult: uploadValidation,
-        });
-      }
-
-      const uploadEvent: ContractAuditEvent = {
-        action: 'document_upload',
-        at: new Date().toISOString(),
-        by: Number(req.userId ?? 0) || null,
-        role: role || null,
-        details: {
-          side: resolvedSide,
-          documentType: normalizedDocumentType,
-          category: resolvedDocumentCategory,
-        },
-      };
-      const metadataWithAudit = appendAuditTrailEvent({}, uploadEvent);
-      metadataWithAudit.contractId = contractId;
-      metadataWithAudit.side = resolvedSide;
-      metadataWithAudit.documentCategory = resolvedDocumentCategory;
-      metadataWithAudit.categoryStatus =
-        isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental
-          ? 'APPROVED'
-          : 'PENDING';
-      metadataWithAudit.validationResult = uploadValidation;
-      metadataWithAudit.originalFileName = uploadedFile.originalname ?? null;
-      metadataWithAudit.uploadedBy = Number(req.userId ?? 0) || null;
-      metadataWithAudit.uploadedAt = uploadEvent.at;
-
-      const documentId = await storeNegotiationDocumentToR2({
-        executor: tx,
-        negotiationId: contract.negotiation_id,
-        type: resolveDocumentStorageType(normalizedDocumentType),
-        documentType: normalizedDocumentType,
-        content: uploadedFile.buffer,
-        metadataJson: metadataWithAudit,
-      });
-
-      const shouldMarkOnlineSignatureMethod =
-        role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
-
-      const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
-        contract.workflow_metadata,
-        uploadEvent
-      );
-
-      if (shouldMarkOnlineSignatureMethod) {
-        const signatureAwareWorkflowMetadata = mergeStoredJsonObject(
-          nextWorkflowMetadata,
-          {
-          signatureMethod: 'online',
-          signedContractUploadedOnlineAt: uploadEvent.at,
-          signedContractUploadedOnlineBy: Number(req.userId ?? 0) || null,
-          }
-        );
-
-        await tx.query(
-          `
-            UPDATE contracts
-            SET
-              workflow_metadata = CAST(? AS JSON),
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `,
-          [JSON.stringify(signatureAwareWorkflowMetadata), contractId]
-        );
-      } else {
-        await tx.query(
-          `
-            UPDATE contracts
-            SET
-              workflow_metadata = CAST(? AS JSON),
-              updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-          `,
-          [JSON.stringify(nextWorkflowMetadata), contractId]
-        );
-      }
 
       await tx.commit();
 
       return res.status(201).json({
         message: 'Documento enviado com sucesso.',
-        document: {
-          id: documentId > 0 ? documentId : null,
-          documentType: documentTypeRaw,
-          documentCategory: resolvedDocumentCategory,
-          side: resolvedSide,
-          originalFileName: uploadedFile.originalname ?? null,
-          contractId,
-        },
+        document: result.document,
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractDocumentMutationError(error)) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...error.body,
+        });
+      }
       console.error('Erro ao enviar documento do contrato:', error);
       return res.status(500).json({ error: 'Falha ao enviar documento.' });
     } finally {
@@ -4631,108 +3097,15 @@ class ContractController {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
-      const [documentRows] = await tx.query<ContractDocumentForDeleteRow[]>(
-        `
-          SELECT
-            id,
-            type,
-            document_type,
-            metadata_json,
-            storage_provider,
-            storage_bucket,
-            storage_key,
-            storage_content_type,
-            storage_size_bytes,
-            storage_etag
-          FROM negotiation_documents
-          WHERE id = ? AND negotiation_id = ?
-          LIMIT 1
-          FOR UPDATE
-        `,
-        [documentId, contract.negotiation_id]
-      );
-
-      const document = documentRows[0];
-      if (!document) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Documento não encontrado.' });
-      }
-
-      const metadata = parseStoredJsonObject(document.metadata_json);
-      const side = parseDocumentSide(metadata.side);
-      const documentType = String(document.document_type ?? '').trim().toLowerCase();
-      const signedDocument = isSignedDocumentType(documentType);
-
-      const role = String(req.userRole ?? '').toLowerCase();
-      const canEditSeller = canEditSellerSide(req, contract);
-      const canEditBuyer = canEditBuyerSide(req, contract);
-      const doubleEnded = isDoubleEndedDeal(contract);
-
-      if (side === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o proprietário pode remover documentos do lado owner.',
-        });
-      }
-
-      if (side === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o comprador pode remover documentos do lado buyer.',
-        });
-      }
-
-      if (!signedDocument) {
-        const sellerStatus = resolveContractApprovalStatus(contract.seller_approval_status);
-        const buyerStatus = resolveContractApprovalStatus(contract.buyer_approval_status);
-
-        if (side === 'seller' && !approvalStatusAllowsEditing(sellerStatus)) {
-          await tx.rollback();
-          return res.status(403).json({
-            error: 'Documentos do lado seller não podem ser removidos após aprovação.',
-          });
-        }
-
-        if (side === 'buyer' && !approvalStatusAllowsEditing(buyerStatus)) {
-          await tx.rollback();
-          return res.status(403).json({
-            error: 'Documentos do lado buyer não podem ser removidos após aprovação.',
-          });
-        }
-
-        if (side == null) {
-          const canEditAtLeastOneSide =
-            approvalStatusAllowsEditing(sellerStatus) ||
-            approvalStatusAllowsEditing(buyerStatus);
-          if (!canEditAtLeastOneSide) {
-            await tx.rollback();
-            return res.status(403).json({
-              error: 'Documento não pode ser removido após aprovação.',
-            });
-          }
-        }
-      }
-
-      await tx.query(
-        `
-          DELETE FROM negotiation_documents
-          WHERE id = ? AND negotiation_id = ?
-          LIMIT 1
-        `,
-        [documentId, contract.negotiation_id]
-      );
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [contractId]
-      );
+      const result = await deleteContractDocument(tx, {
+        req,
+        contract,
+        contractId,
+        documentId,
+      });
 
       await tx.commit();
-      await cleanupContractDocumentAssets([document], {
+      await cleanupContractDocumentAssets([result.document], {
         action: 'delete_contract_document',
         contractId,
         negotiationId: contract.negotiation_id,
@@ -4743,6 +3116,12 @@ class ContractController {
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractDocumentMutationError(error)) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...error.body,
+        });
+      }
       console.error('Erro ao remover documento do contrato:', error);
       return res.status(500).json({ error: 'Falha ao remover documento.' });
     } finally {
@@ -4756,130 +3135,25 @@ class ContractController {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
     }
 
-    const body = (req.body ?? {}) as ContractDataBody;
-
-    let ownerPatch: Record<string, unknown> | null = null;
-    let buyerPatch: Record<string, unknown> | null = null;
-
-    try {
-      ownerPatch = normalizeJsonObject(
-        body.ownerInfo ?? body.owner_info ?? body.sellerInfo ?? body.seller_info,
-        'ownerInfo',
-        { emptyStringAsNull: true }
-      );
-      buyerPatch = normalizeJsonObject(body.buyerInfo ?? body.buyer_info, 'buyerInfo', {
-        emptyStringAsNull: true,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Payload inválido.';
-      return res.status(400).json({ error: message });
-    }
-
-    if (!ownerPatch && !buyerPatch) {
-      return res.status(400).json({
-        error: 'Informe ao menos ownerInfo ou buyerInfo para atualização.',
-      });
-    }
-
     const tx = await getContractDbConnection();
     try {
       await tx.beginTransaction();
-
-      const contract = await fetchContractForUpdate(tx, contractId);
-      if (!contract) {
-        await tx.rollback();
-        return res.status(404).json({ error: 'Contrato não encontrado.' });
-      }
-
-      if (!canAccessContract(req, contract)) {
-        await tx.rollback();
-        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
-      }
-
-      const doubleEnded = isDoubleEndedDeal(contract);
-      const role = String(req.userRole ?? '').toLowerCase();
-      const isAdmin = role === 'admin';
-      const canEditSeller = canEditSellerSide(req, contract);
-      const canEditBuyer = canEditBuyerSide(req, contract);
-
-      if (ownerPatch && !canEditSeller && !doubleEnded) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o proprietário pode editar ownerInfo.',
-        });
-      }
-
-      if (buyerPatch && !canEditBuyer && !doubleEnded) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Somente o comprador pode editar buyerInfo.',
-        });
-      }
-
-      const sellerStatus = resolveContractApprovalStatus(
-        contract.seller_approval_status
-      );
-      const buyerStatus = resolveContractApprovalStatus(
-        contract.buyer_approval_status
-      );
-
-      if (ownerPatch && !approvalStatusAllowsEditing(sellerStatus) && !isAdmin) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Dados do lado owner não podem ser alterados após aprovação.',
-        });
-      }
-
-      if (buyerPatch && !approvalStatusAllowsEditing(buyerStatus) && !isAdmin) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'Dados do lado buyer não podem ser alterados após aprovação.',
-        });
-      }
-
-      if (doubleEnded) {
-        const userId = Number(req.userId);
-        const sameBrokerId = Number(contract.capturing_broker_id ?? 0);
-        if (!isAdmin && userId !== sameBrokerId) {
-          await tx.rollback();
-          return res.status(403).json({
-            error:
-              'Neste contrato de ponta dupla, apenas o corretor responsável pode editar os dois lados.',
-          });
-        }
-      }
-
-      const ownerInfo = parseStoredJsonObject(contract.seller_info);
-      const buyerInfo = parseStoredJsonObject(contract.buyer_info);
-
-      const nextOwnerInfo = ownerPatch ?? ownerInfo;
-      const nextBuyerInfo = buyerPatch ?? buyerInfo;
-
-      await tx.query(
-        `
-          UPDATE contracts
-          SET
-            seller_info = CAST(? AS JSON),
-            buyer_info = CAST(? AS JSON),
-            updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `,
-        [
-          JSON.stringify(nextOwnerInfo),
-          JSON.stringify(nextBuyerInfo),
-          contractId,
-        ]
-      );
-
-      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      const result = await updateContractData(tx, {
+        req,
+        contractId,
+        body: req.body as ContractDataBody,
+      });
       await tx.commit();
 
       return res.status(200).json({
         message: 'Dados do contrato atualizados com sucesso.',
-        contract: updatedContract ? mapContract(updatedContract, req) : null,
+        contract: result.contract ? mapContract(result.contract, req) : null,
       });
     } catch (error) {
       await tx.rollback();
+      if (isContractDataUpdateError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       console.error('Erro ao atualizar dados do contrato:', error);
       return res.status(500).json({ error: 'Falha ao atualizar dados do contrato.' });
     } finally {

@@ -428,4 +428,39 @@ describe('Contract response shape contracts', () => {
     expect(response.body.contract.responsibleUserIds).toEqual([30005, 30006]);
     expect(response.body.contract.viewerSide).toBe('both');
   });
+
+  it('returns 400 for invalid status filter in my contracts listing', async () => {
+    const response = await request(app).get('/contracts/me?status=INVALIDO');
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      error: 'Status de contrato inválido.',
+    });
+  });
+
+  it('returns 401 when user id is missing from the request context', async () => {
+    const unauthApp = express();
+    unauthApp.use(express.json());
+    unauthApp.get('/contracts/me', (req, res) =>
+      contractController.listMyContracts(req as any, res)
+    );
+
+    const response = await request(unauthApp).get('/contracts/me');
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({
+      error: 'Usuário não autenticado.',
+    });
+  });
+
+  it('returns 500 when the personal listing fails', async () => {
+    queryMock.mockRejectedValueOnce(new Error('db down'));
+
+    const response = await request(app).get('/contracts/me');
+
+    expect(response.status).toBe(500);
+    expect(response.body).toMatchObject({
+      error: 'Falha ao listar contratos.',
+    });
+  });
 });

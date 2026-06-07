@@ -10,6 +10,9 @@ const {
   getDraftByDraftIdAndTokenMock,
   updateDraftByDraftIdMock,
   verifyEmailCodeMock,
+  buildUserPayloadMock,
+  signUserTokenMock,
+  hasCompleteProfileMock,
 } = vi.hoisted(() => ({
   beginTransactionMock: vi.fn(),
   commitMock: vi.fn(),
@@ -20,6 +23,9 @@ const {
   getDraftByDraftIdAndTokenMock: vi.fn(),
   updateDraftByDraftIdMock: vi.fn(),
   verifyEmailCodeMock: vi.fn(),
+  buildUserPayloadMock: vi.fn(),
+  signUserTokenMock: vi.fn(),
+  hasCompleteProfileMock: vi.fn(),
 }));
 
 vi.mock('../../src/services/authPersistenceService', () => ({
@@ -44,6 +50,12 @@ vi.mock('../../src/services/emailCodeChallengeService', async () => {
     verifyEmailCode: verifyEmailCodeMock,
   };
 });
+
+vi.mock('../../src/services/authSessionService', () => ({
+  buildUserPayload: buildUserPayloadMock,
+  signUserToken: signUserTokenMock,
+  hasCompleteProfile: hasCompleteProfileMock,
+}));
 
 import { confirmDraftEmailCode } from '../../src/services/registrationDraftService';
 

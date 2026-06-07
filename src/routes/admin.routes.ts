@@ -10,7 +10,24 @@ import { contractDraftUpload } from '../middlewares/uploadMiddleware';
 import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 import { signedProposalUpload } from '../middlewares/uploadMiddleware';
 import { loadAdminDashboardStats } from '../services/adminDashboardService';
+import {
+  getAdminBrokerById,
+  getAdminBrokerProperties,
+  getAdminClientById,
+  getAdminClientProperties,
+  listAdminBrokers,
+  listAdminClients,
+  listAdminUsers,
+  listPendingAdminBrokers,
+} from '../services/adminAccountDirectoryService';
 import { sendAdminNotification } from '../services/adminNotificationService';
+import {
+  listArchivedProperties as loadArchivedProperties,
+  listFeaturedProperties as loadFeaturedProperties,
+  listPropertiesWithBrokers as loadPropertiesWithBrokers,
+  relistProperty as relistCatalogProperty,
+  updateFeaturedProperties as updateCatalogFeaturedProperties,
+} from '../services/adminPropertyCatalogService';
 
 const adminRoutes = Router();
 
@@ -133,17 +150,60 @@ adminRoutes.post(
   ]),
   adminController.createProperty
 );
-adminRoutes.get('/users', adminController.getAllUsers);
+adminRoutes.get('/users', async (req, res) => {
+  try {
+    const payload = await listAdminUsers(req.query);
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao listar usuarios:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
 adminRoutes.post('/users', adminController.createUser);
 adminRoutes.delete('/users/:id', requireAdminReauth, adminController.deleteUser);
 
-adminRoutes.get('/clients', adminController.getAllClients);
-adminRoutes.get('/clients/:id', adminController.getClientById);
+adminRoutes.get('/clients', async (_req, res) => {
+  try {
+    const payload = await listAdminClients();
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao buscar clientes:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
+adminRoutes.get('/clients/:id', async (req, res) => {
+  const clientId = Number(req.params.id);
+  if (Number.isNaN(clientId)) {
+    return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+  }
+  try {
+    const payload = await getAdminClientById(clientId);
+    if (!payload) {
+      return res.status(404).json({ error: 'Cliente nao encontrado.' });
+    }
+    return res.status(200).json({ data: payload });
+  } catch (error) {
+    console.error('Erro ao buscar cliente:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
 adminRoutes.post('/clients/:id/promote-broker', adminController.promoteClientToBroker);
 adminRoutes.post('/clients/:id/demote-broker', adminController.demoteClientBroker);
 adminRoutes.put('/clients/:id', adminController.updateClient);
 adminRoutes.delete('/clients/:id', requireAdminReauth, adminController.deleteClient);
-adminRoutes.get('/clients/:id/properties', adminController.getClientProperties);
+adminRoutes.get('/clients/:id/properties', async (req, res) => {
+  const clientId = Number(req.params.id);
+  if (Number.isNaN(clientId)) {
+    return res.status(400).json({ error: 'Identificador de cliente invalido.' });
+  }
+  try {
+    const payload = await getAdminClientProperties(clientId);
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao buscar imoveis do cliente:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
 
 adminRoutes.post(
   '/brokers',
@@ -154,9 +214,43 @@ adminRoutes.post(
   ]),
   adminController.createBroker
 );
-adminRoutes.get('/brokers', adminController.listBrokers);
-adminRoutes.get('/brokers/pending', adminController.listPendingBrokers);
-adminRoutes.get('/brokers/:id', adminController.getBrokerById);
+adminRoutes.get('/brokers', async (req, res) => {
+  try {
+    const payload = await listAdminBrokers(req.query);
+    return res.status(200).json(payload);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Status de corretor inválido')) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Erro ao buscar corretores:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
+adminRoutes.get('/brokers/pending', async (_req, res) => {
+  try {
+    const payload = await listPendingAdminBrokers();
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao buscar corretores pendentes:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
+adminRoutes.get('/brokers/:id', async (req, res) => {
+  const brokerId = Number(req.params.id);
+  if (Number.isNaN(brokerId)) {
+    return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+  }
+  try {
+    const payload = await getAdminBrokerById(brokerId);
+    if (!payload) {
+      return res.status(404).json({ error: 'Corretor nao encontrado.' });
+    }
+    return res.status(200).json({ data: payload });
+  } catch (error) {
+    console.error('Erro ao buscar corretor:', error);
+    return res.status(500).json({ error: 'Erro interno do servidor.' });
+  }
+});
 adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
 adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);
@@ -173,24 +267,91 @@ adminRoutes.post(
   adminController.uploadBrokerDocuments
 );
 adminRoutes.delete('/brokers/:id/documents/:docType', adminController.deleteBrokerDocument);
-adminRoutes.get('/brokers/:id/properties', adminController.getBrokerProperties);
+adminRoutes.get('/brokers/:id/properties', async (req, res) => {
+  const brokerId = Number(req.params.id);
+  if (Number.isNaN(brokerId)) {
+    return res.status(400).json({ error: 'Identificador de corretor invalido.' });
+  }
+  try {
+    const payload = await getAdminBrokerProperties(brokerId);
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao buscar imoveis do corretor:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
 
-adminRoutes.get('/properties-with-brokers', adminController.listPropertiesWithBrokers);
+adminRoutes.get('/properties-with-brokers', async (req, res) => {
+  try {
+    const payload = await loadPropertiesWithBrokers(req.query);
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao listar imoveis com corretores:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
 adminRoutes.get('/property-edit-requests', adminController.listPropertyEditRequests);
 adminRoutes.get('/property-edit-requests/:id', adminController.getPropertyEditRequestById);
 adminRoutes.post('/property-edit-requests/:id/review', adminController.reviewPropertyEditRequest);
 adminRoutes.post('/property-edit-requests/:id/approve', adminController.approvePropertyEditRequest);
 adminRoutes.post('/property-edit-requests/:id/reject', adminController.rejectPropertyEditRequest);
-adminRoutes.get('/properties/archive', adminController.listArchivedProperties);
-adminRoutes.put('/properties/:id/relist', adminController.relistProperty);
+adminRoutes.get('/properties/archive', async (req, res) => {
+  try {
+    const payload = await loadArchivedProperties(req.query);
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao listar imóveis vendidos/alugados:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
+adminRoutes.put('/properties/:id/relist', async (req, res) => {
+  const propertyId = Number(req.params.id);
+  if (Number.isNaN(propertyId)) {
+    return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
+  }
+  try {
+    const payload = await relistCatalogProperty(propertyId);
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao disponibilizar imóvel novamente:', error);
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : 'Ocorreu um erro inesperado no servidor.',
+    });
+  }
+});
 adminRoutes.get('/properties/:id', adminController.getPropertyDetails);
 adminRoutes.put('/properties/:id', adminController.updateProperty);
 adminRoutes.delete('/properties/:id', requireAdminReauth, adminController.deleteProperty);
 adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
 adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
 adminRoutes.patch('/properties/:id/status', adminController.updatePropertyStatus);
-adminRoutes.get('/featured-properties', adminController.listFeaturedProperties);
-adminRoutes.put('/featured-properties', adminController.updateFeaturedProperties);
+adminRoutes.get('/featured-properties', async (_req, res) => {
+  try {
+    const payload = await loadFeaturedProperties();
+    return res.status(200).json(payload);
+  } catch (error) {
+    console.error('Erro ao listar destaques:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
+adminRoutes.put('/featured-properties', async (req, res) => {
+  try {
+    const payload = await updateCatalogFeaturedProperties(req.body as Record<string, unknown>);
+    return res.status(200).json(payload);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Limite maximo')) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error instanceof Error && error.message.includes('Alguns imoveis')) {
+      return res.status(400).json({ error: error.message, invalidIds: (error as Error & { invalidIds?: number[] }).invalidIds });
+    }
+    if (error instanceof Error && error.message.includes('Finalidade do imóvel')) {
+      return res.status(400).json({ error: error.message, invalidScope: (error as Error & { invalidScope?: Array<{ id: number; scope: string }> }).invalidScope });
+    }
+    console.error('Erro ao atualizar destaques:', error);
+    return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+  }
+});
 adminRoutes.post(
   '/properties/:id/images',
   mediaUpload.array('images', 20),

@@ -6,6 +6,9 @@ const {
   getConnectionMock,
   queryMock,
   txMock,
+  loadUserLifecycleSnapshotMock,
+  approveBrokerAccountMock,
+  rejectBrokerAccountMock,
   notifyAdminsMock,
   notifyUsersMock,
 } = vi.hoisted(() => {
@@ -23,6 +26,9 @@ const {
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
     txMock: tx,
+    loadUserLifecycleSnapshotMock: vi.fn(),
+    approveBrokerAccountMock: vi.fn(),
+    rejectBrokerAccountMock: vi.fn(),
     notifyAdminsMock: vi.fn(),
     notifyUsersMock: vi.fn(),
   };
@@ -31,6 +37,13 @@ const {
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
+    query: queryMock,
+    getConnection: getConnectionMock,
+  },
+}));
+
+vi.mock('../../src/services/adminPersistenceService', () => ({
+  adminDb: {
     query: queryMock,
     getConnection: getConnectionMock,
   },
@@ -46,6 +59,14 @@ vi.mock('../../src/config/cloudinary', () => ({
 vi.mock('../../src/services/notificationService', () => ({
   createUserNotification: vi.fn(),
   notifyAdmins: notifyAdminsMock,
+}));
+
+vi.mock('../../src/services/adminAccountLifecycleService', () => ({
+  loadUserLifecycleSnapshot: loadUserLifecycleSnapshotMock,
+  approveBrokerAccount: approveBrokerAccountMock,
+  rejectBrokerAccount: rejectBrokerAccountMock,
+  isActiveBrokerStatus: (status: unknown) =>
+    ['pending_verification', 'approved'].includes(String(status ?? '').trim()),
 }));
 
 vi.mock('../../src/services/pushNotificationService', () => ({
@@ -85,6 +106,65 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
     txMock.commit.mockResolvedValue(undefined);
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
+
+    loadUserLifecycleSnapshotMock.mockImplementation(async (db: any, userId: number) => {
+      const [rows] = await db.query(
+        `
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        b.id AS broker_id,
+        b.status AS broker_status
+      FROM users u
+      LEFT JOIN brokers b ON b.id = u.id
+      WHERE u.id = ?
+      LIMIT 1
+    `,
+        [userId],
+      );
+      const typedRows = Array.isArray(rows) ? rows : [];
+      return typedRows.length > 0 ? typedRows[0] : null;
+    });
+
+    approveBrokerAccountMock.mockImplementation(async (db: any, brokerId: number) => {
+      const snapshot = await loadUserLifecycleSnapshotMock(db, brokerId, { forUpdate: true });
+      if (!snapshot || snapshot.broker_id == null) {
+        return { snapshot, affected: false };
+      }
+
+      await db.query('UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
+        'approved',
+        brokerId,
+      ]);
+      await db.query(
+        'UPDATE broker_documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?',
+        ['approved', brokerId],
+      );
+      return { snapshot, affected: true };
+    });
+
+    rejectBrokerAccountMock.mockImplementation(async (db: any, brokerId: number) => {
+      const snapshot = await loadUserLifecycleSnapshotMock(db, brokerId, { forUpdate: true });
+      if (!snapshot || snapshot.broker_id == null) {
+        return { snapshot, affected: false };
+      }
+
+      await db.query('UPDATE brokers SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [
+        'rejected',
+        brokerId,
+      ]);
+      await db.query(
+        'UPDATE broker_documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE broker_id = ?',
+        ['rejected', brokerId],
+      );
+      await db.query('UPDATE properties SET broker_id = NULL WHERE broker_id = ?', [brokerId]);
+      await db.query(
+        'UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?',
+        [brokerId],
+      );
+      return { snapshot, affected: true };
+    });
   });
 
   it('rejects a broker by downgrading to client and revoking sessions', async () => {
@@ -211,6 +291,17 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 88,
+            name: 'Broker Demote',
+            email: 'broker2@test.com',
+            broker_id: 88,
+            broker_status: 'approved',
+          },
+        ],
+      ])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
@@ -227,6 +318,17 @@ describe('PATCH /admin/brokers/:id/status lifecycle', () => {
 
   it('works when routed directly with method reference (admin router binding)', async () => {
     txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 99,
+            name: 'Broker Router',
+            email: 'broker-router@test.com',
+            broker_id: 99,
+            broker_status: 'approved',
+          },
+        ],
+      ])
       .mockResolvedValueOnce([
         [
           {

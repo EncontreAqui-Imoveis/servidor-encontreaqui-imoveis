@@ -9,6 +9,9 @@ const {
   updateDraftByDraftIdMock,
   verifyIdTokenMock,
   firebaseAuthMock,
+  buildUserPayloadMock,
+  signUserTokenMock,
+  hasCompleteProfileMock,
 } = vi.hoisted(() => ({
   authQueryMock: vi.fn(),
   getDraftByDraftIdAndTokenMock: vi.fn(),
@@ -18,6 +21,9 @@ const {
   updateDraftByDraftIdMock: vi.fn(),
   verifyIdTokenMock: vi.fn(),
   firebaseAuthMock: vi.fn(),
+  buildUserPayloadMock: vi.fn(),
+  signUserTokenMock: vi.fn(),
+  hasCompleteProfileMock: vi.fn(),
 }));
 
 vi.mock('../../src/services/authPersistenceService', () => ({
@@ -31,6 +37,12 @@ vi.mock('../../src/config/firebaseAdmin', () => ({
     auth: firebaseAuthMock,
     messaging: vi.fn(),
   },
+}));
+
+vi.mock('../../src/services/authSessionService', () => ({
+  buildUserPayload: buildUserPayloadMock,
+  signUserToken: signUserTokenMock,
+  hasCompleteProfile: hasCompleteProfileMock,
 }));
 
 vi.mock('../../src/services/registrationDraftRepository', async () => {
@@ -127,7 +139,7 @@ describe('requestDraftPhoneOtp', () => {
 
     await expect(requestDraftPhoneOtp('draft-abc', 'tok', '61999998888')).rejects.toMatchObject({
       code: 'PHONE_VERIFICATION_UNAVAILABLE',
-      statusCode: 503,
+      appCode: 'UNAVAILABLE',
     });
     expect(upsertDraftPhoneOtpMock).not.toHaveBeenCalled();
     expect(useDraftPhoneOtpMock).not.toHaveBeenCalled();
@@ -248,8 +260,8 @@ describe('confirmDraftPhoneOtp', () => {
     await expect(
       confirmDraftPhoneOtp('draft-abc', 'tok', 'session-legacy', '123456', 'firebase-id-token'),
     ).rejects.toMatchObject({
-      code: 'PHONE_FIREBASE_TOKEN_INVALID',
-      statusCode: 400,
+      code: 'PHONE_FIREBASE_TOKEN_MISSING_PHONE',
+      appCode: 'INVALID_INPUT',
     });
   });
 
@@ -263,7 +275,7 @@ describe('confirmDraftPhoneOtp', () => {
       confirmDraftPhoneOtp('draft-abc', 'tok', 'session-legacy', '123456', 'firebase-id-token'),
     ).rejects.toMatchObject({
       code: 'PHONE_MISMATCH',
-      statusCode: 409,
+      appCode: 'CONFLICT',
     });
     expect(updateDraftByDraftIdMock).not.toHaveBeenCalled();
   });
@@ -271,7 +283,7 @@ describe('confirmDraftPhoneOtp', () => {
   it('exige token Firebase quando provider está em modo firebase', async () => {
     await expect(confirmDraftPhoneOtp('draft-abc', 'tok', 'session-legacy', '123456')).rejects.toMatchObject({
       code: 'PHONE_FIREBASE_TOKEN_REQUIRED',
-      statusCode: 400,
+      appCode: 'INVALID_INPUT',
     });
   });
 });

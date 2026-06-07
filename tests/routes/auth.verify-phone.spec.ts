@@ -93,12 +93,12 @@ describe('POST /auth/verify-phone', () => {
     expect(response.body.user.role).toBe('broker');
     expect(response.body.user.broker).toEqual({
       id: 30003,
-      status: 'pending_verification',
+      status: 'pending_documents',
       creci: '343434-F',
     });
     expect(response.body.broker).toEqual({
       id: 30003,
-      status: 'pending_verification',
+      status: 'pending_documents',
       creci: '343434-F',
     });
   });

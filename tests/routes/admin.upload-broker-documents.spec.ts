@@ -2,7 +2,9 @@ import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getConnectionMock, txMock, uploadToCloudinaryMock } = vi.hoisted(() => {
+const { getConnectionMock, queryMock, txMock, uploadToCloudinaryMock } = vi.hoisted(() => {
+  process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
+
   const tx = {
     beginTransaction: vi.fn(),
     query: vi.fn(),
@@ -13,6 +15,7 @@ const { getConnectionMock, txMock, uploadToCloudinaryMock } = vi.hoisted(() => {
 
   return {
     getConnectionMock: vi.fn(),
+    queryMock: vi.fn(),
     txMock: tx,
     uploadToCloudinaryMock: vi.fn(),
   };
@@ -23,6 +26,13 @@ vi.mock('../../src/database/connection', () => ({
   default: {
     getConnection: getConnectionMock,
     query: vi.fn(),
+  },
+}));
+
+vi.mock('../../src/services/adminPersistenceService', () => ({
+  adminDb: {
+    getConnection: getConnectionMock,
+    query: queryMock,
   },
 }));
 
@@ -61,6 +71,7 @@ describe('POST /admin/brokers/:id/documents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getConnectionMock.mockResolvedValue(txMock);
+    queryMock.mockReset();
     txMock.beginTransaction.mockResolvedValue(undefined);
     txMock.commit.mockResolvedValue(undefined);
     txMock.rollback.mockResolvedValue(undefined);
@@ -77,10 +88,10 @@ describe('POST /admin/brokers/:id/documents', () => {
   it('reenvia apenas a frente do CRECI usando valores existentes para preservar fluxo parcial', async () => {
     txMock.query
       .mockResolvedValueOnce([[{ id: 12 }]])
-      .mockResolvedValueOnce([
-        [{ creci_front_url: '', creci_back_url: 'https://cdn/brokers/12/back.jpg', selfie_url: 'https://cdn/brokers/12/selfie.jpg' }],
-      ])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([
+      [{ creci_front_url: '', creci_back_url: 'https://cdn/brokers/12/back.jpg', selfie_url: 'https://cdn/brokers/12/selfie.jpg' }],
+    ]);
 
     uploadToCloudinaryMock.mockResolvedValueOnce({
       url: 'https://cdn/brokers/12/new-front.jpg',
@@ -97,6 +108,10 @@ describe('POST /admin/brokers/:id/documents', () => {
     expect(response.status).toBe(200);
     expect(response.body.message).toBe('Documentos atualizados com sucesso.');
     expect(txMock.query).toHaveBeenCalledWith(
+      'SELECT id FROM brokers WHERE id = ?',
+      [12],
+    );
+    expect(queryMock).toHaveBeenCalledWith(
       'SELECT creci_front_url, creci_back_url, selfie_url FROM broker_documents WHERE broker_id = ?',
       [12],
     );
@@ -110,8 +125,8 @@ describe('POST /admin/brokers/:id/documents', () => {
   it('faz upload parcial sem quebrar NOT NULL e preenche colunas ausentes com string vazia quando falta histórico', async () => {
     txMock.query
       .mockResolvedValueOnce([[{ id: 12 }]])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([[]]);
 
     uploadToCloudinaryMock.mockResolvedValueOnce({
       url: 'https://cdn/brokers/12/new-front.jpg',
@@ -136,8 +151,8 @@ describe('POST /admin/brokers/:id/documents', () => {
   it('faz upload completo de documentos corretamente', async () => {
     txMock.query
       .mockResolvedValueOnce([[{ id: 12 }]])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([[]]);
 
     uploadToCloudinaryMock
       .mockResolvedValueOnce({ url: 'https://cdn/brokers/12/front.jpg' })
@@ -171,8 +186,8 @@ describe('POST /admin/brokers/:id/documents', () => {
   it('faz upload real com 1 arquivo usando multipart e preserva NOT NULL com string vazia nos faltantes', async () => {
     txMock.query
       .mockResolvedValueOnce([[{ id: 12 }]])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([[]]);
 
     uploadToCloudinaryMock.mockResolvedValueOnce({
       url: 'https://cdn.brokers/12/new-front.jpg',
@@ -194,8 +209,8 @@ describe('POST /admin/brokers/:id/documents', () => {
   it('faz upload real com 2 arquivos e preenche NOT NULL remanescente com string vazia', async () => {
     txMock.query
       .mockResolvedValueOnce([[{ id: 12 }]])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([[]]);
 
     uploadToCloudinaryMock
       .mockResolvedValueOnce({ url: 'https://cdn.brokers/12/new-front.jpg' })
@@ -218,8 +233,8 @@ describe('POST /admin/brokers/:id/documents', () => {
   it('faz upload real com 3 arquivos e atualiza os 3 campos', async () => {
     txMock.query
       .mockResolvedValueOnce([[{ id: 12 }]])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
+    queryMock.mockResolvedValueOnce([[]]);
 
     uploadToCloudinaryMock
       .mockResolvedValueOnce({ url: 'https://cdn.brokers/12/new-front.jpg' })

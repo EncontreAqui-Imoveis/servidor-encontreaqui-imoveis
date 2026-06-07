@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
+import { ApplicationErrorCode } from '../errors/ApplicationError';
 import { authDb } from './authPersistenceService';
 import {
   createDraft as insertDraftRecord,
@@ -67,6 +68,70 @@ type QueryExecutor = {
   query: typeof authDb.query;
 };
 
+const DRAFT_ERROR_APP_CODE_MAP: Record<string, ApplicationErrorCode> = {
+  TERMS_ACCEPTANCE_REQUIRED: 'INVALID_INPUT',
+  PRIVACY_ACCEPTANCE_REQUIRED: 'INVALID_INPUT',
+  BROKER_AGREEMENT_REQUIRED: 'INVALID_INPUT',
+  DRAFT_NOT_FOUND: 'UNAUTHORIZED',
+  DRAFT_EXPIRED: 'GONE',
+  DRAFT_NOT_OPEN: 'CONFLICT',
+  DRAFT_TOKEN_REQUIRED: 'UNAUTHORIZED',
+  DRAFT_INVALID_INPUT: 'INVALID_INPUT',
+  DRAFT_PASSWORD_INVALID: 'INVALID_INPUT',
+  EMAIL_ALREADY_EXISTS: 'CONFLICT',
+  DRAFT_ALREADY_EXISTS: 'CONFLICT',
+  DRAFT_CRICI_INVALID: 'INVALID_INPUT',
+  CRECI_ALREADY_EXISTS: 'CONFLICT',
+  DRAFT_ADDRESS_INVALID: 'INVALID_INPUT',
+  EMAIL_CODE_CHALLENGE_FAILED: 'UNAVAILABLE',
+  EMAIL_PROVIDER_ERROR: 'UNAVAILABLE',
+  EMAIL_CODE_EXPIRED: 'GONE',
+  EMAIL_CODE_LOCKED: 'LOCKED',
+  EMAIL_CODE_INVALID: 'INVALID_INPUT',
+  EMAIL_CODE_MISSING: 'INVALID_INPUT',
+  EMAIL_CODE_CONFIRM_FAILED: 'UNAVAILABLE',
+  PHONE_REQUIRED: 'INVALID_INPUT',
+  PHONE_OTP_LOCKED: 'LOCKED',
+  PHONE_OTP_RATE_LIMITED: 'TOO_MANY_REQUESTS',
+  PHONE_FIREBASE_TOKEN_REQUIRED: 'INVALID_INPUT',
+  PHONE_FIREBASE_TOKEN_INVALID: 'UNAUTHORIZED',
+  PHONE_MISMATCH: 'CONFLICT',
+  PHONE_VERIFICATION_UNAVAILABLE: 'UNAVAILABLE',
+  PHONE_OTP_DELIVERY_FAILED: 'UNAVAILABLE',
+  PHONE_SESSION_NOT_FOUND: 'NOT_FOUND',
+  PHONE_OTP_EXPIRED: 'GONE',
+  PHONE_OTP_INVALID: 'INVALID_INPUT',
+  BROKER_ONLY: 'FORBIDDEN',
+  DRAFT_DOCUMENTS_REQUIRED: 'INVALID_INPUT',
+  DRAFT_PASSWORD_EXPIRED: 'GONE',
+  DRAFT_PASSWORD_REQUIRED: 'INVALID_INPUT',
+  DRAFT_CRICI_REQUIRED: 'INVALID_INPUT',
+  DRAFT_DOCUMENTS_MISSING: 'INVALID_INPUT',
+  DRAFT_DUPLICATE_ACCOUNT: 'CONFLICT',
+  DRAFT_FLOW_DISABLED: 'UNAVAILABLE',
+  PHONE_FIREBASE_TOKEN_MISSING_PHONE: 'INVALID_INPUT',
+  PHONE_FIREBASE_TOKEN_NO_PHONE: 'INVALID_INPUT',
+};
+
+function resolveDraftErrorAppCode(code: string): ApplicationErrorCode {
+  return DRAFT_ERROR_APP_CODE_MAP[code] ?? 'INTERNAL';
+}
+
+function draftError(
+  code: string,
+  message: string,
+  retryAfterSeconds?: number,
+  fields?: string[],
+) {
+  return new DraftFlowError(
+    resolveDraftErrorAppCode(code),
+    code,
+    message,
+    retryAfterSeconds,
+    fields,
+  );
+}
+
 function toLegalAcceptanceBoolean(value: unknown): boolean {
   return value === true;
 }
@@ -83,13 +148,13 @@ function resolveDraftLegalAcceptances(
   const acceptedTerms = toLegalAcceptanceBoolean(payload.acceptedTerms);
   const termsVersion = normalizeLegalAcceptanceVersion(payload.termsVersion);
   if (!acceptedTerms || !termsVersion) {
-    throw new DraftFlowError(400, 'TERMS_ACCEPTANCE_REQUIRED', 'Aceite dos termos de uso e obrigatorio.');
+    throw draftError('TERMS_ACCEPTANCE_REQUIRED', 'Aceite dos termos de uso e obrigatorio.');
   }
 
   const acceptedPrivacy = toLegalAcceptanceBoolean(payload.acceptedPrivacyPolicy);
   const privacyVersion = normalizeLegalAcceptanceVersion(payload.privacyPolicyVersion);
   if (!acceptedPrivacy || !privacyVersion) {
-    throw new DraftFlowError(400, 'PRIVACY_ACCEPTANCE_REQUIRED', 'Aceite da politica de privacidade e obrigatorio.');
+    throw draftError('PRIVACY_ACCEPTANCE_REQUIRED', 'Aceite da politica de privacidade e obrigatorio.');
   }
 
   const requiresBrokerAgreement =
@@ -99,9 +164,7 @@ function resolveDraftLegalAcceptances(
     const acceptedBrokerAgreement = toLegalAcceptanceBoolean(payload.acceptedBrokerAgreement);
     brokerAgreementVersion = normalizeLegalAcceptanceVersion(payload.brokerAgreementVersion);
     if (!acceptedBrokerAgreement || !brokerAgreementVersion) {
-      throw new DraftFlowError(
-        400,
-        'BROKER_AGREEMENT_REQUIRED',
+      throw draftError('BROKER_AGREEMENT_REQUIRED',
         'Aceite do contrato de adesao de corretor e obrigatorio.',
       );
     }
@@ -288,19 +351,19 @@ async function dispatchDraftPhoneOtp(
 }
 
 export class DraftFlowError extends Error {
-  statusCode: number;
+  appCode: ApplicationErrorCode;
   code: string;
   retryAfterSeconds?: number;
   fields?: string[];
   constructor(
-    statusCode: number,
+    appCode: ApplicationErrorCode,
     code: string,
     message: string,
     retryAfterSeconds?: number,
     fields?: string[],
   ) {
     super(message);
-    this.statusCode = statusCode;
+    this.appCode = appCode;
     this.code = code;
     this.retryAfterSeconds = retryAfterSeconds;
     this.fields = fields;
@@ -530,14 +593,14 @@ function resolveDraftErrorStatus(status: string) {
 
 function normalizeDraftResponse(draft: RegistrationDraftRow | null): RegistrationDraftRow {
   if (!draft) {
-    throw new DraftFlowError(401, 'DRAFT_NOT_FOUND', 'Rascunho nao encontrado.');
+    throw draftError('DRAFT_NOT_FOUND', 'Rascunho nao encontrado.');
   }
   if (resolveDraftErrorStatus(draft.status)) {
     const expiresAt = new Date(draft.expires_at);
     if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now().getTime()) {
-      throw new DraftFlowError(410, 'DRAFT_EXPIRED', 'Rascunho expirado.');
+      throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
     }
-    throw new DraftFlowError(409, 'DRAFT_NOT_OPEN', 'Rascunho nao esta aberto.');
+    throw draftError('DRAFT_NOT_OPEN', 'Rascunho nao esta aberto.');
   }
   return draft;
 }
@@ -548,14 +611,14 @@ async function resolveDraftContext(draftId: string, rawDraftToken: unknown): Pro
 }> {
   const token = normalizeToken(rawDraftToken);
   if (!draftId || !token) {
-    throw new DraftFlowError(401, 'DRAFT_TOKEN_REQUIRED', 'Token de rascunho nao informado.');
+    throw draftError('DRAFT_TOKEN_REQUIRED', 'Token de rascunho nao informado.');
   }
   const draftTokenHash = hashToken(token);
   const draft = normalizeDraftResponse(await getDraftByDraftIdAndToken(draftId, draftTokenHash));
   const expiresAt = new Date(draft.expires_at);
   if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now().getTime()) {
     await updateDraftByDraftId(draftId, draftTokenHash, { status: 'EXPIRED' });
-    throw new DraftFlowError(410, 'DRAFT_EXPIRED', 'Rascunho expirado.');
+    throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
   }
   return { draft, draftTokenHash };
 }
@@ -584,13 +647,13 @@ export async function createRegistrationDraft(input: {
   const email = normalizeEmail(input.email);
   const name = String(input.name ?? '').trim();
   if (!email || !name) {
-    throw new DraftFlowError(400, 'DRAFT_INVALID_INPUT', 'Email e nome sao obrigatorios.');
+    throw draftError('DRAFT_INVALID_INPUT', 'Email e nome sao obrigatorios.');
   }
   const profileType = normalizeProfileType(input.profileType);
   const normalizedProvider = normalizeDraftAuthProvider(input.authProvider);
   const password = String(input.password ?? '');
   if (normalizedProvider === 'email' && password.trim().length < 6) {
-    throw new DraftFlowError(400, 'DRAFT_PASSWORD_INVALID', 'Senha obrigatoria com 6 caracteres no minimo.');
+    throw draftError('DRAFT_PASSWORD_INVALID', 'Senha obrigatoria com 6 caracteres no minimo.');
   }
 
   const [existingUsers] = await authDb.query<RowDataPacket[]>(
@@ -598,16 +661,16 @@ export async function createRegistrationDraft(input: {
     [email],
   );
   if (existingUsers.length > 0) {
-    throw new DraftFlowError(409, 'EMAIL_ALREADY_EXISTS', 'Este email ja esta em uso.');
+    throw draftError('EMAIL_ALREADY_EXISTS', 'Este email ja esta em uso.');
   }
   const existingDraft = await findOpenDraftByEmail(email);
   if (existingDraft) {
-    throw new DraftFlowError(409, 'DRAFT_ALREADY_EXISTS', 'Ja existe um fluxo de cadastro para este email.');
+    throw draftError('DRAFT_ALREADY_EXISTS', 'Ja existe um fluxo de cadastro para este email.');
   }
 
   const normalizedCreci = normalizeCreci(input.creci);
   if (profileType === 'broker' && !hasValidCreci(normalizedCreci)) {
-    throw new DraftFlowError(400, 'DRAFT_CRICI_INVALID', 'CRECI invalido.');
+    throw draftError('DRAFT_CRICI_INVALID', 'CRECI invalido.');
   }
   if (profileType === 'broker') {
     const [existingCreci] = await authDb.query<RowDataPacket[]>(
@@ -615,7 +678,7 @@ export async function createRegistrationDraft(input: {
       [normalizedCreci],
     );
     if (existingCreci.length > 0) {
-      throw new DraftFlowError(409, 'CRECI_ALREADY_EXISTS', 'Este CRECI ja esta em uso.');
+      throw draftError('CRECI_ALREADY_EXISTS', 'Este CRECI ja esta em uso.');
     }
   }
 
@@ -624,9 +687,7 @@ export async function createRegistrationDraft(input: {
     ? parseAddressBody(createDraftAddress, true)
     : null;
   if (addressPayload && !addressPayload.ok) {
-    throw new DraftFlowError(
-      400,
-      'DRAFT_ADDRESS_INVALID',
+    throw draftError('DRAFT_ADDRESS_INVALID',
       'Endereco invalido.',
       undefined,
       addressPayload.errors,
@@ -717,7 +778,7 @@ export async function patchRegistrationDraft(
   if (draft.profile_type === 'broker' && Object.prototype.hasOwnProperty.call(body, 'creci')) {
     const creci = normalizeCreci(body.creci);
     if (!hasValidCreci(creci)) {
-      throw new DraftFlowError(400, 'DRAFT_CRICI_INVALID', 'CRECI invalido.');
+      throw draftError('DRAFT_CRICI_INVALID', 'CRECI invalido.');
     }
     updates.creci = creci;
   }
@@ -725,9 +786,7 @@ export async function patchRegistrationDraft(
   if (Object.keys(patchAddressInput).length > 0) {
     const addr = parseAddressBody(patchAddressInput, true);
     if (!addr.ok) {
-      throw new DraftFlowError(
-        400,
-        'DRAFT_ADDRESS_INVALID',
+      throw draftError('DRAFT_ADDRESS_INVALID',
         'Endereco invalido.',
         undefined,
         addr.errors,
@@ -771,11 +830,11 @@ export async function sendDraftEmailVerificationCode(draftId: string, rawDraftTo
     });
   } catch (error) {
     console.error('Falha ao registrar desafio de código para rascunho:', error);
-    throw new DraftFlowError(503, 'EMAIL_CODE_CHALLENGE_FAILED', 'Falha temporária ao enviar o codigo de verificacao.');
+    throw draftError('EMAIL_CODE_CHALLENGE_FAILED', 'Falha temporária ao enviar o codigo de verificacao.');
   }
 
   if (!issue.allowed) {
-    throw new DraftFlowError(429, issue.code, `Aguarde ${issue.retryAfterSeconds}s para reenviar.`);
+    throw draftError(issue.code, `Aguarde ${issue.retryAfterSeconds}s para reenviar.`);
   }
 
   const retryAfterSeconds = 0;
@@ -790,7 +849,7 @@ export async function sendDraftEmailVerificationCode(draftId: string, rawDraftTo
     });
   } catch (error) {
     await deleteEmailCodeChallenge(issue.requestId);
-    throw new DraftFlowError(503, 'EMAIL_PROVIDER_ERROR', 'Servico de email temporariamente indisponivel.');
+    throw draftError('EMAIL_PROVIDER_ERROR', 'Servico de email temporariamente indisponivel.');
   }
 
   return {
@@ -848,16 +907,16 @@ export async function confirmDraftEmailCode(
     committed = true;
 
     if (result.status === 'expired') {
-      throw new DraftFlowError(410, 'EMAIL_CODE_EXPIRED', 'Codigo de verificacao expirado.');
+      throw draftError('EMAIL_CODE_EXPIRED', 'Codigo de verificacao expirado.');
     }
     if (result.status === 'locked') {
-      throw new DraftFlowError(423, 'EMAIL_CODE_LOCKED', 'Codigo bloqueado por excesso de tentativas.');
+      throw draftError('EMAIL_CODE_LOCKED', 'Codigo bloqueado por excesso de tentativas.');
     }
     if (result.status === 'invalid') {
-      throw new DraftFlowError(400, 'EMAIL_CODE_INVALID', 'Codigo invalido.');
+      throw draftError('EMAIL_CODE_INVALID', 'Codigo invalido.');
     }
 
-    throw new DraftFlowError(400, 'EMAIL_CODE_MISSING', 'Codigo de verificacao nao encontrado.');
+    throw draftError('EMAIL_CODE_MISSING', 'Codigo de verificacao nao encontrado.');
   } catch (error) {
     if (!committed) {
       await db.rollback();
@@ -865,9 +924,7 @@ export async function confirmDraftEmailCode(
     if (error instanceof DraftFlowError) {
       throw error;
     }
-    throw new DraftFlowError(
-      500,
-      'EMAIL_CODE_CONFIRM_FAILED',
+    throw draftError('EMAIL_CODE_CONFIRM_FAILED',
       'Nao foi possivel confirmar o codigo no momento.',
     );
   } finally {
@@ -885,15 +942,13 @@ export async function requestDraftPhoneOtp(
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
   const normalizedPhone = normalizePhone(phone);
   if (!normalizedPhone) {
-    throw new DraftFlowError(400, 'PHONE_REQUIRED', 'Telefone e obrigatorio.');
+    throw draftError('PHONE_REQUIRED', 'Telefone e obrigatorio.');
   }
 
   const verificationMode = resolveDraftPhoneVerificationMode();
   if (verificationMode === 'unavailable') {
     console.error('[draft.verify-phone] provider indisponivel', { ...logContext, outcome: 'unavailable', reason: 'PHONE_VERIFICATION_UNAVAILABLE' });
-    throw new DraftFlowError(
-      503,
-      'PHONE_VERIFICATION_UNAVAILABLE',
+    throw draftError('PHONE_VERIFICATION_UNAVAILABLE',
       'Verificacao de telefone indisponivel no momento.',
     );
   }
@@ -926,13 +981,13 @@ export async function requestDraftPhoneOtp(
   if (latestOtp) {
     const attempts = Number(latestOtp.attempts ?? 0);
     if (attempts >= PHONE_MAX_ATTEMPTS) {
-      throw new DraftFlowError(423, 'PHONE_OTP_LOCKED', 'Tentativas excedidas.');
+      throw draftError('PHONE_OTP_LOCKED', 'Tentativas excedidas.');
     }
     const cooldown = Number(latestOtp.cooldown_seconds ?? PHONE_COOLDOWN_SECONDS);
     const sentAt = latestOtp.sent_at instanceof Date ? latestOtp.sent_at : new Date(latestOtp.sent_at);
     const elapsed = Math.floor((now().getTime() - sentAt.getTime()) / 1000);
     if (elapsed < cooldown) {
-      throw new DraftFlowError(429, 'PHONE_OTP_RATE_LIMITED', `Aguarde ${cooldown - elapsed}s para reenviar.`, cooldown - elapsed);
+      throw draftError('PHONE_OTP_RATE_LIMITED', `Aguarde ${cooldown - elapsed}s para reenviar.`, cooldown - elapsed);
     }
   }
 
@@ -953,9 +1008,7 @@ export async function requestDraftPhoneOtp(
   const delivery = await dispatchDraftPhoneOtp(draft.draft_id, normalizedPhone, code);
   if (!delivery.ok) {
     await useDraftPhoneOtp(sessionToken);
-    throw new DraftFlowError(
-      503,
-      'PHONE_OTP_DELIVERY_FAILED',
+    throw draftError('PHONE_OTP_DELIVERY_FAILED',
       `Nao foi possivel enviar o codigo por SMS (${delivery.status}).`,
     );
   }
@@ -989,9 +1042,7 @@ export async function confirmDraftPhoneOtp(
 
   if (verificationMode === 'firebase') {
     if (!normalizedFirebaseIdToken) {
-      throw new DraftFlowError(
-        400,
-        'PHONE_FIREBASE_TOKEN_REQUIRED',
+      throw draftError('PHONE_FIREBASE_TOKEN_REQUIRED',
         'Token de autenticacao do Firebase e obrigatorio para confirmacao.',
       );
     }
@@ -1000,18 +1051,16 @@ export async function confirmDraftPhoneOtp(
     try {
       claims = await firebaseAdmin.auth().verifyIdToken(normalizedFirebaseIdToken);
     } catch {
-      throw new DraftFlowError(401, 'PHONE_FIREBASE_TOKEN_INVALID', 'Token do Firebase invalido ou expirado.');
+      throw draftError('PHONE_FIREBASE_TOKEN_INVALID', 'Token do Firebase invalido ou expirado.');
     }
 
     const phoneFromToken = extractFirebasePhoneFromTokenClaims(claims);
     if (!phoneFromToken) {
-      throw new DraftFlowError(400, 'PHONE_FIREBASE_TOKEN_INVALID', 'Token do Firebase nao possui telefone.');
+      throw draftError('PHONE_FIREBASE_TOKEN_MISSING_PHONE', 'Token do Firebase nao possui telefone.');
     }
 
     if (draft.phone && normalizePhone(draft.phone) !== phoneFromToken) {
-      throw new DraftFlowError(
-        409,
-        'PHONE_MISMATCH',
+      throw draftError('PHONE_MISMATCH',
         'Telefone informado nao confere com o token de autenticacao.',
       );
     }
@@ -1038,9 +1087,7 @@ export async function confirmDraftPhoneOtp(
       hasFirebasePrivateKey: Boolean(process.env.FIREBASE_PRIVATE_KEY),
       hasFirebaseServiceAccountPath: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PATH),
     });
-    throw new DraftFlowError(
-      503,
-      'PHONE_VERIFICATION_UNAVAILABLE',
+    throw draftError('PHONE_VERIFICATION_UNAVAILABLE',
       'Verificacao de telefone indisponivel no momento.',
     );
   }
@@ -1050,13 +1097,13 @@ export async function confirmDraftPhoneOtp(
 
   const phoneOtpRow = await getDraftPhoneOtpBySessionToken(normalizedSession);
   if (!phoneOtpRow || phoneOtpRow.draft_id !== draft.id || phoneOtpRow.invalidated === 1) {
-    throw new DraftFlowError(404, 'PHONE_SESSION_NOT_FOUND', 'Sessao de verificacao nao encontrada.');
+    throw draftError('PHONE_SESSION_NOT_FOUND', 'Sessao de verificacao nao encontrada.');
   }
   const nowTime = now();
   const expiresAt = new Date(phoneOtpRow.expires_at instanceof Date ? phoneOtpRow.expires_at : String(phoneOtpRow.expires_at));
   if (expiresAt.getTime() <= nowTime.getTime()) {
     await useDraftPhoneOtp(normalizedSession);
-    throw new DraftFlowError(410, 'PHONE_OTP_EXPIRED', 'Codigo de telefone expirado.');
+    throw draftError('PHONE_OTP_EXPIRED', 'Codigo de telefone expirado.');
   }
 
   const maxAttempts = Number(phoneOtpRow.max_attempts ?? PHONE_MAX_ATTEMPTS);
@@ -1082,10 +1129,10 @@ export async function confirmDraftPhoneOtp(
         `,
         [normalizedSession],
       );
-      throw new DraftFlowError(423, 'PHONE_OTP_LOCKED', 'Tentativas de codigo excedidas.');
+      throw draftError('PHONE_OTP_LOCKED', 'Tentativas de codigo excedidas.');
     }
     const remaining = Math.max(0, maxAttempts - nextAttempts);
-    throw new DraftFlowError(400, 'PHONE_OTP_INVALID', `Codigo invalido. Restam ${remaining} tentativas.`);
+    throw draftError('PHONE_OTP_INVALID', `Codigo invalido. Restam ${remaining} tentativas.`);
   }
 
   await useDraftPhoneOtp(normalizedSession);
@@ -1109,11 +1156,11 @@ export async function persistDraftDocuments(
 ) {
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
   if (draft.profile_type !== 'broker') {
-    throw new DraftFlowError(403, 'BROKER_ONLY', 'Acoes de documentos so para brokers.');
+    throw draftError('BROKER_ONLY', 'Acoes de documentos so para brokers.');
   }
 
   if (!docs.creciFrontUrl || !docs.creciBackUrl || !docs.selfieUrl) {
-    throw new DraftFlowError(400, 'DRAFT_DOCUMENTS_REQUIRED', 'Envie fotos da frente/verso do creci e selfie.');
+    throw draftError('DRAFT_DOCUMENTS_REQUIRED', 'Envie fotos da frente/verso do creci e selfie.');
   }
 
   await upsertDraftDocuments({
@@ -1137,7 +1184,7 @@ export async function finalizeRegistrationDraft(
 ) {
   const token = normalizeToken(rawDraftToken);
   if (!token) {
-    throw new DraftFlowError(401, 'DRAFT_TOKEN_REQUIRED', 'Token de rascunho nao informado.');
+    throw draftError('DRAFT_TOKEN_REQUIRED', 'Token de rascunho nao informado.');
   }
   const draftTokenHash = hashToken(token);
 
@@ -1146,12 +1193,12 @@ export async function finalizeRegistrationDraft(
   const expiresAt = new Date(draft.expires_at);
   if (expiresAt.getTime() <= now().getTime()) {
     await updateDraftByDraftId(draftId, draftTokenHash, { status: 'EXPIRED' });
-    throw new DraftFlowError(410, 'DRAFT_EXPIRED', 'Rascunho expirado.');
+    throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
   }
   if (draft.password_hash_expires_at) {
     const pwdExp = new Date(draft.password_hash_expires_at);
     if (!Number.isFinite(pwdExp.getTime()) || pwdExp.getTime() <= now().getTime()) {
-      throw new DraftFlowError(410, 'DRAFT_PASSWORD_EXPIRED', 'Senha temporaria expirada.');
+      throw draftError('DRAFT_PASSWORD_EXPIRED', 'Senha temporaria expirada.');
     }
   }
 
@@ -1175,7 +1222,7 @@ export async function finalizeRegistrationDraft(
     );
     if (lockRows.length === 0) {
       await db.rollback();
-      throw new DraftFlowError(409, 'DRAFT_NOT_OPEN', 'Rascunho nao esta aberto para finalizacao.');
+      throw draftError('DRAFT_NOT_OPEN', 'Rascunho nao esta aberto para finalizacao.');
     }
 
     const lockedDraft = lockRows[0] as RegistrationDraftRow;
@@ -1184,7 +1231,7 @@ export async function finalizeRegistrationDraft(
     const acceptedLegal = resolveDraftLegalAcceptances(lockedProfile, action, legalAcceptance);
     if (lockedProfile === 'client' && authProvider === 'email' && !lockedDraft.password_hash) {
       await db.rollback();
-      throw new DraftFlowError(400, 'DRAFT_PASSWORD_REQUIRED', 'Senha nao informada para cliente.');
+      throw draftError('DRAFT_PASSWORD_REQUIRED', 'Senha nao informada para cliente.');
     }
 
     const [userInsertResult] = await db.query<ResultSetHeader>(
@@ -1236,7 +1283,7 @@ export async function finalizeRegistrationDraft(
     if (lockedProfile === 'broker') {
       if (!lockedDraft.creci) {
         await db.rollback();
-        throw new DraftFlowError(400, 'DRAFT_CRICI_REQUIRED', 'CRECI obrigatorio para corretor.');
+        throw draftError('DRAFT_CRICI_REQUIRED', 'CRECI obrigatorio para corretor.');
       }
       await db.query<ResultSetHeader>(
         'INSERT INTO brokers (id, creci, status) VALUES (?, ?, ?)',
@@ -1252,7 +1299,7 @@ export async function finalizeRegistrationDraft(
         );
         if (docsRows.length === 0) {
           await db.rollback();
-          throw new DraftFlowError(400, 'DRAFT_DOCUMENTS_MISSING', 'Documentos de corretor sao obrigatorios.');
+          throw draftError('DRAFT_DOCUMENTS_MISSING', 'Documentos de corretor sao obrigatorios.');
         }
         const docsRow = docsRows[0] as {
           creci_front_url: string;
@@ -1331,7 +1378,7 @@ export async function finalizeRegistrationDraft(
   } catch (error) {
     await db.rollback();
     if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
-      throw new DraftFlowError(409, 'DRAFT_DUPLICATE_ACCOUNT', 'Este email ou creci ja esta em uso.');
+      throw draftError('DRAFT_DUPLICATE_ACCOUNT', 'Este email ou creci ja esta em uso.');
     }
     if (error instanceof DraftFlowError) throw error;
     throw error;
@@ -1402,9 +1449,7 @@ export async function upsertFirebaseContextToDraft(
   if (Object.keys(contextAddressInput).length > 0) {
     const addr = parseAddressBody(contextAddressInput, true);
     if (!addr.ok) {
-      throw new DraftFlowError(
-        400,
-        'DRAFT_ADDRESS_INVALID',
+      throw draftError('DRAFT_ADDRESS_INVALID',
         'Endereco invalido.',
         undefined,
         addr.errors,

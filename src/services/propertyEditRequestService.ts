@@ -9,6 +9,11 @@ import {
   parseAreaUnidade,
 } from '../utils/propertyAreaUnits';
 import { toCanonicalAmenity } from '../utils/propertyAmenities';
+import {
+  normalizeCepForPersistence,
+  parsePromotionPercentage,
+  stringOrNull,
+} from './propertyUpdateValidationService';
 
 export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PropertyEditRequestRequesterRole = 'broker' | 'client';
@@ -205,34 +210,6 @@ type PreparePatchResult = {
   diff: EditablePropertyDiff;
 };
 
-function normalizePurpose(value: unknown): PurposeValue | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value
-    .normalize('NFD')
-    .replace(/[^\p{L}0-9]/gu, '')
-    .toLowerCase();
-  return PURPOSE_MAP[normalized] ?? null;
-}
-
-function stringOrNull(value: unknown): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const normalized = String(value).trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function normalizeCepForPersistence(value: unknown, semCep: boolean): string | null {
-  if (semCep) {
-    return null;
-  }
-
-  const digits = normalizeDigits(value);
-  return digits.length > 0 ? digits : null;
-}
-
 function normalizeAmenityList(value: unknown): string[] {
   const values = (() => {
     if (Array.isArray(value)) {
@@ -274,6 +251,17 @@ function normalizeAmenityList(value: unknown): string[] {
     normalized.add(canonical);
   }
   return Array.from(normalized);
+}
+
+function normalizePurpose(value: unknown): PurposeValue | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value
+    .normalize('NFD')
+    .replace(/[^\p{L}0-9]/gu, '')
+    .toLowerCase();
+  return PURPOSE_MAP[normalized] ?? null;
 }
 
 function normalizeDigits(value: unknown): string {
@@ -320,17 +308,6 @@ function parsePrice(value: unknown, label: string): number | null {
     throw new Error(`${label} invalido.`);
   }
   return parsed;
-}
-
-function parsePromotionPercentage(value: unknown): number | null {
-  if (value === undefined || value === null || value === '') {
-    return null;
-  }
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
-    throw new Error('Percentual de promocao invalido. Use valor entre 1 e 99.');
-  }
-  return Number(parsed.toFixed(2));
 }
 
 function normalizeDateTime(value: unknown): string | null {
@@ -948,7 +925,7 @@ function finalizePatch(
   if (rawPatch.semCep === true) {
     merged.cep = null;
   } else if (rawPatch.cep !== undefined || rawPatch.semCep !== undefined) {
-    merged.cep = normalizeCepForPersistence(merged.cep, merged.semCep);
+    merged.cep = normalizeCepForPersistence(merged.cep, merged.semCep ? 1 : 0);
   }
 
   const shouldEnablePromotion =
@@ -1112,7 +1089,7 @@ export function buildPropertyEditDbPatch(
         break;
       case 'semCep':
         dbPatch.sem_cep = finalState.semCep ? 1 : 0;
-        dbPatch.cep = normalizeCepForPersistence(finalState.cep, finalState.semCep);
+        dbPatch.cep = normalizeCepForPersistence(finalState.cep, finalState.semCep ? 1 : 0);
         break;
       case 'areaTerreno':
         dbPatch.area_terreno = finalState.areaTerreno;

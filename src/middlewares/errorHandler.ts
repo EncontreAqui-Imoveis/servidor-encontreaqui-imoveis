@@ -2,6 +2,7 @@ import type { ErrorRequestHandler, RequestHandler } from 'express';
 import multer from 'multer';
 import * as Sentry from '@sentry/node';
 
+import { applicationErrorToHttpStatus, isApplicationError } from '../errors/ApplicationError';
 import { getRequestId } from './requestContext';
 import { redactValue } from '../utils/logSanitizer';
 
@@ -87,11 +88,13 @@ export const globalErrorHandler: ErrorRequestHandler = (
   }
 
   const statusCode =
-    Number.isInteger(normalized.statusCode) && (normalized.statusCode as number) >= 400
-      ? (normalized.statusCode as number)
-      : Number.isInteger(normalized.status) && (normalized.status as number) >= 400
-        ? (normalized.status as number)
-        : 500;
+    isApplicationError(normalized)
+      ? applicationErrorToHttpStatus(normalized)
+      : Number.isInteger(normalized.statusCode) && (normalized.statusCode as number) >= 400
+        ? (normalized.statusCode as number)
+        : Number.isInteger(normalized.status) && (normalized.status as number) >= 400
+          ? (normalized.status as number)
+          : 500;
 
   console.error(
     'Unhandled application error:',

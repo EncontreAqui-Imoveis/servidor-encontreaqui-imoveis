@@ -326,6 +326,41 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
   `;
 }
 
+function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): string {
+  return `
+      LEFT JOIN brokers b ON p.broker_id = b.id
+      LEFT JOIN users u ON u.id = b.id
+      LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+      LEFT JOIN agencies a ON b.agency_id = a.id
+      LEFT JOIN (
+        SELECT
+          ranked.property_id,
+          ranked.id,
+          ranked.status,
+          ranked.final_value,
+          ranked.buyer_client_id
+        FROM (
+          SELECT
+            n.property_id,
+            n.id,
+            n.status,
+            n.final_value,
+            n.buyer_client_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY n.property_id
+              ORDER BY n.version DESC, n.id DESC
+            ) AS rn
+          FROM negotiations n
+          WHERE n.status NOT IN (?, ?, ?, ?, ?)
+        ) ranked
+        WHERE ranked.rn = 1
+      ) an ON an.property_id = p.id
+      LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      ${includePendingEditRequest ? 'LEFT JOIN property_edit_requests per\n        ON per.property_id = p.id\n       AND per.status = \'PENDING\'' : ''}
+      LEFT JOIN property_images pi ON pi.property_id = p.id
+  `;
+}
+
 async function fetchPropertyAggregateByLookup(
   lookup: PublicPropertyLookup,
   options?: { publicOnly?: boolean }
@@ -629,7 +664,7 @@ export async function listFeaturedProperties(params: {
       ${buildPropertyAggregateSelectClause(false)}
       FROM featured_properties fp
       JOIN properties p ON p.id = fp.property_id
-      ${buildPropertyAggregateJoins(false)}
+      ${buildPropertyAggregateJoinsOnly(false)}
       WHERE p.status = 'approved'
         AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
         AND fp.scope = ?

@@ -450,7 +450,7 @@ export async function updateProposalFromWizard(
           payment_details,
           proposal_validity_date,
           version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
       `,
       [
         negotiationUuid,

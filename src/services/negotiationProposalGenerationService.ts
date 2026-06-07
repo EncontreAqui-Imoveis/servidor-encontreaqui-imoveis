@@ -473,7 +473,7 @@ export async function generateProposalFromProperty(
           payment_details,
           proposal_validity_date,
           version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, 0)
       `,
       [
         negotiationId,

@@ -81,6 +81,8 @@ export async function addPdfJob(data: PdfJobData) {
       type: 'exponential',
       delay: 5000,
     },
+    removeOnComplete: true,
+    removeOnFail: true,
   });
 }
 

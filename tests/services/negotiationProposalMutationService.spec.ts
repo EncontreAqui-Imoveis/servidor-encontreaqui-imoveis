@@ -144,6 +144,8 @@ describe('negotiationProposalMutationService', () => {
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
     expect(res.send).toHaveBeenCalledWith(Buffer.from('%PDF-proposal%'));
+    expect(txMock.query.mock.calls[3]?.[0]).toContain('AND id <> ?');
+    expect(txMock.query.mock.calls[3]?.[1]).toEqual([101, 'neg-1', null, '52998224725']);
     expect(saveNegotiationProposalDocumentMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(Buffer),

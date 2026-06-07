@@ -395,6 +395,7 @@ export async function updateProposalFromWizard(
         SELECT id, status
         FROM negotiations
         WHERE property_id = ?
+          AND id <> ?
           AND status IN ('PROPOSAL_DRAFT', 'PROPOSAL_SENT', 'IN_NEGOTIATION', 'DOCUMENTATION_PHASE', 'CONTRACT_DRAFTING', 'AWAITING_SIGNATURES')
           AND (
             (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
@@ -406,7 +407,7 @@ export async function updateProposalFromWizard(
         LIMIT 1
         FOR UPDATE
       `,
-      [payload.propertyId, buyerClientId, cpfKey]
+      [payload.propertyId, negotiationId, buyerClientId, cpfKey]
     );
     if (existingRows.length > 0) {
       await tx.rollback();

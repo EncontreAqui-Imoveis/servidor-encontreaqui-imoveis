@@ -13,7 +13,7 @@ import {
 
 describe('negotiationProposalSupportService', () => {
   it('normalizes cpf keys and optional ids', () => {
-    expect(normalizeProposalCpfKey('111.222.333-44')).toBe('11122233344');
+    expect(normalizeProposalCpfKey('529.982.247-25')).toBe('52998224725');
     expect(normalizeOptionalPositiveId('12')).toBe(12);
     expect(normalizeOptionalPositiveId('0')).toBeNull();
     expect(normalizeOptionalPositiveId('')).toBeNull();
@@ -22,7 +22,7 @@ describe('negotiationProposalSupportService', () => {
   it('parses proposal data and keeps payment sum consistent', () => {
     const data = parseProposalData({
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       propertyAddress: 'Rua A',
       brokerName: 'Broker X',
       value: 500000,
@@ -35,7 +35,7 @@ describe('negotiationProposalSupportService', () => {
 
     expect(data).toMatchObject({
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       sellingBrokerName: 'Broker X',
       payment: {
         cash: 100000,
@@ -51,7 +51,7 @@ describe('negotiationProposalSupportService', () => {
     const payload = parseProposalWizardBody({
       propertyId: '101',
       clientName: 'Maria',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: '10',
       pagamento: {
         dinheiro: '100000',
@@ -65,7 +65,7 @@ describe('negotiationProposalSupportService', () => {
     expect(payload).toMatchObject({
       propertyId: 101,
       clientName: 'Maria',
-      clientCpf: '11122233344',
+      clientCpf: '52998224725',
       validadeDias: 10,
       sellerBrokerId: null,
       pagamento: {
@@ -83,7 +83,7 @@ describe('negotiationProposalSupportService', () => {
       parseProposalWizardBody({
         propertyId: 101,
         clientName: 'Maria',
-        clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
         validadeDias: 10,
         proposal_validity_date: iso,
         pagamento: {
@@ -132,7 +132,7 @@ describe('negotiationProposalSupportService', () => {
     expect(() =>
       parseProposalData({
         clientName: 'Joao',
-        clientCpf: '111.222.333-44',
+        clientCpf: '529.982.247-25',
         propertyAddress: 'Rua A',
         brokerName: 'Broker',
         value: 500000,

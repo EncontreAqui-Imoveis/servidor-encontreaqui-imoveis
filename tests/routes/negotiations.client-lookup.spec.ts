@@ -51,7 +51,7 @@ describe('GET /negotiations/client-lookup', () => {
         [
           {
             client_name: 'Cliente 1',
-            client_cpf: '11122233344',
+            client_cpf: '52998224725',
             client_phone: '64999990000',
           },
         ],
@@ -59,7 +59,7 @@ describe('GET /negotiations/client-lookup', () => {
 
     const response = await request(app)
       .get('/negotiations/client-lookup')
-      .query({ cpf: '111.222.333-44' });
+      .query({ cpf: '529.982.247-25' });
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
@@ -87,7 +87,7 @@ describe('GET /negotiations/client-lookup', () => {
         [
           {
             client_name: 'Cliente 2',
-            client_cpf: '11122233344',
+            client_cpf: '52998224725',
             client_phone: '64999990000',
           },
         ],
@@ -95,7 +95,7 @@ describe('GET /negotiations/client-lookup', () => {
 
     const response = await request(app)
       .get('/negotiations/client-lookup')
-      .query({ cpf: '11122233344' });
+      .query({ cpf: '52998224725' });
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({

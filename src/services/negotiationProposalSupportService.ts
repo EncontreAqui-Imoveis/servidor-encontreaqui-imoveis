@@ -1,4 +1,5 @@
 import { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
+import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 
 export interface ProposalBody {
   clientName?: unknown;
@@ -91,7 +92,7 @@ export function parsePositiveNumber(input: unknown, fieldName: string): number {
 }
 
 export function normalizeProposalCpfKey(raw: string): string {
-  return String(raw ?? '').replace(/\D/g, '');
+  return normalizeCpfDigits(String(raw ?? ''));
 }
 
 export function parseProposalData(body: ProposalBody): ProposalData {
@@ -168,7 +169,7 @@ export function parseProposalData(body: ProposalBody): ProposalData {
 export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposalWizard {
   const propertyId = Number(body.propertyId);
   const clientName = String(body.clientName ?? '').trim();
-  const clientCpfDigits = String(body.clientCpf ?? '').replace(/\D/g, '');
+  const clientCpfDigits = normalizeCpfDigits(String(body.clientCpf ?? ''));
   const validadeDiasRaw = body.validadeDias ?? 10;
   const validadeDias = Number(validadeDiasRaw);
   const pagamento = body.pagamento ?? {};
@@ -188,8 +189,8 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
     throw new Error('clientName e obrigatorio.');
   }
 
-  if (clientCpfDigits.length != 11) {
-    throw new Error('clientCpf invalido. Informe 11 digitos.');
+  if (!isValidCpf(clientCpfDigits)) {
+    throw new Error('clientCpf invalido. Informe um CPF valido.');
   }
 
   if (!Number.isInteger(validadeDias) || validadeDias <= 0) {

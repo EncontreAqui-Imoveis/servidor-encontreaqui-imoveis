@@ -117,7 +117,7 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-contractual-001',
       propertyId: 101,
       clientName: 'Cliente Contratual',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       value: 1,
       price: 1,

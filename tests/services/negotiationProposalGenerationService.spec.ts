@@ -90,7 +90,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
       .send({
         propertyId: 101,
         clientName: 'Joao da Silva',
-        clientCpf: '111.222.333-44',
+        clientCpf: '529.982.247-25',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -131,7 +131,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
       .send({
         propertyId: 101,
         clientName: 'Joao da Silva',
-        clientCpf: '111.222.333-44',
+        clientCpf: '529.982.247-25',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -159,7 +159,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
       .send({
         propertyId: 101,
         clientName: 'Joao da Silva',
-        clientCpf: '111.222.333-44',
+        clientCpf: '529.982.247-25',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -178,7 +178,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
     const response = await request(app).post('/negotiations/proposal').send({
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -223,7 +223,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
       .send({
         propertyId: 101,
         clientName: 'Joao da Silva',
-        clientCpf: '111.222.333-44',
+        clientCpf: '529.982.247-25',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,

@@ -23,6 +23,7 @@ import {
   type ParsedProposalWizard,
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
+import { isValidCpf } from '../utils/cpfValidator';
 
 interface NegotiationRow extends RowDataPacket {
   id: string;
@@ -396,7 +397,7 @@ export async function generateProposalFromProperty(
     const brokerName = brokerContext.capturingBrokerName;
 
     const cpfKey = normalizeProposalCpfKey(payload.clientCpf);
-    if (cpfKey.length !== 11) {
+    if (!isValidCpf(cpfKey)) {
       await tx.rollback();
       return res.status(400).json({ error: 'CPF do cliente invalido na proposta.' });
     }

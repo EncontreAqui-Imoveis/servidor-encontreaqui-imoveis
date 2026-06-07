@@ -32,7 +32,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
       .mockResolvedValueOnce([
         {
           client_name: 'Cliente Teste',
-          client_cpf: '11122233344',
+          client_cpf: '52998224725',
           client_phone: '(64) 99999-0000',
         },
       ] as any);
@@ -40,7 +40,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
     const req = {
       userId: 30003,
       userRole: 'broker',
-      query: { cpf: '111.222.333-44' },
+      query: { cpf: '529.982.247-25' },
     } as any;
     const res = createMockResponse();
 
@@ -58,7 +58,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
     const req = {
       userId: 30003,
       userRole: 'client',
-      query: { cpf: '111.222.333-44' },
+      query: { cpf: '529.982.247-25' },
     } as any;
     const res = createMockResponse();
 
@@ -85,7 +85,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'CPF inválido. Informe 11 dígitos.' })
+      expect.objectContaining({ error: 'CPF inválido. Informe um CPF válido.' })
     );
   });
 });

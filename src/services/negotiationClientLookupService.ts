@@ -3,6 +3,7 @@ import { RowDataPacket } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
 import { queryNegotiationRows } from './negotiationPersistenceService';
+import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 
 interface NegotiationColumnFlags {
   hasUpdatedAt: boolean;
@@ -48,9 +49,9 @@ export async function lookupClientByCpf(
     return res.status(200).json({ found: false, clientName: null, clientPhone: null });
   }
 
-  const cpfKey = String(req.query.cpf ?? req.query.cpfRaw ?? '').replace(/\D/g, '');
-  if (cpfKey.length !== 11) {
-    return res.status(400).json({ error: 'CPF inválido. Informe 11 dígitos.' });
+  const cpfKey = normalizeCpfDigits(String(req.query.cpf ?? req.query.cpfRaw ?? ''));
+  if (!isValidCpf(cpfKey)) {
+    return res.status(400).json({ error: 'CPF inválido. Informe um CPF válido.' });
   }
 
   const userId = Number(req.userId);

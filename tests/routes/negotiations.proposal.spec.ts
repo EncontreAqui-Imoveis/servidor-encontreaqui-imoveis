@@ -114,7 +114,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-001',
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -166,7 +166,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-002',
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -217,7 +217,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-003',
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       sellerBrokerId: 30004,
       pagamento: {
@@ -245,7 +245,7 @@ describe('POST /negotiations/proposal', () => {
     const response = await request(app).post('/negotiations/proposal').send({
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -272,7 +272,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-retro-date',
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       proposal_validity_date: retroDate,
       pagamento: {
@@ -318,7 +318,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-005',
       propertyId: 101,
       clientName: 'Comprador Externo',
-      clientCpf: '222.333.444-55',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 150000,
@@ -366,7 +366,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-006',
       propertyId: 101,
       clientName: 'Cliente Proprietario',
-      clientCpf: '999.888.777-66',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -412,7 +412,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-no-broker',
       propertyId: 101,
       clientName: 'Cliente Comprador',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -468,7 +468,7 @@ describe('POST /negotiations/proposal', () => {
       idempotency_key: 'proposal-key-004',
       propertyId: 101,
       clientName: 'Joao da Silva',
-      clientCpf: '111.222.333-44',
+      clientCpf: '529.982.247-25',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,

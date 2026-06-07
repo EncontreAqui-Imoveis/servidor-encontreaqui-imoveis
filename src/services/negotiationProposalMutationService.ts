@@ -16,6 +16,7 @@ import {
   type ParsedProposalWizard,
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
+import { isValidCpf } from '../utils/cpfValidator';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
@@ -374,7 +375,7 @@ export async function updateProposalFromWizard(
     }
 
     const cpfKey = normalizeProposalCpfKey(payload.clientCpf);
-    if (cpfKey.length !== 11) {
+    if (!isValidCpf(cpfKey)) {
       await tx.rollback();
       return sendProposalError(
         res,

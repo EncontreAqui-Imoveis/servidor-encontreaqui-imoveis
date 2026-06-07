@@ -44,7 +44,7 @@ describe('negotiationProposalWorkflowService.generateProposal', () => {
     vi.clearAllMocks();
     vi.mocked(parseProposalData).mockReturnValue({
       clientName: 'Joao da Silva',
-      clientCpf: '11122233344',
+      clientCpf: '52998224725',
       propertyAddress: 'Rua A, 100',
       brokerName: 'Broker Teste',
       sellingBrokerName: 'Broker Teste',

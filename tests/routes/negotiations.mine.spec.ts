@@ -64,7 +64,7 @@ describe('GET /negotiations/mine', () => {
           property_image: 'https://res.cloudinary.com/demo/image/upload/casa.jpg',
           status: 'DOCUMENTATION_PHASE',
           client_name: 'Cliente 1',
-          client_cpf: '11122233344',
+          client_cpf: '52998224725',
           proposal_validity_date: '2026-03-20 10:00:00',
           created_at: '2026-03-10 10:00:00',
           updated_at: '2026-03-11 12:00:00',
@@ -85,7 +85,7 @@ describe('GET /negotiations/mine', () => {
         propertyImage: 'https://res.cloudinary.com/demo/image/upload/casa.jpg',
         status: 'DOCUMENTATION_PHASE',
         clientName: 'Cliente 1',
-        clientCpf: '11122233344',
+        clientCpf: '52998224725',
       }),
     ]);
     expect(queryMock).toHaveBeenCalledTimes(2);

@@ -78,7 +78,7 @@ describe('negotiationProposalMutationService', () => {
     parseProposalWizardBodyMock.mockReturnValue({
       propertyId: 101,
       clientName: 'Maria Cliente',
-      clientCpf: '11122233344',
+      clientCpf: '52998224725',
       validadeDias: 10,
       pagamento: {
         dinheiro: 500000,

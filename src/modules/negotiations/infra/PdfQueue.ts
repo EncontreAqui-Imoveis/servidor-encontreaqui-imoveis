@@ -1,7 +1,5 @@
 import { Queue } from 'bullmq';
 import { getRedisConfigForPdfQueue } from '../../../config/redis';
-import type { ProposalData } from '../domain/states/NegotiationState';
-
 const PDF_QUEUE_DISABLED_ERROR_CODE = 'PDF_QUEUE_DISABLED';
 const PDF_QUEUE_DISABLED_MESSAGE = 'PDF_WORKER_ENABLED=false ou configuração Redis ausente. Fila desativada.';
 type PdfQueueError = Error & { code?: string };
@@ -15,7 +13,6 @@ function resolveWorkerEnabledFlag(): boolean {
 
 export interface PdfJobData {
   negotiationId: string;
-  proposalData: ProposalData;
   documentType: 'proposal' | 'contract';
   userId: number;
 }
@@ -76,6 +73,7 @@ export async function addPdfJob(data: PdfJobData) {
   }
 
   return queue.add('generate-pdf', data, {
+    jobId: `${data.documentType}:${data.negotiationId}`,
     attempts: 3,
     backoff: {
       type: 'exponential',

@@ -1,24 +1,12 @@
-import { ValidationError } from '../domain/errors/ValidationError';
 import type { SqlExecutor } from './NegotiationRepository';
+import { toRows } from './sqlResultHelpers';
+import {
+  normalizeCommissionRuleRow,
+  type CommissionRule,
+  type CommissionRuleRow,
+} from './commissionRuleHelpers';
 
-export interface CommissionRule {
-  capturingPercentage: number;
-  sellingPercentage: number;
-  totalPercentage: number;
-}
-
-interface CommissionRuleRow {
-  capturing_percentage: number | string | null;
-  selling_percentage: number | string | null;
-  total_percentage: number | string | null;
-}
-
-const toRows = <T>(result: T[] | [T[], unknown]): T[] => {
-  if (Array.isArray(result) && Array.isArray(result[0])) {
-    return result[0];
-  }
-  return result as T[];
-};
+export type { CommissionRule } from './commissionRuleHelpers';
 
 export class CommissionRulesRepository {
   private readonly executor: SqlExecutor;
@@ -41,23 +29,6 @@ export class CommissionRulesRepository {
     `;
 
     const rows = toRows<CommissionRuleRow>(await executor.execute<CommissionRuleRow[]>(sql));
-    const rule = rows?.[0];
-
-    if (!rule) {
-      throw new ValidationError('Active commission rule not found.');
-    }
-
-    const capturing = Number(rule.capturing_percentage ?? 0);
-    const selling = Number(rule.selling_percentage ?? 0);
-    const total =
-      rule.total_percentage !== null && rule.total_percentage !== undefined
-        ? Number(rule.total_percentage)
-        : capturing + selling;
-
-    return {
-      capturingPercentage: capturing,
-      sellingPercentage: selling,
-      totalPercentage: total,
-    };
+    return normalizeCommissionRuleRow(rows?.[0]);
   }
 }

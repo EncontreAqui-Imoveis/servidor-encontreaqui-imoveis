@@ -1,7 +1,11 @@
 import { Worker, Job } from 'bullmq';
 import { getRedisConfigForPdfQueue } from '../../../config/redis';
 import { isPdfWorkerEnabled, PDF_QUEUE_NAME, PdfJobData } from './PdfQueue';
-import { generateNegotiationProposalPdf, saveNegotiationProposalDocument } from '../../../services/negotiationPersistenceService';
+import {
+  generateNegotiationProposalPdf,
+  getNegotiationProposalDataById,
+  saveNegotiationProposalDocument,
+} from '../../../services/negotiationPersistenceService';
 import { createUserNotification } from '../../../services/notificationService';
 
 export function setupPdfWorker() {
@@ -23,11 +27,13 @@ export function setupPdfWorker() {
     const worker = new Worker<PdfJobData>(
       PDF_QUEUE_NAME,
       async (job: Job<PdfJobData>) => {
-        const { negotiationId, proposalData, documentType, userId } = job.data;
-        
+        const { negotiationId, documentType, userId } = job.data;
+
         console.log(`Processing PDF generation for negotiation ${negotiationId}...`);
 
         try {
+          const proposalData = await getNegotiationProposalDataById(negotiationId);
+
           // 1. Generate PDF
           const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
 
@@ -65,7 +71,7 @@ export function setupPdfWorker() {
           await createUserNotification({
             type: 'negotiation',
             title: 'Erro na geração da proposta',
-            message: `Ocorreu um erro ao gerar sua proposta para o imóvel ${proposalData.propertyAddress}.`,
+            message: 'Ocorreu um erro ao gerar sua proposta.',
             recipientId: userId,
             relatedEntityId: 0,
             metadata: {

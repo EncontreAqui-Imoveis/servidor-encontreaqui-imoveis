@@ -70,6 +70,8 @@ describe('ExternalPdfService', () => {
         client_cpf: '123.456.789-00',
         property_address: 'Rua A, 10',
         broker_name: 'Pedro',
+        selling_broker_name: 'Maria',
+        payment_method: null,
         value: 250000,
         payment: {
           cash: 50000,

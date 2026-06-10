@@ -72,6 +72,13 @@ describe('negotiationProposalWorkflowService.generateProposal', () => {
     expect(parseProposalData).toHaveBeenCalledTimes(1);
     expect(executeNegotiationStatement).toHaveBeenCalledTimes(1);
     expect(addPdfJob).toHaveBeenCalledTimes(1);
+    expect(addPdfJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        documentType: 'proposal',
+        userId: 30003,
+      })
+    );
     expect(res.status).toHaveBeenCalledWith(202);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({

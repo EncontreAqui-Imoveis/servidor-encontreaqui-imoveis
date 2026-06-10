@@ -1,4 +1,5 @@
 import type { SqlExecutor } from './NegotiationRepository';
+import { buildCommissionInsertStatement } from './commissionInsertSql';
 
 export interface CommissionInsert {
   brokerId: number;
@@ -23,22 +24,10 @@ export class CommissionsRepository {
     }
 
     const executor = params.trx ?? this.executor;
-    const valuesSql = params.commissions
-      .map(() => "(UUID(), ?, ?, ?, ?, 'PENDING', CURRENT_TIMESTAMP)")
-      .join(', ');
-
-    const sql = `
-      INSERT INTO commissions
-        (id, negotiation_id, broker_id, role, amount, status, created_at)
-      VALUES ${valuesSql}
-    `;
-
-    const bindings = params.commissions.flatMap((commission) => [
-      params.negotiationId,
-      commission.brokerId,
-      commission.role,
-      commission.amount,
-    ]);
+    const { sql, bindings } = buildCommissionInsertStatement({
+      negotiationId: params.negotiationId,
+      commissions: params.commissions,
+    });
 
     await executor.execute(sql, bindings);
   }

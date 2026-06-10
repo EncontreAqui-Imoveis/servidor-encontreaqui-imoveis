@@ -2,6 +2,7 @@ import type {
   NegotiationDocumentsRepository as NegotiationDocumentsRepositoryPort,
 } from '../domain/states/NegotiationState';
 import type { SqlExecutor } from './NegotiationRepository';
+import { toRows } from './sqlResultHelpers';
 import {
   parseNegotiationDocumentMetadata,
   readNegotiationDocumentObject,
@@ -17,13 +18,6 @@ interface CountRow {
 interface NegotiationDocumentRow extends StoredNegotiationDocumentRow {
   id: number;
 }
-
-const toRows = <T>(result: T[] | [T[], unknown]): T[] => {
-  if (Array.isArray(result) && Array.isArray(result[0])) {
-    return result[0];
-  }
-  return result as T[];
-};
 
 export class NegotiationDocumentsRepository
   implements NegotiationDocumentsRepositoryPort<SqlExecutor>
@@ -111,19 +105,17 @@ export class NegotiationDocumentsRepository
     trx?: SqlExecutor,
     metadataJson?: Record<string, unknown> | null
   ): Promise<number> {
-    const executor = trx ?? this.executor;
-
-    return storeNegotiationDocumentToR2({
-      executor,
+    return this.saveDocument({
       negotiationId,
+      pdfBuffer,
+      trx,
       type: 'proposal',
       documentType: 'contrato_minuta',
-      content: pdfBuffer,
-      metadataJson:
-        metadataJson ?? {
-          originalFileName: 'proposta.pdf',
-          generated: true,
-        },
+      defaultMetadata: {
+        originalFileName: 'proposta.pdf',
+        generated: true,
+      },
+      metadataJson,
     });
   }
 
@@ -133,18 +125,16 @@ export class NegotiationDocumentsRepository
     trx?: SqlExecutor,
     metadataJson?: Record<string, unknown> | null
   ): Promise<number> {
-    const executor = trx ?? this.executor;
-
-    return storeNegotiationDocumentToR2({
-      executor,
+    return this.saveDocument({
       negotiationId,
+      pdfBuffer,
+      trx,
       type: 'other',
       documentType: 'contrato_assinado',
-      content: pdfBuffer,
-      metadataJson:
-        metadataJson ?? {
-          originalFileName: 'proposta_assinada.pdf',
-        },
+      defaultMetadata: {
+        originalFileName: 'proposta_assinada.pdf',
+      },
+      metadataJson,
     });
   }
 
@@ -186,5 +176,26 @@ export class NegotiationDocumentsRepository
       fileContent: await readNegotiationDocumentObject(row),
       type: row.type,
     };
+  }
+
+  private async saveDocument(params: {
+    negotiationId: string;
+    pdfBuffer: Buffer;
+    trx?: SqlExecutor;
+    type: 'proposal' | 'contract' | 'other';
+    documentType: string;
+    defaultMetadata: Record<string, unknown>;
+    metadataJson?: Record<string, unknown> | null;
+  }): Promise<number> {
+    const executor = params.trx ?? this.executor;
+
+    return storeNegotiationDocumentToR2({
+      executor,
+      negotiationId: params.negotiationId,
+      type: params.type,
+      documentType: params.documentType,
+      content: params.pdfBuffer,
+      metadataJson: params.metadataJson ?? params.defaultMetadata,
+    });
   }
 }

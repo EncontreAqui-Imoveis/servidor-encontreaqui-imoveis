@@ -53,4 +53,31 @@ describe('CommissionService', () => {
     expect(insertCall).toBeTruthy();
     expect(String(insertCall?.[1]?.[0] ?? '')).toContain('neg-1');
   });
+
+  it('catches errors raised by the deal closed event handler', async () => {
+    const execute = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM negotiations')) {
+        throw new Error('boom');
+      }
+      return { affectedRows: 1 };
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const eventBus = new NegotiationEventBus();
+    const transactionManager = {
+      run: async <T>(fn: (trx: any) => Promise<T>) => fn({ execute }),
+    };
+
+    new CommissionService({
+      eventBus,
+      transactionManager,
+      commissionRulesRepository: new CommissionRulesRepository({ execute } as any),
+      commissionsRepository: new CommissionsRepository({ execute } as any),
+    });
+
+    eventBus.emitDealClosed('neg-err');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });

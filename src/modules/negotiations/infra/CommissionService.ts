@@ -4,7 +4,10 @@ import type { TransactionManager } from '../domain/states/NegotiationState';
 import type { CommissionRule } from './CommissionRulesRepository';
 import { CommissionRulesRepository } from './CommissionRulesRepository';
 import { CommissionsRepository, type CommissionInsert } from './CommissionsRepository';
+import { calculateCommissions } from './commissionCalculation';
+import { mapCommissionNegotiationRow } from './commissionNegotiationMapper';
 import type { SqlExecutor } from './NegotiationRepository';
+import { toRows } from './sqlResultHelpers';
 
 interface NegotiationRow {
   id: string;
@@ -13,13 +16,6 @@ interface NegotiationRow {
   selling_broker_id: number | null;
   seller_client_id?: number | null;
 }
-
-const toRows = <T>(result: T[] | [T[], unknown]): T[] => {
-  if (Array.isArray(result) && Array.isArray(result[0])) {
-    return result[0];
-  }
-  return result as T[];
-};
 
 export class CommissionService {
   private readonly eventBus: NegotiationEventBus;
@@ -39,7 +35,12 @@ export class CommissionService {
     this.commissionsRepository = params.commissionsRepository;
 
     this.eventBus.onDealClosed((payload) => {
-      void this.handleDealClosed(payload.negotiationId);
+      void this.handleDealClosed(payload.negotiationId).catch((error) => {
+        console.error('Failed to process commissions for closed deal', {
+          negotiationId: payload.negotiationId,
+          error,
+        });
+      });
     });
   }
 
@@ -47,7 +48,7 @@ export class CommissionService {
     await this.transactionManager.run(async (trx) => {
       const negotiation = await this.fetchNegotiation(trx, negotiationId);
       const rule = await this.fetchActiveRule(trx);
-      const commissions = this.calculateCommissions(negotiation, rule);
+      const commissions = calculateCommissions(mapCommissionNegotiationRow(negotiation), rule);
 
       if (commissions.length === 0) {
         return;
@@ -79,53 +80,6 @@ export class CommissionService {
 
   private async fetchActiveRule(trx: SqlExecutor): Promise<CommissionRule> {
     return this.commissionRulesRepository.getActiveRule({ trx });
-  }
-
-  private calculateCommissions(
-    negotiation: NegotiationRow,
-    rule: CommissionRule
-  ): CommissionInsert[] {
-    const finalValue = Number(negotiation.final_value ?? 0);
-    if (!Number.isFinite(finalValue) || finalValue <= 0) {
-      throw new ValidationError('final_value is required to calculate commissions.');
-    }
-
-    const capturingPercentage = rule.capturingPercentage;
-    const sellingPercentage = rule.sellingPercentage;
-    const totalPercentage = rule.totalPercentage;
-
-    if (negotiation.selling_broker_id === null) {
-      return [
-        {
-          brokerId: negotiation.capturing_broker_id,
-          role: 'CAPTURING',
-          amount: Number(((finalValue * totalPercentage) / 100).toFixed(2)),
-        },
-      ];
-    }
-
-    if (negotiation.capturing_broker_id === negotiation.selling_broker_id) {
-      return [
-        {
-          brokerId: negotiation.capturing_broker_id,
-          role: 'CAPTURING',
-          amount: Number(((finalValue * totalPercentage) / 100).toFixed(2)),
-        },
-      ];
-    }
-
-    return [
-      {
-        brokerId: negotiation.capturing_broker_id,
-        role: 'CAPTURING',
-        amount: Number(((finalValue * capturingPercentage) / 100).toFixed(2)),
-      },
-      {
-        brokerId: negotiation.selling_broker_id,
-        role: 'SELLING',
-        amount: Number(((finalValue * sellingPercentage) / 100).toFixed(2)),
-      },
-    ];
   }
 
   private async insertCommissions(

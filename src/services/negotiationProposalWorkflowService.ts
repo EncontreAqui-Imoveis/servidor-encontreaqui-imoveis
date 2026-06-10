@@ -163,7 +163,6 @@ export async function generateProposal(
     try {
       await addPdfJob({
         negotiationId,
-        proposalData,
         documentType: 'proposal',
         userId: Number(req.userId),
       });

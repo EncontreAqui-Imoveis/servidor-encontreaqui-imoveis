@@ -64,7 +64,7 @@ export interface ParsedProposalWizard {
   };
 }
 
-interface PropertyRow {
+interface PropertyAddressRow {
   address: string | null;
   numero: string | null;
   quadra: string | null;
@@ -72,11 +72,12 @@ interface PropertyRow {
   bairro: string | null;
   city: string | null;
   state: string | null;
+}
+
+interface PropertyValueRow {
   price: number | null;
   price_sale: number | null;
   price_rent: number | null;
-  broker_id?: number | null;
-  owner_id?: number | null;
 }
 
 export function toCents(value: number): number {
@@ -234,7 +235,7 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
   };
 }
 
-export function resolvePropertyAddress(row: PropertyRow): string {
+export function resolvePropertyAddress(row: PropertyAddressRow): string {
   const parts = [
     row.address,
     row.numero ? `Nº ${row.numero}` : null,
@@ -250,7 +251,7 @@ export function resolvePropertyAddress(row: PropertyRow): string {
   return parts.join(', ');
 }
 
-export function resolvePropertyValue(row: PropertyRow): number {
+export function resolvePropertyValue(row: PropertyValueRow): number {
   const sale = Number(row.price_sale ?? 0);
   const rent = Number(row.price_rent ?? 0);
   const fallback = Number(row.price ?? 0);

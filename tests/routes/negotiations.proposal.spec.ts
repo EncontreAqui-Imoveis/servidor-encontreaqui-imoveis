@@ -380,6 +380,60 @@ describe('POST /negotiations/proposal', () => {
     expect(String(response.body.error ?? '')).toContain('proprio anuncio');
   });
 
+  it('rejects a new proposal when the property already has an active negotiation', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 50001,
+            status: 'approved',
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: 'Q1',
+            lote: 'L2',
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ name: 'Broker Existente' }]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-existing',
+            status: 'PROPOSAL_SENT',
+          },
+        ],
+      ]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-duplicate-active',
+      propertyId: 101,
+      clientName: 'Cliente',
+      clientCpf: '529.982.247-25',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('PROPOSAL_ALREADY_EXISTS');
+    expect(response.body.error).toContain('proposta ativa');
+    expect(generateProposalMock).not.toHaveBeenCalled();
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+  });
+
   it('allows client to create proposal when property has no responsible broker', async () => {
     authState.userId = 90002;
     authState.userRole = 'client';

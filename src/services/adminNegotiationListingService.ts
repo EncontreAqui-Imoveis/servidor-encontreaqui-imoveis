@@ -36,6 +36,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   id: string;
   negotiation_status: string | null;
   property_id: number | string;
+  created_at: string | Date | null;
   capturing_broker_id: number | string | null;
   selling_broker_id: number | string | null;
   seller_client_id: number | string | null;
@@ -395,6 +396,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     clientName: row.client_name ?? null,
     clientCpf: row.client_cpf ?? null,
     value: toNullableNumber(row.final_value),
+    createdAt: toNullableIsoDate(row.created_at),
     validityDate: row.proposal_validity_date ? String(row.proposal_validity_date) : null,
     payment: {
       dinheiro: toNegotiationMoney(row.payment_dinheiro),
@@ -438,6 +440,7 @@ export async function listNegotiations(params: {
         n.id,
         n.status AS negotiation_status,
         n.property_id,
+        n.created_at,
         n.capturing_broker_id,
         n.selling_broker_id,
         n.seller_client_id,

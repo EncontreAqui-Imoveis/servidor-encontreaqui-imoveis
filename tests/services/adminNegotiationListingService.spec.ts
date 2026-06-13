@@ -51,6 +51,7 @@ describe('adminNegotiationListingService', () => {
             property_image_url: 'https://img.test/1.jpg',
             final_value: 850000,
             proposal_validity_date: '2026-05-02',
+            created_at: '2026-04-22T09:30:00.000Z',
             capturing_broker_name: 'Carlos Broker',
             selling_broker_name: 'Ana Broker',
             seller_client_name: 'Maria Cliente',
@@ -85,6 +86,7 @@ describe('adminNegotiationListingService', () => {
       propertyId: 101,
       brokerName: 'Carlos Broker',
       sellerClientName: 'Maria Cliente',
+      createdAt: '2026-04-22T09:30:00.000Z',
       signedDocumentId: 33,
       signedDocumentFileName: 'proposta-assinada-maria.pdf',
       payment: {
@@ -201,6 +203,7 @@ describe('adminNegotiationListingService', () => {
             property_address: 'Rua A, 10',
             final_value: 850000,
             proposal_validity_date: '2026-05-02',
+            created_at: '2026-04-22T08:45:00.000Z',
             capturing_broker_name: 'Carlos Broker',
             selling_broker_name: null,
             seller_client_name: null,
@@ -232,6 +235,7 @@ describe('adminNegotiationListingService', () => {
       status: 'UNDER_REVIEW',
       propertyId: 101,
       clientName: 'Maria Cliente',
+      createdAt: '2026-04-22T08:45:00.000Z',
     });
   });
 

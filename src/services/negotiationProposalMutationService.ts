@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import { Response } from 'express';
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
@@ -119,6 +118,23 @@ function isDependencyUnavailableError(error: unknown): boolean {
   return code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ECONNRESET';
 }
 
+async function negotiationHasSignedProposalDocument(
+  tx: PoolConnection,
+  negotiationId: string
+): Promise<boolean> {
+  const [signedDocRows] = await tx.query<RowDataPacket[]>(
+    `
+      SELECT COUNT(*) AS c
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND type = 'other'
+        AND document_type = 'contrato_assinado'
+    `,
+    [negotiationId]
+  );
+  return Number(signedDocRows[0]?.c ?? 0) > 0;
+}
+
 export async function updateProposalFromWizard(
   req: AuthRequest,
   res: Response
@@ -205,17 +221,7 @@ export async function updateProposalFromWizard(
       );
     }
 
-    const [signedDocRows] = await tx.query<RowDataPacket[]>(
-      `
-        SELECT COUNT(*) AS c
-        FROM negotiation_documents
-        WHERE negotiation_id = ?
-          AND type = 'other'
-          AND document_type = 'contrato_assinado'
-      `,
-      [negotiationId]
-    );
-    if (Number(signedDocRows[0]?.c ?? 0) > 0) {
+    if (await negotiationHasSignedProposalDocument(tx, negotiationId)) {
       await tx.rollback();
       return sendProposalError(
         res,
@@ -430,43 +436,43 @@ export async function updateProposalFromWizard(
         listingValue: Number(listingValue.toFixed(2)),
       },
     });
-    const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
+    let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();
+    if (!proposalValidityDate) {
+      const fallbackDate = new Date();
+      fallbackDate.setDate(fallbackDate.getDate() + payload.validadeDias);
+      const yyyy = fallbackDate.getFullYear().toString().padStart(4, '0');
+      const mm = String(fallbackDate.getMonth() + 1).padStart(2, '0');
+      const dd = String(fallbackDate.getDate()).padStart(2, '0');
+      proposalValidityDate = `${yyyy}-${mm}-${dd}`;
+    }
     assertProposalValidityDateNotPast(proposalValidityDate);
 
-    const negotiationUuid = randomUUID();
-    const fromStatus = 'PROPOSAL_DRAFT';
+    const fromStatus = String(nRow.status ?? 'PROPOSAL_DRAFT').trim().toUpperCase();
     await tx.execute(
       `
-        INSERT INTO negotiations (
-          id,
-          property_id,
-          capturing_broker_id,
-          selling_broker_id,
-          seller_client_id,
-          buyer_client_id,
-          client_name,
-          client_cpf,
-          status,
-          final_value,
-          payment_details,
-          proposal_validity_date,
-          created_at,
-          version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
+        UPDATE negotiations
+        SET
+          property_id = ?,
+          client_name = ?,
+          client_cpf = ?,
+          status = ?,
+          final_value = ?,
+          payment_details = CAST(? AS JSON),
+          proposal_validity_date = ?,
+          last_draft_edit_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP,
+          version = COALESCE(version, 0) + 1
+        WHERE id = ?
       `,
       [
-        negotiationUuid,
         payload.propertyId,
-        normalizeOptionalPositiveId(req.userId),
-        normalizeOptionalPositiveId(req.userId),
-        sellerClientId,
-        buyerClientId,
         payload.clientName,
         payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
         proposalValue,
         paymentDetails,
         proposalValidityDate,
+        negotiationId,
       ]
     );
 
@@ -483,7 +489,7 @@ export async function updateProposalFromWizard(
         ) VALUES (UUID(), ?, ?, ?, ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
       `,
       [
-        negotiationUuid,
+        negotiationId,
         fromStatus,
         DEFAULT_WIZARD_STATUS,
         req.userId,
@@ -517,7 +523,7 @@ export async function updateProposalFromWizard(
     };
 
     const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
-    const documentId = await saveNegotiationProposalDocument(negotiationUuid, pdfBuffer, tx, {
+    const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
       originalFileName: 'proposta.pdf',
       generated: true,
     });
@@ -525,9 +531,9 @@ export async function updateProposalFromWizard(
     await tx.commit();
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="proposal_${negotiationUuid}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="proposal_${negotiationId}.pdf"`);
     res.setHeader('Content-Length', pdfBuffer.length.toString());
-    res.setHeader('X-Negotiation-Id', negotiationUuid);
+    res.setHeader('X-Negotiation-Id', negotiationId);
     return res.status(201).send(pdfBuffer);
   } catch (error) {
     if (tx) {

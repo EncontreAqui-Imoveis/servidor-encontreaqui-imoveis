@@ -144,13 +144,21 @@ describe('negotiationProposalMutationService', () => {
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
     expect(res.send).toHaveBeenCalledWith(Buffer.from('%PDF-proposal%'));
-    expect(
-      txMock.execute.mock.calls.some(([sql]) => String(sql).includes('created_at'))
-    ).toBe(true);
+    expect(txMock.execute.mock.calls[0]?.[0]).toContain('UPDATE negotiations');
+    expect(txMock.execute.mock.calls[0]?.[1]).toEqual([
+      101,
+      'Maria Cliente',
+      '52998224725',
+      'PROPOSAL_SENT',
+      500000,
+      expect.any(String),
+      expect.any(String),
+      'neg-1',
+    ]);
     expect(txMock.query.mock.calls[3]?.[0]).toContain('AND id <> ?');
     expect(txMock.query.mock.calls[3]?.[1]).toEqual([101, 'neg-1', null, '52998224725']);
     expect(saveNegotiationProposalDocumentMock).toHaveBeenCalledWith(
-      expect.any(String),
+      'neg-1',
       expect.any(Buffer),
       txMock,
       expect.objectContaining({
@@ -248,6 +256,43 @@ describe('negotiationProposalMutationService', () => {
     );
     expect(generateNegotiationProposalPdfMock).not.toHaveBeenCalled();
     expect(saveNegotiationProposalDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia edicao quando a minuta assinada ja existe', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-1',
+            property_id: 101,
+            status: 'PROPOSAL_SENT',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30003,
+            buyer_client_id: null,
+            last_draft_edit_at: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ c: 1 }]]);
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'neg-1' },
+      body: {},
+    } as any;
+    const res = createMockResponse();
+
+    await updateProposalFromWizard(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'PROPOSAL_LOCKED',
+      })
+    );
+    expect(txMock.execute).not.toHaveBeenCalled();
+    expect(generateNegotiationProposalPdfMock).not.toHaveBeenCalled();
   });
 
   it('exclui proposta do usuario e retorna 204', async () => {

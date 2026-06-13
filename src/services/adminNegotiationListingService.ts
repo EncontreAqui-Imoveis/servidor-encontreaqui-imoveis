@@ -45,6 +45,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   property_title: string | null;
   property_address: string | null;
   property_image_url: string | null;
+  property_value: number | string | null;
   final_value: number | string | null;
   proposal_validity_date: string | Date | null;
   capturing_broker_name: string | null;
@@ -68,6 +69,7 @@ interface AdminNegotiationRequestSummaryRow extends RowDataPacket {
   property_title: string | null;
   property_address: string | null;
   property_image_url: string | null;
+  property_value: number | string | null;
   proposal_count: number | string | null;
   latest_updated_at: string | Date | null;
   top_negotiation_id: string | null;
@@ -386,6 +388,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyTitle: row.property_title ?? null,
     propertyAddress: row.property_address ?? null,
     propertyImageUrl: row.property_image_url ?? null,
+    propertyValue: toNullableNumber(row.property_value),
     capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
     sellerClientId: row.seller_client_id != null ? Number(row.seller_client_id) : null,
@@ -448,6 +451,7 @@ export async function listNegotiations(params: {
         p.code AS property_code,
         p.title AS property_title,
         CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
+        COALESCE(NULLIF(p.price_sale, 0), NULLIF(p.price_rent, 0), NULLIF(p.price, 0)) AS property_value,
         (
           SELECT pi.image_url
           FROM property_images pi
@@ -535,6 +539,7 @@ export async function listNegotiationRequestSummary(params: {
     propertyTitle: string | null;
     propertyAddress: string | null;
     propertyImageUrl: string | null;
+    propertyValue: number | null;
     proposalCount: number;
     updatedAt: string | null;
     topProposal: {
@@ -574,6 +579,7 @@ export async function listNegotiationRequestSummary(params: {
         g.property_code,
         g.property_title,
         g.property_address,
+        g.property_value,
         g.proposal_count,
         g.latest_updated_at,
         (
@@ -582,7 +588,7 @@ export async function listNegotiationRequestSummary(params: {
           WHERE pi.property_id = g.property_id
           ORDER BY pi.id ASC
           LIMIT 1
-        ) AS property_image_url,
+      ) AS property_image_url,
         r.negotiation_id AS top_negotiation_id,
         r.final_value AS top_proposal_value,
         r.client_name AS top_client_name,
@@ -593,6 +599,7 @@ export async function listNegotiationRequestSummary(params: {
           MAX(p.code) AS property_code,
           MAX(p.title) AS property_title,
           MAX(CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state)) AS property_address,
+          MAX(COALESCE(NULLIF(p.price_sale, 0), NULLIF(p.price_rent, 0), NULLIF(p.price, 0))) AS property_value,
           COUNT(*) AS proposal_count,
           MAX(${timeSql.nEventAtSelect}) AS latest_updated_at
         FROM negotiations n
@@ -653,6 +660,7 @@ export async function listNegotiationRequestSummary(params: {
       propertyTitle: row.property_title ?? null,
       propertyAddress: row.property_address ?? null,
       propertyImageUrl: row.property_image_url ?? null,
+      propertyValue: toNullableNumber(row.property_value),
       proposalCount: Number(row.proposal_count ?? 0),
       updatedAt: toNullableIsoDate(row.latest_updated_at),
       topProposal: {
@@ -704,6 +712,7 @@ export async function listNegotiationRequestsByProperty(params: {
         n.id,
         n.status AS negotiation_status,
         n.property_id,
+        n.created_at,
         n.capturing_broker_id,
         n.selling_broker_id,
         n.seller_client_id,
@@ -711,6 +720,14 @@ export async function listNegotiationRequestsByProperty(params: {
         p.code AS property_code,
         p.title AS property_title,
         CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
+        COALESCE(NULLIF(p.price_sale, 0), NULLIF(p.price_rent, 0), NULLIF(p.price, 0)) AS property_value,
+        (
+          SELECT pi.image_url
+          FROM property_images pi
+          WHERE pi.property_id = n.property_id
+          ORDER BY pi.id ASC
+          LIMIT 1
+        ) AS property_image_url,
         n.final_value,
         n.proposal_validity_date,
         capture_user.name AS capturing_broker_name,

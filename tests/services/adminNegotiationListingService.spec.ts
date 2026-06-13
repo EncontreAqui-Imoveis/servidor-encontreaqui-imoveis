@@ -49,6 +49,7 @@ describe('adminNegotiationListingService', () => {
             property_title: 'Casa Alto Padrão',
             property_address: 'Rua A, 10',
             property_image_url: 'https://img.test/1.jpg',
+            property_value: 900000,
             final_value: 850000,
             proposal_validity_date: '2026-05-02',
             created_at: '2026-04-22T09:30:00.000Z',
@@ -86,6 +87,7 @@ describe('adminNegotiationListingService', () => {
       propertyId: 101,
       brokerName: 'Carlos Broker',
       sellerClientName: 'Maria Cliente',
+      propertyValue: 900000,
       createdAt: '2026-04-22T09:30:00.000Z',
       signedDocumentId: 33,
       signedDocumentFileName: 'proposta-assinada-maria.pdf',
@@ -132,6 +134,7 @@ describe('adminNegotiationListingService', () => {
             property_code: 'EA-101',
             property_title: 'Casa Alto Padrão',
             property_address: 'Rua A, 10',
+            property_value: 900000,
             proposal_count: 3,
             latest_updated_at: '2026-04-22T10:00:00.000Z',
             property_image_url: 'https://img.test/1.jpg',
@@ -154,6 +157,7 @@ describe('adminNegotiationListingService', () => {
       propertyId: 101,
       propertyCode: 'EA-101',
       proposalCount: 3,
+      propertyValue: 900000,
       topProposal: {
         negotiationId: 'neg-1',
         value: 850000,
@@ -201,6 +205,8 @@ describe('adminNegotiationListingService', () => {
             property_code: 'EA-101',
             property_title: 'Casa Alto Padrão',
             property_address: 'Rua A, 10',
+            property_image_url: 'https://img.test/1.jpg',
+            property_value: 900000,
             final_value: 850000,
             proposal_validity_date: '2026-05-02',
             created_at: '2026-04-22T08:45:00.000Z',
@@ -236,6 +242,8 @@ describe('adminNegotiationListingService', () => {
       propertyId: 101,
       clientName: 'Maria Cliente',
       createdAt: '2026-04-22T08:45:00.000Z',
+      propertyImageUrl: 'https://img.test/1.jpg',
+      propertyValue: 900000,
     });
   });
 

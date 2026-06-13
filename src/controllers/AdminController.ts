@@ -35,6 +35,7 @@ import {
   rejectNegotiation as rejectAdminNegotiation,
   updateNegotiationSellingBroker as updateNegotiationSellingBrokerMutation,
 } from '../services/adminNegotiationMutationService';
+import { generateProposalFromProperty as generateAdminNegotiationProposal } from '../services/negotiationProposalGenerationService';
 import {
   deleteSignedProposal as deleteAdminSignedProposal,
   downloadSignedProposal as downloadAdminSignedProposal,
@@ -294,6 +295,14 @@ class AdminController {
     try {
       const payload = await cancelAdminNegotiation({ negotiationId, actorId, reason });
       return res.status(200).json(payload);
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async generateProposalFromProperty(req: Request, res: Response) {
+    try {
+      return generateAdminNegotiationProposal(req as any, res);
     } catch (error) {
       return respondWithAppError(res, error);
     }

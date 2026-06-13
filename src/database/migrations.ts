@@ -752,6 +752,90 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
   }
 }
 
+async function ensureNegotiationsTimestampBackfill(): Promise<void> {
+  if (!(await tableExists('negotiations'))) {
+    return;
+  }
+
+  const hasCreatedAt = await columnExists('negotiations', 'created_at');
+  const hasUpdatedAt = await columnExists('negotiations', 'updated_at');
+  if (!hasCreatedAt && !hasUpdatedAt) {
+    return;
+  }
+
+  const historyExists = await tableExists('negotiation_history');
+  const documentsExists = await tableExists('negotiation_documents');
+
+  const joinParts: string[] = [];
+  const createdSources: string[] = [];
+  const updatedSources: string[] = [];
+
+  if (historyExists) {
+    joinParts.push(`
+      LEFT JOIN (
+        SELECT
+          negotiation_id,
+          MIN(created_at) AS first_event_at,
+          MAX(created_at) AS last_event_at
+        FROM negotiation_history
+        GROUP BY negotiation_id
+      ) nh ON nh.negotiation_id = n.id
+    `);
+    createdSources.push('nh.first_event_at');
+    updatedSources.push('nh.last_event_at');
+  }
+
+  if (documentsExists) {
+    joinParts.push(`
+      LEFT JOIN (
+        SELECT
+          negotiation_id,
+          MIN(created_at) AS first_document_at,
+          MAX(created_at) AS last_document_at
+        FROM negotiation_documents
+        GROUP BY negotiation_id
+      ) nd ON nd.negotiation_id = n.id
+    `);
+    createdSources.push('nd.first_document_at');
+    updatedSources.push('nd.last_document_at');
+  }
+
+  if (hasUpdatedAt) {
+    createdSources.push('n.updated_at');
+    updatedSources.push('n.created_at');
+  }
+
+  createdSources.push('CURRENT_TIMESTAMP');
+  updatedSources.push('CURRENT_TIMESTAMP');
+
+  const setParts: string[] = [];
+  if (hasCreatedAt) {
+    setParts.push(`n.created_at = COALESCE(${['n.created_at', ...createdSources].join(', ')})`);
+  }
+  if (hasUpdatedAt) {
+    setParts.push(`n.updated_at = COALESCE(${['n.updated_at', ...updatedSources].join(', ')})`);
+  }
+
+  const whereParts: string[] = [];
+  if (hasCreatedAt) {
+    whereParts.push('n.created_at IS NULL');
+  }
+  if (hasUpdatedAt) {
+    whereParts.push('n.updated_at IS NULL');
+  }
+
+  if (setParts.length === 0) {
+    return;
+  }
+
+  await connection.query(`
+    UPDATE negotiations n
+    ${joinParts.join('\n')}
+    SET ${setParts.join(', ')}
+    WHERE ${whereParts.join(' OR ')}
+  `);
+}
+
 async function ensureUserAddressColumns(): Promise<void> {
   if (!(await tableExists('users'))) {
     return;
@@ -1367,6 +1451,7 @@ export async function applyMigrations(): Promise<void> {
     await runFeaturedPropertiesScopeMigration();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();
+    await ensureNegotiationsTimestampBackfill();
     await ensureUserAddressColumns();
     await ensureSupportRequestsTable();
     await ensurePasswordResetTokensTable();

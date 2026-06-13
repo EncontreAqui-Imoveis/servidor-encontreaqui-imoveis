@@ -78,6 +78,9 @@ adminRoutes.put('/negotiations/:id/cancel', adminController.cancelNegotiation);
 adminRoutes.put('/negotiations/:id/selling-broker', (req, res) =>
   (adminController as any).updateNegotiationSellingBroker(req, res)
 );
+adminRoutes.post('/negotiations/proposal', (req, res) =>
+  (adminController as any).generateProposalFromProperty(req, res)
+);
 adminRoutes.get('/negotiations/:id/responsibles', (req, res) =>
   (adminController as any).listNegotiationResponsibles(req, res)
 );

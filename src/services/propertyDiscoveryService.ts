@@ -681,7 +681,7 @@ export async function listFeaturedProperties(params: {
       ORDER BY fp.position ASC
       LIMIT ? OFFSET ?
     `,
-    [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, scope, ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, limit, offset]
+    [scope, ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, limit, offset]
   );
 
   const countRows = await runPropertyQuery<RowDataPacket[]>(

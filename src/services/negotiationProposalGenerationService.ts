@@ -318,13 +318,14 @@ export async function generateProposalFromProperty(
     const userRole = String(req.userRole ?? '').trim().toLowerCase();
     const isClientUser = userRole === 'client';
     const isBrokerUser = userRole === 'broker';
-    if (!isClientUser && !isBrokerUser) {
+    const isAdminUser = userRole === 'admin';
+    if (!isClientUser && !isBrokerUser && !isAdminUser) {
       await tx.rollback();
       return res
         .status(403)
         .json({ error: 'Apenas clientes ou corretores podem enviar proposta.' });
     }
-    if (!isBrokerUser) {
+    if (isClientUser && !isBrokerUser) {
       if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
         await tx.rollback();
         return res.status(403).json({ error: 'Nao e possivel enviar proposta no proprio anuncio.' });
@@ -373,7 +374,7 @@ export async function generateProposalFromProperty(
       });
     }
 
-    const requestedCapturingBrokerId = isClientUser
+    const requestedCapturingBrokerId = isClientUser || isAdminUser
       ? normalizeOptionalPositiveId(property.broker_id)
       : normalizeOptionalPositiveId(req.userId);
     if (isBrokerUser && requestedCapturingBrokerId === null) {

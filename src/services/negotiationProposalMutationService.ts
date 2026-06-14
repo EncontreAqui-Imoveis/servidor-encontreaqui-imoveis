@@ -139,6 +139,21 @@ export async function updateProposalFromWizard(
   req: AuthRequest,
   res: Response
 ): Promise<Response> {
+  return updateProposalFromWizardInternal(req, res, false);
+}
+
+export async function updateProposalFromWizardAsAdmin(
+  req: AuthRequest,
+  res: Response
+): Promise<Response> {
+  return updateProposalFromWizardInternal(req, res, true);
+}
+
+async function updateProposalFromWizardInternal(
+  req: AuthRequest,
+  res: Response,
+  allowAdmin: boolean
+): Promise<Response> {
   if (!req.userId) {
     return sendProposalError(res, 401, 'Usuário não autenticado.', 'SESSION_EXPIRED');
   }
@@ -292,7 +307,8 @@ export async function updateProposalFromWizard(
     const isClientUser = userRole === 'client';
     const isBrokerUser = userRole === 'broker';
     const isAdminUser = userRole === 'admin';
-    if (!isClientUser && !isBrokerUser && !isAdminUser) {
+    const isAdminAuthorized = allowAdmin && isAdminUser;
+    if (!isClientUser && !isBrokerUser && !isAdminAuthorized) {
       await tx.rollback();
       return res.status(403).json({ error: 'Apenas clientes ou corretores podem editar proposta.' });
     }

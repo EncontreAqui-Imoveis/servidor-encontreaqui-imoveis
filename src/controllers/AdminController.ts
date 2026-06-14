@@ -36,6 +36,7 @@ import {
   updateNegotiationSellingBroker as updateNegotiationSellingBrokerMutation,
 } from '../services/adminNegotiationMutationService';
 import { generateProposalFromProperty as generateAdminNegotiationProposal } from '../services/negotiationProposalGenerationService';
+import { updateProposalFromWizardAsAdmin as updateAdminProposalFromWizard } from '../services/negotiationProposalMutationService';
 import {
   deleteSignedProposal as deleteAdminSignedProposal,
   downloadSignedProposal as downloadAdminSignedProposal,
@@ -303,6 +304,14 @@ class AdminController {
   async generateProposalFromProperty(req: Request, res: Response) {
     try {
       return generateAdminNegotiationProposal(req as any, res);
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async updateProposalFromWizard(req: AuthRequest, res: Response) {
+    try {
+      return updateAdminProposalFromWizard(req, res);
     } catch (error) {
       return respondWithAppError(res, error);
     }

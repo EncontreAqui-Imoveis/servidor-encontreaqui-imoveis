@@ -81,6 +81,9 @@ adminRoutes.put('/negotiations/:id/selling-broker', (req, res) =>
 adminRoutes.post('/negotiations/proposal', (req, res) =>
   (adminController as any).generateProposalFromProperty(req, res)
 );
+adminRoutes.put('/negotiations/:id/draft', (req, res) =>
+  (adminController as any).updateProposalFromWizard(req, res)
+);
 adminRoutes.get('/negotiations/:id/responsibles', (req, res) =>
   (adminController as any).listNegotiationResponsibles(req, res)
 );

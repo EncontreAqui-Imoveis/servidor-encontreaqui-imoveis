@@ -424,6 +424,7 @@ export async function listNegotiations(params: {
   const offset = (page - 1) * limit;
   const { clause, params: clauseParams } = buildNegotiationStatusClause(statusFilter);
   const clientSql = await resolveNegotiationClientSqlFragments();
+  const timeSql = await resolveNegotiationTimeSqlFragments();
 
   const [countRows] = await adminDb.query<RowDataPacket[]>(
     `
@@ -443,7 +444,7 @@ export async function listNegotiations(params: {
         n.id,
         n.status AS negotiation_status,
         n.property_id,
-        n.created_at,
+        ${timeSql.nEventAtSelect} AS created_at,
         n.capturing_broker_id,
         n.selling_broker_id,
         n.seller_client_id,
@@ -712,7 +713,7 @@ export async function listNegotiationRequestsByProperty(params: {
         n.id,
         n.status AS negotiation_status,
         n.property_id,
-        n.created_at,
+        ${timeSql.nEventAtSelect} AS created_at,
         n.capturing_broker_id,
         n.selling_broker_id,
         n.seller_client_id,

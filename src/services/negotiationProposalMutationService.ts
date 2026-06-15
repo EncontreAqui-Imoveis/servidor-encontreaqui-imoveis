@@ -85,6 +85,9 @@ function canManageOwnProposal(
   negotiation: NegotiationAccessRow
 ): boolean {
   const normalizedRole = String(role ?? '').trim().toLowerCase();
+  if (normalizedRole === 'admin') {
+    return true;
+  }
   if (normalizedRole === 'client') {
     return (
       userId === Number(negotiation.buyer_client_id ?? 0) ||
@@ -213,8 +216,10 @@ async function updateProposalFromWizardInternal(
       return sendProposalError(res, 404, 'Negociação não encontrada.', 'NOT_FOUND');
     }
 
+    const roleForAccess = String(req.userRole ?? '').trim().toLowerCase();
     if (
-      !canManageOwnProposal(Number(req.userId), String(req.userRole ?? ''), {
+      !(allowAdmin && roleForAccess === 'admin') &&
+      !canManageOwnProposal(Number(req.userId), roleForAccess, {
         id: nRow.id,
         capturing_broker_id: nRow.capturing_broker_id,
         selling_broker_id: nRow.selling_broker_id,
@@ -303,7 +308,7 @@ async function updateProposalFromWizardInternal(
       return sendProposalError(res, 404, 'Imóvel não encontrado.', 'NOT_FOUND');
     }
 
-    const userRole = String(req.userRole ?? '').trim().toLowerCase();
+    const userRole = roleForAccess;
     const isClientUser = userRole === 'client';
     const isBrokerUser = userRole === 'broker';
     const isAdminUser = userRole === 'admin';

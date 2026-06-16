@@ -432,6 +432,9 @@ async function updateProposalFromWizardInternal(
       );
     }
 
+    const listingValue = Number(property.price ?? proposalValue ?? 0);
+    const safeListingValue = Number.isFinite(listingValue) && listingValue > 0 ? listingValue : proposalValue;
+
     const paymentDetails = JSON.stringify({
       method: 'OTHER',
       validadeDias: payload.validadeDias,
@@ -440,7 +443,7 @@ async function updateProposalFromWizardInternal(
         ...payload.pagamento,
         clientName: payload.clientName,
         clientCpf: payload.clientCpf,
-        listingValue: Number((property.price ?? proposalValue).toFixed(2)),
+        listingValue: Number(safeListingValue.toFixed(2)),
       },
     });
     let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();

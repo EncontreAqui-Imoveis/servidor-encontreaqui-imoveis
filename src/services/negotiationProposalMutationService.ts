@@ -482,7 +482,6 @@ async function updateProposalFromWizardInternal(
           payment_details = CAST(? AS JSON),
           proposal_validity_date = ?,
           last_draft_edit_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP,
           version = COALESCE(version, 0) + 1
         WHERE id = ?
       `,

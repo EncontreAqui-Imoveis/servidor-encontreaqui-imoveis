@@ -2,16 +2,13 @@ import { Response } from 'express';
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
-import { getNegotiationDbConnection, generateNegotiationProposalPdf, saveNegotiationProposalDocument } from './negotiationPersistenceService';
+import { getNegotiationDbConnection } from './negotiationPersistenceService';
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
   parseProposalWizardBody,
-  resolvePropertyAddress,
-  resolvePropertyValue,
-  toCents,
   type ParsedProposalWizard,
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
@@ -189,6 +186,7 @@ async function updateProposalFromWizardInternal(
           n.id,
           n.property_id,
           n.status,
+          n.final_value,
           n.capturing_broker_id,
           n.selling_broker_id,
           n.buyer_client_id,
@@ -204,6 +202,7 @@ async function updateProposalFromWizardInternal(
           id: string;
           property_id: number;
           status: string;
+          final_value: number | string | null;
           capturing_broker_id: number | null;
           selling_broker_id: number | null;
           buyer_client_id: number | null;
@@ -313,19 +312,21 @@ async function updateProposalFromWizardInternal(
     const isBrokerUser = userRole === 'broker';
     const isAdminUser = userRole === 'admin';
     const isAdminAuthorized = allowAdmin && isAdminUser;
-    if (!isClientUser && !isBrokerUser && !isAdminAuthorized) {
-      await tx.rollback();
-      return res.status(403).json({ error: 'Apenas clientes ou corretores podem editar proposta.' });
-    }
-    if (isClientUser && !isBrokerUser) {
-      if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
+    if (!allowAdmin) {
+      if (!isClientUser && !isBrokerUser) {
         await tx.rollback();
-        return sendProposalError(
-          res,
-          403,
-          'Nao e possivel editar proposta do proprio anuncio.',
-          'FORBIDDEN'
-        );
+        return res.status(403).json({ error: 'Apenas clientes ou corretores podem editar proposta.' });
+      }
+      if (isClientUser && !isBrokerUser) {
+        if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
+          await tx.rollback();
+          return sendProposalError(
+            res,
+            403,
+            'Nao e possivel editar proposta do proprio anuncio.',
+            'FORBIDDEN'
+          );
+        }
       }
     }
     if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
@@ -338,20 +339,19 @@ async function updateProposalFromWizardInternal(
       );
     }
 
-    const listingValue = resolvePropertyValue(property);
-    if (listingValue <= 0) {
+    const body = req.body as ProposalWizardBody;
+    const rawDeclared =
+      body.proposalValue ?? body.valorProposta ?? (req.body as { proposal_value?: unknown }).proposal_value;
+    let proposalValue = Number(nRow.final_value ?? property.price ?? 0);
+    if (!Number.isFinite(proposalValue) || proposalValue <= 0) {
       await tx.rollback();
       return sendProposalError(
         res,
         400,
-        'Imovel sem valor valido para gerar proposta.',
+        'Imovel sem valor valido para editar proposta.',
         'PROPOSAL_VALIDATION_FAILED'
       );
     }
-    const body = req.body as ProposalWizardBody;
-    const rawDeclared =
-      body.proposalValue ?? body.valorProposta ?? (req.body as { proposal_value?: unknown }).proposal_value;
-    let proposalValue = listingValue;
     if (rawDeclared !== undefined && rawDeclared !== null && String(rawDeclared).trim() !== '') {
       const parsedDeclared = Number(rawDeclared);
       if (!Number.isFinite(parsedDeclared) || parsedDeclared <= 0) {
@@ -364,21 +364,6 @@ async function updateProposalFromWizardInternal(
         );
       }
       proposalValue = Number(parsedDeclared.toFixed(2));
-    }
-    const paymentTotal =
-      payload.pagamento.dinheiro +
-      payload.pagamento.permuta +
-      payload.pagamento.financiamento +
-      payload.pagamento.outros;
-    if (toCents(paymentTotal) !== toCents(proposalValue)) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        400,
-        'A soma dos pagamentos deve ser exatamente igual ao valor total informado na proposta.',
-        'PROPOSAL_VALIDATION_FAILED',
-        { propertyValue: proposalValue, paymentTotal }
-      );
     }
     const requestedCapturingBrokerId = isClientUser || isAdminUser
       ? normalizeOptionalPositiveId(property.broker_id)
@@ -455,7 +440,7 @@ async function updateProposalFromWizardInternal(
         ...payload.pagamento,
         clientName: payload.clientName,
         clientCpf: payload.clientCpf,
-        listingValue: Number(listingValue.toFixed(2)),
+        listingValue: Number((property.price ?? proposalValue).toFixed(2)),
       },
     });
     let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();
@@ -527,36 +512,23 @@ async function updateProposalFromWizardInternal(
         }),
       ]
     );
-
-    const proposalData = {
-      clientName: payload.clientName,
-      clientCpf: payload.clientCpf,
-      propertyAddress: resolvePropertyAddress(property),
-      brokerName: String(req.userId),
-      sellingBrokerName: String(req.userId),
-      value: proposalValue,
-      payment: {
-        cash: payload.pagamento.dinheiro,
-        tradeIn: payload.pagamento.permuta,
-        financing: payload.pagamento.financiamento,
-        others: payload.pagamento.outros,
-      },
-      validityDays: payload.validadeDias,
-    };
-
-    const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
-    const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
-      originalFileName: 'proposta.pdf',
-      generated: true,
-    });
-    void documentId;
     await tx.commit();
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="proposal_${negotiationId}.pdf"`);
-    res.setHeader('Content-Length', pdfBuffer.length.toString());
-    res.setHeader('X-Negotiation-Id', negotiationId);
-    return res.status(201).send(pdfBuffer);
+    return res.status(200).json({
+      negotiationId,
+      propertyId: payload.propertyId,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
+      validityDays: payload.validadeDias,
+      value: Number(proposalValue.toFixed(2)),
+      payment: {
+        dinheiro: payload.pagamento.dinheiro,
+        permuta: payload.pagamento.permuta,
+        financiamento: payload.pagamento.financiamento,
+        outros: payload.pagamento.outros,
+      },
+      status: DEFAULT_WIZARD_STATUS,
+    });
   } catch (error) {
     if (tx) {
       await tx.rollback();

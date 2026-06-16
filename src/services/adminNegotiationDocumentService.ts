@@ -277,6 +277,55 @@ export async function downloadSignedProposal(negotiationId: string): Promise<{
   return { fileContent, filename };
 }
 
+export async function downloadProposalDraft(negotiationId: string): Promise<{
+  fileContent: Buffer;
+  filename: string;
+}> {
+  const normalizedNegotiationId = String(negotiationId ?? '').trim();
+  if (!normalizedNegotiationId) {
+    throw Object.assign(new Error('ID de negociação inválido.'), { statusCode: 400 });
+  }
+
+  const [rows] = await adminDb.query<AdminNegotiationDocumentRow[]>(
+    `
+      SELECT
+        id,
+        type,
+        document_type,
+        metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        storage_content_type,
+        storage_size_bytes,
+        storage_etag
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND type = 'proposal'
+        AND document_type = 'contrato_minuta'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `,
+    [normalizedNegotiationId]
+  );
+
+  const document = rows[0];
+  if (!document) {
+    throw Object.assign(new Error('Minuta não encontrada.'), { statusCode: 404 });
+  }
+
+  const fileContent = await readNegotiationDocumentObject(document);
+  const metadata = parseJsonObjectSafe(document.metadata_json);
+  const originalFileName = String(metadata.originalFileName ?? '').trim();
+  const fallbackType = String(document.document_type ?? document.type ?? 'proposta_minuta')
+    .trim()
+    .toLowerCase();
+  const filename =
+    originalFileName || `${fallbackType || 'proposta_minuta'}_${normalizedNegotiationId}.pdf`;
+
+  return { fileContent, filename };
+}
+
 export async function uploadSignedProposal(params: {
   negotiationId: string;
   actorId: number;
@@ -454,6 +503,72 @@ export async function deleteSignedProposal(params: {
     if (documentToDelete) {
       await deleteNegotiationDocumentObject(documentToDelete).catch((storageError) => {
         console.error('Falha ao excluir arquivo no storage da proposta assinada:', storageError);
+      });
+    }
+
+    return { negotiationId };
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    tx.release();
+  }
+}
+
+export async function deleteProposalDraft(params: {
+  negotiationId: string;
+  actorId: number;
+}): Promise<{ negotiationId: string }> {
+  const negotiationId = String(params.negotiationId ?? '').trim();
+  const actorId = Number(params.actorId);
+  if (!negotiationId) {
+    throw Object.assign(new Error('ID de negociação inválido.'), { statusCode: 400 });
+  }
+  if (!actorId) {
+    throw Object.assign(new Error('Administrador não autenticado.'), { statusCode: 401 });
+  }
+
+  const tx = await adminDb.getConnection();
+  let documentToDelete: AdminNegotiationDocumentRow | null = null;
+  try {
+    await tx.beginTransaction();
+    const [rows] = await tx.query<AdminNegotiationDocumentRow[]>(
+      `
+        SELECT
+          id,
+          type,
+          document_type,
+          metadata_json,
+          storage_provider,
+          storage_bucket,
+          storage_key,
+          storage_content_type,
+          storage_size_bytes,
+          storage_etag
+        FROM negotiation_documents
+        WHERE negotiation_id = ?
+          AND type = 'proposal'
+          AND document_type = 'contrato_minuta'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [negotiationId]
+    );
+    const document = rows[0];
+    if (!document) {
+      await tx.rollback();
+      throw Object.assign(new Error('Minuta não encontrada.'), { statusCode: 404 });
+    }
+
+    await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [document.id]);
+    documentToDelete = document;
+
+    await tx.commit();
+
+    if (documentToDelete) {
+      await deleteNegotiationDocumentObject(documentToDelete).catch((storageError) => {
+        console.error('Falha ao excluir arquivo no storage da minuta:', storageError);
       });
     }
 

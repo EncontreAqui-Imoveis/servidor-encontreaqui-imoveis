@@ -81,6 +81,12 @@ adminRoutes.put('/negotiations/:id/selling-broker', (req, res) =>
 adminRoutes.post('/negotiations/proposal', (req, res) =>
   (adminController as any).generateProposalFromProperty(req, res)
 );
+adminRoutes.post('/negotiations/:id/minuta', (req, res) =>
+  (adminController as any).generateProposalDraft(req, res)
+);
+adminRoutes.delete('/negotiations/:id/minuta', (req, res) =>
+  (adminController as any).deleteProposalDraft(req, res)
+);
 adminRoutes.put('/negotiations/:id/draft', (req, res) =>
   (adminController as any).updateProposalFromWizard(req, res)
 );
@@ -91,6 +97,7 @@ adminRoutes.put('/negotiations/:id/responsibles', (req, res) =>
   (adminController as any).updateNegotiationResponsibles(req, res)
 );
 adminRoutes.get('/negotiations/:id/signed-proposal/download', adminController.downloadSignedProposal);
+adminRoutes.get('/negotiations/:id/minuta/download', adminController.downloadProposalDraft);
 adminRoutes.post(
   '/negotiations/:id/signed-proposal',
   signedProposalUpload.single('file'),

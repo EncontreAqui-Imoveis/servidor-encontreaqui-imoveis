@@ -61,6 +61,8 @@ interface AdminNegotiationListRow extends RowDataPacket {
   approved_at: string | Date | null;
   signed_document_id: number | string | null;
   signed_document_metadata_json: string | null;
+  draft_document_id: number | string | null;
+  draft_document_metadata_json: string | null;
 }
 
 interface AdminNegotiationRequestSummaryRow extends RowDataPacket {
@@ -378,6 +380,8 @@ function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
 function mapAdminNegotiation(row: AdminNegotiationListRow) {
   const signedDocumentMetadata = parseJsonObjectSafe(row.signed_document_metadata_json);
   const signedDocumentFileName = String(signedDocumentMetadata.originalFileName ?? '').trim();
+  const draftDocumentMetadata = parseJsonObjectSafe(row.draft_document_metadata_json);
+  const draftDocumentFileName = String(draftDocumentMetadata.originalFileName ?? '').trim();
 
   return {
     id: row.id,
@@ -412,6 +416,9 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     signedDocumentId: row.signed_document_id != null ? Number(row.signed_document_id) : null,
     signedDocumentFileName:
       row.signed_document_id != null ? signedDocumentFileName || 'proposta_assinada.pdf' : null,
+    draftDocumentId: row.draft_document_id != null ? Number(row.draft_document_id) : null,
+    draftDocumentFileName:
+      row.draft_document_id != null ? draftDocumentFileName || 'proposta_minuta.pdf' : null,
   };
 }
 
@@ -474,7 +481,9 @@ export async function listNegotiations(params: {
         latest_history.created_at AS last_event_at,
         approved_history.approved_at AS approved_at,
         signed_doc.id AS signed_document_id,
-        signed_doc.metadata_json AS signed_document_metadata_json
+        signed_doc.metadata_json AS signed_document_metadata_json,
+        draft_doc.id AS draft_document_id,
+        draft_doc.metadata_json AS draft_document_metadata_json
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
@@ -513,6 +522,20 @@ export async function listNegotiations(params: {
           GROUP BY negotiation_id
         ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
       ) signed_doc ON signed_doc.negotiation_id = n.id
+      LEFT JOIN (
+        SELECT
+          d.negotiation_id,
+          d.id,
+          d.metadata_json
+        FROM negotiation_documents d
+        INNER JOIN (
+          SELECT negotiation_id, MAX(id) AS max_id
+          FROM negotiation_documents
+          WHERE type = 'proposal'
+            AND document_type = 'contrato_minuta'
+          GROUP BY negotiation_id
+        ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
+      ) draft_doc ON draft_doc.negotiation_id = n.id
       WHERE 1 = 1
       ${clause}
       ORDER BY COALESCE(latest_history.created_at, approved_history.approved_at) DESC, n.id DESC
@@ -743,7 +766,9 @@ export async function listNegotiationRequestsByProperty(params: {
         ${timeSql.nEventAtSelect} AS last_event_at,
         NULL AS approved_at,
         signed_doc.id AS signed_document_id,
-        signed_doc.metadata_json AS signed_document_metadata_json
+        signed_doc.metadata_json AS signed_document_metadata_json,
+        draft_doc.id AS draft_document_id,
+        draft_doc.metadata_json AS draft_document_metadata_json
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
@@ -763,6 +788,20 @@ export async function listNegotiationRequestsByProperty(params: {
           GROUP BY negotiation_id
         ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
       ) signed_doc ON signed_doc.negotiation_id = n.id
+      LEFT JOIN (
+        SELECT
+          d.negotiation_id,
+          d.id,
+          d.metadata_json
+        FROM negotiation_documents d
+        INNER JOIN (
+          SELECT negotiation_id, MAX(id) AS max_id
+          FROM negotiation_documents
+          WHERE type = 'proposal'
+            AND document_type = 'contrato_minuta'
+          GROUP BY negotiation_id
+        ) dm ON dm.negotiation_id = d.negotiation_id AND d.id = dm.max_id
+      ) draft_doc ON draft_doc.negotiation_id = n.id
       WHERE n.property_id = ?
       ${clause}
       ORDER BY COALESCE(n.final_value, 0) DESC, ${timeSql.nEventSort} DESC, n.id DESC

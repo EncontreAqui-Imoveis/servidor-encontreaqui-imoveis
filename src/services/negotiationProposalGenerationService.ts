@@ -9,6 +9,7 @@ import {
   findNegotiationDocumentById,
   generateNegotiationProposalPdf,
   getNegotiationDbConnection,
+  getNegotiationProposalDataById,
   saveNegotiationProposalDocument,
 } from './negotiationPersistenceService';
 import {
@@ -126,6 +127,23 @@ function isDependencyUnavailableError(error: unknown): boolean {
   }
 
   return code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ECONNRESET';
+}
+
+async function negotiationHasSignedProposalDocument(
+  tx: PoolConnection,
+  negotiationId: string
+): Promise<boolean> {
+  const [signedDocRows] = await tx.query<RowDataPacket[]>(
+    `
+      SELECT COUNT(*) AS c
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND type = 'other'
+        AND document_type = 'contrato_assinado'
+    `,
+    [negotiationId]
+  );
+  return Number(signedDocRows[0]?.c ?? 0) > 0;
 }
 
 async function resolveBrokerProposalContext(
@@ -594,6 +612,115 @@ export async function generateProposalFromProperty(
       500,
       'INTERNAL_SERVER_ERROR',
       'Falha ao gerar proposta.',
+      false
+    );
+  } finally {
+    tx?.release();
+  }
+}
+
+export async function generateProposalFromNegotiationDraft(
+  req: AuthRequest,
+  res: Response
+): Promise<Response> {
+  if (!req.userId) {
+    return sendProposalError(
+      req,
+      res,
+      401,
+      'SESSION_EXPIRED',
+      'Usuario nao autenticado.',
+      false
+    );
+  }
+
+  const negotiationId = String(req.params.id ?? '').trim();
+  if (!negotiationId) {
+    return sendProposalError(
+      req,
+      res,
+      400,
+      'PROPOSAL_VALIDATION_FAILED',
+      'ID de negociacao invalido.',
+      false
+    );
+  }
+
+  let tx: PoolConnection | null = null;
+  try {
+    tx = await getNegotiationDbConnection();
+    await tx.beginTransaction();
+
+    const [rows] = await tx.query<RowDataPacket[]>(
+      `
+        SELECT status
+        FROM negotiations
+        WHERE id = ?
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [negotiationId]
+    );
+    if (!rows[0]) {
+      await tx.rollback();
+      return sendProposalError(
+        req,
+        res,
+        404,
+        'NOT_FOUND',
+        'Negociação não encontrada.',
+        false
+      );
+    }
+
+    if (await negotiationHasSignedProposalDocument(tx, negotiationId)) {
+      await tx.rollback();
+      return sendProposalError(
+        req,
+        res,
+        400,
+        'PROPOSAL_LOCKED',
+        'Esta proposta não pode gerar minuta após o envio da proposta assinada.',
+        false
+      );
+    }
+
+    const proposalData = await getNegotiationProposalDataById(negotiationId);
+    const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
+    const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
+      originalFileName: 'proposta.pdf',
+      generated: true,
+      metadata: { source: 'admin_negotiation_draft_generation' },
+    });
+
+    await tx.commit();
+
+    return res.status(201).json({
+      negotiationId,
+      documentId,
+      status: 'ok',
+    });
+  } catch (error) {
+    if (tx) {
+      await tx.rollback();
+    }
+    console.error('Erro ao gerar minuta da proposta:', error);
+    if (isDependencyUnavailableError(error)) {
+      return sendProposalError(
+        req,
+        res,
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        'Servico temporariamente indisponivel. Tente novamente em instantes.',
+        true
+      );
+    }
+    return sendProposalError(
+      req,
+      res,
+      500,
+      'INTERNAL_SERVER_ERROR',
+      'Falha ao gerar minuta da proposta.',
       false
     );
   } finally {

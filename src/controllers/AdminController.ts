@@ -35,10 +35,15 @@ import {
   rejectNegotiation as rejectAdminNegotiation,
   updateNegotiationSellingBroker as updateNegotiationSellingBrokerMutation,
 } from '../services/adminNegotiationMutationService';
-import { generateProposalFromProperty as generateAdminNegotiationProposal } from '../services/negotiationProposalGenerationService';
+import {
+  generateProposalFromNegotiationDraft as generateAdminNegotiationDraft,
+  generateProposalFromProperty as generateAdminNegotiationProposal,
+} from '../services/negotiationProposalGenerationService';
 import { updateProposalFromWizardAsAdmin as updateAdminProposalFromWizard } from '../services/negotiationProposalMutationService';
 import {
   deleteSignedProposal as deleteAdminSignedProposal,
+  deleteProposalDraft as deleteAdminProposalDraft,
+  downloadProposalDraft as downloadAdminProposalDraft,
   downloadSignedProposal as downloadAdminSignedProposal,
   listNegotiationResponsibles as listAdminNegotiationResponsibles,
   updateNegotiationResponsibles as updateAdminNegotiationResponsibles,
@@ -309,6 +314,14 @@ class AdminController {
     }
   }
 
+  async generateProposalDraft(req: AuthRequest, res: Response) {
+    try {
+      return generateAdminNegotiationDraft(req, res);
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
   async updateProposalFromWizard(req: AuthRequest, res: Response) {
     try {
       return updateAdminProposalFromWizard(req, res);
@@ -398,6 +411,18 @@ class AdminController {
     }
   }
 
+  async downloadProposalDraft(req: Request, res: Response) {
+    try {
+      const payload = await downloadAdminProposalDraft(String(req.params.id ?? ''));
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', buildAttachmentDisposition(payload.filename));
+      res.setHeader('Content-Length', payload.fileContent.length.toString());
+      return res.status(200).send(payload.fileContent);
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
   async uploadSignedProposal(req: AuthRequest, res: Response) {
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
 
@@ -428,6 +453,21 @@ class AdminController {
       });
       return res.status(200).json({
         message: 'PDF assinado removido com sucesso.',
+        ...payload,
+      });
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async deleteProposalDraft(req: AuthRequest, res: Response) {
+    try {
+      const payload = await deleteAdminProposalDraft({
+        negotiationId: String(req.params.id ?? ''),
+        actorId: Number(req.userId),
+      });
+      return res.status(200).json({
+        message: 'Minuta removida com sucesso.',
         ...payload,
       });
     } catch (error) {

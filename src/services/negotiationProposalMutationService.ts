@@ -513,7 +513,7 @@ async function updateProposalFromWizardInternal(
         negotiationId,
         fromStatus,
         DEFAULT_WIZARD_STATUS,
-        req.userId,
+        allowAdmin && roleForAccess === 'admin' ? null : req.userId,
         JSON.stringify({
           source: 'mobile_proposal_wizard_update',
           payment: payload.pagamento,
@@ -523,6 +523,7 @@ async function updateProposalFromWizardInternal(
           buyerClientId,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
+          adminId: allowAdmin && roleForAccess === 'admin' ? req.userId : null,
         }),
       ]
     );

@@ -149,6 +149,9 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['property_edit_requests', 'field_reviews_json'],
     ['negotiation_responsibles', 'negotiation_id'],
     ['negotiation_responsibles', 'user_id'],
+    ['negotiation_document_deletion_jobs', 'negotiation_id'],
+    ['negotiation_document_deletion_jobs', 'storage_key'],
+    ['negotiation_document_deletion_jobs', 'status'],
   ] as const;
 
   for (const [tableName, columnName] of requiredColumns) {

@@ -10,6 +10,7 @@ import { runSqlMigrations } from './database/migrationRunner';
 import { setupProcessHandlers } from './serverLifecycle';
 import { redactValue } from './utils/logSanitizer';
 import { setupPdfWorker } from './modules/negotiations/infra/PdfWorker';
+import { setupNegotiationDocumentDeletionWorker } from './services/negotiationDocumentDeletionService';
 
 const app = createHttpApp();
 const PORT = process.env.PORT || process.env.API_PORT || 3333;
@@ -25,6 +26,13 @@ async function startServer() {
     console.log('Worker de PDF inicializado.');
   } else {
     console.log('Worker de PDF não inicializado (defina PDF_WORKER_ENABLED=true para habilitar).');
+  }
+
+  const documentDeletionWorker = setupNegotiationDocumentDeletionWorker();
+  if (documentDeletionWorker) {
+    console.log('Worker de deleção de documentos inicializado.');
+  } else {
+    console.log('Worker de deleção de documentos não inicializado.');
   }
 
   const server = app.listen(Number(PORT), HOST, () => {

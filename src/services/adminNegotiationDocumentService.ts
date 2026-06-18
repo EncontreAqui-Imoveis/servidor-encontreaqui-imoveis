@@ -1,10 +1,10 @@
-import type { RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import { adminDb } from './adminPersistenceService';
 import {
-  deleteNegotiationDocumentObject,
   readNegotiationDocumentObject,
 } from './negotiationDocumentStorageService';
+import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import { saveNegotiationSignedProposalDocument } from './negotiationPersistenceService';
 
 type NegotiationResponsibleRow = RowDataPacket & {
@@ -28,6 +28,13 @@ type AdminNegotiationDocumentRow = RowDataPacket & {
   storage_etag: string | null;
 };
 
+type NegotiationDocumentDeletionJobRow = RowDataPacket & {
+  id: number;
+  negotiation_id: string;
+  document_type: string | null;
+  status: string;
+};
+
 let negotiationResponsiblesTableCache: boolean | null = null;
 
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
@@ -46,6 +53,26 @@ function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
     }
   }
   return {};
+}
+
+async function hasPendingDeletionJob(
+  tx: PoolConnection | typeof adminDb,
+  negotiationId: string,
+  documentType: string
+): Promise<boolean> {
+  const [rows] = await tx.query<NegotiationDocumentDeletionJobRow[]>(
+    `
+      SELECT id
+      FROM negotiation_document_deletion_jobs
+      WHERE negotiation_id = ?
+        AND COALESCE(document_type, '') = ?
+        AND status IN ('PENDING', 'PROCESSING', 'FAILED')
+      ORDER BY id DESC
+      LIMIT 1
+    `,
+    [negotiationId, documentType]
+  );
+  return rows.length > 0;
 }
 
 async function hasNegotiationResponsiblesTable(): Promise<boolean> {
@@ -355,7 +382,6 @@ export async function uploadSignedProposal(params: {
   }
 
   const tx = await adminDb.getConnection();
-  let previousDocumentToDelete: AdminNegotiationDocumentRow | null = null;
   try {
     await tx.beginTransaction();
     const [negotiationRows] = await tx.query<RowDataPacket[]>(
@@ -411,8 +437,12 @@ export async function uploadSignedProposal(params: {
     );
     const existingDocument = existingRows[0];
     if (existingDocument) {
+      await enqueueNegotiationDocumentDeletion(tx, existingDocument, {
+        negotiationId,
+        requestedByUserId: actorId,
+        requestSource: 'replace_signed_proposal',
+      });
       await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [existingDocument.id]);
-      previousDocumentToDelete = existingDocument;
     }
 
     const originalFileName = uploadedFile.originalname ?? 'proposta_assinada_admin.pdf';
@@ -430,11 +460,6 @@ export async function uploadSignedProposal(params: {
     );
 
     await tx.commit();
-    if (previousDocumentToDelete) {
-      await deleteNegotiationDocumentObject(previousDocumentToDelete).catch((storageError) => {
-        console.error('Falha ao excluir PDF assinado anterior no storage:', storageError);
-      });
-    }
     return {
       negotiationId,
       documentId,
@@ -463,7 +488,6 @@ export async function deleteSignedProposal(params: {
   }
 
   const tx = await adminDb.getConnection();
-  let documentToDelete: AdminNegotiationDocumentRow | null = null;
   try {
     await tx.beginTransaction();
     const [rows] = await tx.query<AdminNegotiationDocumentRow[]>(
@@ -491,20 +515,23 @@ export async function deleteSignedProposal(params: {
     );
     const document = rows[0];
     if (!document) {
+      const alreadyQueued = await hasPendingDeletionJob(tx, negotiationId, 'contrato_assinado');
+      if (alreadyQueued) {
+        await tx.rollback();
+        return { negotiationId };
+      }
       await tx.rollback();
       throw Object.assign(new Error('Proposta assinada não encontrada.'), { statusCode: 404 });
     }
 
+    await enqueueNegotiationDocumentDeletion(tx, document, {
+      negotiationId,
+      requestedByUserId: actorId,
+      requestSource: 'delete_signed_proposal',
+    });
     await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [document.id]);
-    documentToDelete = document;
 
     await tx.commit();
-
-    if (documentToDelete) {
-      await deleteNegotiationDocumentObject(documentToDelete).catch((storageError) => {
-        console.error('Falha ao excluir arquivo no storage da proposta assinada:', storageError);
-      });
-    }
 
     return { negotiationId };
   } catch (error) {
@@ -529,7 +556,6 @@ export async function deleteProposalDraft(params: {
   }
 
   const tx = await adminDb.getConnection();
-  let documentToDelete: AdminNegotiationDocumentRow | null = null;
   try {
     await tx.beginTransaction();
     const [rows] = await tx.query<AdminNegotiationDocumentRow[]>(
@@ -557,20 +583,23 @@ export async function deleteProposalDraft(params: {
     );
     const document = rows[0];
     if (!document) {
+      const alreadyQueued = await hasPendingDeletionJob(tx, negotiationId, 'contrato_minuta');
+      if (alreadyQueued) {
+        await tx.rollback();
+        return { negotiationId };
+      }
       await tx.rollback();
       throw Object.assign(new Error('Minuta não encontrada.'), { statusCode: 404 });
     }
 
+    await enqueueNegotiationDocumentDeletion(tx, document, {
+      negotiationId,
+      requestedByUserId: actorId,
+      requestSource: 'delete_proposal_draft',
+    });
     await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [document.id]);
-    documentToDelete = document;
 
     await tx.commit();
-
-    if (documentToDelete) {
-      await deleteNegotiationDocumentObject(documentToDelete).catch((storageError) => {
-        console.error('Falha ao excluir arquivo no storage da minuta:', storageError);
-      });
-    }
 
     return { negotiationId };
   } catch (error) {

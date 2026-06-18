@@ -1110,6 +1110,36 @@ async function ensureNegotiationDocumentStorageColumns(): Promise<void> {
   }
 }
 
+async function ensureNegotiationDocumentDeletionJobsTable(): Promise<void> {
+  if (await tableExists('negotiation_document_deletion_jobs')) {
+    return;
+  }
+
+  await connection.query(`
+    CREATE TABLE negotiation_document_deletion_jobs (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      negotiation_document_id BIGINT NULL,
+      negotiation_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      document_type VARCHAR(64) NULL,
+      storage_provider VARCHAR(32) NOT NULL,
+      storage_bucket VARCHAR(255) NOT NULL,
+      storage_key VARCHAR(1024) NOT NULL,
+      requested_by_user_id INT NULL,
+      request_source VARCHAR(64) NULL,
+      status ENUM('PENDING', 'PROCESSING', 'DONE', 'FAILED') NOT NULL DEFAULT 'PENDING',
+      attempts INT NOT NULL DEFAULT 0,
+      last_error TEXT NULL,
+      available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      processed_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_negotiation_document_deletion_jobs_storage_key (storage_key),
+      KEY idx_negotiation_document_deletion_jobs_status_available (status, available_at, id),
+      KEY idx_negotiation_document_deletion_jobs_negotiation (negotiation_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+}
+
 async function ensureAdminsTokenVersionColumn(): Promise<void> {
   if (!(await tableExists('admins'))) {
     return;
@@ -1461,6 +1491,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
     await ensureNegotiationDocumentStorageColumns();
+    await ensureNegotiationDocumentDeletionJobsTable();
     await ensureAdminsTokenVersionColumn();
     await ensureUsersTokenVersionColumn();
     await ensureNegotiationResponsiblesAndBrokerProfileType();

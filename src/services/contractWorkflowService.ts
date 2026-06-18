@@ -5,7 +5,7 @@ import { deleteCloudinaryAsset } from '../config/cloudinary';
 import {
   getContractDbConnection,
 } from './contractPersistenceService';
-import { deleteNegotiationDocumentObject } from './negotiationDocumentStorageService';
+import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import {
   isContractStatus,
   type ContractStatus,
@@ -331,48 +331,61 @@ async function cleanupContractDocumentAssets(
     negotiationId: string;
   }
 ): Promise<void> {
-  for (const document of documents) {
-    const hasNegotiationObject =
-      String(document.storage_provider ?? '').trim().toUpperCase() === 'R2' &&
-      String(document.storage_bucket ?? '').trim().length > 0 &&
-      String(document.storage_key ?? '').trim().length > 0;
-    const assetReference = extractCloudinaryAssetReference(document);
+  const cleanupTx = await getContractDbConnection();
+  try {
+    await cleanupTx.beginTransaction();
+    for (const document of documents) {
+      const hasNegotiationObject =
+        String(document.storage_provider ?? '').trim().toUpperCase() === 'R2' &&
+        String(document.storage_bucket ?? '').trim().length > 0 &&
+        String(document.storage_key ?? '').trim().length > 0;
+      const assetReference = extractCloudinaryAssetReference(document);
 
-    if (hasNegotiationObject) {
-      try {
-        await deleteNegotiationDocumentObject(document);
-      } catch (error) {
-        console.error('Falha ao excluir objeto R2 do documento do contrato:', {
-          action: context.action,
-          contractId: context.contractId,
-          negotiationId: context.negotiationId,
-          documentId: Number(document.id ?? 0),
-          documentType: document.document_type ?? null,
-          storageKey: String(document.storage_key ?? ''),
-          error,
-        });
+      if (hasNegotiationObject) {
+        try {
+          await enqueueNegotiationDocumentDeletion(cleanupTx, document, {
+            negotiationId: context.negotiationId,
+            requestSource: 'contract_step_back_cleanup',
+          });
+        } catch (error) {
+          console.error('Falha ao excluir objeto R2 do documento do contrato:', {
+            action: context.action,
+            contractId: context.contractId,
+            negotiationId: context.negotiationId,
+            documentId: Number(document.id ?? 0),
+            documentType: document.document_type ?? null,
+            storageKey: String(document.storage_key ?? ''),
+            error,
+          });
+        }
+      }
+
+      if (assetReference) {
+        try {
+          await deleteCloudinaryAsset({
+            publicId: assetReference.publicId,
+            url: assetReference.url,
+            resourceType: assetReference.resourceType,
+            invalidate: true,
+          });
+        } catch (error) {
+          console.error('Falha ao excluir asset externo do documento do contrato:', {
+            action: context.action,
+            contractId: context.contractId,
+            negotiationId: context.negotiationId,
+            documentId: Number(document.id ?? 0),
+            documentType: document.document_type ?? null,
+            error,
+          });
+        }
       }
     }
-
-    if (assetReference) {
-      try {
-        await deleteCloudinaryAsset({
-          publicId: assetReference.publicId,
-          url: assetReference.url,
-          resourceType: assetReference.resourceType,
-          invalidate: true,
-        });
-      } catch (error) {
-        console.error('Falha ao excluir asset externo do documento do contrato:', {
-          action: context.action,
-          contractId: context.contractId,
-          negotiationId: context.negotiationId,
-          documentId: Number(document.id ?? 0),
-          documentType: document.document_type ?? null,
-          error,
-        });
-      }
-    }
+    await cleanupTx.commit();
+  } catch (error) {
+    await cleanupTx.rollback();
+    throw error;
+  } finally {
+    cleanupTx.release();
   }
 }
 

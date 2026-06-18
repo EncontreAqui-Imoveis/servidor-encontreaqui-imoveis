@@ -15,10 +15,10 @@ import {
 } from '../services/contractPersistenceService';
 import { listCommissionSummary } from '../services/contractCommissionService';
 import {
-  deleteNegotiationDocumentObject,
   readNegotiationDocumentObject,
   storeNegotiationDocumentToR2,
 } from '../services/negotiationDocumentStorageService';
+import { enqueueNegotiationDocumentDeletion } from '../services/negotiationDocumentDeletionService';
 import {
   listContractsForAdmin,
   listMyContractsForUser,
@@ -1505,53 +1505,68 @@ async function cleanupContractDocumentAssets(
 ): Promise<{ attempted: number; failed: number }> {
   let attempted = 0;
   let failed = 0;
+  const tx = await getContractDbConnection();
 
-  for (const document of documents) {
-    const hasNegotiationObject =
-      String(document.storage_provider ?? '').trim().toUpperCase() === 'R2' &&
-      String(document.storage_bucket ?? '').trim().length > 0 &&
-      String(document.storage_key ?? '').trim().length > 0;
-    const assetReference = extractCloudinaryAssetReference(document);
+  try {
+    await tx.beginTransaction();
 
-    if (hasNegotiationObject) {
-      attempted += 1;
-      try {
-        await deleteNegotiationDocumentObject(document);
-      } catch (error) {
-        failed += 1;
-        console.error('Falha ao excluir objeto R2 do documento do contrato:', {
-          action: context.action,
-          contractId: context.contractId,
-          negotiationId: context.negotiationId,
-          documentId: Number(document.id ?? 0),
-          documentType: document.document_type ?? null,
-          storageKey: String(document.storage_key ?? ''),
-          error,
-        });
+    for (const document of documents) {
+      const hasNegotiationObject =
+        String(document.storage_provider ?? '').trim().toUpperCase() === 'R2' &&
+        String(document.storage_bucket ?? '').trim().length > 0 &&
+        String(document.storage_key ?? '').trim().length > 0;
+      const assetReference = extractCloudinaryAssetReference(document);
+
+      if (hasNegotiationObject) {
+        attempted += 1;
+        try {
+          await enqueueNegotiationDocumentDeletion(tx, document, {
+            negotiationId: context.negotiationId,
+            requestSource: context.action,
+          });
+        } catch (error) {
+          failed += 1;
+          console.error('Falha ao enfileirar exclusão R2 do documento do contrato:', {
+            action: context.action,
+            contractId: context.contractId,
+            negotiationId: context.negotiationId,
+            documentId: Number(document.id ?? 0),
+            documentType: document.document_type ?? null,
+            storageKey: String(document.storage_key ?? ''),
+            error,
+          });
+        }
+      }
+
+      if (assetReference) {
+        attempted += 1;
+        try {
+          await deleteCloudinaryAsset({
+            publicId: assetReference.publicId,
+            url: assetReference.url,
+            resourceType: assetReference.resourceType,
+            invalidate: true,
+          });
+        } catch (error) {
+          failed += 1;
+          console.error('Falha ao excluir asset externo do documento do contrato:', {
+            action: context.action,
+            contractId: context.contractId,
+            negotiationId: context.negotiationId,
+            documentId: Number(document.id ?? 0),
+            documentType: document.document_type ?? null,
+            error,
+          });
+        }
       }
     }
 
-    if (assetReference) {
-      attempted += 1;
-      try {
-        await deleteCloudinaryAsset({
-          publicId: assetReference.publicId,
-          url: assetReference.url,
-          resourceType: assetReference.resourceType,
-          invalidate: true,
-        });
-      } catch (error) {
-        failed += 1;
-        console.error('Falha ao excluir asset externo do documento do contrato:', {
-          action: context.action,
-          contractId: context.contractId,
-          negotiationId: context.negotiationId,
-          documentId: Number(document.id ?? 0),
-          documentType: document.document_type ?? null,
-          error,
-        });
-      }
-    }
+    await tx.commit();
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    tx.release();
   }
 
   return { attempted, failed };

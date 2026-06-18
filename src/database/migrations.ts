@@ -752,6 +752,26 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
   }
 }
 
+async function ensureNegotiationsTimestampColumns(): Promise<void> {
+  if (!(await tableExists('negotiations'))) {
+    return;
+  }
+
+  if (!(await columnExists('negotiations', 'created_at'))) {
+    await connection.query(`
+      ALTER TABLE negotiations
+        ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    `);
+  }
+
+  if (!(await columnExists('negotiations', 'updated_at'))) {
+    await connection.query(`
+      ALTER TABLE negotiations
+        ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    `);
+  }
+}
+
 async function ensureNegotiationsTimestampBackfill(): Promise<void> {
   if (!(await tableExists('negotiations'))) {
     return;
@@ -1482,6 +1502,7 @@ export async function applyMigrations(): Promise<void> {
     await runFeaturedPropertiesScopeMigration();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();
+    await ensureNegotiationsTimestampColumns();
     await ensureNegotiationsTimestampBackfill();
     await ensureUserAddressColumns();
     await ensureSupportRequestsTable();

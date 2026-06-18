@@ -3,6 +3,7 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
 import { storeNegotiationDocumentToR2 } from './negotiationDocumentStorageService';
+import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import {
   isContractDocumentType,
   type ContractDocumentCategoryCode,
@@ -251,6 +252,11 @@ export async function deleteFinalizedContractDocument(
     `,
     [params.documentId, params.contract.negotiation_id, params.contract.id]
   );
+
+  await enqueueNegotiationDocumentDeletion(tx, document, {
+    negotiationId: params.contract.negotiation_id,
+    requestSource: 'contract_finalized_document_delete',
+  });
 
   await tx.query(
     `

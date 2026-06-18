@@ -84,9 +84,54 @@ export function toCents(value: number): number {
   return Math.round(value * 100);
 }
 
+function parseLocalizedDecimal(value: unknown): number | null {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw.replace(/R\$\s*/gi, '').replace(/[^\d.,+-]/g, '');
+  if (!normalized) {
+    return null;
+  }
+
+  const hasMinus = normalized.startsWith('-');
+  const unsigned = hasMinus || normalized.startsWith('+') ? normalized.slice(1) : normalized;
+  const hasComma = unsigned.includes(',');
+  const hasDot = unsigned.includes('.');
+
+  let numericLike = unsigned;
+  if (hasComma && hasDot) {
+    const commaIndex = unsigned.lastIndexOf(',');
+    const dotIndex = unsigned.lastIndexOf('.');
+    const decimalSeparator = commaIndex > dotIndex ? ',' : '.';
+    const thousandsSeparator = decimalSeparator === ',' ? '.' : ',';
+    numericLike = unsigned
+      .split(thousandsSeparator)
+      .join('')
+      .replace(decimalSeparator, '.');
+  } else if (hasComma) {
+    numericLike = unsigned.includes(',') && unsigned.split(',').length === 2
+      ? unsigned.replace(',', '.')
+      : unsigned.split(',').join('');
+  }
+
+  const signed = hasMinus ? `-${numericLike}` : numericLike;
+  const parsed = Number(signed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function parsePositiveNumber(input: unknown, fieldName: string): number {
-  const parsed = Number(input);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  const parsed = parseLocalizedDecimal(input);
+  if (parsed === null || parsed < 0) {
     throw new Error(`${fieldName} deve ser um numero maior ou igual a zero.`);
   }
   return parsed;
@@ -265,6 +310,11 @@ export function normalizeOptionalPositiveId(value: unknown): number | null {
   }
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function isBrokerLikeRole(role: unknown): boolean {
+  const normalized = String(role ?? '').trim().toLowerCase();
+  return normalized === 'broker' || normalized === 'auxiliary_administrative';
 }
 
 export function buildProposalValidityDate(days: number): string {

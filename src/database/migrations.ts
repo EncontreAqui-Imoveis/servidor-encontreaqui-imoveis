@@ -1124,6 +1124,7 @@ async function ensureNegotiationDocumentDeletionJobsTable(): Promise<void> {
       storage_provider VARCHAR(32) NOT NULL,
       storage_bucket VARCHAR(255) NOT NULL,
       storage_key VARCHAR(1024) NOT NULL,
+      storage_key_hash CHAR(64) NOT NULL,
       requested_by_user_id INT NULL,
       request_source VARCHAR(64) NULL,
       status ENUM('PENDING', 'PROCESSING', 'DONE', 'FAILED') NOT NULL DEFAULT 'PENDING',
@@ -1133,7 +1134,7 @@ async function ensureNegotiationDocumentDeletionJobsTable(): Promise<void> {
       processed_at DATETIME NULL,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      UNIQUE KEY uq_negotiation_document_deletion_jobs_storage_key (storage_key),
+      UNIQUE KEY uq_negotiation_document_deletion_jobs_storage_key_hash (storage_key_hash),
       KEY idx_negotiation_document_deletion_jobs_status_available (status, available_at, id),
       KEY idx_negotiation_document_deletion_jobs_negotiation (negotiation_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci

@@ -6,6 +6,7 @@ import { getNegotiationDbConnection } from './negotiationPersistenceService';
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
+  isBrokerLikeRole,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
   parseProposalWizardBody,
@@ -91,7 +92,7 @@ function canManageOwnProposal(
       userId === Number(negotiation.seller_client_id ?? 0)
     );
   }
-  if (normalizedRole === 'broker') {
+  if (normalizedRole === 'broker' || normalizedRole === 'auxiliary_administrative') {
     return userId === Number(negotiation.capturing_broker_id ?? 0);
   }
   return canAccessNegotiationByOwnership(userId, negotiation);
@@ -309,13 +310,13 @@ async function updateProposalFromWizardInternal(
 
     const userRole = roleForAccess;
     const isClientUser = userRole === 'client';
-    const isBrokerUser = userRole === 'broker';
+    const isBrokerUser = isBrokerLikeRole(userRole);
     const isAdminUser = userRole === 'admin';
     const isAdminAuthorized = allowAdmin && isAdminUser;
     if (!allowAdmin) {
       if (!isClientUser && !isBrokerUser) {
         await tx.rollback();
-        return res.status(403).json({ error: 'Apenas clientes ou corretores podem editar proposta.' });
+        return res.status(403).json({ error: 'Apenas clientes, corretores ou assistentes podem editar proposta.' });
       }
       if (isClientUser && !isBrokerUser) {
         if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {

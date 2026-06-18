@@ -1,4 +1,5 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import crypto from 'crypto';
 
 import connection from '../database/connection';
 import {
@@ -49,6 +50,10 @@ function toStoredDocumentParams(
     storageBucket: String(document.storage_bucket ?? '').trim(),
     storageKey: String(document.storage_key ?? '').trim(),
   };
+}
+
+function toStorageKeyHash(storageKey: string): string {
+  return crypto.createHash('sha256').update(storageKey, 'utf8').digest('hex');
 }
 
 async function tableExists(tableName: string): Promise<boolean> {
@@ -106,6 +111,7 @@ export async function enqueueNegotiationDocumentDeletion(
   if (!negotiationId || !row.storageProvider || !row.storageBucket || !row.storageKey) {
     throw new Error('Documento sem metadados suficientes para fila de deleção.');
   }
+  const storageKeyHash = toStorageKeyHash(row.storageKey);
 
   await tx.query(
     `
@@ -116,6 +122,7 @@ export async function enqueueNegotiationDocumentDeletion(
         storage_provider,
         storage_bucket,
         storage_key,
+        storage_key_hash,
         requested_by_user_id,
         request_source,
         status,
@@ -123,7 +130,7 @@ export async function enqueueNegotiationDocumentDeletion(
         last_error,
         available_at,
         processed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, NULL, CURRENT_TIMESTAMP, NULL)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, NULL, CURRENT_TIMESTAMP, NULL)
       ON DUPLICATE KEY UPDATE
         negotiation_document_id = VALUES(negotiation_document_id),
         negotiation_id = VALUES(negotiation_id),
@@ -146,6 +153,7 @@ export async function enqueueNegotiationDocumentDeletion(
       row.storageProvider,
       row.storageBucket,
       row.storageKey,
+      storageKeyHash,
       context?.requestedByUserId ?? null,
       context?.requestSource ?? null,
     ]

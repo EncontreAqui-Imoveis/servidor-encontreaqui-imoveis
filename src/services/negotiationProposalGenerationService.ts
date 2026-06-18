@@ -15,6 +15,7 @@ import {
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
+  isBrokerLikeRole,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
   parseProposalWizardBody,
@@ -335,13 +336,13 @@ export async function generateProposalFromProperty(
     }
     const userRole = String(req.userRole ?? '').trim().toLowerCase();
     const isClientUser = userRole === 'client';
-    const isBrokerUser = userRole === 'broker';
+    const isBrokerUser = isBrokerLikeRole(userRole);
     const isAdminUser = userRole === 'admin';
     if (!isClientUser && !isBrokerUser && !isAdminUser) {
       await tx.rollback();
       return res
         .status(403)
-        .json({ error: 'Apenas clientes ou corretores podem enviar proposta.' });
+        .json({ error: 'Apenas clientes, corretores ou assistentes podem enviar proposta.' });
     }
     if (isClientUser && !isBrokerUser) {
       if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {

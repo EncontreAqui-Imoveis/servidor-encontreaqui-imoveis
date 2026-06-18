@@ -1,6 +1,7 @@
 import type { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
+import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import { resolveContractStatus, type ContractRow } from '../controllers/ContractController';
 
 export interface ContractFinalizedDocumentRow extends RowDataPacket {
@@ -100,6 +101,13 @@ export async function deleteFinalizedContract(
   const documents = await fetchDocumentsForContractScope(tx, contract);
 
   if (documents.length > 0) {
+    for (const document of documents) {
+      await enqueueNegotiationDocumentDeletion(tx, document, {
+        negotiationId: contract.negotiation_id,
+        requestSource: 'contract_finalized_delete',
+      });
+    }
+
     await tx.query(
       `
         DELETE FROM negotiation_documents

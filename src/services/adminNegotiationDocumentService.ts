@@ -362,6 +362,7 @@ export async function uploadSignedProposal(params: {
   documentId: number;
   signedDocumentId: number;
   signedDocumentFileName: string;
+  hasSignedProposalDocument: boolean;
 }> {
   const negotiationId = String(params.negotiationId ?? '').trim();
   const actorId = Number(params.actorId);
@@ -465,6 +466,7 @@ export async function uploadSignedProposal(params: {
       documentId,
       signedDocumentId: documentId,
       signedDocumentFileName: originalFileName,
+      hasSignedProposalDocument: true,
     };
   } catch (error) {
     await tx.rollback();
@@ -477,7 +479,7 @@ export async function uploadSignedProposal(params: {
 export async function deleteSignedProposal(params: {
   negotiationId: string;
   actorId: number;
-}): Promise<{ negotiationId: string }> {
+}): Promise<{ negotiationId: string; hasSignedProposalDocument: boolean }> {
   const negotiationId = String(params.negotiationId ?? '').trim();
   const actorId = Number(params.actorId);
   if (!negotiationId) {
@@ -518,7 +520,7 @@ export async function deleteSignedProposal(params: {
       const alreadyQueued = await hasPendingDeletionJob(tx, negotiationId, 'contrato_assinado');
       if (alreadyQueued) {
         await tx.rollback();
-        return { negotiationId };
+        return { negotiationId, hasSignedProposalDocument: false };
       }
       await tx.rollback();
       throw Object.assign(new Error('Proposta assinada não encontrada.'), { statusCode: 404 });
@@ -533,7 +535,7 @@ export async function deleteSignedProposal(params: {
 
     await tx.commit();
 
-    return { negotiationId };
+    return { negotiationId, hasSignedProposalDocument: false };
   } catch (error) {
     await tx.rollback();
     throw error;

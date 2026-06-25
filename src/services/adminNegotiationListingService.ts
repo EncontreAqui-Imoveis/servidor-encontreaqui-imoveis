@@ -382,6 +382,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
   const signedDocumentFileName = String(signedDocumentMetadata.originalFileName ?? '').trim();
   const draftDocumentMetadata = parseJsonObjectSafe(row.draft_document_metadata_json);
   const draftDocumentFileName = String(draftDocumentMetadata.originalFileName ?? '').trim();
+  const hasSignedProposalDocument = row.signed_document_id != null;
 
   return {
     id: row.id,
@@ -414,6 +415,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     updatedAt: toNullableIsoDate(row.last_event_at),
     approvedAt: toNullableIsoDate(row.approved_at),
     signedDocumentId: row.signed_document_id != null ? Number(row.signed_document_id) : null,
+    hasSignedProposalDocument,
     signedDocumentFileName:
       row.signed_document_id != null ? signedDocumentFileName || 'proposta_assinada.pdf' : null,
     draftDocumentId: row.draft_document_id != null ? Number(row.draft_document_id) : null,

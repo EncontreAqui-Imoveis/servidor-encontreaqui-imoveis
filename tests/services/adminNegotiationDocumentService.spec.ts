@@ -111,8 +111,12 @@ describe('adminNegotiationDocumentService', () => {
       documentId: 321,
       signedDocumentId: 321,
       signedDocumentFileName: 'contrato_assinado.pdf',
+      hasSignedProposalDocument: true,
     });
-    expect(deleteNegotiationDocumentObjectMock).toHaveBeenCalledTimes(1);
+    expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('negotiation_document_deletion_jobs'))).toBe(
+      true
+    );
+    expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
   });
 
   it('baixa proposta assinada e monta filename', async () => {
@@ -164,7 +168,10 @@ describe('adminNegotiationDocumentService', () => {
       actorId: 7,
     });
 
-    expect(result).toEqual({ negotiationId: 'neg-1' });
-    expect(deleteNegotiationDocumentObjectMock).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ negotiationId: 'neg-1', hasSignedProposalDocument: false });
+    expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('negotiation_document_deletion_jobs'))).toBe(
+      true
+    );
+    expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
   });
 });

@@ -214,6 +214,7 @@ export async function uploadSignedProposal(
       status: 'UNDER_REVIEW',
       negotiationId,
       documentId,
+      hasSignedProposalDocument: true,
     });
   } catch (error) {
     if (tx) {

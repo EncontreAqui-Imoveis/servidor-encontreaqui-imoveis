@@ -34,6 +34,7 @@ describe('adminNegotiationListingService', () => {
   it('lista negociações com mapeamento de payload e status', async () => {
     queryMock
       .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'payment_details' }]])
+      .mockResolvedValueOnce([[{ column_name: 'created_at' }]])
       .mockResolvedValueOnce([[{ total: 1 }]])
       .mockResolvedValueOnce([
         [
@@ -80,19 +81,20 @@ describe('adminNegotiationListingService', () => {
 
     expect(result.total).toBe(1);
     expect(result.data).toHaveLength(1);
-    expect(result.data[0]).toMatchObject({
-      id: 'neg-1',
-      status: 'APPROVED',
-      internalStatus: 'DOCUMENTATION_PHASE',
-      propertyId: 101,
+      expect(result.data[0]).toMatchObject({
+        id: 'neg-1',
+        status: 'APPROVED',
+        internalStatus: 'DOCUMENTATION_PHASE',
+        propertyId: 101,
       brokerName: 'Carlos Broker',
       sellerClientName: 'Maria Cliente',
       propertyValue: 900000,
-      createdAt: '2026-04-22T09:30:00.000Z',
-      signedDocumentId: 33,
-      signedDocumentFileName: 'proposta-assinada-maria.pdf',
-      payment: {
-        dinheiro: 200000,
+        createdAt: '2026-04-22T09:30:00.000Z',
+        signedDocumentId: 33,
+        hasSignedProposalDocument: true,
+        signedDocumentFileName: 'proposta-assinada-maria.pdf',
+        payment: {
+          dinheiro: 200000,
         permuta: 0,
         financiamento: 650000,
         outros: 0,
@@ -105,6 +107,7 @@ describe('adminNegotiationListingService', () => {
       .mockImplementationOnce(async () => {
         throw new Error('schema indisponivel');
       })
+      .mockResolvedValueOnce([[{ column_name: 'created_at' }]])
       .mockResolvedValueOnce([[{ total: 0 }]])
       .mockResolvedValueOnce([[]]);
 

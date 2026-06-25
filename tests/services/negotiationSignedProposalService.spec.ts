@@ -134,6 +134,12 @@ describe('negotiationSignedProposalService', () => {
         }),
       })
     );
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hasSignedProposalDocument: true,
+        status: 'UNDER_REVIEW',
+      })
+    );
     expect(txMock.commit).toHaveBeenCalledTimes(1);
   });
 

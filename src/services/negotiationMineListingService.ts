@@ -56,6 +56,7 @@ type NegotiationSummaryPayload = {
     financiamento: number;
     outros: number;
   } | null;
+  hasSignedProposalDocument: boolean;
   propertyBrokerId: number | null;
   sellerBrokerId: number | null;
   sellerClientId: number | null;
@@ -175,6 +176,7 @@ function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPa
     validadeDias: 10,
     proposalValue: null,
     paymentBreakdown: null,
+    hasSignedProposalDocument: false,
     propertyBrokerId: null,
     sellerBrokerId: null,
     sellerClientId: null,
@@ -262,6 +264,7 @@ function buildMineNegotiationSummary(
     canEditProposal,
     secondsUntilEditAllowed: secondsUntilEdit,
     hasSignedProposal,
+    hasSignedProposalDocument: signedCount > 0,
     validadeDias,
     proposalValue: Number.isFinite(finalVal ?? NaN) ? finalVal : null,
     paymentBreakdown: breakdown,

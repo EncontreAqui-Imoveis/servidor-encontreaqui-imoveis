@@ -135,4 +135,53 @@ describe('negotiationMineListingService.listMine', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ data: [] });
   });
+
+  it('does not mark documentation-phase negotiation as signed without document', async () => {
+    vi.mocked(queryNegotiationRows)
+      .mockResolvedValueOnce([
+        { column_name: 'buyer_client_id' },
+        { column_name: 'seller_client_id' },
+        { column_name: 'updated_at' },
+      ] as any)
+      .mockResolvedValueOnce([
+        {
+          id: 'neg-2',
+          property_id: 202,
+          property_title: 'Casa sem PDF',
+          property_city: 'Rio Verde',
+          property_state: 'GO',
+          property_image: null,
+          status: 'DOCUMENTATION_PHASE',
+          client_name: 'Cliente 2',
+          client_cpf: '12345678909',
+          proposal_validity_date: '2026-03-20 10:00:00',
+          created_at: '2026-03-10 10:00:00',
+          updated_at: '2026-03-11 12:00:00',
+          payment_details: JSON.stringify({ validadeDias: 10, details: {} }),
+          capturing_broker_id: 30003,
+          selling_broker_id: 30004,
+          seller_client_id: 90001,
+          buyer_client_id: 90002,
+          last_draft_edit_at: null,
+          final_value: 500000,
+          signed_proposal_count: 0,
+        },
+      ] as any);
+
+    const req = { userId: 90002 } as any;
+    const res = createMockResponse();
+
+    await listMine(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          id: 'neg-2',
+          hasSignedProposal: false,
+          hasSignedProposalDocument: false,
+        }),
+      ],
+    });
+  });
 });

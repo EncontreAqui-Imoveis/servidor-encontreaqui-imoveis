@@ -492,6 +492,22 @@ export async function deleteSignedProposal(params: {
   const tx = await adminDb.getConnection();
   try {
     await tx.beginTransaction();
+    const [negotiationRows] = await tx.query<RowDataPacket[]>(
+      `
+        SELECT id, status
+        FROM negotiations
+        WHERE id = ?
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [negotiationId]
+    );
+    const negotiation = negotiationRows[0];
+    if (!negotiation) {
+      await tx.rollback();
+      throw Object.assign(new Error('Negociação não encontrada.'), { statusCode: 404 });
+    }
+
     const [rows] = await tx.query<AdminNegotiationDocumentRow[]>(
       `
         SELECT
@@ -532,6 +548,42 @@ export async function deleteSignedProposal(params: {
       requestSource: 'delete_signed_proposal',
     });
     await tx.query('DELETE FROM negotiation_documents WHERE id = ?', [document.id]);
+
+    const currentStatus = String((negotiation as { status?: unknown }).status ?? '').trim().toUpperCase();
+    if (currentStatus === 'DOCUMENTATION_PHASE' || currentStatus === 'PROPOSAL_SIGNED') {
+      await tx.query(
+        `
+          UPDATE negotiations
+          SET status = 'PROPOSAL_SENT', version = version + 1
+          WHERE id = ?
+        `,
+        [negotiationId]
+      );
+
+      await tx.query(
+        `
+          INSERT INTO negotiation_history (
+            id,
+            negotiation_id,
+            from_status,
+            to_status,
+            actor_id,
+            metadata_json,
+            created_at
+          )
+          VALUES (UUID(), ?, ?, 'PROPOSAL_SENT', ?, CAST(? AS JSON), CURRENT_TIMESTAMP)
+        `,
+        [
+          negotiationId,
+          currentStatus || 'DOCUMENTATION_PHASE',
+          actorId,
+          JSON.stringify({
+            action: 'signed_proposal_deleted',
+            removedBy: actorId,
+          }),
+        ]
+      );
+    }
 
     await tx.commit();
 

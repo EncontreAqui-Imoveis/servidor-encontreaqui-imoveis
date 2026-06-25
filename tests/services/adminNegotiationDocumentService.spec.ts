@@ -148,6 +148,14 @@ describe('adminNegotiationDocumentService', () => {
       .mockResolvedValueOnce([
         [
           {
+            id: 'neg-1',
+            status: 'DOCUMENTATION_PHASE',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
             id: 11,
             type: 'other',
             document_type: 'contrato_assinado',
@@ -161,6 +169,8 @@ describe('adminNegotiationDocumentService', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     const result = await deleteSignedProposal({
@@ -173,5 +183,10 @@ describe('adminNegotiationDocumentService', () => {
       true
     );
     expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
+    expect(
+      txMock.query.mock.calls.some(
+        ([sql]) => String(sql).includes('UPDATE negotiations') && String(sql).includes("PROPOSAL_SENT")
+      )
+    ).toBe(true);
   });
 });

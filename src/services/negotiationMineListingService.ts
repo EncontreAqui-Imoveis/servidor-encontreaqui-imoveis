@@ -225,7 +225,7 @@ function buildMineNegotiationSummary(
   const validadeDias = Number.isInteger(rawV) && rawV > 0 ? rawV : 10;
   const breakdown = extractPaymentBreakdownFromDetails(pd);
   const signedCount = Number(row.signed_proposal_count ?? 0);
-  const hasSignedProposal = signedCount > 0 || !PRE_SIGNED_PROPOSAL_EDIT_STATUSES.has(st);
+  const hasSignedProposal = signedCount > 0;
 
   const canRoleEdit =
     userId === Number(row.capturing_broker_id ?? 0) ||

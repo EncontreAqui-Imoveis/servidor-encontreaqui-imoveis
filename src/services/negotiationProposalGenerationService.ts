@@ -25,7 +25,7 @@ import {
   type ParsedProposalWizard,
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
-import { isValidCpf } from '../utils/cpfValidator';
+import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 
 interface NegotiationRow extends RowDataPacket {
   id: string;
@@ -59,6 +59,11 @@ interface BrokerRow extends RowDataPacket {
   name: string;
 }
 
+interface UserRow extends RowDataPacket {
+  name: string;
+  cpf?: string | null;
+}
+
 type BrokerProposalContext = {
   capturingBrokerId: number | null;
   sellerBrokerId: number | null;
@@ -88,6 +93,48 @@ function resolveIdempotencyKey(req: AuthRequest): string {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const fromBody = String(body.idempotency_key ?? body.idempotencyKey ?? '').trim();
   return fromBody.slice(0, 128);
+}
+
+function normalizeComparableText(value: string): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isOwnerSelfProposalAttempt(
+  ownerUserId: number,
+  currentUser: { name?: string | null; cpf?: string | null } | null,
+  payload: ParsedProposalWizard
+): boolean {
+  if (Number(ownerUserId) <= 0) {
+    return false;
+  }
+
+  const currentCpf = normalizeCpfDigits(String(currentUser?.cpf ?? ''));
+  const payloadCpf = normalizeCpfDigits(payload.clientCpf);
+  if (currentCpf.length === 11 && payloadCpf.length === 11 && currentCpf === payloadCpf) {
+    return true;
+  }
+
+  const currentName = normalizeComparableText(String(currentUser?.name ?? ''));
+  const payloadName = normalizeComparableText(payload.clientName);
+  return currentName.length > 0 && currentName === payloadName;
+}
+
+async function resolveCurrentUserIdentity(
+  tx: PoolConnection,
+  userId: number
+): Promise<{ name: string | null; cpf: string | null }> {
+  const [rows] = await tx.query<UserRow[]>(
+    'SELECT name, cpf FROM users WHERE id = ? LIMIT 1',
+    [userId]
+  );
+  return {
+    name: rows[0]?.name ?? null,
+    cpf: rows[0]?.cpf ?? null,
+  };
 }
 
 function sendProposalError(
@@ -344,10 +391,13 @@ export async function generateProposalFromProperty(
         .status(403)
         .json({ error: 'Apenas clientes, corretores ou assistentes podem enviar proposta.' });
     }
-    if (isClientUser && !isBrokerUser) {
-      if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
+    if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
+      const currentUser = await resolveCurrentUserIdentity(tx, Number(req.userId));
+      if (isOwnerSelfProposalAttempt(Number(req.userId), currentUser, payload)) {
         await tx.rollback();
-        return res.status(403).json({ error: 'Nao e possivel enviar proposta no proprio anuncio.' });
+        return res.status(403).json({
+          error: 'O proponente não pode ser o próprio dono do imóvel.',
+        });
       }
     }
     if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {

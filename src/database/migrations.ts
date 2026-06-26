@@ -861,6 +861,10 @@ async function ensureUserAddressColumns(): Promise<void> {
     return;
   }
 
+  if (!(await columnExists('users', 'cpf'))) {
+    await connection.query('ALTER TABLE users ADD COLUMN cpf VARCHAR(20) NULL');
+  }
+
   if (!(await columnExists('users', 'street'))) {
     await connection.query('ALTER TABLE users ADD COLUMN street VARCHAR(255) NULL');
   }

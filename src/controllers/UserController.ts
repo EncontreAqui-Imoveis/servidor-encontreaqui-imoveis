@@ -174,6 +174,7 @@ class UserController {
       name,
       email,
       password,
+      cpf,
       phone,
       street,
       number,
@@ -218,12 +219,13 @@ class UserController {
 
       await runUserQuery(
         `
-          INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (name, email, cpf, password_hash, phone, street, number, complement, bairro, city, state, cep)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           name,
           email,
+          stringOrNull(cpf),
           passwordHash,
           stringOrNull(phone),
           addressResult.value.street,
@@ -252,7 +254,7 @@ class UserController {
 
     try {
       const rows = await runUserQuery<RowDataPacket[]>(
-        'SELECT id, name, email, password_hash, token_version FROM users WHERE email = ?',
+        'SELECT id, name, email, cpf, password_hash, token_version FROM users WHERE email = ?',
         [email]
       );
 
@@ -291,6 +293,7 @@ class UserController {
               id,
               name,
               email,
+              cpf,
               email_verified_at,
               phone,
               street,
@@ -328,11 +331,12 @@ class UserController {
           status: brokerState.status,
           requiresDocuments: brokerState.requiresDocuments,
           needsCompletion: !hasCompleteProfile(user),
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            email_verified: user.email_verified_at != null,
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              cpf: user.cpf ?? null,
+              email_verified: user.email_verified_at != null,
             email_verified_at: user.email_verified_at ?? null,
             phone: user.phone,
             street: user.street ?? null,
@@ -354,6 +358,7 @@ class UserController {
             id: user.id,
             name: user.name,
             email: user.email,
+            cpf: user.cpf ?? null,
             email_verified: user.email_verified_at != null,
             email_verified_at: user.email_verified_at ?? null,
             phone: user.phone,
@@ -434,6 +439,10 @@ class UserController {
         updates.phone = normalizedPhone;
       }
 
+      if (hasField('cpf')) {
+        updates.cpf = stringOrNull(payload.cpf)?.replace(/\D/g, '') ?? null;
+      }
+
       const shouldProcessAddress = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep']
         .some(hasAddressField);
       if (shouldProcessAddress) {
@@ -511,6 +520,7 @@ class UserController {
             id,
             name,
             email,
+            cpf,
             email_verified_at,
             phone,
             street,
@@ -548,11 +558,12 @@ class UserController {
         status,
         requiresDocuments,
         needsCompletion: !hasCompleteProfile(user),
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          email_verified: user.email_verified_at != null,
+          user: {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            cpf: user.cpf ?? null,
+            email_verified: user.email_verified_at != null,
           email_verified_at: user.email_verified_at ?? null,
           phone: user.phone,
           street: user.street ?? null,
@@ -656,7 +667,7 @@ class UserController {
         return res.status(401).json({ error: 'Acesso não autorizado.' });
       }
 
-      const { uid, email } = req.body as { uid: string; email: string };
+      const { uid, email, cpf } = req.body as { uid: string; email: string; cpf?: string };
 
       if (!uid || !email) {
         return res.status(400).json({ error: 'UID e email são obrigatórios.' });
@@ -672,8 +683,8 @@ class UserController {
       }
 
       await runUserQuery(
-        'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
-        [uid, email, `User-${uid.substring(0, 8)}`]
+        'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, ?)',
+        [uid, email, `User-${uid.substring(0, 8)}`, stringOrNull(cpf)]
       );
 
       return res.status(201).json({ message: 'Usuário sincronizado com sucesso!' });
@@ -699,7 +710,7 @@ class UserController {
 
       const userRows = await runUserQuery<RowDataPacket[]>(
         `
-          SELECT u.id, u.name, u.email, u.firebase_uid,
+          SELECT u.id, u.name, u.email, u.cpf, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  CASE
                    WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
@@ -748,8 +759,8 @@ class UserController {
 
         const chosenRole = requestedRole === 'broker' ? 'broker' : 'client';
         const result = await runUserQuery<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name) VALUES (?, ?, ?)',
-          [uid, email, name || `User-${uid.substring(0, 8)}`]
+          'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, ?)',
+          [uid, email, name || `User-${uid.substring(0, 8)}`, null]
         );
         user = {
           id: result.insertId,
@@ -840,6 +851,7 @@ class UserController {
           id: user.id,
           name: user.name,
           email: user.email,
+          cpf: user.cpf ?? null,
           role: effectiveRole,
           phone: user.phone ?? null,
           broker_status: user.broker_status,
@@ -1017,11 +1029,12 @@ class UserController {
         }
 
         const result = await runUserQuery<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO users (firebase_uid, email, name, cpf, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             uid,
             fallbackEmail,
             nameOverride ?? displayName,
+            null,
             phoneOverride ?? phone ?? null,
             addressPayload.street,
             addressPayload.number,
@@ -1070,6 +1083,7 @@ class UserController {
           id: user.id,
           name: user.name ?? nameOverride ?? displayName,
           email: user.email ?? fallbackEmail,
+          cpf: user.cpf ?? null,
           role: effectiveRole,
           phone: user.phone ?? phoneOverride ?? phone ?? null,
           broker_status: brokerStatus,

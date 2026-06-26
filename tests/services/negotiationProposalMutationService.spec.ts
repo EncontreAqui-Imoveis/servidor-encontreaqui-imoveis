@@ -89,7 +89,7 @@ describe('negotiationProposalMutationService', () => {
     });
   });
 
-  it('atualiza proposta do wizard e retorna PDF gerado', async () => {
+  it('atualiza proposta do wizard e retorna resposta de sucesso', async () => {
     txMock.query
       .mockResolvedValueOnce([
         [
@@ -141,9 +141,17 @@ describe('negotiationProposalMutationService', () => {
 
     await updateProposalFromWizard(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(201);
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
-    expect(res.send).toHaveBeenCalledWith(Buffer.from('%PDF-proposal%'));
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        propertyId: 101,
+        clientName: 'Maria Cliente',
+        clientCpf: '52998224725',
+        status: 'PROPOSAL_SENT',
+        value: 500000,
+      })
+    );
     expect(txMock.execute.mock.calls[0]?.[0]).toContain('UPDATE negotiations');
     expect(txMock.execute.mock.calls[0]?.[1]).toEqual([
       101,
@@ -155,17 +163,9 @@ describe('negotiationProposalMutationService', () => {
       expect.any(String),
       'neg-1',
     ]);
-    expect(txMock.query.mock.calls[3]?.[0]).toContain('AND id <> ?');
-    expect(txMock.query.mock.calls[3]?.[1]).toEqual([101, 'neg-1', null, '52998224725']);
-    expect(saveNegotiationProposalDocumentMock).toHaveBeenCalledWith(
-      'neg-1',
-      expect.any(Buffer),
-      txMock,
-      expect.objectContaining({
-        originalFileName: 'proposta.pdf',
-        generated: true,
-      })
-    );
+    expect(
+      txMock.query.mock.calls.find(([sql]) => String(sql).includes('AND id <> ?'))?.[1]
+    ).toEqual([101, 'neg-1', null, '52998224725']);
   });
 
   it('retorna 401 quando nao ha usuario autenticado', async () => {
@@ -324,6 +324,71 @@ describe('negotiationProposalMutationService', () => {
     expect(res.status).toHaveBeenCalledWith(204);
     expect(res.send).toHaveBeenCalled();
     expect(txMock.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('bloqueia edicao quando o cpf do proponente e do dono coincide', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-owner',
+            property_id: 101,
+            status: 'PROPOSAL_SENT',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30003,
+            buyer_client_id: null,
+            last_draft_edit_at: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ c: 0 }]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 30003,
+            status: 'approved',
+            address: 'Rua A',
+            numero: '100',
+            quadra: null,
+            lote: null,
+            bairro: 'Centro',
+            city: 'Rio Verde',
+            state: 'GO',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Maria Cliente',
+            cpf: '52998224725',
+          },
+        ],
+      ]);
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'neg-owner' },
+      body: {},
+    } as any;
+    const res = createMockResponse();
+
+    await updateProposalFromWizard(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: 'FORBIDDEN',
+      })
+    );
+    expect(txMock.execute).not.toHaveBeenCalled();
+    expect(generateNegotiationProposalPdfMock).not.toHaveBeenCalled();
   });
 
   it('retorna 403 ao excluir proposta sem acesso', async () => {

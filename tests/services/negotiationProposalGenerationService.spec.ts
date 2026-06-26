@@ -238,4 +238,58 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
     expect(generateProposalMock).not.toHaveBeenCalled();
     expect(saveNegotiationDocumentMock).not.toHaveBeenCalled();
   });
+
+  it('blocks owner self-proposal when CPF matches the logged user', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 30003,
+            status: 'approved',
+            address: 'Rua A',
+            numero: '100',
+            quadra: null,
+            lote: null,
+            bairro: 'Centro',
+            city: 'Rio Verde',
+            state: 'GO',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Joao da Silva',
+            cpf: '52998224725',
+          },
+        ],
+      ]);
+
+    const response = await request(app)
+      .post('/negotiations/proposal')
+      .set('Idempotency-Key', 'proposal-key-owner-self')
+      .send({
+        propertyId: 101,
+        clientName: 'Joao da Silva',
+        clientCpf: '529.982.247-25',
+        validadeDias: 10,
+        pagamento: {
+          dinheiro: 100000,
+          permuta: 0,
+          financiamento: 400000,
+          outros: 0,
+        },
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toContain('próprio dono do imóvel');
+    expect(generateProposalMock).not.toHaveBeenCalled();
+    expect(saveNegotiationDocumentMock).not.toHaveBeenCalled();
+  });
 });

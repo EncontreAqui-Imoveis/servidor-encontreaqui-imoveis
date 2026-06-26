@@ -22,6 +22,7 @@ type AuthUserRow = RowDataPacket & {
   id: number;
   name?: string | null;
   email?: string | null;
+  cpf?: string | null;
   email_verified_at?: string | null;
   password_hash?: string | null;
   phone?: string | null;
@@ -129,7 +130,7 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   try {
     const [rows] = await authDb.query<AuthUserRow[]>(
       `
-        SELECT u.id, u.name, u.email, u.email_verified_at, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
+        SELECT u.id, u.name, u.email, u.cpf, u.email_verified_at, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                u.token_version,
                CASE
                  WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
@@ -213,7 +214,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
     }
 
     const [existingRows] = await authDb.query<AuthUserRow[]>(
-      `SELECT u.id, u.name, u.email, u.email_verified_at, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
+      `SELECT u.id, u.name, u.email, u.cpf, u.email_verified_at, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
               b.id AS broker_id, b.status AS broker_status, b.profile_type AS broker_profile_type, b.creci AS creci,
               bd.status AS broker_documents_status
          FROM users u

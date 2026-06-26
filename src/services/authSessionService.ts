@@ -73,6 +73,7 @@ export function buildUserPayload(row: any, profileType: ProfileType) {
     id: row.id,
     name: row.name,
     email: row.email,
+    cpf: row.cpf ?? null,
     email_verified: emailVerifiedAt != null,
     email_verified_at: emailVerifiedAt,
     phone: row.phone ?? null,

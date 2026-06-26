@@ -243,6 +243,7 @@ class AuthController {
     const email = String(body.email ?? '').trim().toLowerCase();
     const password = typeof body.password === 'string' ? body.password : '';
     const phone = typeof body.phone === 'string' ? body.phone : undefined;
+    const cpf = typeof body.cpf === 'string' ? body.cpf.trim() : '';
     const street = body.street;
     const number = body.number;
     const complement = body.complement;
@@ -364,13 +365,14 @@ class AuthController {
 
       const [userResult] = await authDb.query<ResultSetHeader>(
         `
-          INSERT INTO users (firebase_uid, name, email, email_verified_at, password_hash, phone, street, number, complement, bairro, city, state, cep)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (firebase_uid, name, email, cpf, email_verified_at, password_hash, phone, street, number, complement, bairro, city, state, cep)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           firebaseUid,
           name,
           email,
+          cpf || null,
           emailVerifiedAt,
           passwordHash,
           phone ?? null,
@@ -399,6 +401,7 @@ class AuthController {
           id: userId,
           name,
           email,
+          cpf: cpf || null,
           email_verified_at: emailVerifiedAt?.toISOString() ?? null,
           phone,
           street: addressResult.value.street,

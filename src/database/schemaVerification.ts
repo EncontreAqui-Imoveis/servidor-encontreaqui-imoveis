@@ -130,6 +130,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['negotiations', 'updated_at'],
     ['negotiations', 'last_draft_edit_at'],
     ['admins', 'token_version'],
+    ['users', 'cpf'],
     ['users', 'token_version'],
     ['brokers', 'profile_type'],
     ['properties', 'updated_at'],

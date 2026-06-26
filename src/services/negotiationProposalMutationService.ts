@@ -6,14 +6,13 @@ import { getNegotiationDbConnection } from './negotiationPersistenceService';
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
-  isBrokerLikeRole,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
   parseProposalWizardBody,
   type ParsedProposalWizard,
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
-import { isValidCpf } from '../utils/cpfValidator';
+import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
@@ -39,6 +38,11 @@ interface PropertyRow extends RowDataPacket {
   price: number | null;
   price_sale: number | null;
   price_rent: number | null;
+}
+
+interface UserRow extends RowDataPacket {
+  name: string;
+  cpf?: string | null;
 }
 
 const PRE_SIGNED_PROPOSAL_EDIT_STATUSES = new Set([
@@ -117,6 +121,53 @@ function isDependencyUnavailableError(error: unknown): boolean {
   }
 
   return code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ECONNRESET';
+}
+
+function normalizeComparableText(value: string): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isOwnerSelfProposalAttempt(
+  ownerUserId: number,
+  currentUser: { name?: string | null; cpf?: string | null } | null,
+  payload: ParsedProposalWizard
+): boolean {
+  if (Number(ownerUserId) <= 0) {
+    return false;
+  }
+
+  const currentCpf = normalizeCpfDigits(String(currentUser?.cpf ?? ''));
+  const payloadCpf = normalizeCpfDigits(payload.clientCpf);
+  if (currentCpf.length === 11 && payloadCpf.length === 11 && currentCpf === payloadCpf) {
+    return true;
+  }
+
+  const currentName = normalizeComparableText(String(currentUser?.name ?? ''));
+  const payloadName = normalizeComparableText(payload.clientName);
+  return currentName.length > 0 && currentName === payloadName;
+}
+
+async function resolveCurrentUserIdentity(
+  tx: PoolConnection,
+  userId: number
+): Promise<{ name: string | null; cpf: string | null }> {
+  const [rows] = await tx.query<UserRow[]>(
+    'SELECT name, cpf FROM users WHERE id = ? LIMIT 1',
+    [userId]
+  );
+  return {
+    name: rows[0]?.name ?? null,
+    cpf: rows[0]?.cpf ?? null,
+  };
+}
+
+function isBrokerLikeRole(role: unknown): boolean {
+  const normalized = String(role ?? '').trim().toLowerCase();
+  return normalized === 'broker' || normalized === 'auxiliary_administrative';
 }
 
 async function negotiationHasSignedProposalDocument(
@@ -318,17 +369,6 @@ async function updateProposalFromWizardInternal(
         await tx.rollback();
         return res.status(403).json({ error: 'Apenas clientes, corretores ou assistentes podem editar proposta.' });
       }
-      if (isClientUser && !isBrokerUser) {
-        if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
-          await tx.rollback();
-          return sendProposalError(
-            res,
-            403,
-            'Nao e possivel editar proposta do proprio anuncio.',
-            'FORBIDDEN'
-          );
-        }
-      }
     }
     if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
       await tx.rollback();
@@ -397,6 +437,19 @@ async function updateProposalFromWizardInternal(
         'CPF do cliente invalido na proposta.',
         'PROPOSAL_VALIDATION_FAILED'
       );
+    }
+
+    if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
+      const currentUser = await resolveCurrentUserIdentity(tx, Number(req.userId));
+      if (isOwnerSelfProposalAttempt(Number(req.userId), currentUser, payload)) {
+        await tx.rollback();
+        return sendProposalError(
+          res,
+          403,
+          'O proponente não pode ser o próprio dono do imóvel.',
+          'FORBIDDEN'
+        );
+      }
     }
 
     const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;

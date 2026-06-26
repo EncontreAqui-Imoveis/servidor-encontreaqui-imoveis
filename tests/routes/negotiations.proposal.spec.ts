@@ -160,7 +160,8 @@ describe('POST /negotiations/proposal', () => {
             price_rent: null,
           },
         ],
-      ]);
+      ])
+      .mockResolvedValueOnce([[{ name: 'Cliente Proprietario' }]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
       idempotency_key: 'proposal-key-002',
@@ -360,7 +361,8 @@ describe('POST /negotiations/proposal', () => {
             price_rent: null,
           },
         ],
-      ]);
+      ])
+      .mockResolvedValueOnce([[{ name: 'Cliente Proprietario' }]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
       idempotency_key: 'proposal-key-006',
@@ -377,7 +379,7 @@ describe('POST /negotiations/proposal', () => {
     });
 
     expect(response.status).toBe(403);
-    expect(String(response.body.error ?? '')).toContain('proprio anuncio');
+    expect(String(response.body.error ?? '')).toContain('próprio dono do imóvel');
   });
 
   it('rejects a new proposal when the property already has an active negotiation', async () => {

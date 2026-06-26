@@ -81,9 +81,9 @@ describe('adminNegotiationListingService', () => {
 
     expect(result.total).toBe(1);
     expect(result.data).toHaveLength(1);
-      expect(result.data[0]).toMatchObject({
-        id: 'neg-1',
-        status: 'APPROVED',
+    expect(result.data[0]).toMatchObject({
+      id: 'neg-1',
+      status: 'APPROVED',
         internalStatus: 'DOCUMENTATION_PHASE',
         propertyId: 101,
       brokerName: 'Carlos Broker',
@@ -100,6 +100,27 @@ describe('adminNegotiationListingService', () => {
         outros: 0,
       },
     });
+  });
+
+  it('inclui DOCUMENTATION_PHASE sem assinatura na fila de propostas enviadas', async () => {
+    queryMock
+      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'payment_details' }]])
+      .mockResolvedValueOnce([[{ column_name: 'created_at' }]])
+      .mockResolvedValueOnce([[{ total: 1 }]])
+      .mockResolvedValueOnce([[]]);
+
+    await listNegotiations({
+      statusFilter: 'PROPOSAL_UNSIGNED',
+      page: 1,
+      limit: 20,
+    });
+
+    const sqlCalls = queryMock.mock.calls
+      .map(([sql]) => String(sql))
+      .filter((sql) => sql.includes("PROPOSAL_SENT") || sql.includes("DOCUMENTATION_PHASE"));
+
+    expect(sqlCalls.some((sql) => sql.includes("n.status IN ('PROPOSAL_SENT', 'DOCUMENTATION_PHASE')"))).toBe(true);
+    expect(sqlCalls.some((sql) => sql.includes("NOT EXISTS (SELECT 1 FROM negotiation_documents"))).toBe(true);
   });
 
   it('mantem listagem funcional quando a descoberta de schema falha', async () => {

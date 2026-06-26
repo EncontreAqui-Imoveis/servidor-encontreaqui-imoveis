@@ -196,7 +196,7 @@ function buildNegotiationStatusClause(
   if (statusFilter === 'PROPOSAL_UNSIGNED') {
     return {
       clause:
-        " AND n.status = 'PROPOSAL_SENT' AND NOT EXISTS (SELECT 1 FROM negotiation_documents nd_unsigned WHERE nd_unsigned.negotiation_id = n.id AND nd_unsigned.type = 'other' AND nd_unsigned.document_type = 'contrato_assinado')",
+        " AND n.status IN ('PROPOSAL_SENT', 'DOCUMENTATION_PHASE') AND NOT EXISTS (SELECT 1 FROM negotiation_documents nd_unsigned WHERE nd_unsigned.negotiation_id = n.id AND nd_unsigned.type = 'other' AND nd_unsigned.document_type = 'contrato_assinado')",
       params: [],
     };
   }

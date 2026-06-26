@@ -49,6 +49,8 @@ export async function createContractFromApprovedNegotiation(
       status: string;
       capturing_broker_id: number | null;
       selling_broker_id: number | null;
+      client_name: string | null;
+      client_cpf: string | null;
       property_title: string | null;
     }>>(
       `
@@ -58,6 +60,8 @@ export async function createContractFromApprovedNegotiation(
           n.status,
           n.capturing_broker_id,
           n.selling_broker_id,
+          n.client_name,
+          n.client_cpf,
           p.title AS property_title
         FROM negotiations n
         JOIN properties p ON p.id = n.property_id
@@ -100,6 +104,8 @@ export async function createContractFromApprovedNegotiation(
           n.selling_broker_id,
           n.seller_client_id,
           n.buyer_client_id,
+          n.client_name,
+          n.client_cpf,
           p.title AS property_title,
           p.purpose AS property_purpose,
           p.code AS property_code,
@@ -150,7 +156,7 @@ export async function createContractFromApprovedNegotiation(
           ?,
           'AWAITING_DOCS',
           NULL,
-          NULL,
+          CAST(JSON_OBJECT('clientName', ?, 'clientCpf', ?) AS JSON),
           NULL,
           'PENDING',
           'PENDING',
@@ -160,7 +166,7 @@ export async function createContractFromApprovedNegotiation(
           CURRENT_TIMESTAMP
         )
       `,
-      [negotiationId, negotiation.property_id],
+      [negotiationId, negotiation.property_id, negotiation.client_name, negotiation.client_cpf],
     );
 
     const [createdRows] = await tx.query<Array<RowDataPacket & ContractRow>>(
@@ -183,6 +189,8 @@ export async function createContractFromApprovedNegotiation(
           n.selling_broker_id,
           n.seller_client_id,
           n.buyer_client_id,
+          n.client_name,
+          n.client_cpf,
           p.title AS property_title,
           p.purpose AS property_purpose,
           p.code AS property_code,

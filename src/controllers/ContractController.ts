@@ -166,6 +166,8 @@ export interface ContractRow extends RowDataPacket {
   selling_broker_id: number | null;
   seller_client_id: number | null;
   buyer_client_id: number | null;
+  client_name: string | null;
+  client_cpf: string | null;
   property_title: string | null;
   property_purpose: string | null;
   property_code: string | null;
@@ -1043,6 +1045,8 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     sellerClientId:
       row.seller_client_id !== null ? Number(row.seller_client_id) : null,
     buyerClientId: row.buyer_client_id !== null ? Number(row.buyer_client_id) : null,
+    clientName: row.client_name ?? null,
+    clientCpf: row.client_cpf ?? null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
     ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
@@ -1785,6 +1789,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.selling_broker_id,
     n.seller_client_id,
     n.buyer_client_id,
+    n.client_name,
+    n.client_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,

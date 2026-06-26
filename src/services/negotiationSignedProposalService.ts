@@ -147,6 +147,26 @@ export async function uploadSignedProposal(
       });
     }
 
+    const [existingSignedRows] = await tx.query<RowDataPacket[]>(
+      `
+        SELECT id
+        FROM negotiation_documents
+        WHERE negotiation_id = ?
+          AND type = 'other'
+          AND document_type = 'contrato_assinado'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [negotiationId]
+    );
+
+    if (existingSignedRows.length > 0) {
+      await tx.rollback();
+      return res.status(409).json({
+        error: 'Esta proposta assinada já foi enviada. Remova o PDF atual antes de reenviar.',
+      });
+    }
+
     const documentId = await saveNegotiationSignedProposalDocument(
       negotiationId,
       uploadedFile.buffer,

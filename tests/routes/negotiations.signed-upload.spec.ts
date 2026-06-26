@@ -94,7 +94,7 @@ describe('POST /negotiations/:id/proposals/signed', () => {
           broker_name: 'Pedro Corretor',
         },
       ],
-    ]);
+    ]).mockResolvedValueOnce([[]]);
 
     const response = await request(app)
       .post('/negotiations/neg-uuid-1/proposals/signed')
@@ -126,20 +126,22 @@ describe('POST /negotiations/:id/proposals/signed', () => {
   });
 
   it('permits signed PDF upload when negotiation already entered documentation phase without file', async () => {
-    txMock.query.mockResolvedValueOnce([
-      [
-        {
-          id: 'neg-uuid-2',
-          property_id: 102,
-          status: 'DOCUMENTATION_PHASE',
-          capturing_broker_id: 30003,
-          selling_broker_id: 30003,
-          property_code: 'RV102',
-          property_address: 'Rua 2',
-          broker_name: 'Pedro Corretor',
-        },
-      ],
-    ]);
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-uuid-2',
+            property_id: 102,
+            status: 'DOCUMENTATION_PHASE',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30003,
+            property_code: 'RV102',
+            property_address: 'Rua 2',
+            broker_name: 'Pedro Corretor',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[]]);
 
     const response = await request(app)
       .post('/negotiations/neg-uuid-2/proposals/signed')
@@ -151,5 +153,32 @@ describe('POST /negotiations/:id/proposals/signed', () => {
       expect.stringContaining('UPDATE negotiations'),
       ['DOCUMENTATION_PHASE', 'neg-uuid-2']
     );
+  });
+
+  it('returns 409 when a signed PDF already exists', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-uuid-3',
+            property_id: 103,
+            status: 'PROPOSAL_SENT',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30003,
+            property_code: 'RV103',
+            property_address: 'Rua 3',
+            broker_name: 'Pedro Corretor',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ id: 9001 }]]);
+
+    const response = await request(app)
+      .post('/negotiations/neg-uuid-3/proposals/signed')
+      .attach('file', Buffer.from('%PDF-1.4 signed%'), 'proposta_assinada.pdf');
+
+    expect(response.status).toBe(409);
+    expect(response.body.error).toContain('já foi enviada');
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
   });
 });

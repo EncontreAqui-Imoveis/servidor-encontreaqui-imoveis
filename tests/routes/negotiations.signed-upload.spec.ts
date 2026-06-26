@@ -124,4 +124,32 @@ describe('POST /negotiations/:id/proposals/signed', () => {
       })
     );
   });
+
+  it('permits signed PDF upload when negotiation already entered documentation phase without file', async () => {
+    txMock.query.mockResolvedValueOnce([
+      [
+        {
+          id: 'neg-uuid-2',
+          property_id: 102,
+          status: 'DOCUMENTATION_PHASE',
+          capturing_broker_id: 30003,
+          selling_broker_id: 30003,
+          property_code: 'RV102',
+          property_address: 'Rua 2',
+          broker_name: 'Pedro Corretor',
+        },
+      ],
+    ]);
+
+    const response = await request(app)
+      .post('/negotiations/neg-uuid-2/proposals/signed')
+      .attach('file', Buffer.from('%PDF-1.4 signed%'), 'proposta_assinada.pdf');
+
+    expect(response.status).toBe(201);
+    expect(response.body.status).toBe('UNDER_REVIEW');
+    expect(txMock.execute).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE negotiations'),
+      ['DOCUMENTATION_PHASE', 'neg-uuid-2']
+    );
+  });
 });

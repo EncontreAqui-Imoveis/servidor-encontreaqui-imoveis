@@ -1,9 +1,4 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  ApplicationError,
-  UnauthorizedError,
-  NotFoundError,
-} from '../../src/errors/ApplicationError';
 
 const { compareMock, queryMock, signUserTokenMock, verifyIdTokenMock, withTimeoutMock } =
   vi.hoisted(() => ({
@@ -54,6 +49,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  vi.resetModules();
   vi.clearAllMocks();
   compareMock.mockResolvedValue(true);
   signUserTokenMock.mockReturnValue('jwt-test-token');
@@ -66,8 +62,20 @@ beforeEach(() => {
   });
 });
 
+function mockUserSchema({
+  hasCpf = true,
+  hasFirebaseUid = true,
+}: {
+  hasCpf?: boolean;
+  hasFirebaseUid?: boolean;
+} = {}) {
+  queryMock.mockResolvedValueOnce(hasCpf ? [[{}]] : [[]]);
+  queryMock.mockResolvedValueOnce(hasFirebaseUid ? [[{}]] : [[]]);
+}
+
 describe('authSessionOperationsService', () => {
   it('authenticates login and returns session payload', async () => {
+    mockUserSchema();
     queryMock.mockResolvedValueOnce([
       [
         {
@@ -112,17 +120,19 @@ describe('authSessionOperationsService', () => {
   });
 
   it('rejects login with invalid credentials', async () => {
+    mockUserSchema();
     queryMock.mockResolvedValueOnce([[]]);
 
     const { login } = await import('../../src/services/authSessionOperationsService');
 
-    await expect(login({ email: 'invalido@test.com', password: 'Senha123' })).rejects.toBeInstanceOf(
-      UnauthorizedError,
+    await expect(login({ email: 'invalido@test.com', password: 'Senha123' })).rejects.toThrow(
+      'Credenciais inválidas.',
     );
     expect(compareMock).not.toHaveBeenCalled();
   });
 
   it('returns new-user handshake for google login without existing account', async () => {
+    mockUserSchema();
     queryMock.mockResolvedValueOnce([[]]);
 
     const { google } = await import('../../src/services/authSessionOperationsService');
@@ -143,13 +153,14 @@ describe('authSessionOperationsService', () => {
   });
 
   it('returns authenticated payload for existing google user', async () => {
+    mockUserSchema();
     queryMock.mockResolvedValueOnce([
       [
         {
           id: 42,
           name: 'Google User',
           email: 'google.user@test.com',
-          email_verified_at: null,
+          email_verified_at: new Date().toISOString(),
           phone: '62999998888',
           street: 'Rua B',
           number: '200',
@@ -158,7 +169,7 @@ describe('authSessionOperationsService', () => {
           city: 'Cidade',
           state: 'GO',
           cep: '75900000',
-          firebase_uid: null,
+          firebase_uid: 'google-uid-1',
           token_version: 3,
           broker_id: 42,
           broker_status: 'approved',
@@ -168,8 +179,6 @@ describe('authSessionOperationsService', () => {
         },
       ],
     ]);
-    queryMock.mockResolvedValueOnce([[]]);
-    queryMock.mockResolvedValueOnce([[]]);
 
     const { google } = await import('../../src/services/authSessionOperationsService');
     const result = await google({ idToken: 'token-google', profileType: 'client' });
@@ -194,10 +203,10 @@ describe('authSessionOperationsService', () => {
   it('rejects logout without authenticated user and handles missing rows', async () => {
     const { logout } = await import('../../src/services/authSessionOperationsService');
 
-    await expect(logout({ userId: 0 })).rejects.toBeInstanceOf(UnauthorizedError);
+    await expect(logout({ userId: 0 })).rejects.toThrow('Usuário não autenticado.');
 
     queryMock.mockResolvedValueOnce([{ affectedRows: 0 }]);
-    await expect(logout({ userId: 9 })).rejects.toBeInstanceOf(NotFoundError);
+    await expect(logout({ userId: 9 })).rejects.toThrow('Usuário não encontrado.');
   });
 
   it('treats ER_BAD_FIELD_ERROR as successful logout', async () => {

@@ -95,6 +95,68 @@ function normalizeRequestedProfile(value: unknown): ProfileType | 'auto' {
   return 'auto';
 }
 
+const columnExistsCache = new Map<string, Promise<boolean>>();
+
+function hasColumn(table: string, column: string): Promise<boolean> {
+  const key = `${table}.${column}`;
+  const cached = columnExistsCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = authDb
+    .query<RowDataPacket[]>(
+      `
+        SELECT 1
+          FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = ?
+           AND COLUMN_NAME = ?
+         LIMIT 1
+      `,
+      [table, column],
+    )
+    .then(([rows]) => rows.length > 0)
+    .catch(() => false);
+
+  columnExistsCache.set(key, promise);
+  return promise;
+}
+
+async function buildUserSelectClause(): Promise<string> {
+  const hasCpfColumn = await hasColumn('users', 'cpf');
+  const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
+
+  return [
+    'u.id',
+    'u.name',
+    'u.email',
+    hasCpfColumn ? 'u.cpf' : 'NULL AS cpf',
+    'u.email_verified_at',
+    'u.password_hash',
+    'u.phone',
+    'u.street',
+    'u.number',
+    'u.complement',
+    'u.bairro',
+    'u.city',
+    'u.state',
+    'u.cep',
+    'u.token_version',
+    hasFirebaseUidColumn ? 'u.firebase_uid' : 'NULL AS firebase_uid',
+    `CASE
+       WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
+       WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
+       ELSE 'client'
+     END AS role`,
+    'b.id AS broker_id',
+    'b.status AS broker_status',
+    'b.profile_type AS broker_profile_type',
+    'b.creci AS creci',
+    'bd.status AS broker_documents_status',
+  ].join(', ');
+}
+
 function mapProfile(row: AuthUserRow): ProfileType {
   return row.role === 'auxiliary_administrative'
     ? 'auxiliary_administrative'
@@ -128,20 +190,10 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   }
 
   try {
+    const userSelectClause = await buildUserSelectClause();
     const [rows] = await authDb.query<AuthUserRow[]>(
       `
-        SELECT u.id, u.name, u.email, u.cpf, u.email_verified_at, u.password_hash, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
-               u.token_version,
-               CASE
-                 WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
-                 WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
-                 ELSE 'client'
-               END AS role,
-               b.id AS broker_id,
-               b.status AS broker_status,
-               b.profile_type AS broker_profile_type,
-               b.creci AS creci,
-               bd.status AS broker_documents_status
+        SELECT ${userSelectClause}
         FROM users u
         LEFT JOIN brokers b ON u.id = b.id
         LEFT JOIN broker_documents bd ON b.id = bd.broker_id
@@ -213,16 +265,20 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       throw new InvalidInputError('Email não disponível no token do Google.');
     }
 
+    const userSelectClause = await buildUserSelectClause();
+    const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
+    const lookupWhere = hasFirebaseUidColumn
+      ? 'WHERE u.firebase_uid = ? OR u.email = ?'
+      : 'WHERE u.email = ?';
+    const lookupParams = hasFirebaseUidColumn ? [uid, email] : [email];
     const [existingRows] = await authDb.query<AuthUserRow[]>(
-      `SELECT u.id, u.name, u.email, u.cpf, u.email_verified_at, u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.firebase_uid, u.token_version,
-              b.id AS broker_id, b.status AS broker_status, b.profile_type AS broker_profile_type, b.creci AS creci,
-              bd.status AS broker_documents_status
+      `SELECT ${userSelectClause}
          FROM users u
          LEFT JOIN brokers b ON u.id = b.id
          LEFT JOIN broker_documents bd ON u.id = bd.broker_id
-        WHERE u.firebase_uid = ? OR u.email = ?
+        ${lookupWhere}
         LIMIT 1`,
-      [uid, email],
+      lookupParams,
     );
 
     if (existingRows.length === 0) {
@@ -242,7 +298,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
     }
 
     const row = existingRows[0];
-    if (!row.firebase_uid) {
+    if (hasFirebaseUidColumn && !row.firebase_uid) {
       await authDb.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
     }
     if (decoded.email_verified === true && row.email_verified_at == null) {

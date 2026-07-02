@@ -10,5 +10,5 @@ export function normalizeCreci(value: unknown): string {
 
 export function hasValidCreci(value: unknown): boolean {
   const normalized = normalizeCreci(value);
-  return CRECI_REGEX.test(normalized);
+  return normalized.length <= 8 && CRECI_REGEX.test(normalized);
 }

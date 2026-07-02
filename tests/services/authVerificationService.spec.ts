@@ -223,7 +223,7 @@ describe('authVerificationService', () => {
     expect(emailResult.exists).toBe(false);
 
     queryMock.mockResolvedValueOnce([[]]);
-    const creciResult = await checkCreci({ creci: '12345678-A' });
+    const creciResult = await checkCreci({ creci: '123456-A' });
     expect(creciResult.exists).toBe(false);
   });
 });

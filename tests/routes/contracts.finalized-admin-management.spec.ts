@@ -39,12 +39,16 @@ vi.mock('../../src/database/connection', () => ({
   },
 }));
 
-vi.mock('../../src/config/cloudinary', () => ({
-  __esModule: true,
-  default: {},
-  uploadToCloudinary: vi.fn(),
-  deleteCloudinaryAsset: deleteCloudinaryAssetMock,
-}));
+vi.mock('../../src/config/cloudinary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/config/cloudinary')>();
+  return {
+    ...actual,
+    __esModule: true,
+    default: {},
+    uploadToCloudinary: vi.fn(),
+    deleteCloudinaryAsset: deleteCloudinaryAssetMock,
+  };
+});
 
 vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,

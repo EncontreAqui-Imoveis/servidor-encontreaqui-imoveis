@@ -14,9 +14,13 @@ vi.mock('../../src/database/connection', () => ({
   },
 }));
 
-vi.mock('../../src/config/cloudinary', () => ({
-  uploadToCloudinary: vi.fn(),
-}));
+vi.mock('../../src/config/cloudinary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/config/cloudinary')>();
+  return {
+    ...actual,
+    uploadToCloudinary: vi.fn(),
+  };
+});
 
 vi.mock('../../src/services/notificationService', () => ({
   notifyAdmins: vi.fn(),

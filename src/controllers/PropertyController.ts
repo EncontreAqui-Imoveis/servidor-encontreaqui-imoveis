@@ -500,14 +500,10 @@ function mapProperty(
 
 class PropertyController {
   async show(req: Request, res: Response) {
-    const propertyId = Number(req.params.id);
-
-    if (Number.isNaN(propertyId)) {
-      return res.status(400).json({ error: "Identificador de imóvel inválido." });
-    }
-
     try {
-      const property = await getPropertyByIdService(propertyId);
+      const property = await getPropertyByPublicLookupService(req.params.id, {
+        publicOnly: false,
+      });
 
       if (!property) {
         return res.status(404).json({ error: "Imóvel não encontrado." });

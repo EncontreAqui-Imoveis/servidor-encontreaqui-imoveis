@@ -692,7 +692,6 @@ export async function listFeaturedProperties(params: {
       LIMIT ? OFFSET ?
     `, 
     [
-      ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES,
       scope,
       ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES,
       limit,

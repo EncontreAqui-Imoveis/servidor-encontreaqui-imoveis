@@ -680,10 +680,10 @@ export async function listFeaturedProperties(params: {
       GROUP BY p.id, fp.scope, fp.position
       ORDER BY fp.position ASC
       LIMIT ? OFFSET ?
-    `,
+    `, 
     [
-      scope,
       ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES,
+      scope,
       ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES,
       limit,
       offset,

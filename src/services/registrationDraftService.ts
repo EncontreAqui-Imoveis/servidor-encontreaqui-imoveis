@@ -680,6 +680,20 @@ export async function createRegistrationDraft(input: {
     if (existingCreci.length > 0) {
       throw draftError('CRECI_ALREADY_EXISTS', 'Este CRECI ja esta em uso.');
     }
+    const [openDraftByCreci] = await authDb.query<RowDataPacket[]>(
+      `
+        SELECT id
+        FROM registration_drafts
+        WHERE status = 'OPEN'
+          AND profile_type = 'broker'
+          AND creci = ?
+        LIMIT 1
+      `,
+      [normalizedCreci],
+    );
+    if (openDraftByCreci.length > 0) {
+      throw draftError('CRECI_ALREADY_EXISTS', 'Este CRECI ja esta em uso.');
+    }
   }
 
   const createDraftAddress = buildCreateDraftAddressInput(input);
@@ -779,6 +793,21 @@ export async function patchRegistrationDraft(
     const creci = normalizeCreci(body.creci);
     if (!hasValidCreci(creci)) {
       throw draftError('DRAFT_CRICI_INVALID', 'CRECI invalido.');
+    }
+    const [openDraftByCreci] = await authDb.query<RowDataPacket[]>(
+      `
+        SELECT id
+        FROM registration_drafts
+        WHERE status = 'OPEN'
+          AND profile_type = 'broker'
+          AND creci = ?
+          AND id <> ?
+        LIMIT 1
+      `,
+      [creci, draft.id],
+    );
+    if (openDraftByCreci.length > 0) {
+      throw draftError('CRECI_ALREADY_EXISTS', 'Este CRECI ja esta em uso.');
     }
     updates.creci = creci;
   }

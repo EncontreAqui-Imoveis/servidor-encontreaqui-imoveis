@@ -376,7 +376,7 @@ async function fetchPropertyAggregateByLookup(
         ${publicOnly ? "AND p.status = 'approved' AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'" : ''}
       GROUP BY p.id
     `,
-    [...NEGOTIATION_TERMINAL_STATUSES, lookup.value]
+    [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, lookup.value]
   );
 
   return rows?.[0] ?? null;

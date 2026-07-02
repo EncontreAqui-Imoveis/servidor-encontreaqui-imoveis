@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { brokerDb } from "../services/brokerPersistenceService";
 import { RowDataPacket } from "mysql2";
 import AuthRequest from "../middlewares/auth";
-import { uploadToCloudinary } from "../config/cloudinary";
+import { optimizeCloudinaryImageUrl, uploadToCloudinary } from "../config/cloudinary";
 import { requireEnv } from "../config/env";
 import { sanitizeAddressInput } from "../utils/address";
 import { hasValidCreci, normalizeCreci } from "../utils/creci";
@@ -646,7 +646,12 @@ class BrokerController {
                 eh_mobiliada: parseBool(row.eh_mobiliada),
                 valor_condominio: row.valor_condominio != null ? Number(row.valor_condominio) : null,
                 valor_iptu: row.valor_iptu != null ? Number(row.valor_iptu) : null,
-                images: row.images ? row.images.split(",") : [],
+                images: row.images
+                    ? row.images
+                        .split(",")
+                        .map((imageUrl: string) => optimizeCloudinaryImageUrl(imageUrl, { preset: 'thumb' }))
+                        .filter((imageUrl: string | null): imageUrl is string => Boolean(imageUrl))
+                    : [],
                 negotiation_id: row.active_negotiation_id ?? null,
                 active_negotiation_id: row.active_negotiation_id ?? null,
                 negotiation: row.active_negotiation_id

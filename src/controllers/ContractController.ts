@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
-import { deleteCloudinaryAsset } from '../config/cloudinary';
+import { deleteCloudinaryAsset, optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import type { AuthRequest } from '../middlewares/auth';
 import { getRequestId } from '../middlewares/requestContext';
 import {
@@ -1053,7 +1053,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ownerName: row.property_owner_name ?? null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
-    propertyImageUrl: row.property_image_url ?? null,
+    propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'detail' }) ?? null,
     propertyPurpose: row.property_purpose ?? null,
     agencyName: row.capturing_agency_name ?? null,
     agencyAddress: row.capturing_agency_address ?? null,

@@ -660,7 +660,7 @@ export async function listPublicProperties(query: Record<string, unknown>) {
   const total = Number(totalRows[0]?.total ?? 0);
 
   return {
-    properties: rows.map((row) => mapProperty(row, false)),
+    properties: rows.map((row) => mapProperty(row, false, 'thumb')),
     total,
     page: numericPage,
     totalPages: Math.ceil(total / numericLimit),

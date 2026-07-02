@@ -49,6 +49,19 @@ export function generateUploadSignature(folder: string) {
 }
 
 type CloudinaryResourceType = 'image' | 'video' | 'raw';
+export type CloudinaryImagePreset = 'thumb' | 'detail' | 'hero';
+type CloudinaryImageTransformOptions = {
+  preset?: CloudinaryImagePreset;
+  width?: number;
+  quality?: number | 'auto';
+  crop?: 'limit' | 'fill' | 'fit';
+};
+
+export const CLOUDINARY_IMAGE_PRESETS: Record<CloudinaryImagePreset, CloudinaryImageTransformOptions> = {
+  thumb: { preset: 'thumb', width: 480, crop: 'limit', quality: 'auto' },
+  detail: { preset: 'detail', width: 1200, crop: 'limit', quality: 'auto' },
+  hero: { preset: 'hero', width: 1600, crop: 'limit', quality: 'auto' },
+};
 
 type DeleteCloudinaryAssetInput = {
   publicId?: string | null;
@@ -63,6 +76,71 @@ function normalizeResourceType(value: unknown): CloudinaryResourceType | null {
     return normalized;
   }
   return null;
+}
+
+function normalizeCloudinaryHostname(urlValue: string): string {
+  return urlValue.replace(/^https:\/\/res\.cloudinary\.co\//i, 'https://res.cloudinary.com/');
+}
+
+export function optimizeCloudinaryImageUrl(
+  urlValue: string | null | undefined,
+  options: CloudinaryImageTransformOptions = {}
+): string | null {
+  const raw = String(urlValue ?? '').trim();
+  if (!raw) {
+    return null;
+  }
+
+  const normalizedInput = normalizeCloudinaryHostname(raw);
+
+  try {
+    const parsed = new URL(normalizedInput);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'res.cloudinary.com') {
+      return normalizedInput;
+    }
+
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const resourceIndex = segments.findIndex(
+      (segment, index) =>
+        normalizeResourceType(segment) != null && segments[index + 1] === 'upload'
+    );
+
+    if (resourceIndex < 0) {
+      return normalizedInput;
+    }
+
+    const uploadIndex = resourceIndex + 1;
+    const afterUpload = segments.slice(uploadIndex + 1);
+    const versionIndex = afterUpload.findIndex((segment) => /^v\d+$/i.test(segment));
+    const publicIdSegments = versionIndex >= 0 ? afterUpload.slice(versionIndex) : afterUpload;
+
+    const preset = options.preset ? CLOUDINARY_IMAGE_PRESETS[options.preset] : null;
+    const effectiveWidth = options.width ?? preset?.width;
+    const effectiveCrop = options.crop ?? preset?.crop ?? 'limit';
+    const effectiveQuality = options.quality ?? preset?.quality ?? 'auto';
+
+    const transformations = [
+      `c_${effectiveCrop}`,
+      effectiveWidth ? `w_${Math.round(effectiveWidth)}` : null,
+      effectiveQuality != null ? `q_${effectiveQuality}` : 'q_auto',
+      'f_auto',
+    ].filter(Boolean);
+
+    const rebuiltPath = [
+      ...segments.slice(0, uploadIndex + 1),
+      ...transformations,
+      ...publicIdSegments,
+    ].join('/');
+
+    parsed.pathname = `/${rebuiltPath}`;
+    return parsed.toString();
+  } catch {
+    return normalizedInput;
+  }
+}
+
+export function getCloudinaryImagePreset(preset: CloudinaryImagePreset): CloudinaryImageTransformOptions {
+  return CLOUDINARY_IMAGE_PRESETS[preset];
 }
 
 function resolveCloudinaryReferenceFromUrl(urlValue: string): {
@@ -209,7 +287,7 @@ function uploadByStream(
           return reject(mapCloudinaryError(error));
         }
         resolve({
-          url: result.secure_url,
+          url: optimizeCloudinaryImageUrl(result.secure_url, { preset: 'hero' }) ?? result.secure_url,
           public_id: result.public_id,
         });
       }
@@ -232,7 +310,7 @@ async function uploadByPath(
     })) as UploadApiResponse;
 
     return {
-      url: result.secure_url,
+      url: optimizeCloudinaryImageUrl(result.secure_url, { preset: 'hero' }) ?? result.secure_url,
       public_id: result.public_id,
     };
   } catch (error) {
@@ -267,7 +345,7 @@ async function uploadVideoChunked(
       chunk_size: 20 * 1024 * 1024,
     })) as UploadApiResponse;
     return {
-      url: result.secure_url,
+      url: optimizeCloudinaryImageUrl(result.secure_url, { preset: 'hero' }) ?? result.secure_url,
       public_id: result.public_id,
     };
   } catch (error) {

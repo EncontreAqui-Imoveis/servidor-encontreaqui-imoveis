@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import AuthRequest from '../middlewares/auth';
+import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import { getRequestId } from '../middlewares/requestContext';
 import admin from '../config/firebaseAdmin';
 import { createAdminNotification } from '../services/notificationService';
@@ -112,7 +113,12 @@ function stringOrNull(value: unknown): string | null {
 }
 
 function mapFavorite(row: FavoriteRow) {
-  const images = row.images ? row.images.split(',').filter(Boolean) : [];
+  const images = row.images
+    ? row.images
+        .split(',')
+        .map((imageUrl) => optimizeCloudinaryImageUrl(imageUrl, { preset: 'thumb' }))
+        .filter((imageUrl): imageUrl is string => Boolean(imageUrl))
+    : [];
   const agency = row.agency_id
     ? {
         id: Number(row.agency_id),

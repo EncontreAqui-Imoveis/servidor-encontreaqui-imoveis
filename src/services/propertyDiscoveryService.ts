@@ -1,5 +1,6 @@
 import { RowDataPacket } from 'mysql2';
 
+import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import { runPropertyQuery } from './propertyPersistenceService';
 import { runFeaturedPropertiesScopeMigration } from '../database/migrations';
 import {
@@ -316,7 +317,7 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
               ORDER BY n.version DESC, n.id DESC
             ) AS rn
           FROM negotiations n
-          WHERE n.status NOT IN (?, ?, ?, ?, ?)
+          WHERE n.status NOT IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
@@ -351,7 +352,7 @@ function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): st
               ORDER BY n.version DESC, n.id DESC
             ) AS rn
           FROM negotiations n
-          WHERE n.status NOT IN (?, ?, ?, ?, ?)
+          WHERE n.status NOT IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
@@ -399,8 +400,17 @@ export async function getPropertyByPublicLookup(
   return fetchPropertyAggregateByLookup(lookup, options);
 }
 
-export function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
-  const images = row.images ? row.images.split(',').filter(Boolean) : [];
+export function mapProperty(
+  row: PropertyAggregateRow,
+  includeOwnerInfo = false,
+  imagePreset: 'thumb' | 'detail' | 'hero' = 'thumb'
+) {
+  const images = row.images
+    ? row.images
+        .split(',')
+        .map((imageUrl) => optimizeCloudinaryImageUrl(imageUrl, { preset: imagePreset }))
+        .filter((imageUrl): imageUrl is string => Boolean(imageUrl))
+    : [];
   const mergedAmenities = mergePropertyAmenities(row);
   const activeNegotiationId = row.active_negotiation_id ? String(row.active_negotiation_id) : null;
   const activeNegotiationStatus = row.active_negotiation_status ? String(row.active_negotiation_status) : null;
@@ -714,7 +724,7 @@ export async function listFeaturedProperties(params: {
   const total = Number(countRows[0]?.total ?? 0);
 
   return {
-    properties: rows.map((row) => mapProperty(row, false)),
+    properties: rows.map((row) => mapProperty(row, false, 'thumb')),
     total,
     page,
     totalPages: Math.ceil(total / limit),

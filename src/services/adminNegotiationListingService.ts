@@ -1,5 +1,6 @@
 import { RowDataPacket } from 'mysql2';
 
+import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import { adminDb } from './adminPersistenceService';
 
 const NEGOTIATION_INTERNAL_STATUSES = new Set([
@@ -392,7 +393,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyCode: row.property_code ?? null,
     propertyTitle: row.property_title ?? null,
     propertyAddress: row.property_address ?? null,
-    propertyImageUrl: row.property_image_url ?? null,
+    propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'thumb' }) ?? null,
     propertyValue: toNullableNumber(row.property_value),
     capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
@@ -685,7 +686,7 @@ export async function listNegotiationRequestSummary(params: {
       propertyCode: row.property_code ?? null,
       propertyTitle: row.property_title ?? null,
       propertyAddress: row.property_address ?? null,
-      propertyImageUrl: row.property_image_url ?? null,
+      propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'thumb' }) ?? null,
       propertyValue: toNullableNumber(row.property_value),
       proposalCount: Number(row.proposal_count ?? 0),
       updatedAt: toNullableIsoDate(row.latest_updated_at),

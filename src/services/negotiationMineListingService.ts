@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import { RowDataPacket } from 'mysql2/promise';
 
+import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import type { AuthRequest } from '../middlewares/auth';
 import { queryNegotiationRows } from './negotiationPersistenceService';
 
@@ -163,7 +164,7 @@ function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPa
     propertyTitle: row.property_title ?? '',
     propertyCity: row.property_city ?? null,
     propertyState: row.property_state ?? null,
-    propertyImage: row.property_image ?? null,
+    propertyImage: optimizeCloudinaryImageUrl(row.property_image, { preset: 'thumb' }) ?? null,
     status: String(row.status ?? '').trim().toUpperCase(),
     clientName: resolveNegotiationClientName(row),
     clientCpf: resolveNegotiationClientCpf(row),

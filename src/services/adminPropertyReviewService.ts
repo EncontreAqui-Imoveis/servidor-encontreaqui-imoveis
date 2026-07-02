@@ -1,4 +1,5 @@
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
+import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import {
   ApplicationError,
   InternalError,
@@ -106,7 +107,10 @@ function mapAdminProperty(row: PropertyDetailRow) {
           .map((pair) => {
             const [id, url] = pair.split('|');
             const numId = Number(id);
-            return { id: Number.isFinite(numId) ? numId : null, url };
+            return {
+              id: Number.isFinite(numId) ? numId : null,
+              url: optimizeCloudinaryImageUrl(url, { preset: 'thumb' }) ?? url,
+            };
           })
           .filter((item) => item.id !== null && item.url)
       : [];
@@ -243,7 +247,8 @@ export async function getPropertyDetails(propertyId: number) {
     property.images = imageRows
       .map((row) => {
         const imageId = Number(row.id);
-        const imageUrl = typeof row.image_url === 'string' ? row.image_url.trim() : '';
+        const imageUrl =
+          typeof row.image_url === 'string' ? optimizeCloudinaryImageUrl(row.image_url.trim(), { preset: 'thumb' }) ?? '' : '';
         if (!Number.isFinite(imageId) || imageUrl.length === 0) {
           return null;
         }

@@ -18,6 +18,9 @@ import {
 } from "../utils/propertyAmenities";
 import { stripExpiredPromotionFromPublicPayload } from "../utils/promotionPublicWindow";
 import {
+  optimizeCloudinaryImageUrl,
+} from '../config/cloudinary';
+import {
   getPropertyById as getPropertyByIdService,
   getAvailableBairrosWithCount as getAvailableBairrosWithCountService,
   getAvailableCities as getAvailableCitiesService,
@@ -296,8 +299,17 @@ function toBoolean(value: unknown): boolean {
   return value === 1 || value === "1" || value === true;
 }
 
-function mapProperty(row: PropertyAggregateRow, includeOwnerInfo = false) {
-  const images = row.images ? row.images.split(",").filter(Boolean) : [];
+function mapProperty(
+  row: PropertyAggregateRow,
+  includeOwnerInfo = false,
+  imagePreset: 'thumb' | 'detail' | 'hero' = 'thumb'
+) {
+  const images = row.images
+    ? row.images
+        .split(",")
+        .map((imageUrl) => optimizeCloudinaryImageUrl(imageUrl, { preset: imagePreset }))
+        .filter((imageUrl): imageUrl is string => Boolean(imageUrl))
+    : [];
   const mergedAmenities = mergePropertyAmenities(row);
   const activeNegotiationId = stringOrNull(row.active_negotiation_id);
   const activeNegotiationStatus = stringOrNull(row.active_negotiation_status);
@@ -515,7 +527,7 @@ class PropertyController {
       }
       const showOwnerInfo = isOwner || isAdmin;
 
-      return res.status(200).json(mapProperty(property, showOwnerInfo));
+      return res.status(200).json(mapProperty(property, showOwnerInfo, 'detail'));
     } catch (error) {
       console.error("Erro ao buscar imóvel:", error);
       return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });
@@ -537,7 +549,7 @@ class PropertyController {
         return res.status(404).json({ error: "Imóvel não encontrado." });
       }
 
-      return res.status(200).json(mapProperty(property, false));
+      return res.status(200).json(mapProperty(property, false, 'detail'));
     } catch (error) {
       console.error("Erro ao buscar imóvel público:", error);
       return res.status(500).json({ error: "Ocorreu um erro inesperado no servidor." });

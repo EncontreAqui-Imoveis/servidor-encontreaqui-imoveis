@@ -375,6 +375,13 @@ function buildPublicListingWhereClauses(params: {
       selectedTerrenoUnidade = parsed.unidade;
     }
   }
+  // Fallback: aplica o filtro de unidade mesmo sem valores numéricos (só unidade selecionada)
+  if (!selectedTerrenoUnidade && (minAreaTerrenoUnidade || maxAreaTerrenoUnidade)) {
+    const rawUnit = minAreaTerrenoUnidade || maxAreaTerrenoUnidade;
+    if (rawUnit && String(rawUnit).trim() !== '') {
+      selectedTerrenoUnidade = normalizeAreaUnidade(String(rawUnit));
+    }
+  }
   if (selectedTerrenoUnidade) {
     whereClauses.push('p.area_terreno_unidade = ?');
     queryParams.push(selectedTerrenoUnidade);
@@ -642,10 +649,27 @@ export async function listPublicProperties(query: Record<string, unknown>) {
     }
   }
 
+  const areaM2Expr = `
+    GREATEST(
+      COALESCE(
+        CASE p.area_construida_unidade
+          WHEN 'hectare' THEN COALESCE(p.area_construida_valor, p.area_construida) * 10000
+          WHEN 'alqueire' THEN COALESCE(p.area_construida_valor, p.area_construida) * 48400
+          ELSE COALESCE(p.area_construida_m2, p.area_construida_valor, p.area_construida)
+        END, 0),
+      COALESCE(
+        CASE p.area_terreno_unidade
+          WHEN 'hectare' THEN COALESCE(p.area_terreno_valor, p.area_terreno) * 10000
+          WHEN 'alqueire' THEN COALESCE(p.area_terreno_valor, p.area_terreno) * 48400
+          ELSE COALESCE(p.area_terreno_m2, p.area_terreno_valor, p.area_terreno)
+        END, 0)
+    )
+  `.replace(/\s+/g, ' ').trim();
+
   const sortColumnMap: Record<string, string> = {
     price: priceColumn,
     created_at: 'p.created_at',
-    area_construida: 'COALESCE(p.area_construida_m2, p.area_construida)',
+    area_construida: areaM2Expr,
   };
   const sortColumn = sortColumnMap[String(sortBy ?? '').toLowerCase()] ?? 'p.created_at';
   const sortDirection = String(order ?? 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';

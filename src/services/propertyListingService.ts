@@ -4,7 +4,7 @@ import { mapProperty } from './propertyDiscoveryService';
 import { runPropertyQuery } from './propertyPersistenceService';
 import { areaInputToSquareMeters, parseAreaUnidade } from '../utils/propertyAreaUnits';
 import { normalizePropertyType } from '../utils/propertyTypes';
-import { normalizePropertyAmenities } from '../utils/propertyAmenities';
+import { normalizePropertyAmenities, toCanonicalAmenity } from '../utils/propertyAmenities';
 
 type Nullable<T> = T | null;
 
@@ -330,11 +330,13 @@ function buildPublicListingWhereClauses(params: {
   const minAreaTerrenoUnidade = params['min_area_terreno_unidade' as keyof typeof params] ?? params['minAreaTerrenoUnidade' as keyof typeof params] ?? params['min_area_terreno_unit' as keyof typeof params] ?? params['minAreaTerrenoUnit' as keyof typeof params];
   const maxAreaTerrenoUnidade = params['max_area_terreno_unidade' as keyof typeof params] ?? params['maxAreaTerrenoUnidade' as keyof typeof params] ?? params['max_area_terreno_unit' as keyof typeof params] ?? params['maxAreaTerrenoUnit' as keyof typeof params];
 
+  let selectedConstruidaUnidade: string | null = null;
   if (minAreaConstruida != null && String(minAreaConstruida).trim() !== '') {
     const parsed = parseAreaFilterValue(minAreaConstruida, minAreaConstruidaUnidade, 'Filtro de área construída mínima');
     if (parsed.valor != null && parsed.m2 != null) {
       whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) >= ?');
       queryParams.push(parsed.m2);
+      selectedConstruidaUnidade = parsed.unidade;
     }
   }
   if (maxAreaConstruida != null && String(maxAreaConstruida).trim() !== '') {
@@ -342,13 +344,21 @@ function buildPublicListingWhereClauses(params: {
     if (parsed.valor != null && parsed.m2 != null) {
       whereClauses.push('COALESCE(p.area_construida_m2, p.area_construida) <= ?');
       queryParams.push(parsed.m2);
+      selectedConstruidaUnidade = parsed.unidade;
     }
   }
+  if (selectedConstruidaUnidade) {
+    whereClauses.push('p.area_construida_unidade = ?');
+    queryParams.push(selectedConstruidaUnidade);
+  }
+
+  let selectedTerrenoUnidade: string | null = null;
   if (minAreaTerreno != null && String(minAreaTerreno).trim() !== '') {
     const parsed = parseAreaFilterValue(minAreaTerreno, minAreaTerrenoUnidade, 'Filtro de área do terreno mínima');
     if (parsed.valor != null && parsed.m2 != null) {
       whereClauses.push('COALESCE(p.area_terreno_m2, p.area_terreno) >= ?');
       queryParams.push(parsed.m2);
+      selectedTerrenoUnidade = parsed.unidade;
     }
   }
   if (maxAreaTerreno != null && String(maxAreaTerreno).trim() !== '') {
@@ -356,7 +366,12 @@ function buildPublicListingWhereClauses(params: {
     if (parsed.valor != null && parsed.m2 != null) {
       whereClauses.push('COALESCE(p.area_terreno_m2, p.area_terreno) <= ?');
       queryParams.push(parsed.m2);
+      selectedTerrenoUnidade = parsed.unidade;
     }
+  }
+  if (selectedTerrenoUnidade) {
+    whereClauses.push('p.area_terreno_unidade = ?');
+    queryParams.push(selectedTerrenoUnidade);
   }
 
   if (params.bedrooms) {
@@ -418,7 +433,7 @@ function buildPublicListingWhereClauses(params: {
   if (params.amenities && Array.isArray(params.amenities) && params.amenities.length > 0) {
     for (const amenity of params.amenities) {
       whereClauses.push('JSON_CONTAINS(p.amenities, JSON_QUOTE(?)) = 1');
-      queryParams.push(amenity);
+      queryParams.push(toCanonicalAmenity(amenity) || amenity);
     }
   }
 

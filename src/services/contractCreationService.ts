@@ -52,6 +52,8 @@ export async function createContractFromApprovedNegotiation(
       client_name: string | null;
       client_cpf: string | null;
       property_title: string | null;
+      property_owner_name: string | null;
+      property_owner_phone: string | null;
     }>>(
       `
         SELECT
@@ -62,7 +64,9 @@ export async function createContractFromApprovedNegotiation(
           n.selling_broker_id,
           n.client_name,
           n.client_cpf,
-          p.title AS property_title
+          p.title AS property_title,
+          p.owner_name AS property_owner_name,
+          p.owner_phone AS property_owner_phone
         FROM negotiations n
         JOIN properties p ON p.id = n.property_id
         WHERE n.id = ?
@@ -112,6 +116,7 @@ export async function createContractFromApprovedNegotiation(
           NULL AS property_image_url,
           p.owner_id AS property_owner_id,
           p.owner_name AS property_owner_name,
+          p.owner_phone AS property_owner_phone,
           NULL AS capturing_broker_name,
           NULL AS selling_broker_name,
           NULL AS seller_client_name,
@@ -155,7 +160,7 @@ export async function createContractFromApprovedNegotiation(
           ?,
           ?,
           'AWAITING_DOCS',
-          NULL,
+          CAST(JSON_OBJECT('nome', ?, 'telefone', ?) AS JSON),
           CAST(JSON_OBJECT('clientName', ?, 'clientCpf', ?) AS JSON),
           NULL,
           'PENDING',
@@ -166,7 +171,14 @@ export async function createContractFromApprovedNegotiation(
           CURRENT_TIMESTAMP
         )
       `,
-      [negotiationId, negotiation.property_id, negotiation.client_name, negotiation.client_cpf],
+      [
+        negotiationId,
+        negotiation.property_id,
+        negotiation.property_owner_name,
+        negotiation.property_owner_phone,
+        negotiation.client_name,
+        negotiation.client_cpf,
+      ],
     );
 
     const [createdRows] = await tx.query<Array<RowDataPacket & ContractRow>>(
@@ -197,6 +209,7 @@ export async function createContractFromApprovedNegotiation(
           NULL AS property_image_url,
           p.owner_id AS property_owner_id,
           p.owner_name AS property_owner_name,
+          p.owner_phone AS property_owner_phone,
           NULL AS capturing_broker_name,
           NULL AS selling_broker_name,
           NULL AS seller_client_name,

@@ -43,7 +43,10 @@ describe('Contract response shape contracts', () => {
             negotiation_id: 'neg-1',
             property_id: 101,
             status: 'AWAITING_SIGNATURES',
-            seller_info: JSON.stringify({ maritalStatus: 'Casado' }),
+            seller_info: JSON.stringify({
+              nome: 'Proprietário',
+              telefone: '(62) 99999-0000',
+            }),
             buyer_info: JSON.stringify({ maritalStatus: 'Solteiro' }),
             commission_data: JSON.stringify({ saleValue: 350000 }),
             workflow_metadata: JSON.stringify({
@@ -101,7 +104,14 @@ describe('Contract response shape contracts', () => {
         negotiationId: 'neg-1',
         propertyId: 101,
         status: 'AWAITING_SIGNATURES',
-        sellerInfo: { maritalStatus: 'Casado' },
+        ownerInfo: {
+          nome: 'Proprietário',
+          telefone: '(62) 99999-0000',
+        },
+        sellerInfo: {
+          nome: 'Proprietário',
+          telefone: '(62) 99999-0000',
+        },
         buyerInfo: { maritalStatus: 'Solteiro' },
         commissionData: { saleValue: 350000 },
         workflowMetadata: {
@@ -357,8 +367,12 @@ describe('Contract response shape contracts', () => {
 
     const response = await request(clientApp).get('/contracts/contract-redact-1');
     expect(response.status).toBe(200);
-    expect(response.body.contract.ownerInfo).toEqual({ nome: 'Proprietario' });
-    expect(response.body.contract.sellerInfo).toEqual({ nome: 'Proprietario' });
+    expect(response.body.contract.ownerInfo).toEqual({
+      nome: 'Proprietario',
+    });
+    expect(response.body.contract.sellerInfo).toEqual({
+      nome: 'Proprietario',
+    });
     expect(response.body.contract.commissionData).toEqual({});
     expect(response.body.contract.responsibleUserIds).toEqual([30003, 30005]);
     expect(response.body.documents).toEqual([

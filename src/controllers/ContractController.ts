@@ -174,6 +174,7 @@ export interface ContractRow extends RowDataPacket {
   property_image_url: string | null;
   property_owner_id: number | null;
   property_owner_name: string | null;
+  property_owner_phone: string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
   seller_client_name: string | null;
@@ -1002,6 +1003,26 @@ function redactOwnerInfoByRole(
   return Object.fromEntries(redactedEntries);
 }
 
+function buildOwnerInfoFromContractRow(row: ContractRow): Record<string, unknown> {
+  const fromStored = parseStoredJsonObject(row.seller_info);
+  if (Object.keys(fromStored).length > 0) {
+    return fromStored;
+  }
+
+  const fallback: Record<string, unknown> = {};
+  const ownerName = String(row.property_owner_name ?? '').trim();
+  const ownerPhone = String(row.property_owner_phone ?? '').trim();
+
+  if (ownerName) {
+    fallback.nome = ownerName;
+  }
+  if (ownerPhone) {
+    fallback.telefone = ownerPhone;
+  }
+
+  return fallback;
+}
+
 function shouldExposeOwnerSensitiveDocument(
   input: {
     side: ContractDocumentSide | null;
@@ -1017,7 +1038,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const documentRequirements = resolveDocumentRequirementsForContract(
     buildContractDocumentRuleContextFromRow(row)
   );
-  const ownerInfo = parseStoredJsonObject(row.seller_info);
+  const ownerInfo = buildOwnerInfoFromContractRow(row);
   const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
   const ownerInfoForViewer = redactOwnerInfoByRole(ownerInfo, canViewSensitiveData);
   const viewerSide = resolveContractViewerSide(req, row);
@@ -1051,6 +1072,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     sellingBrokerName: row.selling_broker_name ?? null,
     ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
     ownerName: row.property_owner_name ?? null,
+    propertyOwnerPhone: row.property_owner_phone ?? null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
     propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'detail' }) ?? null,
@@ -1803,6 +1825,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     ) AS property_image_url,
     p.owner_id AS property_owner_id,
     COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
+    p.owner_phone AS property_owner_phone,
     capture_user.name AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
     seller_client_user.name AS seller_client_name,

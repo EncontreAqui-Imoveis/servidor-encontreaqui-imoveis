@@ -38,6 +38,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   negotiation_status: string | null;
   property_id: number | string;
   created_at: string | Date | null;
+  property_owner_name: string | null;
   capturing_broker_id: number | string | null;
   selling_broker_id: number | string | null;
   seller_client_id: number | string | null;
@@ -395,6 +396,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyAddress: row.property_address ?? null,
     propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'thumb' }) ?? null,
     propertyValue: toNullableNumber(row.property_value),
+    propertyOwnerName: row.property_owner_name ?? null,
     capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
     sellerClientId: row.seller_client_id != null ? Number(row.seller_client_id) : null,
@@ -455,6 +457,7 @@ export async function listNegotiations(params: {
         n.status AS negotiation_status,
         n.property_id,
         ${timeSql.nEventAtSelect} AS created_at,
+        COALESCE(property_owner_user.name, p.owner_name) AS property_owner_name,
         n.capturing_broker_id,
         n.selling_broker_id,
         n.seller_client_id,
@@ -489,6 +492,7 @@ export async function listNegotiations(params: {
         draft_doc.metadata_json AS draft_document_metadata_json
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
+      LEFT JOIN users property_owner_user ON property_owner_user.id = p.owner_id
       LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
       LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
@@ -741,6 +745,7 @@ export async function listNegotiationRequestsByProperty(params: {
         n.status AS negotiation_status,
         n.property_id,
         ${timeSql.nEventAtSelect} AS created_at,
+        COALESCE(property_owner_user.name, p.owner_name) AS property_owner_name,
         n.capturing_broker_id,
         n.selling_broker_id,
         n.seller_client_id,
@@ -775,6 +780,7 @@ export async function listNegotiationRequestsByProperty(params: {
         draft_doc.metadata_json AS draft_document_metadata_json
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
+      LEFT JOIN users property_owner_user ON property_owner_user.id = p.owner_id
       LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
       LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id

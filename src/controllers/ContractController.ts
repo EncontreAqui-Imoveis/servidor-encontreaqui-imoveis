@@ -1826,7 +1826,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     p.owner_id AS property_owner_id,
     COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
     p.owner_phone AS property_owner_phone,
-    capture_user.name AS capturing_broker_name,
+    COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
     seller_client_user.name AS seller_client_name,
     buyer_user.name AS buyer_client_name,
@@ -1836,6 +1836,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
   FROM contracts c
   JOIN negotiations n ON n.id = c.negotiation_id
   JOIN properties p ON p.id = c.property_id
+  LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
   LEFT JOIN brokers capture_broker ON capture_broker.id = n.capturing_broker_id
   LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id

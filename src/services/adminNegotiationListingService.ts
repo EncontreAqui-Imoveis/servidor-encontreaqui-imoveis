@@ -472,7 +472,7 @@ export async function listNegotiations(params: {
         ) AS property_image_url,
         n.final_value,
         n.proposal_validity_date,
-        capture_user.name AS capturing_broker_name,
+        COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
         seller_user.name AS selling_broker_name,
         seller_client_user.name AS seller_client_name,
         ${clientSql.clientName} AS client_name,
@@ -489,6 +489,7 @@ export async function listNegotiations(params: {
         draft_doc.metadata_json AS draft_document_metadata_json
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
+      LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
       LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
       LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
@@ -757,7 +758,7 @@ export async function listNegotiationRequestsByProperty(params: {
         ) AS property_image_url,
         n.final_value,
         n.proposal_validity_date,
-        capture_user.name AS capturing_broker_name,
+        COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
         seller_user.name AS selling_broker_name,
         seller_client_user.name AS seller_client_name,
         ${clientSql.clientName} AS client_name,
@@ -774,6 +775,7 @@ export async function listNegotiationRequestsByProperty(params: {
         draft_doc.metadata_json AS draft_document_metadata_json
       FROM negotiations n
       JOIN properties p ON p.id = n.property_id
+      LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
       LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
       LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id

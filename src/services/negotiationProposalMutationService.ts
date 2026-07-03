@@ -429,9 +429,10 @@ async function updateProposalFromWizardInternal(
       }
       proposalValue = Number(parsedDeclared.toFixed(2));
     }
-    const requestedCapturingBrokerId = isClientUser || isAdminUser
-      ? normalizeOptionalPositiveId(property.broker_id)
-      : normalizeOptionalPositiveId(req.userId);
+    const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
+    const existingCapturingBrokerId = normalizeOptionalPositiveId(nRow.capturing_broker_id);
+    const requestedCapturingBrokerId =
+      propertyBrokerId ?? existingCapturingBrokerId ?? (isBrokerUser ? normalizeOptionalPositiveId(req.userId) : null);
     if (isBrokerUser && requestedCapturingBrokerId === null) {
       await tx.rollback();
       return sendProposalError(
@@ -441,14 +442,17 @@ async function updateProposalFromWizardInternal(
         'PROPOSAL_VALIDATION_FAILED'
       );
     }
-    if (normalizeOptionalPositiveId(nRow.capturing_broker_id) !== requestedCapturingBrokerId) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        400,
-        'Corretor captador incompativel com a negociacao existente.',
-        'CONFLICT'
-      );
+    if (
+      existingCapturingBrokerId != null &&
+      requestedCapturingBrokerId != null &&
+      existingCapturingBrokerId !== requestedCapturingBrokerId
+    ) {
+      console.warn('Normalizando captador legado da proposta ao salvar minuta.', {
+        negotiationId,
+        existingCapturingBrokerId,
+        requestedCapturingBrokerId,
+        propertyBrokerId,
+      });
     }
 
     const cpfKey = normalizeProposalCpfKey(payload.clientCpf);
@@ -540,6 +544,8 @@ async function updateProposalFromWizardInternal(
         UPDATE negotiations
         SET
           property_id = ?,
+          capturing_broker_id = ?,
+          selling_broker_id = ?,
           client_name = ?,
           client_cpf = ?,
           status = ?,
@@ -552,6 +558,8 @@ async function updateProposalFromWizardInternal(
       `,
       [
         payload.propertyId,
+        requestedCapturingBrokerId,
+        requestedCapturingBrokerId,
         payload.clientName,
         payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
@@ -582,9 +590,9 @@ async function updateProposalFromWizardInternal(
         JSON.stringify({
           source: 'mobile_proposal_wizard_update',
           payment: payload.pagamento,
-          sellerBrokerId: normalizeOptionalPositiveId(req.userId),
+          sellerBrokerId: requestedCapturingBrokerId,
           sellerClientId,
-          capturingBrokerId: normalizeOptionalPositiveId(req.userId),
+          capturingBrokerId: requestedCapturingBrokerId,
           buyerClientId,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
@@ -597,8 +605,9 @@ async function updateProposalFromWizardInternal(
       clientName: payload.clientName,
       clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
-      brokerName: (await resolveUserNameById(tx, nRow.capturing_broker_id)) ?? '',
-      sellingBrokerName: await resolveUserNameById(tx, nRow.selling_broker_id),
+      brokerName: (await resolveUserNameById(tx, requestedCapturingBrokerId ?? nRow.capturing_broker_id)) ?? '',
+      sellingBrokerName:
+        (await resolveUserNameById(tx, requestedCapturingBrokerId ?? nRow.selling_broker_id)) ?? null,
       value: proposalValue,
       payment: {
         cash: payload.pagamento.dinheiro,

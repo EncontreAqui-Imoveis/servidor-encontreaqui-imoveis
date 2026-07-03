@@ -444,9 +444,8 @@ export async function generateProposalFromProperty(
       });
     }
 
-    const requestedCapturingBrokerId = isClientUser || isAdminUser
-      ? normalizeOptionalPositiveId(property.broker_id)
-      : normalizeOptionalPositiveId(req.userId);
+    const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
+    const requestedCapturingBrokerId = propertyBrokerId ?? (isBrokerUser ? normalizeOptionalPositiveId(req.userId) : null);
     if (isBrokerUser && requestedCapturingBrokerId === null) {
       await tx.rollback();
       return res.status(400).json({ error: 'Corretor captador invalido para esta proposta.' });

@@ -2,7 +2,7 @@ import { RowDataPacket } from 'mysql2';
 
 import { mapProperty } from './propertyDiscoveryService';
 import { runPropertyQuery } from './propertyPersistenceService';
-import { areaInputToSquareMeters, parseAreaUnidade } from '../utils/propertyAreaUnits';
+import { areaInputToSquareMeters, parseAreaUnidade, normalizeAreaUnidade } from '../utils/propertyAreaUnits';
 import { normalizePropertyType } from '../utils/propertyTypes';
 import { normalizePropertyAmenities, toCanonicalAmenity } from '../utils/propertyAmenities';
 
@@ -347,9 +347,15 @@ function buildPublicListingWhereClauses(params: {
       selectedConstruidaUnidade = parsed.unidade;
     }
   }
+  if (!selectedConstruidaUnidade && (minAreaConstruidaUnidade || maxAreaConstruidaUnidade)) {
+    const rawUnit = minAreaConstruidaUnidade || maxAreaConstruidaUnidade;
+    if (rawUnit && String(rawUnit).trim() !== '') {
+      selectedConstruidaUnidade = normalizeAreaUnidade(String(rawUnit));
+    }
+  }
   if (selectedConstruidaUnidade) {
-    whereClauses.push('p.area_construida_unidade = ?');
-    queryParams.push(selectedConstruidaUnidade);
+    whereClauses.push('(p.area_construida_unidade = ? OR p.area_terreno_unidade = ?)');
+    queryParams.push(selectedConstruidaUnidade, selectedConstruidaUnidade);
   }
 
   let selectedTerrenoUnidade: string | null = null;
@@ -554,8 +560,14 @@ export async function listPublicProperties(query: Record<string, unknown>) {
   const tem_automacao = query.tem_automacao;
   const tem_ar_condicionado = query.tem_ar_condicionado;
   const eh_mobiliada = query.eh_mobiliada;
-  const sortBy = query.sortBy ?? query.sort;
-  const order = query.order;
+  let sortBy = query.sortBy ?? query.sort;
+  let order = query.order;
+
+  if (typeof sortBy === 'string' && sortBy.includes(':')) {
+    const parts = sortBy.split(':');
+    sortBy = parts[0];
+    order = parts[1];
+  }
   const searchTermRaw = query.searchTerm ?? query.search;
   const searchTerm =
     typeof searchTermRaw === 'string' && searchTermRaw.trim().length > 0

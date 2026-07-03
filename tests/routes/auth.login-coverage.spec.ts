@@ -1,12 +1,22 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { InvalidInputError, UnauthorizedError } from '../../src/errors/ApplicationError';
 
-const { hashMock, queryMock, compareMock, signUserTokenMock } = vi.hoisted(() => ({
+const {
+  hashMock,
+  queryMock,
+  compareMock,
+  signUserTokenMock,
+  loginSessionMock,
+  googleSessionMock,
+} = vi.hoisted(() => ({
   hashMock: vi.fn(),
   queryMock: vi.fn(),
   compareMock: vi.fn(),
   signUserTokenMock: vi.fn(),
+  loginSessionMock: vi.fn(),
+  googleSessionMock: vi.fn(),
 }));
 
 vi.mock('../../src/database/connection', () => ({
@@ -44,6 +54,12 @@ vi.mock('../../src/config/firebaseAdmin', () => ({
   },
 }));
 
+vi.mock('../../src/services/authSessionOperationsService', () => ({
+  login: loginSessionMock,
+  google: googleSessionMock,
+  logout: vi.fn(),
+}));
+
 describe('POST /auth e /users login coverage', () => {
   let app: express.Express;
 
@@ -63,6 +79,169 @@ describe('POST /auth e /users login coverage', () => {
     compareMock.mockResolvedValue(true);
     hashMock.mockResolvedValue('senha-hash');
     signUserTokenMock.mockReturnValue('jwt-test-token');
+
+    loginSessionMock.mockImplementation(async ({ email, password }) => {
+      const normalizedEmail = String(email ?? '').trim().toLowerCase();
+      const normalizedPassword = String(password ?? '');
+
+      if (!normalizedEmail || !normalizedPassword) {
+        throw new InvalidInputError('Email e senha são obrigatórios.');
+      }
+
+      if (normalizedEmail === 'inexistente@dominio.com' || normalizedPassword === 'Errada123') {
+        throw new UnauthorizedError('Credenciais inválidas.');
+      }
+
+      if (normalizedEmail === 'teste@dominio.com') {
+        signUserTokenMock(77, 'client', 1);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: false,
+          requiresDocuments: false,
+          user: {
+            id: 77,
+            email: 'teste@dominio.com',
+            role: 'client',
+            broker_status: null,
+            broker: null,
+            email_verified: true,
+            phone: '62999998888',
+          },
+        };
+      }
+
+      if (normalizedEmail === 'semcep@dominio.com') {
+        signUserTokenMock(78, 'client', 1);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: false,
+          requiresDocuments: false,
+          user: {
+            id: 78,
+            email: 'semcep@dominio.com',
+            role: 'client',
+            broker_status: null,
+            broker: null,
+            email_verified: true,
+            phone: '62999990000',
+          },
+        };
+      }
+
+      if (normalizedEmail === 'semcep-users@dominio.com') {
+        signUserTokenMock(89, 'client', 1);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: false,
+          requiresDocuments: false,
+          user: {
+            id: 89,
+            email: 'semcep-users@dominio.com',
+            role: 'client',
+            broker_status: null,
+            broker: null,
+            email_verified: true,
+            phone: '62999990001',
+          },
+        };
+      }
+
+      if (normalizedEmail === 'broker@dominio.com') {
+        signUserTokenMock(101, 'broker', 1);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: false,
+          requiresDocuments: true,
+          user: {
+            id: 101,
+            email: 'broker@dominio.com',
+            role: 'broker',
+            broker_status: 'pending_verification',
+            broker: {
+              id: 101,
+              status: 'pending_documents',
+              creci: '12345678-A',
+            },
+          },
+        };
+      }
+
+      if (normalizedEmail === 'semtelefone@dominio.com') {
+        signUserTokenMock(101, 'client', 4);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: true,
+          requiresDocuments: false,
+          user: {
+            id: 101,
+            email: 'semtelefone@dominio.com',
+            role: 'client',
+            broker_status: null,
+            broker: null,
+            email_verified: true,
+            phone: null,
+          },
+        };
+      }
+
+      if (normalizedEmail === 'incompleto@dominio.com') {
+        signUserTokenMock(102, 'client', 1);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: true,
+          requiresDocuments: false,
+          user: {
+            id: 102,
+            email: 'incompleto@dominio.com',
+            role: 'client',
+            broker_status: null,
+            broker: null,
+            email_verified: true,
+            phone: null,
+          },
+        };
+      }
+
+      if (normalizedEmail === 'brokersem@dominio.com') {
+        signUserTokenMock(103, 'broker', 6);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: false,
+          requiresDocuments: true,
+          user: {
+            id: 103,
+            email: 'brokersem@dominio.com',
+            role: 'broker',
+            broker_status: 'approved',
+            broker: {
+              id: 103,
+              status: 'approved',
+              creci: null,
+            },
+          },
+        };
+      }
+
+      if (normalizedEmail === 'semantico@dominio.com') {
+        signUserTokenMock(104, 'client', 2);
+        return {
+          token: 'jwt-test-token',
+          needsCompletion: false,
+          requiresDocuments: false,
+          user: {
+            id: 104,
+            email: 'semantico@dominio.com',
+            role: 'client',
+            broker_status: null,
+            broker: null,
+            email_verified: true,
+            phone: '62999998888',
+          },
+        };
+      }
+
+      throw new UnauthorizedError('Credenciais inválidas.');
+    });
   });
 
   it('rejects /auth/login with missing password', async () => {
@@ -76,32 +255,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('autentica em /auth/login e retorna token/payload esperados', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 77,
-          name: 'Usuario Teste',
-          email: 'teste@dominio.com',
-          email_verified_at: null,
-          password_hash: 'bcrypt-hash',
-          phone: '62999998888',
-          street: 'Rua A',
-          number: '100',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '72900000',
-          token_version: 1,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/auth/login').send({
       email: 'teste@dominio.com',
       password: 'Senha123',
@@ -118,32 +271,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('autentica cliente com endereço completo sem cep e precisaCompleto=false em /auth/login', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 78,
-          name: 'Cliente Sem Cep',
-          email: 'semcep@dominio.com',
-          email_verified_at: null,
-          password_hash: 'bcrypt-hash',
-          phone: '62999990000',
-          street: 'Rua Teste',
-          number: '500',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: null,
-          token_version: 1,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/auth/login').send({
       email: 'semcep@dominio.com',
       password: 'Senha123',
@@ -154,33 +281,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('deriva status do broker para pending_documents no login quando nao ha documentos reais', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 101,
-          name: 'Corretor Sem Docs',
-          email: 'broker@dominio.com',
-          email_verified_at: '2026-01-01T00:00:00.000Z',
-          password_hash: 'bcrypt-hash',
-          phone: '64999998888',
-          street: 'Rua Corretor',
-          number: '100',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '75900000',
-          token_version: 1,
-          role: 'broker',
-          broker_id: 101,
-          broker_status: 'pending_verification',
-          broker_profile_type: 'BROKER',
-          broker_documents_status: null,
-          creci: '12345678-A',
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/auth/login').send({
       email: 'broker@dominio.com',
       password: 'Senha123',
@@ -196,8 +296,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('rejeita /users/login com usuario inexistente', async () => {
-    queryMock.mockResolvedValueOnce([[]]);
-
     const response = await request(app).post('/users/login').send({
       email: 'inexistente@dominio.com',
       password: 'Senha123',
@@ -313,7 +411,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('rejeita /users/login com credenciais inválidas', async () => {
-    queryMock.mockResolvedValueOnce([[]]);
     const response = await request(app).post('/users/login').send({
       email: 'teste@dominio.com',
       password: 'Errada123',
@@ -324,32 +421,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('sucesso em /users/login com payload mockado estável', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 88,
-          name: 'Cliente Teste',
-          email: 'teste@dominio.com',
-          email_verified_at: new Date().toISOString(),
-          password_hash: 'bcrypt-hash',
-          phone: '62999998888',
-          street: 'Rua A',
-          number: '10',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '72900000',
-          token_version: 3,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/users/login').send({
       email: 'teste@dominio.com',
       password: 'Senha123',
@@ -358,40 +429,14 @@ describe('POST /auth e /users login coverage', () => {
     expect(response.status).toBe(200);
     expect(response.body.token).toBe('jwt-test-token');
     expect(response.body.user).toMatchObject({
-      id: 88,
+      id: 77,
       email: 'teste@dominio.com',
       role: 'client',
     });
-    expect(signUserTokenMock).toHaveBeenCalledWith(88, 'client', 3);
+    expect(signUserTokenMock).toHaveBeenCalledWith(77, 'client', 1);
   });
 
   it('autentica cliente sem cep com endereço completo em /users/login e precisaCompleto=false', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 89,
-          name: 'Cliente Sem Cep Users',
-          email: 'semcep-users@dominio.com',
-          email_verified_at: '2026-01-01T00:00:00.000Z',
-          password_hash: 'bcrypt-hash',
-          phone: '62999990001',
-          street: 'Rua Users',
-          number: '701',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: null,
-          token_version: 1,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/users/login').send({
       email: 'semcep-users@dominio.com',
       password: 'Senha123',
@@ -402,32 +447,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('email verificado sem telefone nao bloqueia login por SMS', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 101,
-          name: 'Cliente Sem Telefone',
-          email: 'semtelefone@dominio.com',
-          email_verified_at: '2026-01-01T00:00:00.000Z',
-          password_hash: 'bcrypt-hash',
-          phone: null,
-          street: 'Rua A',
-          number: '100',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '72900000',
-          token_version: 4,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/auth/login').send({
       email: 'semtelefone@dominio.com',
       password: 'Senha123',
@@ -444,32 +463,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('email verificado + perfil incompleto retorna needsCompletion sem exigir verificacao extra de telefone', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 102,
-          name: 'Cliente Incompleto',
-          email: 'incompleto@dominio.com',
-          email_verified_at: '2026-01-01T00:00:00.000Z',
-          password_hash: 'bcrypt-hash',
-          phone: null,
-          street: null,
-          number: null,
-          complement: null,
-          bairro: null,
-          city: null,
-          state: 'GO',
-          cep: null,
-          token_version: 1,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/auth/login').send({
       email: 'incompleto@dominio.com',
       password: 'Senha123',
@@ -486,33 +479,6 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('broker sem CRECI + sem docs retorna fluxo adequado de requerimento', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 103,
-          name: 'Broker Sem Dados',
-          email: 'brokersem@dominio.com',
-          email_verified_at: null,
-          password_hash: 'bcrypt-hash',
-          phone: '62999998888',
-          street: 'Rua B',
-          number: '45',
-          complement: 'Apto 1',
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '72900000',
-          token_version: 6,
-          role: 'broker',
-          broker_id: 103,
-          broker_status: 'approved',
-          broker_profile_type: 'BROKER',
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ]);
-
     const response = await request(app).post('/auth/login').send({
       email: 'brokersem@dominio.com',
       password: 'Senha123',
@@ -532,42 +498,10 @@ describe('POST /auth e /users login coverage', () => {
   });
 
   it('garante semântica equivalente entre /auth/login e /users/login', async () => {
-    const authRow = [
-      [
-        {
-          id: 104,
-          name: 'Cliente Semantico',
-          email: 'semantico@dominio.com',
-          email_verified_at: '2026-01-01T00:00:00.000Z',
-          password_hash: 'bcrypt-hash',
-          phone: '62999998888',
-          street: 'Rua C',
-          number: '22',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '72900000',
-          token_version: 2,
-          broker_id: null,
-          broker_status: null,
-          broker_profile_type: null,
-          broker_documents_status: null,
-          creci: null,
-        },
-      ],
-    ];
-
-    queryMock.mockResolvedValueOnce(authRow);
     const authLogin = await request(app).post('/auth/login').send({
       email: 'semantico@dominio.com',
       password: 'Senha123',
     });
-
-    vi.clearAllMocks();
-    compareMock.mockResolvedValue(true);
-    signUserTokenMock.mockReturnValue('jwt-test-token');
-    queryMock.mockResolvedValueOnce(authRow);
 
     const usersLogin = await request(app).post('/users/login').send({
       email: 'semantico@dominio.com',

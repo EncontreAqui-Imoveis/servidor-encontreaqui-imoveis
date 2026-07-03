@@ -12,6 +12,7 @@ import {
   getNegotiationProposalDataById,
   saveNegotiationProposalDocument,
 } from './negotiationPersistenceService';
+import { purgeNegotiationProposalDocuments } from './negotiationProposalDocumentCleanupService';
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
@@ -742,6 +743,11 @@ export async function generateProposalFromNegotiationDraft(
       originalFileName: 'proposta.pdf',
       generated: true,
       metadata: { source: 'admin_negotiation_draft_generation' },
+    });
+    await purgeNegotiationProposalDocuments(tx, negotiationId, {
+      keepDocumentId: documentId,
+      requestedByUserId: Number(req.userId),
+      requestSource: 'proposal_regeneration',
     });
 
     await tx.commit();

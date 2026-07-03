@@ -184,13 +184,13 @@ function toInvalidInput(message: string): never {
   throw new InvalidInputError(message);
 }
 
-export function requestOtp(input: RequestOtpInput): OtpIssueResult {
+export async function requestOtp(input: RequestOtpInput): Promise<OtpIssueResult> {
   const phone = normalizePhoneOtpInput(input.phone);
   if (phone.length < 8) {
     toInvalidInput('Telefone invalido.');
   }
 
-  const issue = phoneOtpService.requestOtp(phone);
+  const issue = await phoneOtpService.requestOtp(phone);
   return {
     sessionToken: issue.sessionToken,
     expiresAt: issue.expiresAt,
@@ -198,13 +198,13 @@ export function requestOtp(input: RequestOtpInput): OtpIssueResult {
   };
 }
 
-export function resendOtp(input: ResendOtpInput): OtpIssueResult {
+export async function resendOtp(input: ResendOtpInput): Promise<OtpIssueResult> {
   const sessionToken = String(input.sessionToken ?? '').trim();
   if (!sessionToken) {
     throw new InvalidInputError('sessionToken e obrigatorio.', { code: 'SESSION_TOKEN_REQUIRED' });
   }
 
-  const issue = phoneOtpService.resendOtp(sessionToken);
+  const issue = await phoneOtpService.resendOtp(sessionToken);
   if (!issue) {
     throw new NotFoundError('Sessao OTP nao encontrada.', { code: 'OTP_SESSION_NOT_FOUND' });
   }
@@ -216,7 +216,7 @@ export function resendOtp(input: ResendOtpInput): OtpIssueResult {
   };
 }
 
-export function verifyOtp(input: VerifyOtpInput): { ok: true } {
+export async function verifyOtp(input: VerifyOtpInput): Promise<{ ok: true }> {
   const sessionToken = String(input.sessionToken ?? '').trim();
   const code = String(input.code ?? '').replace(/\D/g, '');
 
@@ -226,7 +226,7 @@ export function verifyOtp(input: VerifyOtpInput): { ok: true } {
     });
   }
 
-  const result = phoneOtpService.verifyOtp(sessionToken, code);
+  const result = await phoneOtpService.verifyOtp(sessionToken, code);
   if (!result.ok) {
     throw new InvalidInputError('Codigo invalido ou expirado.', {
       code: 'OTP_CODE_INVALID',

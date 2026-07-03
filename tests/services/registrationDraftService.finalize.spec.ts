@@ -6,6 +6,7 @@ const {
   authGetConnectionMock,
   authQueryMock,
   updateDraftByDraftIdMock,
+  deleteDraftsByIdsMock,
   authReleaseMock,
   authRollbackMock,
   getDraftByDraftIdAndTokenMock,
@@ -15,6 +16,7 @@ const {
   authGetConnectionMock: vi.fn(),
   authQueryMock: vi.fn(),
   updateDraftByDraftIdMock: vi.fn(),
+  deleteDraftsByIdsMock: vi.fn(),
   authReleaseMock: vi.fn(),
   authRollbackMock: vi.fn(),
   getDraftByDraftIdAndTokenMock: vi.fn(),
@@ -23,6 +25,7 @@ const {
 vi.mock('../../src/services/authPersistenceService', () => ({
   authDb: {
     getConnection: authGetConnectionMock,
+    query: authQueryMock,
   },
 }));
 
@@ -32,6 +35,7 @@ vi.mock('../../src/services/registrationDraftRepository', async () => {
     ...(actual as Record<string, unknown>),
     getDraftByDraftIdAndToken: getDraftByDraftIdAndTokenMock,
     updateDraftByDraftId: updateDraftByDraftIdMock,
+    deleteDraftsByIds: deleteDraftsByIdsMock,
   };
 });
 
@@ -99,6 +103,35 @@ describe('finalizeRegistrationDraft', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authGetConnectionMock.mockResolvedValue(db);
+    authQueryMock.mockResolvedValue([[]]);
+  });
+
+  it('remove o rascunho quando a senha provisória já expirou', async () => {
+    const expiredDraft = buildDraft({
+      password_hash_expires_at: new Date(Date.now() - 60 * 1000),
+    });
+    getDraftByDraftIdAndTokenMock.mockResolvedValueOnce(expiredDraft);
+
+    await expect(
+      finalizeRegistrationDraft(
+        'draft-finalize',
+        'raw-token',
+        'submit_documents',
+        {
+          acceptedTerms: true,
+          acceptedPrivacyPolicy: true,
+          termsVersion: '2026-04-28',
+          privacyPolicyVersion: '2026-04-28',
+        },
+        { ip: '200.1.2.3', userAgent: 'mobile-agent' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'DRAFT_PASSWORD_EXPIRED',
+      appCode: 'GONE',
+    });
+
+    expect(deleteDraftsByIdsMock).toHaveBeenCalledWith([expiredDraft.id]);
+    expect(authGetConnectionMock).not.toHaveBeenCalled();
   });
 
   it('persiste aceite de termos e política no finalize do cliente', async () => {
@@ -414,9 +447,6 @@ describe('finalizeRegistrationDraft', () => {
       .mockResolvedValueOnce(lockedDraft)
       .mockResolvedValueOnce(patchedDraft);
     updateDraftByDraftIdMock.mockResolvedValue(undefined);
-    authQueryMock
-      .mockResolvedValueOnce([[lockedDraft], []])
-      .mockResolvedValueOnce([[patchedDraft], []]);
 
     const response = await patchRegistrationDraft(
       'draft-finalize',

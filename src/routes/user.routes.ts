@@ -1,27 +1,12 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { userController } from '../controllers/UserController';
 import { authController } from '../controllers/AuthController';
 import { authMiddleware } from '../middlewares/auth';
 import uploadController from '../controllers/UploadController';
+import { createAuthSensitiveLimiter } from '../config/rateLimiters';
 
 const userRoutes = Router();
-
-const legacyAuthWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS);
-const legacyAuthLimit = Number(process.env.AUTH_RATE_LIMIT_MAX);
-
-const legacyAuthLimiter = rateLimit({
-  windowMs:
-    Number.isFinite(legacyAuthWindowMs) && legacyAuthWindowMs > 0
-      ? legacyAuthWindowMs
-      : 15 * 60 * 1000,
-  limit: Number.isFinite(legacyAuthLimit) && legacyAuthLimit > 0 ? legacyAuthLimit : 20,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: {
-    error: 'Muitas tentativas em rotas legadas de autenticacao. Use /auth/*.',
-  },
-});
+const legacyAuthLimiter = createAuthSensitiveLimiter();
 
 userRoutes.post('/register', legacyAuthLimiter, (req, res) =>
   authController.register(req, res)

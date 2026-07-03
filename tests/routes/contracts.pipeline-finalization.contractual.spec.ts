@@ -29,6 +29,10 @@ const { deleteNegotiationDocumentObjectMock } = vi.hoisted(() => ({
   deleteNegotiationDocumentObjectMock: vi.fn(),
 }));
 
+const { enqueueNegotiationDocumentDeletionMock } = vi.hoisted(() => ({
+  enqueueNegotiationDocumentDeletionMock: vi.fn(),
+}));
+
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
@@ -49,6 +53,10 @@ vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   deleteNegotiationDocumentObject: deleteNegotiationDocumentObjectMock,
   parseNegotiationDocumentMetadata: (value: unknown) =>
     value && typeof value === 'object' ? value : {},
+}));
+
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -291,6 +299,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
     expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
     expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
+    expect(enqueueNegotiationDocumentDeletionMock).not.toHaveBeenCalled();
   });
 
   it('substitui a minuta antiga ao anexar um novo PDF', async () => {
@@ -323,7 +332,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(response.status).toBe(200);
     expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
-    expect(deleteNegotiationDocumentObjectMock).toHaveBeenCalledTimes(1);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
     expect(draftDocumentsState).toHaveLength(0);
   });
 

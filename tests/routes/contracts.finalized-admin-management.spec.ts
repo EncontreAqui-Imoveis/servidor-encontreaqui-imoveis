@@ -30,6 +30,12 @@ const {
   readNegotiationDocumentObjectMock: vi.fn(),
 }));
 
+const {
+  enqueueNegotiationDocumentDeletionMock,
+} = vi.hoisted(() => ({
+  enqueueNegotiationDocumentDeletionMock: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
@@ -56,6 +62,10 @@ vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   readNegotiationDocumentObject: readNegotiationDocumentObjectMock,
   parseNegotiationDocumentMetadata: (value: unknown) =>
     value && typeof value === 'object' ? value : {},
+}));
+
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
@@ -345,6 +355,7 @@ describe('Admin management for finalized contracts', () => {
     expect(propertyLifecycleStatus).toBe('AVAILABLE');
     expect(documentsState.map((item) => item.id)).toEqual([9003]);
     expect(deleteCloudinaryAssetMock).toHaveBeenCalledTimes(2);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(2);
     expect(response.body.message).toContain('documentos vinculados foram removidos');
   });
 
@@ -432,6 +443,7 @@ describe('Admin management for finalized contracts', () => {
 
     expect(deleteResponse.status).toBe(200);
     expect(documentsState.some((item) => item.id === 9999)).toBe(false);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(2);
   });
 
   it('deletes finalized contract and only linked or legacy docs from the same negotiation', async () => {
@@ -441,5 +453,6 @@ describe('Admin management for finalized contracts', () => {
     expect(contractState).toBeNull();
     expect(documentsState.map((item) => item.id)).toEqual([9003]);
     expect(deleteCloudinaryAssetMock).toHaveBeenCalledTimes(2);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(4);
   });
 });

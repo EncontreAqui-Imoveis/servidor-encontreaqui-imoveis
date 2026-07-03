@@ -7,6 +7,7 @@ const {
   generateNegotiationProposalPdfMock,
   saveNegotiationProposalDocumentMock,
   parseProposalWizardBodyMock,
+  purgeNegotiationProposalDocumentsMock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -23,6 +24,7 @@ const {
     generateNegotiationProposalPdfMock: vi.fn(),
     saveNegotiationProposalDocumentMock: vi.fn(),
     parseProposalWizardBodyMock: vi.fn(),
+    purgeNegotiationProposalDocumentsMock: vi.fn(),
   };
 });
 
@@ -30,6 +32,10 @@ vi.mock('../../src/services/negotiationPersistenceService', () => ({
   getNegotiationDbConnection: getConnectionMock,
   generateNegotiationProposalPdf: generateNegotiationProposalPdfMock,
   saveNegotiationProposalDocument: saveNegotiationProposalDocumentMock,
+}));
+
+vi.mock('../../src/services/negotiationProposalDocumentCleanupService', () => ({
+  purgeNegotiationProposalDocuments: purgeNegotiationProposalDocumentsMock,
 }));
 
 vi.mock('../../src/services/negotiationProposalSupportService', () => ({
@@ -129,7 +135,34 @@ describe('negotiationProposalMutationService', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]]);
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Corretor A',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Corretor A',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 9001,
+            negotiation_id: 'neg-1',
+            type: 'proposal',
+            document_type: 'proposta',
+            storage_provider: 'r2',
+            storage_bucket: 'bucket',
+            storage_key: 'neg-1/proposta.pdf',
+          },
+        ],
+      ]);
 
     const req = {
       userId: 30003,
@@ -150,6 +183,7 @@ describe('negotiationProposalMutationService', () => {
         clientCpf: '52998224725',
         status: 'PROPOSAL_SENT',
         value: 500000,
+        documentId: 9001,
       })
     );
     expect(txMock.execute.mock.calls[0]?.[0]).toContain('UPDATE negotiations');
@@ -166,6 +200,34 @@ describe('negotiationProposalMutationService', () => {
     expect(
       txMock.query.mock.calls.find(([sql]) => String(sql).includes('AND id <> ?'))?.[1]
     ).toEqual([101, 'neg-1', null, '52998224725']);
+    expect(generateNegotiationProposalPdfMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientName: 'Maria Cliente',
+        clientCpf: '52998224725',
+        propertyAddress: 'Rua A, 100',
+        brokerName: 'Corretor A',
+        sellingBrokerName: 'Corretor A',
+        value: 500000,
+      })
+    );
+    expect(saveNegotiationProposalDocumentMock).toHaveBeenCalledWith(
+      'neg-1',
+      expect.any(Buffer),
+      txMock,
+      expect.objectContaining({
+        originalFileName: 'proposta.pdf',
+        generated: true,
+      })
+    );
+    expect(purgeNegotiationProposalDocumentsMock).toHaveBeenCalledWith(
+      txMock,
+      'neg-1',
+      expect.objectContaining({
+        keepDocumentId: 9001,
+        requestedByUserId: 30003,
+        requestSource: 'proposal_edit_save',
+      })
+    );
   });
 
   it('retorna 401 quando nao ha usuario autenticado', async () => {
@@ -324,6 +386,14 @@ describe('negotiationProposalMutationService', () => {
     expect(res.status).toHaveBeenCalledWith(204);
     expect(res.send).toHaveBeenCalled();
     expect(txMock.commit).toHaveBeenCalledTimes(1);
+    expect(purgeNegotiationProposalDocumentsMock).toHaveBeenCalledWith(
+      txMock,
+      'neg-1',
+      expect.objectContaining({
+        requestedByUserId: 30003,
+        requestSource: 'proposal_delete',
+      })
+    );
   });
 
   it('bloqueia edicao quando o cpf do proponente e do dono coincide', async () => {

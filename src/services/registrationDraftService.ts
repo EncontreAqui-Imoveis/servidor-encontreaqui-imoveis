@@ -13,6 +13,8 @@ import {
   upsertDraftDocuments,
   findOpenDraftByEmail,
   discardExpiredDrafts,
+  deleteDraftsByIds,
+  getRegistrationDraftTtlMinutes,
   DraftProfileType,
   DraftStep,
   DraftAuthProvider,
@@ -40,7 +42,6 @@ export type DraftFinalizeAction = 'send_later' | 'submit_documents';
 const PHONE_OTP_TTL_SECONDS = 5 * 60;
 const PHONE_MAX_ATTEMPTS = 5;
 const PHONE_COOLDOWN_SECONDS = 60;
-const PASSWORD_TTL_MINUTES = 60;
 type DraftPhoneVerificationMode = 'firebase' | 'legacy' | 'unavailable';
 type PhoneOtpDeliveryResult =
   | { ok: true; provider: string; status: 'sent' | 'mock' }
@@ -591,15 +592,23 @@ function resolveDraftErrorStatus(status: string) {
   return status === 'OPEN' ? null : 'DRAFT_NOT_OPEN';
 }
 
-function normalizeDraftResponse(draft: RegistrationDraftRow | null): RegistrationDraftRow {
+async function normalizeDraftResponse(draft: RegistrationDraftRow | null): Promise<RegistrationDraftRow> {
   if (!draft) {
     throw draftError('DRAFT_NOT_FOUND', 'Rascunho nao encontrado.');
   }
-  if (resolveDraftErrorStatus(draft.status)) {
-    const expiresAt = new Date(draft.expires_at);
-    if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now().getTime()) {
-      throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
+  const expiresAt = new Date(draft.expires_at);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now().getTime()) {
+    await deleteDraftsByIds([draft.id]);
+    throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
+  }
+  if (draft.password_hash_expires_at) {
+    const passwordExpiresAt = new Date(draft.password_hash_expires_at);
+    if (!Number.isFinite(passwordExpiresAt.getTime()) || passwordExpiresAt.getTime() <= now().getTime()) {
+      await deleteDraftsByIds([draft.id]);
+      throw draftError('DRAFT_PASSWORD_EXPIRED', 'Senha temporaria expirada.');
     }
+  }
+  if (resolveDraftErrorStatus(draft.status)) {
     throw draftError('DRAFT_NOT_OPEN', 'Rascunho nao esta aberto.');
   }
   return draft;
@@ -614,12 +623,7 @@ async function resolveDraftContext(draftId: string, rawDraftToken: unknown): Pro
     throw draftError('DRAFT_TOKEN_REQUIRED', 'Token de rascunho nao informado.');
   }
   const draftTokenHash = hashToken(token);
-  const draft = normalizeDraftResponse(await getDraftByDraftIdAndToken(draftId, draftTokenHash));
-  const expiresAt = new Date(draft.expires_at);
-  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now().getTime()) {
-    await updateDraftByDraftId(draftId, draftTokenHash, { status: 'EXPIRED' });
-    throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
-  }
+  const draft = await normalizeDraftResponse(await getDraftByDraftIdAndToken(draftId, draftTokenHash));
   return { draft, draftTokenHash };
 }
 
@@ -710,7 +714,7 @@ export async function createRegistrationDraft(input: {
 
   const passwordHash = normalizedProvider === 'email' ? await bcrypt.hash(password, 8) : null;
   const passwordHashExpiresAt = passwordHash
-    ? new Date(now().getTime() + PASSWORD_TTL_MINUTES * 60 * 1000)
+    ? new Date(now().getTime() + getRegistrationDraftTtlMinutes() * 60 * 1000)
     : null;
   const draftId = generateDraftId();
   const draftToken = generateDraftToken();
@@ -746,7 +750,7 @@ export async function createRegistrationDraft(input: {
     draftId,
     draftToken,
     draft: draftPayload(draft),
-    expiresAtMinutes: 1440,
+    expiresAtMinutes: getRegistrationDraftTtlMinutes(),
   };
 }
 
@@ -834,7 +838,7 @@ export async function patchRegistrationDraft(
   if (Object.keys(updates).length > 0) {
     await updateDraftByDraftId(draftId, draftTokenHash, updates);
     const reloaded = await getDraftByDraftIdAndToken(draftId, draftTokenHash);
-    return draftPayload(normalizeDraftResponse(reloaded));
+    return draftPayload(await normalizeDraftResponse(reloaded));
   }
 
   return draftPayload(draft);
@@ -1201,7 +1205,7 @@ export async function persistDraftDocuments(
   });
   await updateDraftByDraftId(draftId, draftTokenHash, { currentStep: 'FINALIZE_READY' });
   const reloaded = await getDraftByDraftIdAndToken(draftId, draftTokenHash);
-  return draftPayload(normalizeDraftResponse(reloaded));
+  return draftPayload(await normalizeDraftResponse(reloaded));
 }
 
 export async function finalizeRegistrationDraft(
@@ -1218,19 +1222,7 @@ export async function finalizeRegistrationDraft(
   const draftTokenHash = hashToken(token);
 
   const draftRows = await getDraftByDraftIdAndToken(draftId, draftTokenHash);
-  const draft = normalizeDraftResponse(draftRows);
-  const expiresAt = new Date(draft.expires_at);
-  if (expiresAt.getTime() <= now().getTime()) {
-    await updateDraftByDraftId(draftId, draftTokenHash, { status: 'EXPIRED' });
-    throw draftError('DRAFT_EXPIRED', 'Rascunho expirado.');
-  }
-  if (draft.password_hash_expires_at) {
-    const pwdExp = new Date(draft.password_hash_expires_at);
-    if (!Number.isFinite(pwdExp.getTime()) || pwdExp.getTime() <= now().getTime()) {
-      throw draftError('DRAFT_PASSWORD_EXPIRED', 'Senha temporaria expirada.');
-    }
-  }
-
+  const draft = await normalizeDraftResponse(draftRows);
   const db = await authDb.getConnection();
   try {
     await db.beginTransaction();
@@ -1497,6 +1489,6 @@ export async function upsertFirebaseContextToDraft(
 
   await updateDraftByDraftId(draftId, draftTokenHash, updates as any);
   const reloaded = await getDraftByDraftId(draft.draft_id);
-  return draftPayload(normalizeDraftResponse(reloaded));
+  return draftPayload(await normalizeDraftResponse(reloaded));
 }
 

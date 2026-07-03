@@ -84,17 +84,17 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requestOtpMock.mockReturnValue({
+  requestOtpMock.mockResolvedValue({
     sessionToken: 'otp-session',
     expiresAt: new Date('2026-03-06T10:00:00.000Z'),
     code: '123456',
   });
-  resendOtpMock.mockReturnValue({
+  resendOtpMock.mockResolvedValue({
     sessionToken: 'otp-session',
     expiresAt: new Date('2026-03-06T10:00:00.000Z'),
     code: '123456',
   });
-  verifyOtpMock.mockReturnValue({ ok: true });
+  verifyOtpMock.mockResolvedValue({ ok: true });
   getEmailVerificationStatusMock.mockResolvedValue({
     status: 'pending',
     expiresAt: new Date('2026-03-06T10:20:00.000Z'),
@@ -130,19 +130,19 @@ describe('authVerificationService', () => {
   it('handles OTP request/resend/verify', async () => {
     const { requestOtp, resendOtp, verifyOtp } = await import('../../src/services/authVerificationService');
 
-    expect(() => requestOtp({ phone: '123' })).toThrow(InvalidInputError);
+    await expect(requestOtp({ phone: '123' })).rejects.toBeInstanceOf(InvalidInputError);
 
-    const requestResult = requestOtp({ phone: '(62) 99999-8888' });
+    const requestResult = await requestOtp({ phone: '(62) 99999-8888' });
     expect(requestResult.otpCode).toBe('123456');
     expect(requestOtpMock).toHaveBeenCalledWith('62999998888');
 
-    expect(() => resendOtp({})).toThrow(InvalidInputError);
+    await expect(resendOtp({})).rejects.toBeInstanceOf(InvalidInputError);
 
-    const resendResult = resendOtp({ sessionToken: 'otp-session' });
+    const resendResult = await resendOtp({ sessionToken: 'otp-session' });
     expect(resendResult.sessionToken).toBe('otp-session');
 
-    expect(verifyOtp({ sessionToken: 'otp-session', code: '123456' })).toEqual({ ok: true });
-    expect(() => verifyOtp({ sessionToken: 'otp-session', code: '123' })).toThrow(
+    await expect(verifyOtp({ sessionToken: 'otp-session', code: '123456' })).resolves.toEqual({ ok: true });
+    await expect(verifyOtp({ sessionToken: 'otp-session', code: '123' })).rejects.toBeInstanceOf(
       InvalidInputError,
     );
   });

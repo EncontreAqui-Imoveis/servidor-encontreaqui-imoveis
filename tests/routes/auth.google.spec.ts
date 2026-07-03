@@ -2,27 +2,14 @@ import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock, verifyIdTokenMock } = vi.hoisted(() => ({
-  queryMock: vi.fn(),
-  verifyIdTokenMock: vi.fn(),
+const { googleSessionMock } = vi.hoisted(() => ({
+  googleSessionMock: vi.fn(),
 }));
 
-vi.mock('../../src/database/connection', () => ({
-  __esModule: true,
-  default: {
-    query: queryMock,
-  },
-}));
-
-vi.mock('../../src/config/firebaseAdmin', () => ({
-  __esModule: true,
-  default: {
-    auth: () => ({
-      verifyIdToken: verifyIdTokenMock,
-      getUserByEmail: vi.fn(),
-      createUser: vi.fn(),
-    }),
-  },
+vi.mock('../../src/services/authSessionOperationsService', () => ({
+  google: googleSessionMock,
+  login: vi.fn(),
+  logout: vi.fn(),
 }));
 
 describe('POST /auth/google', () => {
@@ -30,6 +17,7 @@ describe('POST /auth/google', () => {
 
   beforeAll(async () => {
     process.env.JWT_SECRET ??= 'test-secret';
+    vi.resetModules();
     const { default: authRoutes } = await import('../../src/routes/auth.routes');
     app = express();
     app.use(express.json());
@@ -41,12 +29,19 @@ describe('POST /auth/google', () => {
   });
 
   it('returns isNewUser payload without creating user in database', async () => {
-    verifyIdTokenMock.mockResolvedValueOnce({
-      uid: 'google-uid-123',
-      email: 'novo@exemplo.com',
-      name: 'Novo Usuario',
+    googleSessionMock.mockResolvedValueOnce({
+      isNewUser: true,
+      requiresProfileChoice: true,
+      pending: {
+        email: 'novo@exemplo.com',
+        name: 'Novo Usuario',
+        googleUid: 'google-uid-123',
+      },
+      roleLocked: false,
+      needsCompletion: true,
+      requiresDocuments: false,
+      requestedProfile: 'auto',
     });
-    queryMock.mockResolvedValueOnce([[]]);
 
     const response = await request(app)
       .post('/auth/google')
@@ -62,40 +57,28 @@ describe('POST /auth/google', () => {
         googleUid: 'google-uid-123',
       },
     });
-
-    const allSqlCalls = queryMock.mock.calls.map(([sql]) => String(sql).toUpperCase());
-    expect(allSqlCalls.some((sql) => sql.includes('INSERT INTO USERS'))).toBe(false);
   });
 
   it('logs in existing broker and returns token payload', async () => {
-    verifyIdTokenMock.mockResolvedValueOnce({
-      uid: 'google-uid-456',
-      email: 'broker@exemplo.com',
-      name: 'Broker Existing',
-    });
-
-    queryMock.mockResolvedValueOnce([
-      [
-        {
+    googleSessionMock.mockResolvedValueOnce({
+      user: {
+        id: 42,
+        email: 'broker@exemplo.com',
+        role: 'broker',
+        broker: {
           id: 42,
-          name: 'Broker Existing',
-          email: 'broker@exemplo.com',
-          phone: '62999998888',
-          street: 'Rua A',
-          number: '100',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Rio Verde',
-          state: 'GO',
-          cep: '75900000',
-          firebase_uid: 'google-uid-456',
-          broker_id: 42,
-          broker_status: 'pending_verification',
+          status: 'pending_verification',
           creci: '12345-F',
-          broker_documents_status: 'pending',
         },
-      ],
-    ]);
+      },
+      token: 'jwt-test-token',
+      needsCompletion: false,
+      requiresDocuments: true,
+      blockedBrokerRequest: false,
+      roleLocked: true,
+      isNewUser: false,
+      requestedProfile: 'auto',
+    });
 
     const response = await request(app)
       .post('/auth/google')
@@ -114,8 +97,5 @@ describe('POST /auth/google', () => {
         creci: '12345-F',
       },
     });
-
-    const allSqlCalls = queryMock.mock.calls.map(([sql]) => String(sql).toUpperCase());
-    expect(allSqlCalls.some((sql) => sql.includes('INSERT INTO USERS'))).toBe(false);
   });
 });

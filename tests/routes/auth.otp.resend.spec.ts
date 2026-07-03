@@ -2,28 +2,80 @@ import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { phoneOtpService } from '../../src/services/phoneOtpService';
+type FakeOtpSession = {
+  sessionToken: string;
+  phone: string;
+  code: string;
+  expiresAt: Date;
+};
 
-const { queryMock } = vi.hoisted(() => ({
-  queryMock: vi.fn(),
+const otpSessions = new Map<string, FakeOtpSession>();
+
+const { nextTokenMock, nextCodeMock } = vi.hoisted(() => ({
+  nextTokenMock: vi.fn(),
+  nextCodeMock: vi.fn(),
 }));
 
-vi.mock('../../src/database/connection', () => ({
-  __esModule: true,
-  default: {
-    query: queryMock,
-  },
-}));
-
-vi.mock('../../src/config/firebaseAdmin', () => ({
-  __esModule: true,
-  default: {
-    auth: () => ({
-      verifyIdToken: vi.fn(),
-      getUserByEmail: vi.fn(),
-      createUser: vi.fn(),
+vi.mock('../../src/services/phoneOtpService', () => ({
+  phoneOtpService: {
+    requestOtp: vi.fn(async (phone: string) => {
+      const sessionToken = `token-${nextTokenMock()}`;
+      const code = String(nextCodeMock()).padStart(6, '0');
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      otpSessions.forEach((session, token) => {
+        if (session.phone === phone) {
+          otpSessions.delete(token);
+        }
+      });
+      otpSessions.set(sessionToken, { sessionToken, phone, code, expiresAt });
+      return { sessionToken, expiresAt, code };
+    }),
+    resendOtp: vi.fn(async (sessionToken: string) => {
+      const existing = otpSessions.get(sessionToken);
+      if (!existing) {
+        return null;
+      }
+      otpSessions.delete(sessionToken);
+      const nextSessionToken = `token-${nextTokenMock()}`;
+      const code = String(nextCodeMock()).padStart(6, '0');
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+      otpSessions.set(nextSessionToken, {
+        sessionToken: nextSessionToken,
+        phone: existing.phone,
+        code,
+        expiresAt,
+      });
+      return { sessionToken: nextSessionToken, expiresAt, code };
+    }),
+    verifyOtp: vi.fn(async (sessionToken: string, code: string) => {
+      const existing = otpSessions.get(sessionToken);
+      if (!existing) {
+        return { ok: false, reason: 'INVALID_SESSION' as const };
+      }
+      if (existing.expiresAt.getTime() <= Date.now()) {
+        otpSessions.delete(sessionToken);
+        return { ok: false, reason: 'EXPIRED' as const };
+      }
+      if (existing.code !== code) {
+        return { ok: false, reason: 'INVALID_CODE' as const };
+      }
+      otpSessions.delete(sessionToken);
+      return { ok: true as const, phone: existing.phone };
     }),
   },
+}));
+
+vi.mock('../../src/config/redis', () => ({
+  resolveRedisConfig: () => ({
+    config: undefined,
+    reason: 'mocked test environment without redis',
+    source: 'missing' as const,
+  }),
+  getRedisConfigForPdfQueue: () => ({
+    config: undefined,
+    reason: 'mocked test environment without redis',
+    source: 'missing' as const,
+  }),
 }));
 
 describe('POST /auth/otp/resend flow', () => {
@@ -36,11 +88,14 @@ describe('POST /auth/otp/resend flow', () => {
     app = express();
     app.use(express.json());
     app.use('/auth', authRoutes);
-  });
+  }, 30000);
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    phoneOtpService.clearForTests();
+    otpSessions.clear();
+    nextTokenMock.mockReset();
+    nextCodeMock.mockReset();
+    nextTokenMock.mockReturnValueOnce(1).mockReturnValueOnce(2);
+    nextCodeMock.mockReturnValueOnce(123456).mockReturnValueOnce(654321);
   });
 
   it('invalidates old code after resend and accepts only the new code', async () => {
@@ -49,8 +104,8 @@ describe('POST /auth/otp/resend flow', () => {
       .send({ phone: '+55 (64) 99999-0000' });
 
     expect(requestResponse.status).toBe(200);
-    expect(requestResponse.body.sessionToken).toBeTypeOf('string');
-    expect(requestResponse.body.otpCode).toBeTypeOf('string');
+    expect(requestResponse.body.sessionToken).toBe('token-1');
+    expect(requestResponse.body.otpCode).toBe('123456');
 
     const tokenA = requestResponse.body.sessionToken as string;
     const codeA = requestResponse.body.otpCode as string;
@@ -60,8 +115,8 @@ describe('POST /auth/otp/resend flow', () => {
       .send({ sessionToken: tokenA });
 
     expect(resendResponse.status).toBe(200);
-    expect(resendResponse.body.sessionToken).toBeTypeOf('string');
-    expect(resendResponse.body.otpCode).toBeTypeOf('string');
+    expect(resendResponse.body.sessionToken).toBe('token-2');
+    expect(resendResponse.body.otpCode).toBe('654321');
 
     const tokenB = resendResponse.body.sessionToken as string;
     const codeB = resendResponse.body.otpCode as string;
@@ -86,4 +141,3 @@ describe('POST /auth/otp/resend flow', () => {
     expect(verifyNewResponse.body).toEqual({ ok: true });
   });
 });
-

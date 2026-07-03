@@ -107,7 +107,7 @@ describe('rate limit de autenticação (MV-001)', () => {
 
     expect(status).toBe(429);
     expect(last.body).toMatchObject({
-      error: 'Muitas tentativas em rotas legadas de autenticacao. Use /auth/*.',
+      error: 'Muitas tentativas em rotas de autenticacao. Tente novamente em instantes.',
     });
   });
 

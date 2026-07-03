@@ -1,38 +1,47 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
-import { addPdfJob, pdfQueue } from './PdfQueue';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const queueAddMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 'job-123' }));
-const queueCtorMock = vi.hoisted(() =>
-  vi.fn(function () {
+const { queueAddMock, queueCtorMock } = vi.hoisted(() => ({
+  queueAddMock: vi.fn().mockResolvedValue({ id: 'job-123' }),
+  queueCtorMock: vi.fn(function () {
     return { add: queueAddMock };
   }),
-);
-const originalPdfWorkerEnabled = process.env.PDF_WORKER_ENABLED;
+}));
+
+vi.mock('../../../config/redis', () => ({
+  getRedisConfigForPdfQueue: () => ({
+    config: {
+      host: '127.0.0.1',
+      port: 6379,
+      maxRetriesPerRequest: null,
+    },
+    reason: 'test',
+    source: 'legacy_host',
+  }),
+}));
 
 vi.mock('bullmq', () => ({
   Queue: queueCtorMock,
 }));
 
-describe('PdfQueue', () => {
-  beforeAll(() => {
-    process.env.PDF_WORKER_ENABLED = 'true';
-  });
+async function loadPdfQueueModule() {
+  vi.resetModules();
+  return import('./PdfQueue');
+}
 
+describe('PdfQueue', () => {
   beforeEach(() => {
     process.env.PDF_WORKER_ENABLED = 'true';
     queueCtorMock.mockClear();
-    vi.clearAllMocks();
+    queueAddMock.mockClear();
   });
 
-  afterAll(() => {
-    if (originalPdfWorkerEnabled === undefined) {
-      delete process.env.PDF_WORKER_ENABLED;
-    } else {
-      process.env.PDF_WORKER_ENABLED = originalPdfWorkerEnabled;
-    }
+  afterEach(() => {
+    delete process.env.PDF_WORKER_ENABLED;
   });
 
   it('should add a job to the queue with correct data', async () => {
+    const { addPdfJob } = await loadPdfQueueModule();
+
     const jobData = {
       negotiationId: 'neg-123',
       documentType: 'proposal' as const,
@@ -48,13 +57,14 @@ describe('PdfQueue', () => {
         jobId: 'proposal:neg-123',
         removeOnComplete: true,
         removeOnFail: true,
-      })
+      }),
     );
     expect(queueCtorMock).toHaveBeenCalledTimes(1);
     expect(result).toBeUndefined();
   });
 
   it('throws when queue is disabled', async () => {
+    const { addPdfJob } = await loadPdfQueueModule();
     process.env.PDF_WORKER_ENABLED = 'false';
 
     const jobData = {
@@ -69,6 +79,7 @@ describe('PdfQueue', () => {
   });
 
   it('não instancia Queue quando PDF_WORKER_ENABLED=false', async () => {
+    const { addPdfJob } = await loadPdfQueueModule();
     process.env.PDF_WORKER_ENABLED = 'false';
 
     const jobData = {

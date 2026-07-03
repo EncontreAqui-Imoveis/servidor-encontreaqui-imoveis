@@ -2,17 +2,24 @@ import { Response } from 'express';
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
-import { getNegotiationDbConnection } from './negotiationPersistenceService';
+import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
+import {
+  generateNegotiationProposalPdf,
+  getNegotiationDbConnection,
+  saveNegotiationProposalDocument,
+} from './negotiationPersistenceService';
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
+  resolvePropertyAddress,
   parseProposalWizardBody,
   type ParsedProposalWizard,
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
+import { purgeNegotiationProposalDocuments } from './negotiationProposalDocumentCleanupService';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
@@ -163,6 +170,22 @@ async function resolveCurrentUserIdentity(
     name: rows[0]?.name ?? null,
     cpf: rows[0]?.cpf ?? null,
   };
+}
+
+async function resolveUserNameById(
+  tx: PoolConnection,
+  userId: number | null | undefined
+): Promise<string | null> {
+  const normalizedUserId = Number(userId ?? 0);
+  if (!Number.isFinite(normalizedUserId) || normalizedUserId <= 0) {
+    return null;
+  }
+
+  const [rows] = await tx.query<UserRow[]>(
+    'SELECT name FROM users WHERE id = ? LIMIT 1',
+    [normalizedUserId]
+  );
+  return rows[0]?.name?.trim() || null;
 }
 
 function isBrokerLikeRole(role: unknown): boolean {
@@ -569,6 +592,34 @@ async function updateProposalFromWizardInternal(
         }),
       ]
     );
+
+    const proposalData: ProposalData = {
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
+      propertyAddress: resolvePropertyAddress(property),
+      brokerName: (await resolveUserNameById(tx, nRow.capturing_broker_id)) ?? '',
+      sellingBrokerName: await resolveUserNameById(tx, nRow.selling_broker_id),
+      value: proposalValue,
+      payment: {
+        cash: payload.pagamento.dinheiro,
+        tradeIn: payload.pagamento.permuta,
+        financing: payload.pagamento.financiamento,
+        others: payload.pagamento.outros,
+      },
+      validityDays: payload.validadeDias,
+    };
+    const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
+    const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
+      originalFileName: 'proposta.pdf',
+      generated: true,
+      metadata: { source: 'mobile_proposal_wizard_update' },
+    });
+    await purgeNegotiationProposalDocuments(tx, negotiationId, {
+      keepDocumentId: documentId,
+      requestedByUserId: Number(req.userId),
+      requestSource: 'proposal_edit_save',
+    });
+
     await tx.commit();
 
     return res.status(200).json({
@@ -585,6 +636,7 @@ async function updateProposalFromWizardInternal(
         outros: payload.pagamento.outros,
       },
       status: DEFAULT_WIZARD_STATUS,
+      documentId,
     });
   } catch (error) {
     if (tx) {
@@ -673,6 +725,10 @@ export async function deleteMyProposal(
         error: 'Não é possível excluir a proposta após o envio da minuta assinada.',
       });
     }
+    await purgeNegotiationProposalDocuments(tx, negotiationId, {
+      requestedByUserId: userId,
+      requestSource: 'proposal_delete',
+    });
     await tx.query('DELETE FROM negotiation_proposal_idempotency WHERE negotiation_id = ?', [
       negotiationId,
     ]);

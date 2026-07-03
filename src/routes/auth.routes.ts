@@ -1,42 +1,13 @@
 import { NextFunction, Request, Response, Router } from 'express';
-import rateLimit from 'express-rate-limit';
 import { authController } from '../controllers/AuthController';
 import { registrationDraftController } from '../controllers/RegistrationDraftController';
 import { authMiddleware } from '../middlewares/auth';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
+import { createAuthLightLimiter, createAuthSensitiveLimiter } from '../config/rateLimiters';
 
 const authRoutes = Router();
-
-const authWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS);
-const authLimit = Number(process.env.AUTH_RATE_LIMIT_MAX);
-const authLightWindowMs = Number(process.env.AUTH_LIGHT_RATE_LIMIT_WINDOW_MS);
-const authLightLimit = Number(process.env.AUTH_LIGHT_RATE_LIMIT_MAX);
-
-const authSensitiveLimiter = rateLimit({
-  windowMs:
-    Number.isFinite(authWindowMs) && authWindowMs > 0
-      ? authWindowMs
-      : 15 * 60 * 1000,
-  limit: Number.isFinite(authLimit) && authLimit > 0 ? authLimit : 20,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: {
-    error: 'Muitas tentativas em rotas de autenticacao. Tente novamente em instantes.',
-  },
-});
-
-const authLightLimiter = rateLimit({
-  windowMs:
-    Number.isFinite(authLightWindowMs) && authLightWindowMs > 0
-      ? authLightWindowMs
-      : 15 * 60 * 1000,
-  limit: Number.isFinite(authLightLimit) && authLightLimit > 0 ? authLightLimit : 120,
-  standardHeaders: 'draft-7',
-  legacyHeaders: false,
-  message: {
-    error: 'Muitas tentativas de consulta de autenticacao. Tente novamente em instantes.',
-  },
-});
+const authSensitiveLimiter = createAuthSensitiveLimiter();
+const authLightLimiter = createAuthLightLimiter();
 
 function handleDraftUploadError(
   error: unknown,

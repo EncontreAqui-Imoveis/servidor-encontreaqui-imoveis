@@ -83,7 +83,7 @@ function respondStructuredError(req: Request, res: Response, error: unknown): Re
 class AuthController {
   async requestOtp(req: Request, res: Response) {
     try {
-      const result = requestOtpService({ phone: req.body?.phone });
+      const result = await requestOtpService({ phone: req.body?.phone });
       return res.status(200).json(result);
     } catch (error) {
       return respondPlainError(res, error);
@@ -92,7 +92,7 @@ class AuthController {
 
   async resendOtp(req: Request, res: Response) {
     try {
-      const result = resendOtpService({ sessionToken: req.body?.sessionToken });
+      const result = await resendOtpService({ sessionToken: req.body?.sessionToken });
       return res.status(200).json(result);
     } catch (error) {
       return respondPlainError(res, error);
@@ -101,7 +101,7 @@ class AuthController {
 
   async verifyOtp(req: Request, res: Response) {
     try {
-      const result = verifyOtpService({
+      const result = await verifyOtpService({
         sessionToken: req.body?.sessionToken,
         code: req.body?.code,
       });

@@ -4,6 +4,7 @@ import { mapProperty } from './propertyDiscoveryService';
 import { runPropertyQuery } from './propertyPersistenceService';
 import { areaInputToSquareMeters, parseAreaUnidade } from '../utils/propertyAreaUnits';
 import { normalizePropertyType } from '../utils/propertyTypes';
+import { normalizePropertyAmenities } from '../utils/propertyAmenities';
 
 type Nullable<T> = T | null;
 
@@ -257,6 +258,8 @@ function buildPublicListingWhereClauses(params: {
   searchTerm?: string;
   id?: unknown;
   codeOrId?: unknown;
+  amenities?: string[];
+  garage_spots?: unknown;
 }) {
   const whereClauses: string[] = [];
   const queryParams: any[] = [];
@@ -384,6 +387,20 @@ function buildPublicListingWhereClauses(params: {
     }
   }
 
+  if (params.garage_spots) {
+    const value = Number(params.garage_spots);
+    if (!Number.isNaN(value) && value > 0) {
+      const normalized = Math.trunc(value);
+      if (normalized >= 4) {
+        whereClauses.push('p.garage_spots >= ?');
+        queryParams.push(4);
+      } else {
+        whereClauses.push('p.garage_spots = ?');
+        queryParams.push(normalized);
+      }
+    }
+  }
+
   for (const [field, value] of [
     ['has_wifi', params.has_wifi],
     ['tem_piscina', params.tem_piscina],
@@ -395,6 +412,13 @@ function buildPublicListingWhereClauses(params: {
     if (value !== undefined) {
       whereClauses.push(`p.${field} = ?`);
       queryParams.push(parseBoolean(value));
+    }
+  }
+
+  if (params.amenities && Array.isArray(params.amenities) && params.amenities.length > 0) {
+    for (const amenity of params.amenities) {
+      whereClauses.push('JSON_CONTAINS(p.amenities, JSON_QUOTE(?)) = 1');
+      queryParams.push(amenity);
     }
   }
 
@@ -415,13 +439,8 @@ function buildPublicListingWhereClauses(params: {
     whereClauses.push('p.id = ?');
     queryParams.push(idTrimmed);
   } else if (codeOrId) {
-    if (uuidRe.test(codeOrId)) {
-      whereClauses.push('p.id = ?');
-      queryParams.push(codeOrId);
-    } else {
-      whereClauses.push('TRIM(p.code) = ?');
-      queryParams.push(codeOrId);
-    }
+    whereClauses.push('(TRIM(p.code) = ? OR TRIM(p.public_code) = ?)');
+    queryParams.push(codeOrId, codeOrId);
   }
 
   const negotiationPlaceholders = NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ');
@@ -513,6 +532,7 @@ export async function listPublicProperties(query: Record<string, unknown>) {
   const maxPrice = query.maxPrice;
   const bedrooms = query.bedrooms;
   const bathrooms = query.bathrooms;
+  const garage_spots = query.garage_spots ?? query.garages;
   const has_wifi = query.has_wifi;
   const tem_piscina = query.tem_piscina;
   const tem_energia_solar = query.tem_energia_solar;
@@ -526,6 +546,15 @@ export async function listPublicProperties(query: Record<string, unknown>) {
     typeof searchTermRaw === 'string' && searchTermRaw.trim().length > 0
       ? searchTermRaw
       : undefined;
+
+  let amenitiesList: string[] = [];
+  if (query.amenities != null) {
+    try {
+      amenitiesList = normalizePropertyAmenities(query.amenities);
+    } catch (e) {
+      // Ignora comodidades inválidas na query pública
+    }
+  }
 
   const numericLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
   const numericPage = Math.max(Number(page) || 1, 1);
@@ -556,6 +585,7 @@ export async function listPublicProperties(query: Record<string, unknown>) {
         query.max_area_terreno_unidade ?? query.maxAreaTerrenoUnidade ?? query.max_area_terreno_unit ?? query.maxAreaTerrenoUnit,
       bedrooms,
       bathrooms,
+      garage_spots,
       has_wifi,
       tem_piscina,
       tem_energia_solar,
@@ -565,6 +595,7 @@ export async function listPublicProperties(query: Record<string, unknown>) {
       searchTerm,
       id: query.id,
       codeOrId: query.code ?? query.propertyCode,
+      amenities: amenitiesList,
     }));
   } catch (error) {
     if (isPropertyListingError(error)) {

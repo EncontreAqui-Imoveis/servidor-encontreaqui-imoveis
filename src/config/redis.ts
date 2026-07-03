@@ -2,7 +2,7 @@ import { ConnectionOptions } from 'bullmq';
 
 const DEFAULT_REDIS_PORT = 6379;
 const nodeEnv = String(process.env.NODE_ENV ?? '').trim().toLowerCase();
-const allowLocalFallback = nodeEnv !== 'production';
+const allowLocalFallback = nodeEnv !== 'production' && nodeEnv !== 'test';
 
 function normalizePort(value: string | undefined): number {
   const parsed = Number(value);
@@ -65,4 +65,3 @@ export function resolveRedisConfig(): {
 export function getRedisConfigForPdfQueue() {
   return resolveRedisConfig();
 }
-

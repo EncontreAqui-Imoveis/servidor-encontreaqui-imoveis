@@ -6,8 +6,10 @@ const {
   txMock,
   getConnectionMock,
   findNegotiationDocumentByIdMock,
+  getNegotiationProposalDataByIdMock,
   generateProposalMock,
   saveNegotiationDocumentMock,
+  purgeNegotiationProposalDocumentsMock,
   authState,
 } = vi.hoisted(() => {
   const tx = {
@@ -23,8 +25,10 @@ const {
     txMock: tx,
     getConnectionMock: vi.fn(),
     findNegotiationDocumentByIdMock: vi.fn(),
+    getNegotiationProposalDataByIdMock: vi.fn(),
     generateProposalMock: vi.fn(),
     saveNegotiationDocumentMock: vi.fn(),
+    purgeNegotiationProposalDocumentsMock: vi.fn(),
     authState: {
       userId: 30003,
       userRole: 'broker',
@@ -36,14 +40,22 @@ vi.mock('../../src/services/negotiationPersistenceService', () => ({
   getNegotiationDbConnection: getConnectionMock,
   findNegotiationDocumentById: findNegotiationDocumentByIdMock,
   generateNegotiationProposalPdf: generateProposalMock,
+  getNegotiationProposalDataById: getNegotiationProposalDataByIdMock,
   saveNegotiationProposalDocument: saveNegotiationDocumentMock,
+}));
+
+vi.mock('../../src/services/negotiationProposalDocumentCleanupService', () => ({
+  purgeNegotiationProposalDocuments: purgeNegotiationProposalDocumentsMock,
 }));
 
 vi.mock('../../src/middlewares/requestContext', () => ({
   getRequestId: () => 'req-123',
 }));
 
-import { generateProposalFromProperty } from '../../src/services/negotiationProposalGenerationService';
+import {
+  generateProposalFromNegotiationDraft,
+  generateProposalFromProperty,
+} from '../../src/services/negotiationProposalGenerationService';
 
 describe('negotiationProposalGenerationService.generateProposalFromProperty', () => {
   const app = express();
@@ -67,6 +79,61 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
     generateProposalMock.mockResolvedValue(Buffer.from('%PDF-fake-proposal%'));
     saveNegotiationDocumentMock.mockResolvedValue(91001);
     findNegotiationDocumentByIdMock.mockResolvedValue(null);
+    getNegotiationProposalDataByIdMock.mockResolvedValue({
+      clientName: 'Joao da Silva',
+      clientCpf: '52998224725',
+      propertyAddress: 'Rua A, 100',
+      brokerName: 'Corretor A',
+      sellingBrokerName: null,
+      value: 500000,
+      payment: {
+        cash: 100000,
+        tradeIn: 0,
+        financing: 400000,
+        others: 0,
+      },
+      validityDays: 10,
+    });
+  });
+
+  it('regenera minuta e limpa documentos antigos da negociacao', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            status: 'PROPOSAL_SENT',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ c: 0 }]]);
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'neg-1' },
+      body: {},
+    } as any;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+      send: vi.fn().mockReturnThis(),
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    } as any;
+
+    await generateProposalFromNegotiationDraft(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(saveNegotiationDocumentMock).toHaveBeenCalledTimes(1);
+    expect(purgeNegotiationProposalDocumentsMock).toHaveBeenCalledWith(
+      txMock,
+      'neg-1',
+      expect.objectContaining({
+        keepDocumentId: 91001,
+        requestedByUserId: 30003,
+        requestSource: 'proposal_regeneration',
+      })
+    );
   });
 
   it('replays an existing proposal when idempotency is complete', async () => {

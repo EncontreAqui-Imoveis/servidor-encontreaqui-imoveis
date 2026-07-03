@@ -4,7 +4,7 @@ const {
   getContractDbConnectionMock,
   txMock,
   deleteCloudinaryAssetMock,
-  deleteNegotiationDocumentObjectMock,
+  enqueueNegotiationDocumentDeletionMock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -18,7 +18,7 @@ const {
     getContractDbConnectionMock: vi.fn(),
     txMock: tx,
     deleteCloudinaryAssetMock: vi.fn(),
-    deleteNegotiationDocumentObjectMock: vi.fn(),
+    enqueueNegotiationDocumentDeletionMock: vi.fn(),
   };
 });
 
@@ -31,8 +31,8 @@ vi.mock('../../src/config/cloudinary', () => ({
   deleteCloudinaryAsset: deleteCloudinaryAssetMock,
 }));
 
-vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
-  deleteNegotiationDocumentObject: deleteNegotiationDocumentObjectMock,
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
 }));
 
 import {
@@ -167,7 +167,7 @@ describe('contractWorkflowService', () => {
       statusCode: 400,
     });
 
-    expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
+    expect(enqueueNegotiationDocumentDeletionMock).not.toHaveBeenCalled();
     expect(deleteCloudinaryAssetMock).not.toHaveBeenCalled();
   });
 
@@ -228,7 +228,7 @@ describe('contractWorkflowService', () => {
     expect(result.contract?.status).toBe('IN_DRAFT');
     expect(contractState.status).toBe('IN_DRAFT');
     expect(contractState.workflow_metadata).toEqual({ extra: 'keep-me' });
-    expect(deleteNegotiationDocumentObjectMock).toHaveBeenCalledTimes(1);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
     expect(deleteCloudinaryAssetMock).not.toHaveBeenCalled();
     expect(documentsState).toHaveLength(0);
   });

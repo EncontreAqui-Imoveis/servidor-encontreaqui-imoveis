@@ -94,7 +94,7 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
         status: 'OPEN',
         currentStep: 'IDENTITY',
       },
-      expiresAtMinutes: 1440,
+      expiresAtMinutes: 60,
     });
 
     const response = await request(app).post('/auth/register/draft').send({
@@ -109,7 +109,7 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
     expect(response.body.draftId).toBe('draft-abc');
     expect(response.body.draft.token).toBeUndefined();
     expect(response.body.draft.profileType).toBe('client');
-    expect(response.body.expiresAtMinutes).toBe(1440);
+    expect(response.body.expiresAtMinutes).toBe(60);
   });
 
   it('retorna draftId com tamanho compatível com schema', async () => {
@@ -124,7 +124,7 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
         status: 'OPEN',
         currentStep: 'IDENTITY',
       },
-      expiresAtMinutes: 1440,
+      expiresAtMinutes: 60,
     });
 
     const response = await request(app).post('/auth/register/draft').send({
@@ -152,7 +152,7 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
         status: 'OPEN',
         currentStep: 'IDENTITY',
       },
-      expiresAtMinutes: 1440,
+      expiresAtMinutes: 60,
     });
 
     const response = await request(app).post('/auth/register/draft').send({

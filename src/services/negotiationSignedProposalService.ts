@@ -67,6 +67,15 @@ function canManageOwnProposal(
   return canAccessNegotiationByOwnership(userId, negotiation);
 }
 
+function toRowArray<T>(result: unknown): T[] {
+  if (!Array.isArray(result)) {
+    return [];
+  }
+
+  const rows = result[0];
+  return Array.isArray(rows) ? (rows as T[]) : [];
+}
+
 function handleUnauthenticated(res: Response): Response {
   return res.status(401).json({ error: 'Usuario nao autenticado.' });
 }
@@ -147,7 +156,7 @@ export async function uploadSignedProposal(
       });
     }
 
-    const [existingSignedRows] = await tx.query<RowDataPacket[]>(
+    const existingSignedRowsResult = await tx.query<RowDataPacket[]>(
       `
         SELECT id
         FROM negotiation_documents
@@ -159,6 +168,7 @@ export async function uploadSignedProposal(
       `,
       [negotiationId]
     );
+    const existingSignedRows = toRowArray<RowDataPacket>(existingSignedRowsResult);
 
     if (existingSignedRows.length > 0) {
       await tx.rollback();

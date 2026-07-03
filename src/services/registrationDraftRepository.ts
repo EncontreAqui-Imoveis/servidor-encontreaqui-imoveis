@@ -82,15 +82,23 @@ export interface DraftDocumentRow extends RowDataPacket {
   updated_at: string | Date;
 }
 
-const TOKEN_LIFETIME_MINUTES = 1440;
+const DEFAULT_REGISTRATION_DRAFT_TTL_MINUTES = 60;
 const DRAFT_TOKEN_BYTES = 32;
+
+export function getRegistrationDraftTtlMinutes(): number {
+  const raw = Number(process.env.REGISTRATION_DRAFT_TTL_MINUTES);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_REGISTRATION_DRAFT_TTL_MINUTES;
+  }
+  return Math.floor(raw);
+}
 
 export function nowDate(): Date {
   return new Date();
 }
 
 export function draftExpiryAt(base: Date = nowDate()): Date {
-  return new Date(base.getTime() + TOKEN_LIFETIME_MINUTES * 60 * 1000);
+  return new Date(base.getTime() + getRegistrationDraftTtlMinutes() * 60 * 1000);
 }
 
 export function generateDraftId(): string {
@@ -394,49 +402,62 @@ export async function updateDraftByDraftId(
   await db.query<ResultSetHeader>(query, values);
 }
 
-export async function discardExpiredDrafts(): Promise<number> {
-  const now = nowDate();
-  const [result] = await authDb.query<ResultSetHeader>(
-    `
-      UPDATE registration_drafts
-      SET
-        status = 'EXPIRED',
-        password_hash = NULL,
-        password_hash_expires_at = NULL
-      WHERE status = 'OPEN' AND expires_at <= ?
-    `,
-    [now],
-  );
+export async function deleteDraftsByIds(ids: number[]): Promise<number> {
+  const validIds = ids.filter((id) => Number.isFinite(id) && id > 0);
+  if (validIds.length === 0) {
+    return 0;
+  }
+
+  const placeholders = validIds.map(() => '?').join(', ');
   await authDb.query<ResultSetHeader>(
     `
       UPDATE registration_phone_otps
       SET invalidated = 1
-      WHERE draft_id IN (
-        SELECT id FROM registration_drafts WHERE status = 'EXPIRED' AND expires_at <= ?
-      )
+      WHERE draft_id IN (${placeholders})
     `,
-    [now],
+    validIds,
   );
   await authDb.query<ResultSetHeader>(
     `
       DELETE FROM registration_draft_documents
-      WHERE draft_id IN (
-        SELECT id FROM registration_drafts WHERE status = 'EXPIRED' AND expires_at <= ?
-      )
+      WHERE draft_id IN (${placeholders})
     `,
-    [now],
+    validIds,
   );
   await authDb.query<ResultSetHeader>(
     `
       UPDATE email_code_challenges
       SET status = 'expired'
-      WHERE draft_id IN (
-        SELECT id FROM registration_drafts WHERE status = 'EXPIRED' AND expires_at <= ?
-      )
+      WHERE draft_id IN (${placeholders})
     `,
-    [now],
+    validIds,
   );
-  return result.affectedRows;
+  await authDb.query<ResultSetHeader>(
+    `
+      DELETE FROM registration_drafts
+      WHERE id IN (${placeholders})
+    `,
+    validIds,
+  );
+  return validIds.length;
+}
+
+export async function discardExpiredDrafts(): Promise<number> {
+  const now = nowDate();
+  const [rows] = await authDb.query<RowDataPacket[]>(
+    `
+      SELECT id
+      FROM registration_drafts
+      WHERE status = 'OPEN'
+        AND (
+          expires_at <= ?
+          OR (password_hash_expires_at IS NOT NULL AND password_hash_expires_at <= ?)
+        )
+    `,
+    [now, now],
+  );
+  const ids = rows.map((row) => Number(row.id));
+  return deleteDraftsByIds(ids);
 }
 
 export async function upsertDraftPhoneOtp(params: {

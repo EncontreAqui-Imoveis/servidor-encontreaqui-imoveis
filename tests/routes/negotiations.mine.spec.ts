@@ -82,10 +82,13 @@ describe('GET /negotiations/mine', () => {
         propertyTitle: 'Casa Central',
         propertyCity: 'Rio Verde',
         propertyState: 'GO',
-        propertyImage: 'https://res.cloudinary.com/demo/image/upload/casa.jpg',
+        propertyImage:
+          'https://res.cloudinary.com/demo/image/upload/c_limit/w_480/q_auto/f_auto/casa.jpg',
         status: 'DOCUMENTATION_PHASE',
         clientName: 'Cliente 1',
         clientCpf: '52998224725',
+        createdAt: '2026-03-10T13:00:00.000Z',
+        updatedAt: '2026-03-11T15:00:00.000Z',
       }),
     ]);
     expect(queryMock).toHaveBeenCalledTimes(2);

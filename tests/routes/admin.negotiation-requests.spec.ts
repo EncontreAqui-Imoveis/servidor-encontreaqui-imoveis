@@ -2,20 +2,26 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock } = vi.hoisted(() => {
+const {
+  listNegotiationRequestSummaryMock,
+  listNegotiationRequestsByPropertyMock,
+  isInvalidNegotiationStatusFilterMock,
+  parseNegotiationStatusFilterMock,
+} = vi.hoisted(() => {
   process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
   return {
-    queryMock: vi.fn(),
+    listNegotiationRequestSummaryMock: vi.fn(),
+    listNegotiationRequestsByPropertyMock: vi.fn(),
+    isInvalidNegotiationStatusFilterMock: vi.fn(),
+    parseNegotiationStatusFilterMock: vi.fn(),
   };
 });
 
-vi.mock('../../src/database/connection', () => ({
-  __esModule: true,
-  default: {
-    query: queryMock,
-    execute: vi.fn(),
-    getConnection: vi.fn(),
-  },
+vi.mock('../../src/services/adminNegotiationListingService', () => ({
+  listNegotiationRequestSummary: listNegotiationRequestSummaryMock,
+  listNegotiationRequestsByProperty: listNegotiationRequestsByPropertyMock,
+  isInvalidNegotiationStatusFilter: isInvalidNegotiationStatusFilterMock,
+  parseNegotiationStatusFilter: parseNegotiationStatusFilterMock,
 }));
 
 vi.mock('../../src/config/cloudinary', () => ({
@@ -62,30 +68,88 @@ describe('admin negotiation request views', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    isInvalidNegotiationStatusFilterMock.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return false;
+      const normalized = value.trim().toUpperCase();
+      return normalized !== '' && normalized === 'INVALID_STATUS';
+    });
+
+    parseNegotiationStatusFilterMock.mockImplementation((value: unknown) => {
+      if (typeof value !== 'string') return null;
+      const normalized = value.trim().toUpperCase();
+      if (!normalized || normalized === 'INVALID_STATUS') {
+        return null;
+      }
+      return normalized === 'REJECTED' ? 'REFUSED' : normalized;
+    });
+
+    listNegotiationRequestSummaryMock.mockResolvedValue({
+      page: 1,
+      limit: 10,
+      total: 1,
+      data: [
+        {
+          propertyId: 101,
+          propertyCode: 'EA-101',
+          propertyTitle: 'Casa Alto Padrão',
+          propertyAddress: 'Rua A, 10, Centro, Goiania, GO',
+          propertyImageUrl: 'https://res.cloudinary.com/demo/image/upload/c_limit/w_480/q_auto/f_auto/casa.jpg',
+          propertyValue: 1000000,
+          proposalCount: 3,
+          updatedAt: '2026-04-22T10:00:00.000Z',
+          topProposal: {
+            negotiationId: 'neg-1',
+            value: 850000,
+            clientName: 'Maria Compradora',
+            createdAt: '2026-04-22T09:00:00.000Z',
+          },
+        },
+      ],
+    });
+
+    listNegotiationRequestsByPropertyMock.mockResolvedValue({
+      page: 1,
+      limit: 10,
+      total: 2,
+      propertyId: 101,
+      data: [
+        {
+          id: 'neg-1',
+          status: 'UNDER_REVIEW',
+          internalStatus: 'DOCUMENTATION_PHASE',
+          propertyId: 101,
+          propertyCode: 'EA-101',
+          propertyTitle: 'Casa Alto Padrão',
+          propertyAddress: 'Rua A, 10, Centro, Goiania, GO',
+          propertyImageUrl: 'https://res.cloudinary.com/demo/image/upload/c_limit/w_480/q_auto/f_auto/casa.jpg',
+          propertyValue: 1000000,
+          capturingBrokerName: 'Carlos Broker',
+          sellingBrokerName: null,
+          sellerClientName: null,
+          clientName: 'Maria Compradora',
+          clientCpf: '11122233344',
+          value: 850000,
+          createdAt: '2026-04-22T09:00:00.000Z',
+          validityDate: '2026-05-02',
+          payment: {
+            dinheiro: 200000,
+            permuta: 0,
+            financiamento: 650000,
+            outros: 0,
+          },
+          updatedAt: '2026-04-22T10:00:00.000Z',
+          approvedAt: null,
+          signedDocumentId: 33,
+          hasSignedProposalDocument: true,
+          signedDocumentFileName: 'proposta-assinada-maria.pdf',
+          draftDocumentId: null,
+          draftDocumentFileName: null,
+        },
+      ],
+    });
   });
 
   it('returns property grouped summary with top proposal', async () => {
-    queryMock
-      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
-      .mockResolvedValueOnce([[{ column_name: 'updated_at' }]])
-      .mockResolvedValueOnce([[{ total: 1 }]])
-      .mockResolvedValueOnce([
-        [
-          {
-            property_id: 101,
-            property_code: 'EA-101',
-            property_title: 'Casa Alto Padrão',
-            property_address: 'Rua A, 10, Centro, Goiania, GO',
-            proposal_count: 3,
-            latest_updated_at: '2026-04-22T10:00:00.000Z',
-            top_negotiation_id: 'neg-1',
-            top_proposal_value: 850000,
-            top_client_name: 'Maria Compradora',
-            top_created_at: '2026-04-22T09:00:00.000Z',
-          },
-        ],
-      ]);
-
     const response = await request(app).get('/admin/negotiations/requests/summary');
 
     expect(response.status).toBe(200);
@@ -108,40 +172,6 @@ describe('admin negotiation request views', () => {
   });
 
   it('returns paginated requests for a single property', async () => {
-    queryMock
-      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
-      .mockResolvedValueOnce([[{ column_name: 'updated_at' }]])
-      .mockResolvedValueOnce([[{ total: 2 }]])
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 'neg-1',
-            negotiation_status: 'DOCUMENTATION_PHASE',
-            property_id: 101,
-            property_status: 'approved',
-            property_code: 'EA-101',
-            property_title: 'Casa Alto Padrão',
-            property_address: 'Rua A, 10, Centro, Goiania, GO',
-            final_value: 850000,
-            proposal_validity_date: '2026-05-02',
-            capturing_broker_name: 'Carlos Broker',
-            selling_broker_name: null,
-            client_name: 'Maria Compradora',
-            client_cpf: '11122233344',
-            payment_dinheiro: 200000,
-            payment_permuta: 0,
-            payment_financiamento: 650000,
-            payment_outros: 0,
-            last_event_at: '2026-04-22T10:00:00.000Z',
-            approved_at: null,
-            signed_document_id: 33,
-            signed_document_metadata_json: JSON.stringify({
-              originalFileName: 'proposta-assinada-maria.pdf',
-            }),
-          },
-        ],
-      ]);
-
     const response = await request(app)
       .get('/admin/negotiations/requests/property/101?page=1&limit=10');
 
@@ -170,15 +200,14 @@ describe('admin negotiation request views', () => {
 
     expect(response.status).toBe(400);
     expect(response.body).toMatchObject({ error: 'status inválido.' });
-    expect(queryMock).not.toHaveBeenCalled();
+    expect(listNegotiationRequestSummaryMock).not.toHaveBeenCalled();
+    expect(listNegotiationRequestsByPropertyMock).not.toHaveBeenCalled();
   });
 
   it('returns 500 when summary query fails', async () => {
-    queryMock
-      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'client_cpf' }]])
-      .mockResolvedValueOnce([[{ column_name: 'updated_at' }]])
-      .mockResolvedValueOnce([[{ total: 1 }]])
-      .mockRejectedValueOnce(Object.assign(new Error('Unknown column'), { code: 'ER_BAD_FIELD_ERROR' }));
+    listNegotiationRequestSummaryMock.mockRejectedValueOnce(
+      Object.assign(new Error('Unknown column'), { code: 'ER_BAD_FIELD_ERROR' })
+    );
 
     const response = await request(app).get('/admin/negotiations/requests/summary');
 

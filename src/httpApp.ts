@@ -1,11 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import mainRoutes from './routes';
 import publicRoutes from './routes/public.routes';
 import { globalErrorHandler, notFoundHandler } from './middlewares/errorHandler';
-import { getRequestId, requestContextMiddleware } from './middlewares/requestContext';
+import { requestContextMiddleware } from './middlewares/requestContext';
 import {
   buildCorsOptions,
   enforceHttps,
@@ -15,39 +14,7 @@ import { requestSanitizer } from './middlewares/requestSanitizer';
 import { tempUploadCleanup } from './middlewares/tempUploadCleanup';
 import { patchConsoleRedaction } from './utils/logSanitizer';
 import { metricsMiddleware, getMetrics } from './middlewares/metrics';
-
-const DEFAULT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 300;
-
-function resolveRateLimitWindowMs() {
-  const configuredValue = Number(process.env.RATE_LIMIT_WINDOW_MS);
-  return Number.isFinite(configuredValue) && configuredValue > 0
-    ? configuredValue
-    : DEFAULT_RATE_LIMIT_WINDOW_MS;
-}
-
-function resolveRateLimitMaxRequests() {
-  const configuredValue = Number(process.env.RATE_LIMIT_MAX_REQUESTS);
-  return Number.isFinite(configuredValue) && configuredValue > 0
-    ? configuredValue
-    : DEFAULT_RATE_LIMIT_MAX_REQUESTS;
-}
-
-function createApiRateLimiter() {
-  return rateLimit({
-    windowMs: resolveRateLimitWindowMs(),
-    limit: resolveRateLimitMaxRequests(),
-    standardHeaders: 'draft-7',
-    legacyHeaders: false,
-    skip: (req) => req.path === '/health' || req.method === 'OPTIONS',
-    handler: (req, res) => {
-      return res.status(429).json({
-        error: 'Muitas requisições. Tente novamente em instantes.',
-        requestId: getRequestId(req),
-      });
-    },
-  });
-}
+import { createGlobalRateLimiter } from './config/rateLimiters';
 
 export function createHttpApp() {
   const app = express();
@@ -96,7 +63,7 @@ export function createHttpApp() {
     }
     next();
   });
-  app.use(createApiRateLimiter());
+  app.use(createGlobalRateLimiter());
 
   app.use(
     express.json({

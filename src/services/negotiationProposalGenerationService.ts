@@ -478,6 +478,7 @@ export async function generateProposalFromProperty(
     const capturingBrokerId = brokerContext.capturingBrokerId;
     const sellerBrokerId = brokerContext.sellerBrokerId;
     const sellingBrokerName = brokerContext.sellingBrokerName;
+    const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
 
     const [existingRows] = await tx.query<NegotiationRow[]>(
       `
@@ -485,10 +486,17 @@ export async function generateProposalFromProperty(
         FROM negotiations
         WHERE property_id = ?
           AND status IN (${ACTIVE_NEGOTIATION_STATUSES.map(() => '?').join(', ')})
-        LIMIT 1
+          AND (
+            (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
+            OR (
+              buyer_client_id IS NULL
+              AND ${normalizedCpfExpr} = ?
+            )
+          )
+          LIMIT 1
         FOR UPDATE
       `,
-      [payload.propertyId, ...ACTIVE_NEGOTIATION_STATUSES]
+      [payload.propertyId, ...ACTIVE_NEGOTIATION_STATUSES, buyerClientId, cpfKey]
     );
     if (existingRows.length > 0) {
       await tx.rollback();

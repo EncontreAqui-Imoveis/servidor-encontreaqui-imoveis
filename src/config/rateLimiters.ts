@@ -18,7 +18,9 @@ function resolveNumber(value: string | undefined, fallback: number): number {
 class RedisRateLimitStore implements Store {
   localKeys = false;
   prefix: string;
-  private readonly redis: Redis;
+  private readonly redis?: Redis;
+  private readonly fallback = new Map<string, { hits: number; expiresAt: number }>();
+  private redisHealthy = true;
   private windowMs = DEFAULT_WINDOW_MS;
 
   constructor(prefix: string) {
@@ -29,6 +31,17 @@ class RedisRateLimitStore implements Store {
 
     this.prefix = prefix;
     this.redis = new Redis(redisConnection.config as RedisOptions);
+    this.redis.on('error', () => {
+      this.redisHealthy = false;
+    });
+    this.redis.on('close', () => {
+      this.redisHealthy = false;
+    });
+    this.redis.on('end', () => {
+      this.redisHealthy = false;
+    });
+    this.redis.options.retryStrategy = () => null;
+    this.redis.options.maxRetriesPerRequest = 1;
   }
 
   init(options: { windowMs: number }): void {
@@ -36,54 +49,139 @@ class RedisRateLimitStore implements Store {
   }
 
   async increment(key: string): Promise<{ totalHits: number; resetTime: Date | undefined }> {
-    const storeKey = this.prefixedKey(key);
-    const totalHits = await this.redis.incr(storeKey);
-    if (totalHits === 1) {
-      await this.redis.pexpire(storeKey, this.windowMs);
+    if (!this.redis || !this.redisHealthy) {
+      return this.incrementFallback(key);
     }
-    const ttl = await this.redis.pttl(storeKey);
 
-    return {
-      totalHits,
-      resetTime: ttl > 0 ? new Date(Date.now() + ttl) : undefined,
-    };
+    const storeKey = this.prefixedKey(key);
+    try {
+      const totalHits = await this.redis.incr(storeKey);
+      if (totalHits === 1) {
+        await this.redis.pexpire(storeKey, this.windowMs);
+      }
+      const ttl = await this.redis.pttl(storeKey);
+
+      return {
+        totalHits,
+        resetTime: ttl > 0 ? new Date(Date.now() + ttl) : undefined,
+      };
+    } catch {
+      this.redisHealthy = false;
+      return this.incrementFallback(key);
+    }
   }
 
   async decrement(key: string): Promise<void> {
-    const storeKey = this.prefixedKey(key);
-    const current = await this.redis.get(storeKey);
-    const hits = Number(current ?? 0);
-    if (!Number.isFinite(hits) || hits <= 1) {
-      await this.redis.del(storeKey);
+    if (!this.redis || !this.redisHealthy) {
+      this.decrementFallback(key);
       return;
     }
-    await this.redis.decr(storeKey);
+
+    const storeKey = this.prefixedKey(key);
+    try {
+      const current = await this.redis.get(storeKey);
+      const hits = Number(current ?? 0);
+      if (!Number.isFinite(hits) || hits <= 1) {
+        await this.redis.del(storeKey);
+        return;
+      }
+      await this.redis.decr(storeKey);
+    } catch {
+      this.redisHealthy = false;
+      this.decrementFallback(key);
+    }
   }
 
   async resetKey(key: string): Promise<void> {
-    await this.redis.del(this.prefixedKey(key));
+    if (!this.redis || !this.redisHealthy) {
+      this.fallback.delete(this.prefixedKey(key));
+      return;
+    }
+
+    try {
+      await this.redis.del(this.prefixedKey(key));
+    } catch {
+      this.redisHealthy = false;
+      this.fallback.delete(this.prefixedKey(key));
+    }
   }
 
   async get(key: string): Promise<ClientRateLimitInfo | undefined> {
-    const storeKey = this.prefixedKey(key);
-    const current = await this.redis.get(storeKey);
-    const hits = Number(current ?? 0);
-    if (!Number.isFinite(hits) || hits <= 0) {
-      return undefined;
+    if (!this.redis || !this.redisHealthy) {
+      return this.getFallback(key);
     }
-    const ttl = await this.redis.pttl(storeKey);
-    return {
-      totalHits: hits,
-      resetTime: ttl > 0 ? new Date(Date.now() + ttl) : undefined,
-    };
+
+    const storeKey = this.prefixedKey(key);
+    try {
+      const current = await this.redis.get(storeKey);
+      const hits = Number(current ?? 0);
+      if (!Number.isFinite(hits) || hits <= 0) {
+        return undefined;
+      }
+      const ttl = await this.redis.pttl(storeKey);
+      return {
+        totalHits: hits,
+        resetTime: ttl > 0 ? new Date(Date.now() + ttl) : undefined,
+      };
+    } catch {
+      this.redisHealthy = false;
+      return this.getFallback(key);
+    }
   }
 
   async shutdown(): Promise<void> {
-    await this.redis.quit();
+    await this.redis?.quit();
   }
 
   private prefixedKey(key: string): string {
     return `${this.prefix}${key}`;
+  }
+
+  private incrementFallback(key: string) {
+    const storeKey = this.prefixedKey(key);
+    const now = Date.now();
+    const current = this.fallback.get(storeKey);
+    if (!current || current.expiresAt <= now) {
+      const expiresAt = now + this.windowMs;
+      this.fallback.set(storeKey, { hits: 1, expiresAt });
+      return { totalHits: 1, resetTime: new Date(expiresAt) };
+    }
+
+    current.hits += 1;
+    return {
+      totalHits: current.hits,
+      resetTime: new Date(current.expiresAt),
+    };
+  }
+
+  private decrementFallback(key: string) {
+    const storeKey = this.prefixedKey(key);
+    const current = this.fallback.get(storeKey);
+    if (!current) {
+      return;
+    }
+    current.hits -= 1;
+    if (current.hits <= 0) {
+      this.fallback.delete(storeKey);
+    }
+  }
+
+  private getFallback(key: string): ClientRateLimitInfo | undefined {
+    const storeKey = this.prefixedKey(key);
+    const current = this.fallback.get(storeKey);
+    if (!current) {
+      return undefined;
+    }
+
+    if (current.expiresAt <= Date.now()) {
+      this.fallback.delete(storeKey);
+      return undefined;
+    }
+
+    return {
+      totalHits: current.hits,
+      resetTime: new Date(current.expiresAt),
+    };
   }
 }
 

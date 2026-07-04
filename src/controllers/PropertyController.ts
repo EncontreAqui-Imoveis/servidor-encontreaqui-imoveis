@@ -79,6 +79,20 @@ const ALLOWED_STATUSES = new Set<PropertyStatus>([
   "sold",
 ]);
 
+const CONTRACT_READY_NEGOTIATION_STATUSES = new Set([
+  'DOCUMENTATION_PHASE',
+  'CONTRACT_DRAFTING',
+  'AWAITING_SIGNATURES',
+  'AWAITING_DOCS',
+  'IN_DRAFT',
+  'FINALIZED',
+  'CONCLUDED',
+  'SOLD',
+  'RENTED',
+  'APPROVED',
+  'APPROVED_WITH_RES',
+]);
+
 interface PropertyRow extends RowDataPacket {
   id: number;
   broker_id: number | null;
@@ -166,6 +180,10 @@ interface PropertyRow extends RowDataPacket {
   active_negotiation_status?: string | null;
   active_negotiation_value?: number | string | null;
   active_negotiation_client_name?: string | null;
+  latest_negotiation_id?: string | null;
+  latest_negotiation_status?: string | null;
+  latest_contract_id?: string | null;
+  latest_contract_status?: string | null;
 }
 
 interface PropertyAggregateRow extends PropertyRow {
@@ -320,6 +338,14 @@ function mapProperty(
     row.active_negotiation_value != null
       ? Number(row.active_negotiation_value)
       : null;
+  const latestNegotiationId = stringOrNull(row.latest_negotiation_id);
+  const latestNegotiationStatus = stringOrNull(row.latest_negotiation_status);
+  const latestContractId = stringOrNull(row.latest_contract_id);
+  const latestContractStatus = stringOrNull(row.latest_contract_status);
+  const contractReadyProposal =
+    Boolean(latestContractId) ||
+    (latestNegotiationStatus != null &&
+      CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus));
   const negotiation = activeNegotiationId
     ? {
       id: activeNegotiationId,
@@ -482,6 +508,18 @@ function mapProperty(
     activeNegotiationId: activeNegotiationId,
     negotiation,
     activeNegotiation: negotiation,
+    contractReadyProposal,
+    contractReadyProposalReason:
+      latestContractId != null
+        ? 'contract_created'
+        : latestNegotiationStatus != null &&
+            CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus)
+          ? 'contract_stage'
+          : null,
+    latestNegotiationId,
+    latestNegotiationStatus,
+    latestContractId,
+    latestContractStatus,
     hasPendingEditRequest:
       row.pending_edit_request_id != null &&
       Number(row.pending_edit_request_id) > 0,

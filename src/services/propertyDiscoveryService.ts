@@ -18,6 +18,20 @@ const NEGOTIATION_PUBLIC_BLOCKING_STATUSES = [
   'RENTED',
 ];
 
+const CONTRACT_READY_NEGOTIATION_STATUSES = new Set([
+  'DOCUMENTATION_PHASE',
+  'CONTRACT_DRAFTING',
+  'AWAITING_SIGNATURES',
+  'AWAITING_DOCS',
+  'IN_DRAFT',
+  'FINALIZED',
+  'CONCLUDED',
+  'SOLD',
+  'RENTED',
+  'APPROVED',
+  'APPROVED_WITH_RES',
+]);
+
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
 
 interface PropertyRow extends RowDataPacket {
@@ -104,6 +118,10 @@ interface PropertyRow extends RowDataPacket {
   active_negotiation_status?: string | null;
   active_negotiation_value?: number | string | null;
   active_negotiation_client_name?: string | null;
+  latest_negotiation_id?: string | null;
+  latest_negotiation_status?: string | null;
+  latest_contract_id?: string | null;
+  latest_contract_status?: string | null;
 }
 
 type PropertyAggregateRow = PropertyRow;
@@ -284,7 +302,11 @@ function buildPropertyAggregateSelectClause(includePendingEditRequest: boolean):
         ANY_VALUE(an.id) AS active_negotiation_id,
         ANY_VALUE(an.status) AS active_negotiation_status,
         ANY_VALUE(an.final_value) AS active_negotiation_value,
-        ANY_VALUE(nbu.name) AS active_negotiation_client_name
+        ANY_VALUE(nbu.name) AS active_negotiation_client_name,
+        ANY_VALUE(ln.id) AS latest_negotiation_id,
+        ANY_VALUE(ln.status) AS latest_negotiation_status,
+        ANY_VALUE(c.id) AS latest_contract_id,
+        ANY_VALUE(c.status) AS latest_contract_status
         ${includePendingEditRequest ? ',\n        ANY_VALUE(per.id) AS pending_edit_request_id' : ''}
         ,
         GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
@@ -322,6 +344,29 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
       LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN (
+        SELECT
+          ranked.property_id,
+          ranked.id,
+          ranked.status,
+          ranked.final_value,
+          ranked.buyer_client_id
+        FROM (
+          SELECT
+            n.property_id,
+            n.id,
+            n.status,
+            n.final_value,
+            n.buyer_client_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY n.property_id
+              ORDER BY n.version DESC, n.id DESC
+            ) AS rn
+          FROM negotiations n
+        ) ranked
+        WHERE ranked.rn = 1
+      ) ln ON ln.property_id = p.id
+      LEFT JOIN contracts c ON c.negotiation_id = ln.id
       ${includePendingEditRequest ? 'LEFT JOIN property_edit_requests per\n        ON per.property_id = p.id\n       AND per.status = \'PENDING\'' : ''}
       LEFT JOIN property_images pi ON pi.property_id = p.id
   `;
@@ -357,6 +402,29 @@ function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): st
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
       LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN (
+        SELECT
+          ranked.property_id,
+          ranked.id,
+          ranked.status,
+          ranked.final_value,
+          ranked.buyer_client_id
+        FROM (
+          SELECT
+            n.property_id,
+            n.id,
+            n.status,
+            n.final_value,
+            n.buyer_client_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY n.property_id
+              ORDER BY n.version DESC, n.id DESC
+            ) AS rn
+          FROM negotiations n
+        ) ranked
+        WHERE ranked.rn = 1
+      ) ln ON ln.property_id = p.id
+      LEFT JOIN contracts c ON c.negotiation_id = ln.id
       ${includePendingEditRequest ? 'LEFT JOIN property_edit_requests per\n        ON per.property_id = p.id\n       AND per.status = \'PENDING\'' : ''}
       LEFT JOIN property_images pi ON pi.property_id = p.id
   `;
@@ -419,6 +487,18 @@ export function mapProperty(
     : null;
   const activeNegotiationValue =
     row.active_negotiation_value != null ? Number(row.active_negotiation_value) : null;
+  const latestNegotiationId = row.latest_negotiation_id ? String(row.latest_negotiation_id) : null;
+  const latestNegotiationStatus = row.latest_negotiation_status
+    ? String(row.latest_negotiation_status).trim().toUpperCase()
+    : null;
+  const latestContractId = row.latest_contract_id ? String(row.latest_contract_id) : null;
+  const latestContractStatus = row.latest_contract_status
+    ? String(row.latest_contract_status).trim().toUpperCase()
+    : null;
+  const contractReadyProposal =
+    Boolean(latestContractId) ||
+    (latestNegotiationStatus != null &&
+      CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus));
   const negotiation = activeNegotiationId
     ? {
         id: activeNegotiationId,
@@ -561,6 +641,18 @@ export function mapProperty(
     activeNegotiationId: activeNegotiationId,
     negotiation,
     activeNegotiation: negotiation,
+    contractReadyProposal,
+    contractReadyProposalReason:
+      latestContractId != null
+        ? 'contract_created'
+        : latestNegotiationStatus != null &&
+            CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus)
+          ? 'contract_stage'
+          : null,
+    latestNegotiationId,
+    latestNegotiationStatus,
+    latestContractId,
+    latestContractStatus,
     hasPendingEditRequest: row.pending_edit_request_id != null && Number(row.pending_edit_request_id) > 0,
     pendingEditRequestId: row.pending_edit_request_id != null ? Number(row.pending_edit_request_id) : null,
     rejection_reason: row.rejection_reason != null ? String(row.rejection_reason) : null,

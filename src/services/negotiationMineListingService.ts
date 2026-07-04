@@ -63,6 +63,7 @@ type NegotiationSummaryPayload = {
   sellerClientId: number | null;
   contractId: string | null;
   contractStatus: string | null;
+  contractReadyProposal: boolean;
   buyerApprovalStatus: string | null;
   sellerApprovalStatus: string | null;
 };
@@ -81,6 +82,21 @@ const PROPOSAL_LIST_VISIBLE_STATUSES = [
   'DOCUMENTATION_PHASE',
   'REFUSED',
 ] as const;
+
+const CONTRACT_READY_NEGOTIATION_STATUSES = new Set([
+  'DOCUMENTATION_PHASE',
+  'CONTRACT_DRAFTING',
+  'CONTRACT_PREPARATION',
+  'AWAITING_SIGNATURES',
+  'AWAITING_DOCS',
+  'IN_DRAFT',
+  'FINALIZED',
+  'CONCLUDED',
+  'SOLD',
+  'RENTED',
+  'APPROVED',
+  'APPROVED_WITH_RES',
+]);
 
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
   if (!value) {
@@ -183,6 +199,7 @@ function mapNegotiationSummaryRow(row: NegotiationListRow): NegotiationSummaryPa
     sellerClientId: null,
     contractId: null,
     contractStatus: null,
+    contractReadyProposal: false,
     buyerApprovalStatus: null,
     sellerApprovalStatus: null,
   };
@@ -227,6 +244,9 @@ function buildMineNegotiationSummary(
   const breakdown = extractPaymentBreakdownFromDetails(pd);
   const signedCount = Number(row.signed_proposal_count ?? 0);
   const hasSignedProposal = signedCount > 0;
+  const contractStatus = String(row.contract_status ?? '').trim().toUpperCase();
+  const contractReadyProposal =
+    contractStatus.length > 0 || CONTRACT_READY_NEGOTIATION_STATUSES.has(st);
 
   const canRoleEdit =
     userId === Number(row.capturing_broker_id ?? 0) ||
@@ -285,10 +305,8 @@ function buildMineNegotiationSummary(
       row.contract_id != null && String(row.contract_id).trim().length > 0
         ? String(row.contract_id).trim()
         : null,
-    contractStatus:
-      row.contract_status != null && String(row.contract_status).trim().length > 0
-        ? String(row.contract_status).trim().toUpperCase()
-        : null,
+    contractStatus: contractStatus.length > 0 ? contractStatus : null,
+    contractReadyProposal,
     buyerApprovalStatus:
       row.buyer_approval_status != null &&
       String(row.buyer_approval_status).trim().length > 0

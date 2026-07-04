@@ -115,6 +115,10 @@ interface PropertyRow extends RowDataPacket {
   active_negotiation_status?: string | null;
   active_negotiation_value?: number | string | null;
   active_negotiation_client_name?: string | null;
+  latest_negotiation_id?: string | null;
+  latest_negotiation_status?: string | null;
+  latest_contract_id?: string | null;
+  latest_contract_status?: string | null;
 }
 
 interface PropertyAggregateRow extends PropertyRow {
@@ -504,6 +508,10 @@ export async function listUserProperties(userId: number) {
         ANY_VALUE(an.status) AS active_negotiation_status,
         ANY_VALUE(an.final_value) AS active_negotiation_value,
         ANY_VALUE(nbu.name) AS active_negotiation_client_name,
+        ANY_VALUE(ln.id) AS latest_negotiation_id,
+        ANY_VALUE(ln.status) AS latest_negotiation_status,
+        ANY_VALUE(c.id) AS latest_contract_id,
+        ANY_VALUE(c.status) AS latest_contract_status,
         ANY_VALUE(per.id) AS pending_edit_request_id,
         GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
       FROM properties p
@@ -535,6 +543,29 @@ export async function listUserProperties(userId: number) {
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
       LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN (
+        SELECT
+          ranked.property_id,
+          ranked.id,
+          ranked.status,
+          ranked.final_value,
+          ranked.buyer_client_id
+        FROM (
+          SELECT
+            n.property_id,
+            n.id,
+            n.status,
+            n.final_value,
+            n.buyer_client_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY n.property_id
+              ORDER BY n.version DESC, n.id DESC
+            ) AS rn
+          FROM negotiations n
+        ) ranked
+        WHERE ranked.rn = 1
+      ) ln ON ln.property_id = p.id
+      LEFT JOIN contracts c ON c.negotiation_id = ln.id
       LEFT JOIN property_edit_requests per
         ON per.property_id = p.id
        AND per.status = 'PENDING'
@@ -696,6 +727,10 @@ export async function listPublicProperties(query: Record<string, unknown>) {
         ANY_VALUE(an.status) AS active_negotiation_status,
         ANY_VALUE(an.final_value) AS active_negotiation_value,
         ANY_VALUE(nbu.name) AS active_negotiation_client_name,
+        ANY_VALUE(ln.id) AS latest_negotiation_id,
+        ANY_VALUE(ln.status) AS latest_negotiation_status,
+        ANY_VALUE(c.id) AS latest_contract_id,
+        ANY_VALUE(c.status) AS latest_contract_status,
         GROUP_CONCAT(DISTINCT pi.image_url ORDER BY pi.id) AS images
       FROM properties p
       LEFT JOIN brokers b ON p.broker_id = b.id
@@ -726,6 +761,29 @@ export async function listPublicProperties(query: Record<string, unknown>) {
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
       LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN (
+        SELECT
+          ranked.property_id,
+          ranked.id,
+          ranked.status,
+          ranked.final_value,
+          ranked.buyer_client_id
+        FROM (
+          SELECT
+            n.property_id,
+            n.id,
+            n.status,
+            n.final_value,
+            n.buyer_client_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY n.property_id
+              ORDER BY n.version DESC, n.id DESC
+            ) AS rn
+          FROM negotiations n
+        ) ranked
+        WHERE ranked.rn = 1
+      ) ln ON ln.property_id = p.id
+      LEFT JOIN contracts c ON c.negotiation_id = ln.id
       LEFT JOIN property_images pi ON pi.property_id = p.id
       ${where}
       GROUP BY p.id

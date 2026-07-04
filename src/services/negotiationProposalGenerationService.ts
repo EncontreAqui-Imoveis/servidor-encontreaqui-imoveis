@@ -61,6 +61,7 @@ interface BrokerRow extends RowDataPacket {
 }
 
 interface UserRow extends RowDataPacket {
+  id: number;
   name: string;
   cpf?: string | null;
 }
@@ -122,6 +123,40 @@ function isOwnerSelfProposalAttempt(
   const currentName = normalizeComparableText(String(currentUser?.name ?? ''));
   const payloadName = normalizeComparableText(payload.clientName);
   return currentName.length > 0 && currentName === payloadName;
+}
+
+async function resolveBuyerUserIdentity(
+  tx: PoolConnection,
+  buyerUserId: number
+): Promise<{ id: number; name: string; cpfDigits: string }> {
+  const normalizedBuyerUserId = normalizeOptionalPositiveId(buyerUserId);
+  if (normalizedBuyerUserId === null) {
+    throw new Error('buyerUserId invalido.');
+  }
+
+  const [rows] = await tx.query<UserRow[]>(
+    'SELECT id, name, cpf FROM users WHERE id = ? LIMIT 1',
+    [normalizedBuyerUserId]
+  );
+  const row = rows[0];
+  if (!row) {
+    throw new Error('Usuario comprador nao encontrado.');
+  }
+
+  const name = String(row.name ?? '').trim();
+  const cpfDigits = normalizeCpfDigits(String(row.cpf ?? ''));
+  if (!name) {
+    throw new Error('Usuario comprador sem nome valido.');
+  }
+  if (!isValidCpf(cpfDigits)) {
+    throw new Error('Usuario comprador sem CPF valido.');
+  }
+
+  return {
+    id: normalizedBuyerUserId,
+    name,
+    cpfDigits,
+  };
 }
 
 async function resolveCurrentUserIdentity(
@@ -392,15 +427,6 @@ export async function generateProposalFromProperty(
         .status(403)
         .json({ error: 'Apenas clientes, corretores ou assistentes podem enviar proposta.' });
     }
-    if (Number(property.owner_id ?? 0) === Number(req.userId ?? 0)) {
-      const currentUser = await resolveCurrentUserIdentity(tx, Number(req.userId));
-      if (isOwnerSelfProposalAttempt(Number(req.userId), currentUser, payload)) {
-        await tx.rollback();
-        return res.status(403).json({
-          error: 'O proponente não pode ser o próprio dono do imóvel.',
-        });
-      }
-    }
     if (String(property.status ?? '').trim().toLowerCase() !== 'approved') {
       await tx.rollback();
       return res.status(409).json({
@@ -444,6 +470,37 @@ export async function generateProposalFromProperty(
       });
     }
 
+    if (Number(payload.buyerUserId) === Number(req.userId ?? 0)) {
+      await tx.rollback();
+      return res.status(400).json({
+        error: 'O comprador da proposta precisa ser um usuário diferente de quem a criou.',
+      });
+    }
+
+    let buyerUserIdentity: { id: number; name: string; cpfDigits: string };
+    try {
+      buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
+    } catch (error) {
+      await tx.rollback();
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : 'Usuario comprador invalido.',
+      });
+    }
+
+    if (normalizeComparableText(payload.clientName) !== normalizeComparableText(buyerUserIdentity.name)) {
+      await tx.rollback();
+      return res.status(400).json({
+        error: 'O nome informado deve corresponder ao usuário comprador selecionado.',
+      });
+    }
+
+    if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
+      await tx.rollback();
+      return res.status(400).json({
+        error: 'O CPF informado deve corresponder ao usuário comprador selecionado.',
+      });
+    }
+
     const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
     const requestedCapturingBrokerId = propertyBrokerId ?? (isBrokerUser ? normalizeOptionalPositiveId(req.userId) : null);
     if (isBrokerUser && requestedCapturingBrokerId === null) {
@@ -472,7 +529,7 @@ export async function generateProposalFromProperty(
       return res.status(400).json({ error: 'CPF do cliente invalido na proposta.' });
     }
 
-    const buyerClientId: number | null = Number(req.userId);
+    const buyerClientId: number | null = buyerUserIdentity.id;
     const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
     const capturingBrokerId = brokerContext.capturingBrokerId;
@@ -514,13 +571,13 @@ export async function generateProposalFromProperty(
       method: 'OTHER',
       validadeDias: payload.validadeDias,
       amount: Number(proposalValue.toFixed(2)),
-      details: {
-        ...payload.pagamento,
-        clientName: payload.clientName,
-        clientCpf: payload.clientCpf,
-        listingValue: Number(listingValue.toFixed(2)),
-      },
-    });
+        details: {
+          ...payload.pagamento,
+          clientName: buyerUserIdentity.name,
+          clientCpf: buyerUserIdentity.cpfDigits,
+          listingValue: Number(listingValue.toFixed(2)),
+        },
+      });
     const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
     assertProposalValidityDateNotPast(proposalValidityDate);
 
@@ -552,8 +609,8 @@ export async function generateProposalFromProperty(
         sellerBrokerId,
         sellerClientId,
         buyerClientId,
-        payload.clientName,
-        payload.clientCpf,
+        buyerUserIdentity.name,
+        buyerUserIdentity.cpfDigits,
         DEFAULT_WIZARD_STATUS,
         proposalValue,
         paymentDetails,
@@ -585,15 +642,15 @@ export async function generateProposalFromProperty(
           sellerClientId,
           capturingBrokerId,
           buyerClientId,
-          clientName: payload.clientName,
-          clientCpf: payload.clientCpf,
+          clientName: buyerUserIdentity.name,
+          clientCpf: buyerUserIdentity.cpfDigits,
         }),
       ]
     );
 
     const proposalData: ProposalData = {
-      clientName: payload.clientName,
-      clientCpf: payload.clientCpf,
+      clientName: buyerUserIdentity.name,
+      clientCpf: buyerUserIdentity.cpfDigits,
       propertyAddress: resolvePropertyAddress(property),
       brokerName,
       sellingBrokerName,
@@ -629,6 +686,9 @@ export async function generateProposalFromProperty(
       message: 'Proposta gerada com sucesso.',
       negotiationId,
       documentId,
+      buyerUserId: buyerClientId,
+      clientName: buyerUserIdentity.name,
+      clientCpf: buyerUserIdentity.cpfDigits,
     });
   } catch (error: any) {
     if (tx) {

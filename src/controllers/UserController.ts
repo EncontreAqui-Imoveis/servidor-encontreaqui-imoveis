@@ -383,6 +383,63 @@ class UserController {
     }
   }
 
+  async searchUsers(req: AuthRequest, res: Response) {
+    const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const query = String(req.query.q ?? req.query.search ?? '').trim();
+    const digits = query.replace(/\D/g, '');
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 10) || 10, 1), 20);
+
+    if (query.length < 2 && digits.length < 2) {
+      return res.status(200).json({ data: [] });
+    }
+
+    try {
+      const rows = await runUserQuery<RowDataPacket[]>(
+        `
+          SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.cpf,
+            u.phone,
+            CASE
+              WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
+              ELSE 'client'
+            END AS role
+          FROM users u
+          LEFT JOIN brokers b ON u.id = b.id
+          WHERE u.id <> ?
+            AND (
+              u.name LIKE ?
+              OR u.email LIKE ?
+              OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(u.cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') LIKE ?
+            )
+          ORDER BY u.name ASC
+          LIMIT ?
+        `,
+        [userId, `%${query}%`, `%${query}%`, `%${digits || query}%`, limit],
+      );
+
+      return res.status(200).json({
+        data: rows.map((row) => ({
+          id: Number(row.id),
+          name: String(row.name ?? '').trim(),
+          email: row.email ?? null,
+          cpf: row.cpf ?? null,
+          phone: row.phone ?? null,
+          role: row.role ?? 'client',
+        })),
+      });
+    } catch (error) {
+      console.error('Erro ao buscar usuarios:', error);
+      return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
+    }
+  }
+
   async updateProfile(req: AuthRequest, res: Response) {
     const userId = req.userId;
     if (!userId) {

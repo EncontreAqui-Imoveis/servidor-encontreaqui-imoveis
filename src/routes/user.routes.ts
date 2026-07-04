@@ -18,6 +18,7 @@ userRoutes.post('/sync', userController.syncUser);
 userRoutes.post('/auth/google', (req, res) => authController.google(req, res));
 userRoutes.post('/auth/firebase', userController.firebaseLogin);
 userRoutes.get('/me', authMiddleware, (req, res) => userController.getProfile(req as any, res));
+userRoutes.get('/search', authMiddleware, (req, res) => userController.searchUsers(req as any, res));
 userRoutes.put('/me', authMiddleware, (req, res) => userController.updateProfile(req as any, res));
 userRoutes.get('/upload/signature', authMiddleware, (req, res) => uploadController.getSignature(req, res));
 userRoutes.put('/me/address', authMiddleware, (req, res) =>

@@ -470,13 +470,6 @@ export async function generateProposalFromProperty(
       });
     }
 
-    if (Number(payload.buyerUserId) === Number(req.userId ?? 0)) {
-      await tx.rollback();
-      return res.status(400).json({
-        error: 'O comprador da proposta precisa ser um usuário diferente de quem a criou.',
-      });
-    }
-
     let buyerUserIdentity: { id: number; name: string; cpfDigits: string };
     try {
       buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);

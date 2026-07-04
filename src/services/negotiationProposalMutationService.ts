@@ -504,16 +504,6 @@ async function updateProposalFromWizardInternal(
       );
     }
 
-    if (Number(payload.buyerUserId) === Number(req.userId ?? 0)) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        400,
-        'O comprador da proposta precisa ser um usuário diferente de quem a criou.',
-        'PROPOSAL_VALIDATION_FAILED'
-      );
-    }
-
     let buyerUserIdentity: { id: number; name: string; cpfDigits: string };
     try {
       buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);

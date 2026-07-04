@@ -470,28 +470,33 @@ export async function generateProposalFromProperty(
       });
     }
 
-    let buyerUserIdentity: { id: number; name: string; cpfDigits: string };
-    try {
-      buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
-    } catch (error) {
-      await tx.rollback();
-      return res.status(400).json({
-        error: error instanceof Error ? error.message : 'Usuario comprador invalido.',
-      });
-    }
+    let buyerUserIdentity: { id: number; name: string; cpfDigits: string } | null = null;
+    if (payload.buyerUserId != null) {
+      try {
+        buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
+      } catch (error) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: error instanceof Error ? error.message : 'Usuario comprador invalido.',
+        });
+      }
 
-    if (normalizeComparableText(payload.clientName) !== normalizeComparableText(buyerUserIdentity.name)) {
-      await tx.rollback();
-      return res.status(400).json({
-        error: 'O nome informado deve corresponder ao usuário comprador selecionado.',
-      });
-    }
+      if (
+        normalizeComparableText(payload.clientName) !==
+        normalizeComparableText(buyerUserIdentity.name)
+      ) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'O nome informado deve corresponder ao usuário comprador selecionado.',
+        });
+      }
 
-    if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
-      await tx.rollback();
-      return res.status(400).json({
-        error: 'O CPF informado deve corresponder ao usuário comprador selecionado.',
-      });
+      if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
+        await tx.rollback();
+        return res.status(400).json({
+          error: 'O CPF informado deve corresponder ao usuário comprador selecionado.',
+        });
+      }
     }
 
     const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
@@ -522,7 +527,7 @@ export async function generateProposalFromProperty(
       return res.status(400).json({ error: 'CPF do cliente invalido na proposta.' });
     }
 
-    const buyerClientId: number | null = buyerUserIdentity.id;
+    const buyerClientId: number | null = buyerUserIdentity?.id ?? null;
     const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
     const capturingBrokerId = brokerContext.capturingBrokerId;
@@ -538,10 +543,7 @@ export async function generateProposalFromProperty(
           AND status IN (${ACTIVE_NEGOTIATION_STATUSES.map(() => '?').join(', ')})
           AND (
             (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
-            OR (
-              buyer_client_id IS NULL
-              AND ${normalizedCpfExpr} = ?
-            )
+            OR ${normalizedCpfExpr} = ?
           )
           LIMIT 1
         FOR UPDATE
@@ -564,13 +566,14 @@ export async function generateProposalFromProperty(
       method: 'OTHER',
       validadeDias: payload.validadeDias,
       amount: Number(proposalValue.toFixed(2)),
-        details: {
-          ...payload.pagamento,
-          clientName: buyerUserIdentity.name,
-          clientCpf: buyerUserIdentity.cpfDigits,
-          listingValue: Number(listingValue.toFixed(2)),
-        },
-      });
+      details: {
+        ...payload.pagamento,
+        clientName: payload.clientName,
+        clientCpf: payload.clientCpf,
+        listingValue: Number(listingValue.toFixed(2)),
+        buyerUserId: buyerClientId,
+      },
+    });
     const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
     assertProposalValidityDateNotPast(proposalValidityDate);
 
@@ -602,8 +605,8 @@ export async function generateProposalFromProperty(
         sellerBrokerId,
         sellerClientId,
         buyerClientId,
-        buyerUserIdentity.name,
-        buyerUserIdentity.cpfDigits,
+        payload.clientName,
+        payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
         proposalValue,
         paymentDetails,
@@ -635,15 +638,15 @@ export async function generateProposalFromProperty(
           sellerClientId,
           capturingBrokerId,
           buyerClientId,
-          clientName: buyerUserIdentity.name,
-          clientCpf: buyerUserIdentity.cpfDigits,
+          clientName: payload.clientName,
+          clientCpf: payload.clientCpf,
         }),
       ]
     );
 
     const proposalData: ProposalData = {
-      clientName: buyerUserIdentity.name,
-      clientCpf: buyerUserIdentity.cpfDigits,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
       brokerName,
       sellingBrokerName,
@@ -680,8 +683,8 @@ export async function generateProposalFromProperty(
       negotiationId,
       documentId,
       buyerUserId: buyerClientId,
-      clientName: buyerUserIdentity.name,
-      clientCpf: buyerUserIdentity.cpfDigits,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
     });
   } catch (error: any) {
     if (tx) {

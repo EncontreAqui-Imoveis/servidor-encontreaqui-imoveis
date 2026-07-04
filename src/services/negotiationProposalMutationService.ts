@@ -504,40 +504,45 @@ async function updateProposalFromWizardInternal(
       );
     }
 
-    let buyerUserIdentity: { id: number; name: string; cpfDigits: string };
-    try {
-      buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
-    } catch (error) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        400,
-        error instanceof Error ? error.message : 'Usuario comprador invalido.',
-        'PROPOSAL_VALIDATION_FAILED'
-      );
+    let buyerUserIdentity: { id: number; name: string; cpfDigits: string } | null = null;
+    if (payload.buyerUserId != null) {
+      try {
+        buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
+      } catch (error) {
+        await tx.rollback();
+        return sendProposalError(
+          res,
+          400,
+          error instanceof Error ? error.message : 'Usuario comprador invalido.',
+          'PROPOSAL_VALIDATION_FAILED'
+        );
+      }
+
+      if (
+        normalizeComparableText(payload.clientName) !==
+        normalizeComparableText(buyerUserIdentity.name)
+      ) {
+        await tx.rollback();
+        return sendProposalError(
+          res,
+          400,
+          'O nome informado deve corresponder ao usuário comprador selecionado.',
+          'PROPOSAL_VALIDATION_FAILED'
+        );
+      }
+
+      if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
+        await tx.rollback();
+        return sendProposalError(
+          res,
+          400,
+          'O CPF informado deve corresponder ao usuário comprador selecionado.',
+          'PROPOSAL_VALIDATION_FAILED'
+        );
+      }
     }
 
-    if (normalizeComparableText(payload.clientName) !== normalizeComparableText(buyerUserIdentity.name)) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        400,
-        'O nome informado deve corresponder ao usuário comprador selecionado.',
-        'PROPOSAL_VALIDATION_FAILED'
-      );
-    }
-
-    if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        400,
-        'O CPF informado deve corresponder ao usuário comprador selecionado.',
-        'PROPOSAL_VALIDATION_FAILED'
-      );
-    }
-
-    const buyerClientId: number | null = buyerUserIdentity.id;
+    const buyerClientId: number | null = buyerUserIdentity?.id ?? null;
     const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
     const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
@@ -551,10 +556,7 @@ async function updateProposalFromWizardInternal(
           AND status IN ('PROPOSAL_DRAFT', 'PROPOSAL_SENT', 'IN_NEGOTIATION', 'DOCUMENTATION_PHASE', 'CONTRACT_DRAFTING', 'AWAITING_SIGNATURES')
           AND (
             (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
-            OR (
-              buyer_client_id IS NULL
-              AND ${normalizedCpfExpr} = ?
-            )
+            OR ${normalizedCpfExpr} = ?
           )
         LIMIT 1
         FOR UPDATE
@@ -578,13 +580,14 @@ async function updateProposalFromWizardInternal(
       method: 'OTHER',
       validadeDias: payload.validadeDias,
       amount: Number(proposalValue.toFixed(2)),
-        details: {
-          ...payload.pagamento,
-          clientName: buyerUserIdentity.name,
-          clientCpf: buyerUserIdentity.cpfDigits,
-          listingValue: Number(safeListingValue.toFixed(2)),
-        },
-      });
+      details: {
+        ...payload.pagamento,
+        clientName: payload.clientName,
+        clientCpf: payload.clientCpf,
+        listingValue: Number(safeListingValue.toFixed(2)),
+        buyerUserId: buyerClientId,
+      },
+    });
     let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();
     if (!proposalValidityDate) {
       const fallbackDate = new Date();
@@ -652,16 +655,16 @@ async function updateProposalFromWizardInternal(
           sellerClientId,
           capturingBrokerId: requestedCapturingBrokerId,
           buyerClientId,
-          clientName: buyerUserIdentity.name,
-          clientCpf: buyerUserIdentity.cpfDigits,
+          clientName: payload.clientName,
+          clientCpf: payload.clientCpf,
           adminId: allowAdmin && roleForAccess === 'admin' ? req.userId : null,
         }),
       ]
     );
 
     const proposalData: ProposalData = {
-      clientName: buyerUserIdentity.name,
-      clientCpf: buyerUserIdentity.cpfDigits,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
       brokerName: (await resolveUserNameById(tx, requestedCapturingBrokerId ?? nRow.capturing_broker_id)) ?? '',
       sellingBrokerName:
@@ -692,8 +695,8 @@ async function updateProposalFromWizardInternal(
     return res.status(200).json({
       negotiationId,
       propertyId: payload.propertyId,
-      clientName: buyerUserIdentity.name,
-      clientCpf: buyerUserIdentity.cpfDigits,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
       buyerUserId: buyerClientId,
       validityDays: payload.validadeDias,
       value: Number(proposalValue.toFixed(2)),

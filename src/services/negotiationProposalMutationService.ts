@@ -104,7 +104,10 @@ function canManageOwnProposal(
     );
   }
   if (normalizedRole === 'broker' || normalizedRole === 'auxiliary_administrative') {
-    return userId === Number(negotiation.capturing_broker_id ?? 0);
+    return (
+      userId === Number(negotiation.buyer_client_id ?? 0) ||
+      userId === Number(negotiation.capturing_broker_id ?? 0)
+    );
   }
   return canAccessNegotiationByOwnership(userId, negotiation);
 }
@@ -479,7 +482,7 @@ async function updateProposalFromWizardInternal(
       }
     }
 
-    const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
+    const buyerClientId: number | null = Number(req.userId);
     const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
     const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;

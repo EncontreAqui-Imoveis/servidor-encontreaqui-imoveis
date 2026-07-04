@@ -1657,16 +1657,24 @@ function resolveContractViewerSide(
   const isOwner = userId === Number(contract.property_owner_id ?? 0);
   const isBuyer = userId === Number(contract.buyer_client_id ?? 0);
 
-  if (isCapturingBroker && isSellingBroker) {
+  if (isCapturingBroker && isSellingBroker && !isBuyer && !isOwner) {
     return 'both';
   }
 
-  if (isCapturingBroker || isOwner) {
+  if (isOwner) {
     return 'seller';
   }
 
-  if (isSellingBroker || isSellerClient || isBuyer) {
+  if (isBuyer) {
     return 'buyer';
+  }
+
+  if (isSellingBroker || isSellerClient) {
+    return 'seller';
+  }
+
+  if (isCapturingBroker) {
+    return 'seller';
   }
 
   return 'none';
@@ -1703,6 +1711,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   return (
     userId === Number(contract.capturing_broker_id ?? 0) ||
     userId === Number(contract.selling_broker_id ?? 0) ||
+    userId === Number(contract.buyer_client_id ?? 0) ||
     userId === Number(contract.seller_client_id ?? 0)
   );
 }

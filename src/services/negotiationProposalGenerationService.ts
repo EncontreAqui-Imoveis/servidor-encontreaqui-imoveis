@@ -472,7 +472,7 @@ export async function generateProposalFromProperty(
       return res.status(400).json({ error: 'CPF do cliente invalido na proposta.' });
     }
 
-    const buyerClientId: number | null = isClientUser ? Number(req.userId) : null;
+    const buyerClientId: number | null = Number(req.userId);
     const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
     const capturingBrokerId = brokerContext.capturingBrokerId;

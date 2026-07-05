@@ -577,7 +577,7 @@ async function queryMineNegotiationsSchemaAware(
   ), '.', ''), '-', ''), '/', ''), ' ', '')`;
 
   const whereClauses = ['n.capturing_broker_id = ?'];
-  const params: number[] = [userId];
+  const params: Array<number | string> = [userId];
 
   if (flags.hasBuyerClientId) {
     whereClauses.push('n.buyer_client_id = ?');

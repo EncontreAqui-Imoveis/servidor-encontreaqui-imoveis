@@ -73,7 +73,8 @@ type BrokerProposalContext = {
   sellingBrokerName: string | null;
 };
 
-const ACTIVE_NEGOTIATION_STATUSES = [
+// A user may have at most one active proposal per property while it is still in a proposal flow.
+const PROPOSAL_BLOCKING_STATUSES = [
   'PROPOSAL_DRAFT',
   'PROPOSAL_SENT',
   'IN_NEGOTIATION',
@@ -81,7 +82,7 @@ const ACTIVE_NEGOTIATION_STATUSES = [
 
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
 const DUPLICATE_PROPOSAL_CONFLICT_MESSAGE =
-  'Ja existe uma proposta ativa desta pessoa para este imovel.';
+  'Ja existe uma proposta ativa ou em andamento desta pessoa para este imovel.';
 
 function resolveIdempotencyKey(req: AuthRequest): string {
   const fromHeader = String(req.get('Idempotency-Key') ?? '').trim();
@@ -548,7 +549,7 @@ export async function generateProposalFromProperty(
         SELECT id, status
         FROM negotiations
         WHERE property_id = ?
-          AND status IN (${ACTIVE_NEGOTIATION_STATUSES.map(() => '?').join(', ')})
+          AND status IN (${PROPOSAL_BLOCKING_STATUSES.map(() => '?').join(', ')})
           AND (
             (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
             OR ${normalizedCpfExpr} = ?
@@ -556,7 +557,7 @@ export async function generateProposalFromProperty(
           LIMIT 1
         FOR UPDATE
       `,
-      [payload.propertyId, ...ACTIVE_NEGOTIATION_STATUSES, buyerClientId, cpfKey]
+      [payload.propertyId, ...PROPOSAL_BLOCKING_STATUSES, buyerClientId, cpfKey]
     );
     if (existingRows.length > 0) {
       await tx.rollback();

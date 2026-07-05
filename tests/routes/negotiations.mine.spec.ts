@@ -98,6 +98,7 @@ describe('GET /negotiations/mine', () => {
     expect(params).toEqual([]);
     const listParams = queryMock.mock.calls[1]?.[1] as unknown[];
     expect(listParams?.slice(0, 2)).toEqual([30003, 30003]);
+    expect(listParams).toContain('IN_NEGOTIATION');
   });
 
   it('uses schema-aware query for /negotiations/mine when optional columns are inspected', async () => {

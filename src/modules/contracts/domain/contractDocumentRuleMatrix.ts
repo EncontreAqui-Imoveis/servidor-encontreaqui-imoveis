@@ -28,6 +28,20 @@ function stripDiacritics(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+function normalizePurpose(value: string | null): string {
+  return stripDiacritics(String(value ?? '').trim().toLowerCase());
+}
+
+function isSalePurpose(value: string | null): boolean {
+  const purpose = normalizePurpose(value);
+  return purpose.includes('vend') || purpose.includes('sale');
+}
+
+function isRentalPurpose(value: string | null): boolean {
+  const purpose = normalizePurpose(value);
+  return purpose.includes('alug') || purpose.includes('rent');
+}
+
 /**
  * Lê estado civil a partir de `estado_civil` / `estadoCivil`.
  * `unknown`: preencher estado civil e/ou certidão antes de exigir documentos do cônjuge.
@@ -95,6 +109,8 @@ export function resolveDocumentRequirements(input: {
   const sellerMarital = resolveMaritalBucket(input.sellerInfo);
   const buyerMarital = resolveMaritalBucket(input.buyerInfo);
   const marital = input.side === 'seller' ? sellerMarital : buyerMarital;
+  const salePurpose = isSalePurpose(input.propertyPurpose);
+  const rentalPurpose = isRentalPurpose(input.propertyPurpose);
 
   const conjuge = conjugeRequirementForMarital(marital);
 
@@ -127,9 +143,11 @@ export function resolveDocumentRequirements(input: {
       conjuge,
       {
         category: 'docs_imovel',
-        applicability: 'required',
-        required: true,
-        reasonCode: 'DOCS_IMOVEL_REQUIRED',
+        applicability: rentalPurpose ? 'not_applicable' : 'required',
+        required: !rentalPurpose,
+        reasonCode: rentalPurpose
+          ? 'DOCS_IMOVEL_NA_RENTAL_ONLY'
+          : 'DOCS_IMOVEL_REQUIRED',
       },
       {
         category: 'outro',
@@ -162,9 +180,12 @@ export function resolveDocumentRequirements(input: {
     conjuge,
     {
       category: 'comprovante_renda',
-      applicability: 'required',
-      required: true,
-      reasonCode: 'COMPROVANTE_RENDA_REQUIRED',
+      applicability: salePurpose && !rentalPurpose ? 'not_applicable' : 'required',
+      required: !salePurpose || rentalPurpose,
+      reasonCode:
+        salePurpose && !rentalPurpose
+          ? 'COMPROVANTE_RENDA_NA_SALE_ONLY'
+          : 'COMPROVANTE_RENDA_REQUIRED',
     },
     {
       category: 'outro',

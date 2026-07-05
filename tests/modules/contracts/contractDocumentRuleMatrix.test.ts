@@ -16,7 +16,7 @@ describe('contractDocumentRuleMatrix', () => {
     expect(resolveMaritalBucket({})).toBe('unknown');
   });
 
-  it('comprovante de renda: obrigatório no comprador em venda e aluguel', () => {
+  it('comprovante de renda: obrigatório no comprador em aluguel e N/A em venda', () => {
     const sale = resolveDocumentRequirements({
       side: 'buyer',
       propertyPurpose: 'Venda de imóvel',
@@ -31,11 +31,11 @@ describe('contractDocumentRuleMatrix', () => {
     });
     const crSale = sale.find((r) => r.category === 'comprovante_renda');
     const crRent = rent.find((r) => r.category === 'comprovante_renda');
-    expect(crSale?.applicability).toBe('required');
+    expect(crSale?.applicability).toBe('not_applicable');
     expect(crRent?.applicability).toBe('required');
   });
 
-  it('docs_imovel: obrigatório no vendedor em venda e aluguel', () => {
+  it('docs_imovel: obrigatório no vendedor em venda e N/A em aluguel', () => {
     const sale = resolveDocumentRequirements({
       side: 'seller',
       propertyPurpose: 'Venda',
@@ -49,7 +49,7 @@ describe('contractDocumentRuleMatrix', () => {
       buyerInfo: {},
     });
     expect(sale.find((r) => r.category === 'docs_imovel')?.applicability).toBe('required');
-    expect(rent.find((r) => r.category === 'docs_imovel')?.applicability).toBe('required');
+    expect(rent.find((r) => r.category === 'docs_imovel')?.applicability).toBe('not_applicable');
   });
 
   it('cônjuge: obrigatório só casado/união; solteiro N/A; unknown N/A cônjuge', () => {
@@ -79,7 +79,23 @@ describe('contractDocumentRuleMatrix', () => {
     expect(u?.applicability).toBe('not_applicable');
   });
 
-  it('não bloqueia upload em comprovante_renda para comprador solteiro', () => {
+  it('não bloqueia upload em comprovante_renda para comprador solteiro em aluguel', () => {
+    const ctx = {
+      propertyPurpose: 'Aluguel',
+      sellerInfo: { estado_civil: 'Solteiro' },
+      buyerInfo: { estado_civil: 'Solteiro' },
+    };
+    const blocked = isUploadBlockedForNotApplicableCategory(
+      'buyer',
+      'comprovante_renda',
+      ctx
+    );
+    expect(blocked).toEqual(
+      expect.objectContaining({ blocked: false })
+    );
+  });
+
+  it('bloqueia renda do comprador em venda', () => {
     const ctx = {
       propertyPurpose: 'Venda',
       sellerInfo: { estado_civil: 'Solteiro' },
@@ -91,7 +107,7 @@ describe('contractDocumentRuleMatrix', () => {
       ctx
     );
     expect(blocked).toEqual(
-      expect.objectContaining({ blocked: false })
+      expect.objectContaining({ blocked: true, reasonCode: 'COMPROVANTE_RENDA_NA_SALE_ONLY' })
     );
   });
 

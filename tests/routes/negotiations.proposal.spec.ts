@@ -384,7 +384,14 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[{ name: 'Cliente Proprietario' }]]);
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Cliente Proprietario',
+            cpf: '52998224725',
+          },
+        ],
+      ]);
 
     const response = await request(app).post('/negotiations/proposal').send({
       idempotency_key: 'proposal-key-006',

@@ -787,6 +787,20 @@ function resolveContractPropertyTitle(contract: ContractRow): string {
   return title || 'Imóvel sem título';
 }
 
+function resolveSellerPartyId(contract: ContractRow): number {
+  // `property_owner_id` is the canonical seller-side identity.
+  // `seller_client_id` stays as legacy fallback for older contracts.
+  const ownerId = Number(contract.property_owner_id ?? 0);
+  if (Number.isFinite(ownerId) && ownerId > 0) {
+    return ownerId;
+  }
+
+  const legacySellerClientId = Number(contract.seller_client_id ?? 0);
+  return Number.isFinite(legacySellerClientId) && legacySellerClientId > 0
+    ? legacySellerClientId
+    : 0;
+}
+
 function resolveApprovalSideLabel(
   contract: ContractRow,
   side: 'seller' | 'buyer'
@@ -1653,9 +1667,10 @@ function resolveContractViewerSide(
 
   const isCapturingBroker = userId === Number(contract.capturing_broker_id ?? 0);
   const isSellingBroker = userId === Number(contract.selling_broker_id ?? 0);
-  const isSellerClient = userId === Number(contract.seller_client_id ?? 0);
+  const sellerPartyId = resolveSellerPartyId(contract);
   const isOwner = userId === Number(contract.property_owner_id ?? 0);
   const isBuyer = userId === Number(contract.buyer_client_id ?? 0);
+  const isSellerParty = sellerPartyId > 0 && userId === sellerPartyId;
 
   if (isCapturingBroker && isSellingBroker && !isBuyer && !isOwner) {
     return 'both';
@@ -1669,7 +1684,7 @@ function resolveContractViewerSide(
     return 'buyer';
   }
 
-  if (isSellingBroker || isSellerClient) {
+  if (isSellingBroker || isSellerParty) {
     return 'seller';
   }
 
@@ -1697,11 +1712,9 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   if (role === 'client') {
-    return (
-      userId === Number(contract.buyer_client_id ?? 0) ||
+    return userId === Number(contract.buyer_client_id ?? 0) ||
       userId === Number(contract.property_owner_id ?? 0) ||
-      userId === Number(contract.seller_client_id ?? 0)
-    );
+      userId === resolveSellerPartyId(contract);
   }
 
   if (role !== 'broker' && role !== 'auxiliary_administrative') {
@@ -1712,7 +1725,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
     userId === Number(contract.capturing_broker_id ?? 0) ||
     userId === Number(contract.selling_broker_id ?? 0) ||
     userId === Number(contract.buyer_client_id ?? 0) ||
-    userId === Number(contract.seller_client_id ?? 0)
+    userId === resolveSellerPartyId(contract)
   );
 }
 
@@ -1730,10 +1743,8 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
     return false;
   }
   if (role === 'client') {
-    return (
-      userId === Number(contract.property_owner_id ?? 0) ||
-      userId === Number(contract.seller_client_id ?? 0)
-    );
+    return userId === Number(contract.property_owner_id ?? 0) ||
+      userId === resolveSellerPartyId(contract);
   }
   return userId === Number(contract.capturing_broker_id ?? 0);
 }
@@ -1780,10 +1791,9 @@ function shouldMoveToDraft(
 }
 
 function shouldTreatContractAsSingleClientFlow(contract: ContractRow): boolean {
-  const ownerId = Number(contract.property_owner_id ?? 0);
-  const sellerClientId = Number(contract.seller_client_id ?? 0);
+  const sellerPartyId = resolveSellerPartyId(contract);
   const buyerId = Number(contract.buyer_client_id ?? 0);
-  return ownerId > 0 && buyerId > 0 && ownerId !== buyerId && sellerClientId !== buyerId;
+  return sellerPartyId > 0 && buyerId > 0 && sellerPartyId !== buyerId;
 }
 
 function resolveApprovalStatusesForProgress(

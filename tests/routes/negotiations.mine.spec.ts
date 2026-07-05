@@ -43,6 +43,7 @@ describe('GET /negotiations/mine', () => {
 
   it('returns the authenticated user negotiations in the site shape', async () => {
     queryMock
+      .mockResolvedValueOnce([[{ cpf: '52998224725' }]])
       .mockResolvedValueOnce([
         [
           { column_name: 'buyer_client_id' },
@@ -91,18 +92,23 @@ describe('GET /negotiations/mine', () => {
         updatedAt: '2026-03-11T15:00:00.000Z',
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    const schemaSql = String(queryMock.mock.calls[0]?.[0] ?? '');
-    const params = queryMock.mock.calls[0]?.[1] as unknown[];
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    const cpfSql = String(queryMock.mock.calls[0]?.[0] ?? '');
+    const cpfParams = queryMock.mock.calls[0]?.[1] as unknown[];
+    expect(cpfSql).toContain('SELECT cpf');
+    expect(cpfParams).toEqual([30003]);
+    const schemaSql = String(queryMock.mock.calls[1]?.[0] ?? '');
+    const params = queryMock.mock.calls[1]?.[1] as unknown[];
     expect(schemaSql).toContain('information_schema.columns');
     expect(params).toEqual([]);
-    const listParams = queryMock.mock.calls[1]?.[1] as unknown[];
+    const listParams = queryMock.mock.calls[2]?.[1] as unknown[];
     expect(listParams?.slice(0, 2)).toEqual([30003, 30003]);
     expect(listParams).toContain('IN_NEGOTIATION');
   });
 
   it('uses schema-aware query for /negotiations/mine when optional columns are inspected', async () => {
     queryMock
+      .mockResolvedValueOnce([[{ cpf: '52998224725' }]])
       .mockResolvedValueOnce([
         [
           { column_name: 'client_name' },
@@ -150,11 +156,12 @@ describe('GET /negotiations/mine', () => {
         clientCpf: '99988877766',
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock).toHaveBeenCalledTimes(3);
   });
 
   it('is compatible with GET /negotiations/me as alias of /negotiations/mine', async () => {
     queryMock
+      .mockResolvedValueOnce([[{ cpf: '52998224725' }]])
       .mockResolvedValueOnce([
         [
           { column_name: 'buyer_client_id' },

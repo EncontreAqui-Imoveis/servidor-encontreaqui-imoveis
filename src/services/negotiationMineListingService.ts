@@ -4,6 +4,7 @@ import { RowDataPacket } from 'mysql2/promise';
 import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import type { AuthRequest } from '../middlewares/auth';
 import { queryNegotiationRows } from './negotiationPersistenceService';
+import { normalizeCpfDigits } from '../utils/cpfValidator';
 
 interface NegotiationListRow extends RowDataPacket {
   id: string;
@@ -31,6 +32,10 @@ interface NegotiationListRow extends RowDataPacket {
   contract_status?: string | null;
   buyer_approval_status?: string | null;
   seller_approval_status?: string | null;
+}
+
+interface UserIdentityRow extends RowDataPacket {
+  cpf: string | null;
 }
 
 type NegotiationSummaryPayload = {
@@ -98,6 +103,20 @@ const CONTRACT_READY_NEGOTIATION_STATUSES = new Set([
   'APPROVED',
   'APPROVED_WITH_RES',
 ]);
+
+async function resolveCurrentUserCpfDigits(userId: number): Promise<string | null> {
+  const [rows] = await queryNegotiationRows<UserIdentityRow>(
+    `
+      SELECT cpf
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [userId]
+  );
+  const cpfDigits = normalizeCpfDigits(String(rows[0]?.cpf ?? ''));
+  return cpfDigits.length === 11 ? cpfDigits : null;
+}
 
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
   if (!value) {
@@ -522,7 +541,8 @@ async function queryMineNegotiationsLegacy(userId: number): Promise<NegotiationS
 }
 
 async function queryMineNegotiationsSchemaAware(
-  userId: number
+  userId: number,
+  currentUserCpfDigits: string | null
 ): Promise<NegotiationSummaryPayload[]> {
   const flags = await getNegotiationColumnFlags();
 
@@ -548,6 +568,13 @@ async function queryMineNegotiationsSchemaAware(
       AND nd.document_type = 'contrato_assinado'
   )`;
   const visiblePlaceholders = PROPOSAL_LIST_VISIBLE_STATUSES.map(() => '?').join(', ');
+  const normalizedResolvedClientCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(
+    NULLIF(n.client_cpf, ''),
+    JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
+    JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
+    JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+    JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
+  ), '.', ''), '-', ''), '/', ''), ' ', '')`;
 
   const whereClauses = ['n.capturing_broker_id = ?'];
   const params: number[] = [userId];
@@ -559,6 +586,10 @@ async function queryMineNegotiationsSchemaAware(
   if (flags.hasSellerClientId) {
     whereClauses.push('n.seller_client_id = ?');
     params.push(userId);
+  }
+  if (currentUserCpfDigits) {
+    whereClauses.push(`${normalizedResolvedClientCpfExpr} = ?`);
+    params.push(currentUserCpfDigits);
   }
 
   const selectSelling = flags.hasSellingBrokerId ? 'n.selling_broker_id' : 'NULL';
@@ -624,7 +655,8 @@ export async function listMine(
   }
 
   try {
-    const data = await queryMineNegotiationsSchemaAware(userId);
+    const currentUserCpfDigits = await resolveCurrentUserCpfDigits(userId);
+    const data = await queryMineNegotiationsSchemaAware(userId, currentUserCpfDigits);
     return res.status(200).json({ data });
   } catch (error) {
     console.error('Erro ao listar negociações do usuário:', error);

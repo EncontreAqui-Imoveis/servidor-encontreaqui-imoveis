@@ -77,9 +77,6 @@ const ACTIVE_NEGOTIATION_STATUSES = [
   'PROPOSAL_DRAFT',
   'PROPOSAL_SENT',
   'IN_NEGOTIATION',
-  'DOCUMENTATION_PHASE',
-  'CONTRACT_DRAFTING',
-  'AWAITING_SIGNATURES',
 ] as const;
 
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
@@ -432,6 +429,17 @@ export async function generateProposalFromProperty(
       return res.status(409).json({
         error: 'A proposta só pode ser gerada para imóveis aprovados.',
       });
+    }
+
+    const propertyOwnerId = normalizeOptionalPositiveId(property.owner_id);
+    if (isClientUser && propertyOwnerId !== null && propertyOwnerId === normalizeOptionalPositiveId(req.userId)) {
+      const currentUserIdentity = await resolveCurrentUserIdentity(tx, req.userId);
+      if (isOwnerSelfProposalAttempt(propertyOwnerId, currentUserIdentity, payload)) {
+        await tx.rollback();
+        return res.status(403).json({
+          error: 'Não é permitido enviar proposta como próprio dono do imóvel.',
+        });
+      }
     }
 
     const listingValue = resolvePropertyValue(property);

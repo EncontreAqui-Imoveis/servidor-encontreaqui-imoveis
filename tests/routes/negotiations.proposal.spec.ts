@@ -230,10 +230,17 @@ describe('POST /negotiations/proposal', () => {
     });
 
     expect(response.status).toBe(201);
-    expect(txMock.execute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
-    );
+    expect(
+      txMock.execute.mock.calls.some(([sql, params]) =>
+        String(sql).includes('INSERT INTO negotiations') &&
+        Array.isArray(params) &&
+        params[1] === 101 &&
+        params[2] === 30003 &&
+        params[3] === 30003 &&
+        params[4] === null &&
+        params[8] === 'PROPOSAL_SENT'
+      )
+    ).toBe(true);
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
         brokerName: 'Broker Captador',
@@ -330,10 +337,17 @@ describe('POST /negotiations/proposal', () => {
     });
 
     expect(response.status).toBe(201);
-    expect(txMock.execute).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
-    );
+    expect(
+      txMock.execute.mock.calls.some(([sql, params]) =>
+        String(sql).includes('INSERT INTO negotiations') &&
+        Array.isArray(params) &&
+        params[1] === 101 &&
+        params[2] === 45555 &&
+        params[3] === 45555 &&
+        params[4] === 50001 &&
+        params[8] === 'PROPOSAL_SENT'
+      )
+    ).toBe(true);
   });
 
   it('blocks client from proposing on own listing', async () => {
@@ -359,6 +373,14 @@ describe('POST /negotiations/proposal', () => {
             price: 500000,
             price_sale: 500000,
             price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Cliente Proprietario',
+            cpf: '52998224725',
           },
         ],
       ])
@@ -436,6 +458,53 @@ describe('POST /negotiations/proposal', () => {
     expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
   });
 
+  it('does not include contract-stage statuses in the duplicate proposal lookup', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 50001,
+            status: 'approved',
+            address: 'Av. Paulista, 1000',
+            numero: '1000',
+            quadra: 'Q1',
+            lote: 'L2',
+            bairro: 'Bela Vista',
+            city: 'Sao Paulo',
+            state: 'SP',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ name: 'Broker Existente' }]])
+      .mockResolvedValueOnce([[]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-key-no-contract-block',
+      propertyId: 101,
+      clientName: 'Cliente',
+      clientCpf: '529.982.247-25',
+      validadeDias: 10,
+      pagamento: {
+        dinheiro: 100000,
+        permuta: 0,
+        financiamento: 400000,
+        outros: 0,
+      },
+    });
+
+    expect(response.status).toBe(201);
+    const duplicateSql = String(txMock.query.mock.calls[3]?.[0] ?? '');
+    expect(duplicateSql).not.toContain('DOCUMENTATION_PHASE');
+    expect(duplicateSql).not.toContain('CONTRACT_DRAFTING');
+    expect(duplicateSql).not.toContain('AWAITING_SIGNATURES');
+  });
+
   it('allows client to create proposal when property has no responsible broker', async () => {
     authState.userId = 90002;
     authState.userRole = 'client';
@@ -481,7 +550,7 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([101, null, null, 90002, 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, null, null, 90001, 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({

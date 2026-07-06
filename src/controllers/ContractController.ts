@@ -97,6 +97,12 @@ import {
   type ContractDocumentSide,
   validateContractDocumentUpload,
 } from '../modules/contracts/domain/contractDocumentValidation';
+import {
+  isBuyerSideUser,
+  isSellerSideUser,
+  resolveContractAccessContext,
+  resolveSellerPartyId,
+} from '../utils/contractIdentity';
 
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
   'IN_NEGOTIATION',
@@ -786,36 +792,6 @@ function resolveActingBrokerName(req: AuthRequest, contract: ContractRow): strin
 function resolveContractPropertyTitle(contract: ContractRow): string {
   const title = String(contract.property_title ?? '').trim();
   return title || 'Imóvel sem título';
-}
-
-function resolveSellerPartyId(contract: ContractRow): number {
-  // `property_owner_id` is the canonical seller-side identity.
-  // `seller_client_id` stays as legacy fallback for older contracts.
-  const ownerId = Number(contract.property_owner_id ?? 0);
-  if (Number.isFinite(ownerId) && ownerId > 0) {
-    return ownerId;
-  }
-
-  const legacySellerClientId = Number(contract.seller_client_id ?? 0);
-  return Number.isFinite(legacySellerClientId) && legacySellerClientId > 0
-    ? legacySellerClientId
-    : 0;
-}
-
-function resolveProposalInitiatorUserId(contract: ContractRow): number {
-  const initiatorUserId = Number(contract.proposal_initiator_user_id ?? 0);
-  return Number.isFinite(initiatorUserId) && initiatorUserId > 0 ? initiatorUserId : 0;
-}
-
-function isBuyerSideUser(contract: ContractRow, userId: number): boolean {
-  return (
-    userId === Number(contract.buyer_client_id ?? 0) ||
-    userId === resolveProposalInitiatorUserId(contract)
-  );
-}
-
-function isSellerSideUser(contract: ContractRow, userId: number): boolean {
-  return userId === resolveSellerPartyId(contract);
 }
 
 function resolveApprovalSideLabel(
@@ -1667,49 +1643,46 @@ function resolveContractViewerSide(
     return null;
   }
 
-  const role = String(req.userRole ?? '').trim().toLowerCase();
-  const userId = Number(req.userId ?? 0);
-  if (!Number.isFinite(userId) || userId <= 0) {
+  const context = resolveContractAccessContext(
+    req,
+    contract,
+    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
+      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
+        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+  );
+  if (!context) {
     return 'none';
   }
 
-  if (role === 'admin') {
+  if (context.isAdmin) {
     return 'both';
   }
 
-  if (
-    isNegotiationResponsibleUser(contract, userId) &&
-    (role === 'broker' || role === 'auxiliary_administrative')
-  ) {
+  if (context.isResponsible) {
     return 'both';
   }
 
-  const isCapturingBroker = userId === Number(contract.capturing_broker_id ?? 0);
-  const isSellingBroker = userId === Number(contract.selling_broker_id ?? 0);
-  const isBuyer = isBuyerSideUser(contract, userId);
-  const isSeller = isSellerSideUser(contract, userId);
-
-  if (isCapturingBroker && isSellingBroker && !isBuyer && !isSeller) {
+  if (context.isCapturingBroker && context.isSellingBroker && !context.isBuyerSide && !context.isSellerSide) {
     return 'both';
   }
 
-  if (isSeller && !isBuyer) {
+  if (context.isSellerSide && !context.isBuyerSide) {
     return 'seller';
   }
 
-  if (isBuyer && !isSeller) {
+  if (context.isBuyerSide && !context.isSellerSide) {
     return 'buyer';
   }
 
-  if (isBuyer && isSeller) {
+  if (context.isBuyerSide && context.isSellerSide) {
     return 'seller';
   }
 
-  if (isSellingBroker || isSeller) {
+  if (context.isSellingBroker || context.isSellerSide) {
     return 'seller';
   }
 
-  if (isCapturingBroker) {
+  if (context.isCapturingBroker) {
     return 'seller';
   }
 
@@ -1717,77 +1690,88 @@ function resolveContractViewerSide(
 }
 
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
-  const role = String(req.userRole ?? '').toLowerCase();
-  if (role === 'admin') {
-    return true;
-  }
-
-  const userId = Number(req.userId);
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return false;
-  }
-
-  const isResponsible = isNegotiationResponsibleUser(contract, userId);
-  if (isResponsible && (role === 'broker' || role === 'auxiliary_administrative')) {
-    return true;
-  }
-
-  const isBuyer = isBuyerSideUser(contract, userId);
-  const isSeller = isSellerSideUser(contract, userId);
-
-  if (role === 'client') {
-    return isBuyer || isSeller;
-  }
-
-  if (role !== 'broker' && role !== 'auxiliary_administrative') {
-    return false;
-  }
-
-  return (
-    userId === Number(contract.capturing_broker_id ?? 0) ||
-    userId === Number(contract.selling_broker_id ?? 0) ||
-    isBuyer ||
-    isSeller
+  const context = resolveContractAccessContext(
+    req,
+    contract,
+    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
+      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
+        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
   );
+  if (!context) {
+    return false;
+  }
+
+  if (context.isAdmin) {
+    return true;
+  }
+
+  if (context.isResponsible) {
+    return true;
+  }
+
+  if (context.role === 'client') {
+    return context.isBuyerSide || context.isSellerSide;
+  }
+
+  if (context.role !== 'broker' && context.role !== 'auxiliary_administrative') {
+    return false;
+  }
+
+  return context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide;
 }
 
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
-  const role = String(req.userRole ?? '').toLowerCase();
-  if (role === 'admin') {
+  const context = resolveContractAccessContext(
+    req,
+    contract,
+    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
+      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
+        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+  );
+  if (!context) {
+    return false;
+  }
+
+  if (context.isAdmin) {
     return true;
   }
 
-  const userId = Number(req.userId);
-  if (isNegotiationResponsibleUser(contract, userId)) {
+  if (context.isResponsible) {
     return true;
   }
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return false;
+
+  if (context.role === 'client') {
+    return context.isSellerSide;
   }
-  if (role === 'client') {
-    return userId === Number(contract.property_owner_id ?? 0) ||
-      userId === resolveSellerPartyId(contract);
-  }
-  return userId === Number(contract.capturing_broker_id ?? 0);
+
+  return context.isCapturingBroker;
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
-  const role = String(req.userRole ?? '').toLowerCase();
-  if (role === 'admin') {
+  const context = resolveContractAccessContext(
+    req,
+    contract,
+    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
+      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
+        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+  );
+  if (!context) {
+    return false;
+  }
+
+  if (context.isAdmin) {
     return true;
   }
 
-  const userId = Number(req.userId);
-  if (isNegotiationResponsibleUser(contract, userId)) {
+  if (context.isResponsible) {
     return true;
   }
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return false;
+
+  if (context.role === 'client') {
+    return context.isBuyerSide;
   }
-  if (role === 'client') {
-    return userId === Number(contract.buyer_client_id ?? 0);
-  }
-  return userId === Number(contract.capturing_broker_id ?? 0);
+
+  return context.isCapturingBroker;
 }
 
 function isDoubleEndedDeal(contract: ContractRow): boolean {

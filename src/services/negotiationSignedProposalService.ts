@@ -30,6 +30,10 @@ interface NegotiationAccessRow extends RowDataPacket {
   buyer_client_id: number | null;
 }
 
+interface ProposalInitiatorRow extends RowDataPacket {
+  id: number;
+}
+
 const SIGNED_PROPOSAL_REVIEW_STATUS = 'DOCUMENTATION_PHASE';
 const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
   'PROPOSAL_SENT',
@@ -65,6 +69,23 @@ function canManageOwnProposal(
     return userId === Number(negotiation.capturing_broker_id ?? 0);
   }
   return canAccessNegotiationByOwnership(userId, negotiation);
+}
+
+async function hasProposalInitiatorAccess(
+  negotiationId: string,
+  userId: number
+): Promise<boolean> {
+  const rows = await queryNegotiationRows<ProposalInitiatorRow>(
+    `
+      SELECT 1 AS id
+      FROM negotiation_proposal_idempotency
+      WHERE negotiation_id = ?
+        AND user_id = ?
+      LIMIT 1
+    `,
+    [negotiationId, userId]
+  );
+  return rows.length > 0;
 }
 
 function toRowArray<T>(result: unknown): T[] {
@@ -135,13 +156,21 @@ export async function uploadSignedProposal(
       return res.status(404).json({ error: 'Negociação não encontrada.' });
     }
 
-      if (
-        !canManageOwnProposal(
-          Number(req.userId),
-          String(req.userRole ?? ''),
-          negotiation as unknown as NegotiationAccessRow
-        )
-      ) {
+    const userId = Number(req.userId);
+    const userRole = String(req.userRole ?? '');
+    const hasOwnershipAccess = canManageOwnProposal(
+      userId,
+      userRole,
+      negotiation as unknown as NegotiationAccessRow
+    );
+    const hasInitiatorAccess = hasOwnershipAccess
+      ? true
+      : await hasProposalInitiatorAccess(negotiationId, userId);
+    if (
+      userRole.trim().toLowerCase() !== 'admin' &&
+      !hasOwnershipAccess &&
+      !hasInitiatorAccess
+    ) {
       await tx.rollback();
       return res
         .status(403)
@@ -289,7 +318,15 @@ export async function downloadLatestProposal(
       return res.status(404).json({ error: 'Negociação não encontrada.' });
     }
 
-    if (role !== 'admin' && !canManageOwnProposal(userId, role, negotiation)) {
+    const hasOwnershipAccess = canManageOwnProposal(userId, role, negotiation);
+    const hasInitiatorAccess = hasOwnershipAccess
+      ? true
+      : await hasProposalInitiatorAccess(negotiationId, userId);
+    if (
+      role !== 'admin' &&
+      !hasOwnershipAccess &&
+      !hasInitiatorAccess
+    ) {
       return res.status(403).json({ error: 'Acesso negado à proposta.' });
     }
 

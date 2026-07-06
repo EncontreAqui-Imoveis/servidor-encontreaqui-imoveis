@@ -226,6 +226,7 @@ describe('negotiationSignedProposalService', () => {
         },
       ],
     ]);
+    queryMock.mockResolvedValueOnce([]);
 
     const req = {
       userId: 99999,
@@ -244,6 +245,53 @@ describe('negotiationSignedProposalService', () => {
     expect(res.status).toHaveBeenCalledWith(403);
     expect(saveSignedProposalMock).not.toHaveBeenCalled();
     expect(txMock.commit).not.toHaveBeenCalled();
+  });
+
+  it('allows the proposal creator to upload signed proposal even if not buyer or broker', async () => {
+    txMock.query.mockResolvedValueOnce([
+      [
+        {
+          id: 'neg-creator',
+          property_id: 101,
+          status: 'PROPOSAL_SENT',
+          capturing_broker_id: 30003,
+          selling_broker_id: 30003,
+          buyer_client_id: null,
+          property_title: 'Casa Teste',
+          broker_name: 'Pedro Corretor',
+        },
+      ],
+    ]);
+    queryMock.mockResolvedValueOnce([
+      {
+        id: 1,
+      },
+    ]);
+
+    const req = {
+      userId: 99999,
+      userRole: 'client',
+      params: { id: 'neg-creator' },
+      file: {
+        buffer: Buffer.from('%PDF-signed%'),
+        mimetype: 'application/pdf',
+        originalname: 'proposta_assinada.pdf',
+      },
+    } as any;
+    const res = createMockResponse();
+
+    await uploadSignedProposal(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(saveSignedProposalMock).toHaveBeenCalledWith(
+      'neg-creator',
+      expect.any(Buffer),
+      txMock,
+      expect.objectContaining({
+        uploadedBy: 99999,
+      })
+    );
+    expect(txMock.commit).toHaveBeenCalledTimes(1);
   });
 
   it('returns 404 when no latest proposal exists', async () => {

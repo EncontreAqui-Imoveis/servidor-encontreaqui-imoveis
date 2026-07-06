@@ -175,6 +175,7 @@ export interface ContractRow extends RowDataPacket {
   property_owner_id: number | null;
   property_owner_name: string | null;
   property_owner_phone: string | null;
+  proposal_initiator_user_id: number | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
   seller_client_name: string | null;
@@ -801,6 +802,11 @@ function resolveSellerPartyId(contract: ContractRow): number {
     : 0;
 }
 
+function resolveProposalInitiatorUserId(contract: ContractRow): number {
+  const initiatorUserId = Number(contract.proposal_initiator_user_id ?? 0);
+  return Number.isFinite(initiatorUserId) && initiatorUserId > 0 ? initiatorUserId : 0;
+}
+
 function resolveApprovalSideLabel(
   contract: ContractRow,
   side: 'seller' | 'buyer'
@@ -1087,6 +1093,8 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
     ownerName: row.property_owner_name ?? null,
     propertyOwnerPhone: row.property_owner_phone ?? null,
+    proposalInitiatorUserId:
+      row.proposal_initiator_user_id !== null ? Number(row.proposal_initiator_user_id) : null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
     propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'detail' }) ?? null,
@@ -1670,6 +1678,7 @@ function resolveContractViewerSide(
   const sellerPartyId = resolveSellerPartyId(contract);
   const isOwner = userId === Number(contract.property_owner_id ?? 0);
   const isBuyer = userId === Number(contract.buyer_client_id ?? 0);
+  const isProposalInitiator = userId === resolveProposalInitiatorUserId(contract);
   const isSellerParty = sellerPartyId > 0 && userId === sellerPartyId;
 
   if (isCapturingBroker && isSellingBroker && !isBuyer && !isOwner) {
@@ -1681,6 +1690,10 @@ function resolveContractViewerSide(
   }
 
   if (isBuyer) {
+    return 'buyer';
+  }
+
+  if (isProposalInitiator) {
     return 'buyer';
   }
 
@@ -1713,6 +1726,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
 
   if (role === 'client') {
     return userId === Number(contract.buyer_client_id ?? 0) ||
+      userId === resolveProposalInitiatorUserId(contract) ||
       userId === Number(contract.property_owner_id ?? 0) ||
       userId === resolveSellerPartyId(contract);
   }
@@ -1725,6 +1739,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
     userId === Number(contract.capturing_broker_id ?? 0) ||
     userId === Number(contract.selling_broker_id ?? 0) ||
     userId === Number(contract.buyer_client_id ?? 0) ||
+    userId === resolveProposalInitiatorUserId(contract) ||
     userId === resolveSellerPartyId(contract)
   );
 }
@@ -1845,6 +1860,11 @@ export const CONTRACT_SELECT_BASE_SQL = `
     p.owner_id AS property_owner_id,
     COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
     p.owner_phone AS property_owner_phone,
+    (
+      SELECT MIN(npi.user_id)
+      FROM negotiation_proposal_idempotency npi
+      WHERE npi.negotiation_id = c.negotiation_id
+    ) AS proposal_initiator_user_id,
     COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
     seller_client_user.name AS seller_client_name,

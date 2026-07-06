@@ -63,6 +63,7 @@ describe('Contract response shape contracts', () => {
             updated_at: '2026-03-02 08:00:00',
             capturing_broker_id: 30003,
             selling_broker_id: 30004,
+            proposal_initiator_user_id: 30003,
             property_title: 'Casa Centro',
             property_purpose: 'Aluguel',
             property_code: 'RV-101',
@@ -144,6 +145,70 @@ describe('Contract response shape contracts', () => {
         },
       ],
     });
+  });
+
+  it('allows the proposal initiator to open the contract detail even without buyer_client_id', async () => {
+    const initiatorApp = express();
+    initiatorApp.use(express.json());
+    initiatorApp.use((req, _res, next) => {
+      (req as any).userId = 55555;
+      (req as any).userRole = 'client';
+      next();
+    });
+    initiatorApp.get('/contracts/:id', (req, res) =>
+      contractController.getById(req as any, res)
+    );
+
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
+        return [[
+          {
+            id: 'contract-initiator-detail',
+            negotiation_id: 'neg-initiator-detail',
+            property_id: 909,
+            status: 'AWAITING_DOCS',
+            seller_info: JSON.stringify({ nome: 'Proprietário' }),
+            buyer_info: JSON.stringify({ clientName: 'Terceiro' }),
+            commission_data: JSON.stringify({}),
+            workflow_metadata: JSON.stringify({}),
+            seller_approval_status: 'PENDING',
+            buyer_approval_status: 'PENDING',
+            seller_approval_reason: null,
+            buyer_approval_reason: null,
+            created_at: '2026-03-03 10:00:00',
+            updated_at: '2026-03-03 10:05:00',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30004,
+            seller_client_id: null,
+            buyer_client_id: null,
+            client_name: 'Terceiro',
+            client_cpf: '09169443106',
+            property_owner_id: 80001,
+            proposal_initiator_user_id: 55555,
+            property_title: 'Casa Região Norte',
+            property_purpose: 'Venda',
+            property_code: 'RN-909',
+            capturing_broker_name: 'Captador',
+            selling_broker_name: 'Vendedor',
+            capturing_agency_name: 'Encontre Aqui',
+            capturing_agency_address: 'Av. Norte, 123',
+            responsible_user_ids: null,
+          },
+        ]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(initiatorApp).get('/contracts/contract-initiator-detail');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.viewerSide).toBe('buyer');
+    expect(response.body.contract.negotiationId).toBe('neg-initiator-detail');
   });
 
   it('returns list payload items in the flat shape consumed by contracts/me', async () => {

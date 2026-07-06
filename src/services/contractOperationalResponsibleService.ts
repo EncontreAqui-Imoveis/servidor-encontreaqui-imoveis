@@ -2,6 +2,7 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
 import { resolveContractStatus, type ContractRow } from '../controllers/ContractController';
+import { resolveContractAccessContext } from '../utils/contractIdentity';
 
 class ContractOperationalResponsibleError extends Error {
   statusCode: number;
@@ -66,17 +67,15 @@ export async function updateContractOperationalResponsible(
   }
 
   const role = String(params.req.userRole ?? '').toLowerCase();
+  const context = resolveContractAccessContext(params.req, contract, false);
   const canAccess =
-    role === 'admin' ||
-    (role === 'client'
-      ? userId === Number(contract.buyer_client_id ?? 0) ||
-        userId === Number(contract.property_owner_id ?? 0) ||
-        userId === Number(contract.seller_client_id ?? 0)
-      : role === 'broker' || role === 'auxiliary_administrative'
-        ? userId === Number(contract.capturing_broker_id ?? 0) ||
-          userId === Number(contract.selling_broker_id ?? 0) ||
-          userId === Number(contract.seller_client_id ?? 0)
-        : false);
+    context != null &&
+    (context.isAdmin ||
+      (context.role === 'client'
+        ? context.isBuyerSide || context.isSellerSide
+        : context.role === 'broker' || context.role === 'auxiliary_administrative'
+          ? context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide
+          : false));
 
   if (!canAccess) {
     throw mutationError(403, 'Acesso negado ao contrato.');

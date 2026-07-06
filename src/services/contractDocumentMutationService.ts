@@ -9,6 +9,7 @@ import {
   type ContractRow,
   resolveContractStatus,
 } from '../controllers/ContractController';
+import { resolveContractAccessContext } from '../utils/contractIdentity';
 import {
   resolveDocumentCategoryFromType,
   resolveFallbackDocumentTypeByCategory,
@@ -200,17 +201,16 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   const userId = Number(req.userId);
-  if (Number.isFinite(userId) && userId > 0) {
-    if (role === 'client') {
-      return (
-        userId === Number(contract.property_owner_id ?? 0) ||
-        userId === Number(contract.seller_client_id ?? 0)
-      );
-    }
-    return userId === Number(contract.capturing_broker_id ?? 0);
+  const context = resolveContractAccessContext(req, contract, false);
+  if (!context || !Number.isFinite(userId) || userId <= 0) {
+    return false;
   }
 
-  return false;
+  if (context.role === 'client') {
+    return context.isSellerSide;
+  }
+
+  return context.isCapturingBroker;
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -220,14 +220,16 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   const userId = Number(req.userId);
-  if (Number.isFinite(userId) && userId > 0) {
-    if (role === 'client') {
-      return userId === Number(contract.buyer_client_id ?? 0);
-    }
-    return userId === Number(contract.capturing_broker_id ?? 0);
+  const context = resolveContractAccessContext(req, contract, false);
+  if (!context || !Number.isFinite(userId) || userId <= 0) {
+    return false;
   }
 
-  return false;
+  if (context.role === 'client') {
+    return context.isBuyerSide;
+  }
+
+  return context.isCapturingBroker;
 }
 
 function resolveDocumentStorageType(documentType: string): 'contract' | 'other' {

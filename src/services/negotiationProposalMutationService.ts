@@ -165,7 +165,7 @@ function isOwnerSelfProposalAttempt(
 async function resolveBuyerUserIdentity(
   tx: PoolConnection,
   buyerUserId: number
-): Promise<{ id: number; name: string; cpfDigits: string }> {
+): Promise<{ id: number; name: string }> {
   const normalizedBuyerUserId = normalizeOptionalPositiveId(buyerUserId);
   if (normalizedBuyerUserId === null) {
     throw new Error('buyerUserId invalido.');
@@ -181,18 +181,13 @@ async function resolveBuyerUserIdentity(
   }
 
   const name = String(row.name ?? '').trim();
-  const cpfDigits = normalizeCpfDigits(String(row.cpf ?? ''));
   if (!name) {
     throw new Error('Usuario comprador sem nome valido.');
-  }
-  if (!isValidCpf(cpfDigits)) {
-    throw new Error('Usuario comprador sem CPF valido.');
   }
 
   return {
     id: normalizedBuyerUserId,
     name,
-    cpfDigits,
   };
 }
 
@@ -504,7 +499,7 @@ async function updateProposalFromWizardInternal(
       );
     }
 
-    let buyerUserIdentity: { id: number; name: string; cpfDigits: string } | null = null;
+    let buyerUserIdentity: { id: number; name: string } | null = null;
     if (payload.buyerUserId != null) {
       try {
         buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
@@ -518,25 +513,13 @@ async function updateProposalFromWizardInternal(
         );
       }
 
-      if (
-        normalizeComparableText(payload.clientName) !==
-        normalizeComparableText(buyerUserIdentity.name)
-      ) {
+      const resolvedBuyerUserIdentity = buyerUserIdentity;
+      if (!resolvedBuyerUserIdentity) {
         await tx.rollback();
         return sendProposalError(
           res,
           400,
-          'O nome informado deve corresponder ao usuário comprador selecionado.',
-          'PROPOSAL_VALIDATION_FAILED'
-        );
-      }
-
-      if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
-        await tx.rollback();
-        return sendProposalError(
-          res,
-          400,
-          'O CPF informado deve corresponder ao usuário comprador selecionado.',
+          'Usuario comprador invalido.',
           'PROPOSAL_VALIDATION_FAILED'
         );
       }

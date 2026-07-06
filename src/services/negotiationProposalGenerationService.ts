@@ -126,7 +126,7 @@ function isOwnerSelfProposalAttempt(
 async function resolveBuyerUserIdentity(
   tx: PoolConnection,
   buyerUserId: number
-): Promise<{ id: number; name: string; cpfDigits: string }> {
+): Promise<{ id: number; name: string }> {
   const normalizedBuyerUserId = normalizeOptionalPositiveId(buyerUserId);
   if (normalizedBuyerUserId === null) {
     throw new Error('buyerUserId invalido.');
@@ -142,18 +142,13 @@ async function resolveBuyerUserIdentity(
   }
 
   const name = String(row.name ?? '').trim();
-  const cpfDigits = normalizeCpfDigits(String(row.cpf ?? ''));
   if (!name) {
     throw new Error('Usuario comprador sem nome valido.');
-  }
-  if (!isValidCpf(cpfDigits)) {
-    throw new Error('Usuario comprador sem CPF valido.');
   }
 
   return {
     id: normalizedBuyerUserId,
     name,
-    cpfDigits,
   };
 }
 
@@ -479,7 +474,7 @@ export async function generateProposalFromProperty(
       });
     }
 
-    let buyerUserIdentity: { id: number; name: string; cpfDigits: string } | null = null;
+    let buyerUserIdentity: { id: number; name: string } | null = null;
     if (payload.buyerUserId != null) {
       try {
         buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
@@ -490,20 +485,11 @@ export async function generateProposalFromProperty(
         });
       }
 
-      if (
-        normalizeComparableText(payload.clientName) !==
-        normalizeComparableText(buyerUserIdentity.name)
-      ) {
+      const resolvedBuyerUserIdentity = buyerUserIdentity;
+      if (!resolvedBuyerUserIdentity) {
         await tx.rollback();
         return res.status(400).json({
-          error: 'O nome informado deve corresponder ao usuário comprador selecionado.',
-        });
-      }
-
-      if (normalizeCpfDigits(payload.clientCpf) !== buyerUserIdentity.cpfDigits) {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'O CPF informado deve corresponder ao usuário comprador selecionado.',
+          error: 'Usuario comprador invalido.',
         });
       }
     }

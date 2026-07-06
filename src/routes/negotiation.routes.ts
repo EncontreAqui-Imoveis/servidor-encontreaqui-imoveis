@@ -17,6 +17,10 @@ negotiationRoutes.get('/client-lookup', authMiddleware, (req, res) =>
   negotiationController.lookupClientByCpf(req as any, res)
 );
 
+negotiationRoutes.get('/proposal/conflict', authMiddleware, (req, res) =>
+  negotiationController.lookupProposalConflict(req as any, res)
+);
+
 negotiationRoutes.post('/proposal', authMiddleware, (req, res) =>
   negotiationController.generateProposalFromProperty(req as any, res)
 );

@@ -13,6 +13,7 @@ import {
 } from '../services/negotiationSignedProposalService';
 import { downloadDocument as downloadDocumentService } from '../services/negotiationDocumentDownloadService';
 import { lookupClientByCpf as lookupClientByCpfService } from '../services/negotiationClientLookupService';
+import { lookupProposalConflict as lookupProposalConflictService } from '../services/negotiationProposalConflictLookupService';
 import { listMine as listMineService } from '../services/negotiationMineListingService';
 
 class NegotiationController {
@@ -42,6 +43,10 @@ class NegotiationController {
 
   async lookupClientByCpf(req: AuthRequest, res: Response): Promise<Response> {
     return lookupClientByCpfService(req, res);
+  }
+
+  async lookupProposalConflict(req: AuthRequest, res: Response): Promise<Response> {
+    return lookupProposalConflictService(req, res);
   }
 
   async updateProposalFromWizard(req: AuthRequest, res: Response): Promise<Response> {

@@ -752,6 +752,28 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
   }
 }
 
+async function ensureNegotiationsDealTypeColumn(): Promise<void> {
+  if (!(await tableExists('negotiations'))) {
+    return;
+  }
+
+  if (!(await columnExists('negotiations', 'deal_type'))) {
+    await connection.query(
+      "ALTER TABLE negotiations ADD COLUMN deal_type ENUM('sale', 'rent') NOT NULL DEFAULT 'sale' AFTER buyer_client_id"
+    );
+  }
+
+  await connection.query(`
+    UPDATE negotiations n
+    JOIN properties p ON p.id = n.property_id
+    SET n.deal_type = CASE
+      WHEN LOWER(COALESCE(p.purpose, '')) LIKE '%alug%' THEN 'rent'
+      ELSE 'sale'
+    END
+    WHERE n.deal_type IS NULL OR n.deal_type = ''
+  `);
+}
+
 async function ensureNegotiationsTimestampColumns(): Promise<void> {
   if (!(await tableExists('negotiations'))) {
     return;
@@ -1506,6 +1528,7 @@ export async function applyMigrations(): Promise<void> {
     await runFeaturedPropertiesScopeMigration();
     await ensureNotificationsType();
     await ensureNegotiationsClientColumns();
+    await ensureNegotiationsDealTypeColumn();
     await ensureNegotiationsTimestampColumns();
     await ensureNegotiationsTimestampBackfill();
     await ensureUserAddressColumns();

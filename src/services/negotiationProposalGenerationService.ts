@@ -17,8 +17,10 @@ import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
   isBrokerLikeRole,
+  inferDealTypeFromPurpose,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
+  normalizeDealType,
   parseProposalWizardBody,
   resolvePropertyAddress,
   resolvePropertyValue,
@@ -51,6 +53,7 @@ interface PropertyRow extends RowDataPacket {
   bairro: string | null;
   city: string | null;
   state: string | null;
+  purpose: string | null;
   price: number | null;
   price_sale: number | null;
   price_rent: number | null;
@@ -394,6 +397,7 @@ export async function generateProposalFromProperty(
           bairro,
           city,
           state,
+          purpose,
           price,
           price_sale,
           price_rent
@@ -443,6 +447,7 @@ export async function generateProposalFromProperty(
       await tx.rollback();
       return res.status(400).json({ error: 'Imovel sem valor valido para gerar proposta.' });
     }
+    const dealType = normalizeDealType(payload.dealType) ?? inferDealTypeFromPurpose(property.purpose);
 
     const body = req.body as ProposalWizardBody;
     const rawDeclared =
@@ -583,6 +588,7 @@ export async function generateProposalFromProperty(
           selling_broker_id,
           seller_client_id,
           buyer_client_id,
+          deal_type,
           client_name,
           client_cpf,
           status,
@@ -600,6 +606,7 @@ export async function generateProposalFromProperty(
         sellerBrokerId,
         sellerClientId,
         buyerClientId,
+        dealType,
         payload.clientName,
         payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
@@ -633,6 +640,7 @@ export async function generateProposalFromProperty(
           sellerClientId,
           capturingBrokerId,
           buyerClientId,
+          dealType,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
         }),
@@ -643,6 +651,7 @@ export async function generateProposalFromProperty(
       clientName: payload.clientName,
       clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
+      dealType,
       brokerName,
       sellingBrokerName,
       value: proposalValue,

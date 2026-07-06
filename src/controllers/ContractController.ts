@@ -2135,10 +2135,14 @@ class ContractController {
       body.documentType ?? body.document_type ?? ''
     ).trim();
     const side = parseDocumentSide(body.side);
-    if (!isContractDocumentType(documentTypeRaw) || !isSignedDocumentType(documentTypeRaw)) {
+    const isAdminSupplementalDocumentType = documentTypeRaw.toLowerCase() === 'outro';
+    if (
+      !isContractDocumentType(documentTypeRaw) ||
+      (!isSignedDocumentType(documentTypeRaw) && !isAdminSupplementalDocumentType)
+    ) {
       return res.status(400).json({
         error:
-          "documentType inválido. Use contrato_assinado, comprovante_pagamento ou boleto_vistoria.",
+          "documentType inválido. Use contrato_assinado, comprovante_pagamento, boleto_vistoria ou outro.",
       });
     }
 

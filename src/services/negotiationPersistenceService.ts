@@ -5,7 +5,11 @@ import type { ProposalData } from '../modules/negotiations/domain/states/Negotia
 import { ExternalPdfService } from '../modules/negotiations/infra/ExternalPdfService';
 import { NegotiationDocumentsRepository } from '../modules/negotiations/infra/NegotiationDocumentsRepository';
 import type { SqlExecutor } from '../modules/negotiations/infra/NegotiationRepository';
-import { resolvePropertyAddress } from './negotiationProposalSupportService';
+import {
+  inferDealTypeFromPurpose,
+  normalizeDealType,
+  resolvePropertyAddress,
+} from './negotiationProposalSupportService';
 
 const executor: SqlExecutor = {
   execute<T = unknown>(sql: string, params?: unknown[]): Promise<T | [T, unknown]> {
@@ -23,6 +27,7 @@ interface NegotiationProposalRow extends RowDataPacket {
   payment_details: unknown;
   final_value: number | string | null;
   validity_days: number | string | null;
+  deal_type: string | null;
   address: string | null;
   numero: string | null;
   quadra: string | null;
@@ -30,6 +35,7 @@ interface NegotiationProposalRow extends RowDataPacket {
   bairro: string | null;
   city: string | null;
   state: string | null;
+  property_purpose: string | null;
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
 }
@@ -108,6 +114,7 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
         n.payment_details,
         n.final_value,
         n.proposal_validity_date,
+        n.deal_type,
         p.address,
         p.numero,
         p.quadra,
@@ -115,6 +122,7 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
         p.bairro,
         p.city,
         p.state,
+        p.purpose AS property_purpose,
         cb.name AS capturing_broker_name,
         sb.name AS selling_broker_name
       FROM negotiations n
@@ -136,6 +144,7 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
   const details = parseJsonObjectSafe(paymentDetails.details);
   const finalValue = Number(row.final_value ?? paymentDetails.amount ?? 0);
   const validityDays = Number(paymentDetails.validadeDias ?? paymentDetails.validityDays ?? 10);
+  const dealType = normalizeDealType(row.deal_type) ?? inferDealTypeFromPurpose(row.property_purpose);
   const payment = {
     cash: readPaymentAmount(paymentDetails, ['dinheiro', 'cash', 'paymentDinheiro']),
     tradeIn: readPaymentAmount(paymentDetails, ['permuta', 'tradeIn', 'paymentPermuta']),
@@ -167,6 +176,7 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
     clientName: String(row.client_name ?? details.clientName ?? details.client_name ?? '').trim(),
     clientCpf: String(row.client_cpf ?? details.clientCpf ?? details.client_cpf ?? '').trim(),
     propertyAddress: fallbackPropertyAddress,
+    dealType,
     brokerName: String(row.capturing_broker_name ?? '').trim(),
     sellingBrokerName: String(row.selling_broker_name ?? '').trim() || null,
     value: normalizedFinalValue,

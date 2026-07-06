@@ -13,6 +13,7 @@ export type NegotiationStatus =
   | 'CANCELLED';
 
 export type PaymentMethod = 'MONEY' | 'PERMUTATION' | 'FINANCING' | 'OTHER';
+export type DealType = 'sale' | 'rent';
 
 export interface PaymentDetails {
   method: PaymentMethod;
@@ -24,6 +25,7 @@ export interface ProposalData {
   clientName: string;
   clientCpf: string;
   propertyAddress: string;
+  dealType?: DealType;
   brokerName: string;
   sellingBrokerName?: string | null;
   value: number;

@@ -1,4 +1,4 @@
-import { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
+import { ProposalData, type DealType } from '../modules/negotiations/domain/states/NegotiationState';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 
 export interface ProposalBody {
@@ -15,6 +15,8 @@ export interface ProposalBody {
   value?: unknown;
   paymentMethod?: unknown;
   payment_method?: unknown;
+  dealType?: unknown;
+  deal_type?: unknown;
   payment?: {
     cash?: unknown;
     tradeIn?: unknown;
@@ -44,6 +46,8 @@ export interface ProposalWizardBody {
   sellerBrokerId?: unknown;
   proposalValue?: unknown;
   valorProposta?: unknown;
+  dealType?: unknown;
+  deal_type?: unknown;
   pagamento?: {
     dinheiro?: unknown;
     permuta?: unknown;
@@ -56,6 +60,7 @@ export interface ParsedProposalWizard {
   propertyId: number;
   clientName: string;
   clientCpf: string;
+  dealType: DealType;
   buyerUserId: number | null;
   validadeDias: number;
   sellerBrokerId: number | null;
@@ -144,6 +149,27 @@ export function normalizeProposalCpfKey(raw: string): string {
   return normalizeCpfDigits(String(raw ?? ''));
 }
 
+export function normalizeDealType(value: unknown): DealType | null {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (!normalized) return null;
+  if (normalized.includes('alug') || normalized.includes('rent')) return 'rent';
+  if (normalized.includes('vend') || normalized.includes('sale')) return 'sale';
+  return null;
+}
+
+export function inferDealTypeFromPurpose(purpose: unknown): DealType {
+  const normalized = String(purpose ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return normalized.includes('alug') || normalized.includes('rent') ? 'rent' : 'sale';
+}
+
 export function parseProposalData(body: ProposalBody): ProposalData {
   const clientName = String(body.clientName ?? body.client_name ?? '').trim();
   const clientCpf = String(body.clientCpf ?? body.client_cpf ?? '').trim();
@@ -151,6 +177,7 @@ export function parseProposalData(body: ProposalBody): ProposalData {
   const brokerName = String(body.brokerName ?? body.broker_name ?? '').trim();
   const numericValue = Number(body.value);
   const paymentMethod = String(body.paymentMethod ?? body.payment_method ?? '').trim();
+  const dealType = normalizeDealType(body.dealType ?? body.deal_type) ?? undefined;
   const validityDays = Number(body.validityDays ?? body.validity_days ?? 10);
   const payment = body.payment ?? {};
 
@@ -201,6 +228,7 @@ export function parseProposalData(body: ProposalBody): ProposalData {
     clientName,
     clientCpf,
     propertyAddress,
+    dealType,
     brokerName,
     sellingBrokerName: brokerName,
     value: numericValue,
@@ -219,6 +247,7 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
   const propertyId = Number(body.propertyId);
   const clientName = String(body.clientName ?? '').trim();
   const clientCpfDigits = normalizeCpfDigits(String(body.clientCpf ?? ''));
+  const dealType = normalizeDealType(body.dealType ?? body.deal_type) ?? 'sale';
   const buyerUserId = normalizeOptionalPositiveId(body.buyerUserId ?? body.buyer_user_id);
   const validadeDiasRaw = body.validadeDias ?? 10;
   const validadeDias = Number(validadeDiasRaw);
@@ -273,6 +302,7 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
     propertyId,
     clientName,
     clientCpf: clientCpfDigits,
+    dealType,
     buyerUserId,
     validadeDias,
     sellerBrokerId: null,

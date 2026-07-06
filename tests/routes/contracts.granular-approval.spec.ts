@@ -297,6 +297,29 @@ describe('Contract granular approval and signed docs endpoints', () => {
     );
   });
 
+  it('allows admin supplemental outro upload in AWAITING_SIGNATURES', async () => {
+    contractState = createInitialContractState({
+      status: 'AWAITING_SIGNATURES',
+      seller_approval_status: 'APPROVED',
+      buyer_approval_status: 'APPROVED',
+    });
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/signed-docs')
+      .field('documentType', 'outro')
+      .attach('file', Buffer.from('%PDF-1.4 admin supplemental'), 'anexo.pdf');
+
+    expect(response.status).toBe(201);
+    expect(response.body.document.documentType).toBe('outro');
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        documentType: 'outro',
+        content: expect.any(Buffer),
+      })
+    );
+  });
+
   it('when rejected, keeps contract in AWAITING_DOCS and releases property availability', async () => {
     const response = await request(app)
       .put('/admin/contracts/contract-1/evaluate-side')

@@ -11,8 +11,10 @@ import {
 import {
   assertProposalValidityDateNotPast,
   buildProposalValidityDate,
+  inferDealTypeFromPurpose,
   normalizeOptionalPositiveId,
   normalizeProposalCpfKey,
+  normalizeDealType,
   resolvePropertyAddress,
   parseProposalWizardBody,
   type ParsedProposalWizard,
@@ -42,6 +44,7 @@ interface PropertyRow extends RowDataPacket {
   bairro: string | null;
   city: string | null;
   state: string | null;
+  purpose: string | null;
   price: number | null;
   price_sale: number | null;
   price_rent: number | null;
@@ -400,6 +403,7 @@ async function updateProposalFromWizardInternal(
           bairro,
           city,
           state,
+          purpose,
           price,
           price_sale,
           price_rent
@@ -414,6 +418,7 @@ async function updateProposalFromWizardInternal(
       await tx.rollback();
       return sendProposalError(res, 404, 'Imóvel não encontrado.', 'NOT_FOUND');
     }
+    const dealType = normalizeDealType(payload.dealType) ?? inferDealTypeFromPurpose(property.purpose);
 
     const userRole = roleForAccess;
     const isClientUser = userRole === 'client';
@@ -590,6 +595,7 @@ async function updateProposalFromWizardInternal(
           property_id = ?,
           capturing_broker_id = ?,
           selling_broker_id = ?,
+          deal_type = ?,
           client_name = ?,
           client_cpf = ?,
           status = ?,
@@ -604,6 +610,7 @@ async function updateProposalFromWizardInternal(
         payload.propertyId,
         requestedCapturingBrokerId,
         requestedCapturingBrokerId,
+        dealType,
         payload.clientName,
         payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
@@ -638,6 +645,7 @@ async function updateProposalFromWizardInternal(
           sellerClientId,
           capturingBrokerId: requestedCapturingBrokerId,
           buyerClientId,
+          dealType,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
           adminId: allowAdmin && roleForAccess === 'admin' ? req.userId : null,
@@ -649,6 +657,7 @@ async function updateProposalFromWizardInternal(
       clientName: payload.clientName,
       clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
+      dealType,
       brokerName: (await resolveUserNameById(tx, requestedCapturingBrokerId ?? nRow.capturing_broker_id)) ?? '',
       sellingBrokerName:
         (await resolveUserNameById(tx, requestedCapturingBrokerId ?? nRow.selling_broker_id)) ?? null,

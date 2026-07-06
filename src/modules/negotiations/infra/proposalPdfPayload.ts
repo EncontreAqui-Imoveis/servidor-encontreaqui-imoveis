@@ -26,6 +26,7 @@ export function buildProposalPdfPayload(data: ProposalData): {
   client_name: string;
   client_cpf: string;
   property_address: string;
+  deal_type: string | null;
   broker_name: string;
   selling_broker_name: string | null;
   payment_method: string | null;
@@ -44,6 +45,7 @@ export function buildProposalPdfPayload(data: ProposalData): {
     client_name: toRequiredText(data.clientName, 'clientName'),
     client_cpf: toRequiredText(data.clientCpf, 'clientCpf'),
     property_address: toRequiredText(data.propertyAddress, 'propertyAddress'),
+    deal_type: data.dealType ?? null,
     broker_name: toRequiredText(data.brokerName, 'brokerName'),
     selling_broker_name: toOptionalText(data.sellingBrokerName),
     payment_method: toOptionalText(data.paymentMethod),

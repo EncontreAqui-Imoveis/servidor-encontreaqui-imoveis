@@ -807,6 +807,17 @@ function resolveProposalInitiatorUserId(contract: ContractRow): number {
   return Number.isFinite(initiatorUserId) && initiatorUserId > 0 ? initiatorUserId : 0;
 }
 
+function isBuyerSideUser(contract: ContractRow, userId: number): boolean {
+  return (
+    userId === Number(contract.buyer_client_id ?? 0) ||
+    userId === resolveProposalInitiatorUserId(contract)
+  );
+}
+
+function isSellerSideUser(contract: ContractRow, userId: number): boolean {
+  return userId === resolveSellerPartyId(contract);
+}
+
 function resolveApprovalSideLabel(
   contract: ContractRow,
   side: 'seller' | 'buyer'
@@ -1675,29 +1686,26 @@ function resolveContractViewerSide(
 
   const isCapturingBroker = userId === Number(contract.capturing_broker_id ?? 0);
   const isSellingBroker = userId === Number(contract.selling_broker_id ?? 0);
-  const sellerPartyId = resolveSellerPartyId(contract);
-  const isOwner = userId === Number(contract.property_owner_id ?? 0);
-  const isBuyer = userId === Number(contract.buyer_client_id ?? 0);
-  const isProposalInitiator = userId === resolveProposalInitiatorUserId(contract);
-  const isSellerParty = sellerPartyId > 0 && userId === sellerPartyId;
+  const isBuyer = isBuyerSideUser(contract, userId);
+  const isSeller = isSellerSideUser(contract, userId);
 
-  if (isCapturingBroker && isSellingBroker && !isBuyer && !isOwner) {
+  if (isCapturingBroker && isSellingBroker && !isBuyer && !isSeller) {
     return 'both';
   }
 
-  if (isOwner) {
+  if (isSeller && !isBuyer) {
     return 'seller';
   }
 
-  if (isBuyer) {
+  if (isBuyer && !isSeller) {
     return 'buyer';
   }
 
-  if (isProposalInitiator) {
-    return 'buyer';
+  if (isBuyer && isSeller) {
+    return 'seller';
   }
 
-  if (isSellingBroker || isSellerParty) {
+  if (isSellingBroker || isSeller) {
     return 'seller';
   }
 
@@ -1724,11 +1732,11 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
     return true;
   }
 
+  const isBuyer = isBuyerSideUser(contract, userId);
+  const isSeller = isSellerSideUser(contract, userId);
+
   if (role === 'client') {
-    return userId === Number(contract.buyer_client_id ?? 0) ||
-      userId === resolveProposalInitiatorUserId(contract) ||
-      userId === Number(contract.property_owner_id ?? 0) ||
-      userId === resolveSellerPartyId(contract);
+    return isBuyer || isSeller;
   }
 
   if (role !== 'broker' && role !== 'auxiliary_administrative') {
@@ -1738,9 +1746,8 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   return (
     userId === Number(contract.capturing_broker_id ?? 0) ||
     userId === Number(contract.selling_broker_id ?? 0) ||
-    userId === Number(contract.buyer_client_id ?? 0) ||
-    userId === resolveProposalInitiatorUserId(contract) ||
-    userId === resolveSellerPartyId(contract)
+    isBuyer ||
+    isSeller
   );
 }
 

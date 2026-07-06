@@ -124,31 +124,45 @@ export async function listMyContractsForUser(
   const statusParams = statusFilter ? [statusFilter] : [];
 
   const contractSelectSql = await getContractSelectSql();
+  const visibilityClause = `
+      (
+        n.capturing_broker_id = ?
+        OR n.selling_broker_id = ?
+        OR n.seller_client_id = ?
+        OR n.buyer_client_id = ?
+        OR EXISTS (
+          SELECT 1
+          FROM negotiation_proposal_idempotency npi
+          WHERE npi.negotiation_id = c.negotiation_id
+            AND npi.user_id = ?
+        )
+      )
+  `;
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id
-      WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.seller_client_id = ? OR n.buyer_client_id = ?)
+      WHERE ${visibilityClause}
         AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
         AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
       ${statusClause}
     `,
-    [userId, userId, userId, userId, ...statusParams],
+    [userId, userId, userId, userId, userId, ...statusParams],
   );
   const total = Number(countRows[0]?.total ?? 0);
 
   const rows = await queryContractRows<ContractRow>(
     `
       ${contractSelectSql}
-      WHERE (n.capturing_broker_id = ? OR n.selling_broker_id = ? OR n.seller_client_id = ? OR n.buyer_client_id = ?)
+      WHERE ${visibilityClause}
         AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
         AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
       ${statusClause}
       ORDER BY c.updated_at DESC, c.created_at DESC
       LIMIT ? OFFSET ?
     `,
-    [userId, userId, userId, userId, ...statusParams, limit, offset],
+    [userId, userId, userId, userId, userId, ...statusParams, limit, offset],
   );
 
   if (rows.length === 0) {

@@ -220,6 +220,81 @@ describe('Contract response shape contracts', () => {
     });
   });
 
+  it('includes contracts started by the authenticated user even when buyer_client_id is null', async () => {
+    const initiatorApp = express();
+    initiatorApp.use(express.json());
+    initiatorApp.use((req, _res, next) => {
+      (req as any).userId = 55555;
+      (req as any).userRole = 'client';
+      next();
+    });
+    initiatorApp.get('/contracts/me', (req, res) =>
+      contractController.listMyContracts(req as any, res)
+    );
+
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('COUNT(*) AS total')) {
+        expect(sql).toContain('EXISTS');
+        expect(sql).toContain('negotiation_proposal_idempotency');
+        return [[{ total: 1 }]];
+      }
+
+      if (sql.includes('FROM contracts c') && sql.includes('LIMIT ? OFFSET ?')) {
+        expect(sql).toContain('EXISTS');
+        expect(sql).toContain('negotiation_proposal_idempotency');
+        return [[
+          {
+            id: 'contract-initiator',
+            negotiation_id: 'neg-initiator',
+            property_id: 909,
+            status: 'AWAITING_DOCS',
+            seller_info: JSON.stringify({ nome: 'Proprietário' }),
+            buyer_info: JSON.stringify({ clientName: 'Terceiro' }),
+            commission_data: JSON.stringify({}),
+            workflow_metadata: JSON.stringify({}),
+            seller_approval_status: 'PENDING',
+            buyer_approval_status: 'PENDING',
+            seller_approval_reason: null,
+            buyer_approval_reason: null,
+            created_at: '2026-03-03 10:00:00',
+            updated_at: '2026-03-03 10:05:00',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30004,
+            seller_client_id: null,
+            buyer_client_id: null,
+            client_name: 'Terceiro',
+            client_cpf: '09169443106',
+            property_title: 'Casa Região Norte',
+            property_purpose: 'Venda',
+            property_code: 'RN-909',
+            capturing_broker_name: 'Captador',
+            selling_broker_name: 'Vendedor',
+            capturing_agency_name: 'Encontre Aqui',
+            capturing_agency_address: 'Av. Norte, 123',
+            responsible_user_ids: null,
+          },
+        ]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(initiatorApp).get('/contracts/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0]).toMatchObject({
+      id: 'contract-initiator',
+      negotiationId: 'neg-initiator',
+      propertyTitle: 'Casa Região Norte',
+      clientCpf: '09169443106',
+    });
+  });
+
   it('keeps rejected documents visible in the contract payload', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {

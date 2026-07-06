@@ -19,6 +19,8 @@ type DecisionNegotiationRow = RowDataPacket & {
   responsible_broker_id: number | string | null;
   buyer_client_id?: number | string | null;
   property_title: string | null;
+  property_owner_name: string | null;
+  property_owner_phone: string | null;
   property_code: string | null;
   property_address: string | null;
   property_status: string | null;
@@ -95,6 +97,8 @@ async function loadDecisionNegotiationRow(
         ) AS responsible_broker_id
         ${buyerClientSelect},
         p.title AS property_title,
+        p.owner_name AS property_owner_name,
+        p.owner_phone AS property_owner_phone,
         p.code AS property_code,
         CONCAT_WS(', ', p.address, p.numero, p.bairro, p.city, p.state) AS property_address,
         p.status AS property_status,
@@ -225,9 +229,11 @@ export async function approveNegotiation(params: {
           INSERT INTO contracts (
             id,
             negotiation_id,
-            property_id,
-            status,
-            seller_approval_status,
+          property_id,
+          status,
+          seller_info,
+          buyer_info,
+          seller_approval_status,
             buyer_approval_status,
             created_at,
             updated_at
@@ -236,13 +242,25 @@ export async function approveNegotiation(params: {
             ?,
             ?,
             'AWAITING_DOCS',
+            CAST(JSON_OBJECT('nome', ?, 'name', ?, 'telefone', ?) AS JSON),
+            CAST(JSON_OBJECT('clientName', ?, 'clientCpf', ?, 'nome', ?, 'cpf', ?) AS JSON),
             'PENDING',
             'PENDING',
             CURRENT_TIMESTAMP,
             CURRENT_TIMESTAMP
           )
         `,
-        [negotiationId, negotiation.property_id]
+        [
+          negotiationId,
+          negotiation.property_id,
+          negotiation.property_owner_name,
+          negotiation.property_owner_name,
+          negotiation.property_owner_phone,
+          negotiation.client_name,
+          negotiation.client_cpf,
+          negotiation.client_name,
+          negotiation.client_cpf,
+        ]
       );
     }
 

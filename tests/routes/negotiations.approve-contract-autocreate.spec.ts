@@ -70,6 +70,8 @@ type ContractState = {
   status: string;
   sellerApprovalStatus: string;
   buyerApprovalStatus: string;
+  sellerInfo: Record<string, unknown> | null;
+  buyerInfo: Record<string, unknown> | null;
 } | null;
 
 describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
@@ -116,7 +118,11 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
             property_id: 101,
             property_broker_id: 30005,
             capturing_broker_id: 30003,
+            client_name: 'FGFG',
+            client_cpf: '09169443106',
             property_title: 'Casa Centro',
+            property_owner_name: 'Dona Maria',
+            property_owner_phone: '(64) 99999-1111',
             property_code: 'RV-101',
             property_address: 'Rua 1, Centro',
             property_status: 'approved',
@@ -158,6 +164,17 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
           status: 'AWAITING_DOCS',
           sellerApprovalStatus: 'PENDING',
           buyerApprovalStatus: 'PENDING',
+          sellerInfo: {
+            nome: params[2],
+            name: params[2],
+            telefone: params[4],
+          },
+          buyerInfo: {
+            clientName: params[5],
+            clientCpf: params[6],
+            nome: params[7],
+            cpf: params[8],
+          },
         };
         return [{ affectedRows: 1 }];
       }
@@ -177,6 +194,21 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     expect(contractState?.status).toBe('AWAITING_DOCS');
     expect(contractState?.sellerApprovalStatus).toBe('PENDING');
     expect(contractState?.buyerApprovalStatus).toBe('PENDING');
+    expect(contractState?.sellerInfo).toEqual(
+      expect.objectContaining({
+        nome: 'Dona Maria',
+        name: 'Dona Maria',
+        telefone: '(64) 99999-1111',
+      })
+    );
+    expect(contractState?.buyerInfo).toEqual(
+      expect.objectContaining({
+        clientName: 'FGFG',
+        clientCpf: '09169443106',
+        nome: 'FGFG',
+        cpf: '09169443106',
+      })
+    );
     expect(contractInsertCount).toBe(1);
     const propertyMoveCalls = txMock.query.mock.calls.filter(([sql]) =>
       String(sql).includes("UPDATE properties") &&

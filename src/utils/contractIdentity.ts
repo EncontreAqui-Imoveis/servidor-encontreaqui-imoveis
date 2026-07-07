@@ -52,7 +52,6 @@ export function isBuyerSideUser(
 ): boolean {
   return (
     userId === Number(contract.buyer_client_id ?? 0) ||
-    userId === resolveProposalInitiatorUserId(contract) ||
     isSameCpf(userCpf, contract.client_cpf)
   );
 }

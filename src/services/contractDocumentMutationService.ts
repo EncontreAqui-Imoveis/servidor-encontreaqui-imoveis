@@ -187,13 +187,6 @@ function approvalStatusAllowsEditing(status: ContractApprovalStatus): boolean {
   return status === 'PENDING' || status === 'REJECTED';
 }
 
-function isDoubleEndedDeal(contract: ContractRow): boolean {
-  if (contract.capturing_broker_id == null || contract.selling_broker_id == null) {
-    return false;
-  }
-  return Number(contract.capturing_broker_id) === Number(contract.selling_broker_id);
-}
-
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   const role = String(req.userRole ?? '').toLowerCase();
   if (role === 'admin') {
@@ -325,7 +318,6 @@ export async function uploadContractDocument(
     }
   }
 
-  const doubleEnded = isDoubleEndedDeal(params.contract);
   const canEditSeller = canEditSellerSide(params.req, params.contract);
   const canEditBuyer = canEditBuyerSide(params.req, params.contract);
 
@@ -335,9 +327,6 @@ export async function uploadContractDocument(
       : (() => {
           if (requestedSide) {
             return requestedSide;
-          }
-          if (doubleEnded) {
-            return 'seller';
           }
           if (canEditSeller && !canEditBuyer) {
             return 'seller';
@@ -360,11 +349,11 @@ export async function uploadContractDocument(
     );
   }
 
-  if (resolvedSide === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
+  if (resolvedSide === 'seller' && !canEditSeller && role !== 'admin') {
     throw mutationError(403, 'Somente o proprietário pode anexar documentos do lado owner.');
   }
 
-  if (resolvedSide === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
+  if (resolvedSide === 'buyer' && !canEditBuyer && role !== 'admin') {
     throw mutationError(403, 'Somente o comprador pode anexar documentos do lado buyer.');
   }
 
@@ -543,13 +532,11 @@ export async function deleteContractDocument(
   const role = String(params.req.userRole ?? '').toLowerCase();
   const canEditSeller = canEditSellerSide(params.req, params.contract);
   const canEditBuyer = canEditBuyerSide(params.req, params.contract);
-  const doubleEnded = isDoubleEndedDeal(params.contract);
-
-  if (side === 'seller' && !canEditSeller && role !== 'admin' && !doubleEnded) {
+  if (side === 'seller' && !canEditSeller && role !== 'admin') {
     throw mutationError(403, 'Somente o proprietário pode remover documentos do lado owner.');
   }
 
-  if (side === 'buyer' && !canEditBuyer && role !== 'admin' && !doubleEnded) {
+  if (side === 'buyer' && !canEditBuyer && role !== 'admin') {
     throw mutationError(403, 'Somente o comprador pode remover documentos do lado buyer.');
   }
 

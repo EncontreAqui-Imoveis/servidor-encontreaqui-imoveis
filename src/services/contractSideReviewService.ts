@@ -270,13 +270,6 @@ function shouldMoveToDraft(
   );
 }
 
-function isDoubleEndedDeal(contract: ContractRow): boolean {
-  if (contract.capturing_broker_id == null || contract.selling_broker_id == null) {
-    return false;
-  }
-  return Number(contract.capturing_broker_id) === Number(contract.selling_broker_id);
-}
-
 function resolveContractPropertyTitle(contract: ContractRow): string {
   const title = String(contract.property_title ?? '').trim();
   return title || 'Imóvel sem título';
@@ -286,10 +279,6 @@ function resolveApprovalSideLabel(
   contract: ContractRow,
   side: 'seller' | 'buyer'
 ): string {
-  if (isDoubleEndedDeal(contract)) {
-    return 'documentação do contrato';
-  }
-
   return side === 'seller' ? 'documentação do proprietário' : 'documentação do comprador';
 }
 
@@ -806,7 +795,7 @@ export async function evaluateContractSide(
             metadata: {
               contractId,
               negotiationId: contract.negotiation_id,
-              side: isDoubleEndedDeal(contract) ? 'both' : side,
+              side,
               status: nextSideStatus,
               reason: reasonText,
             },
@@ -836,7 +825,7 @@ export async function evaluateContractSide(
             metadata: {
               contractId,
               negotiationId: contract.negotiation_id,
-              side: isDoubleEndedDeal(contract) ? 'both' : side,
+              side,
               status: nextSideStatus,
               reason: reasonText,
             },

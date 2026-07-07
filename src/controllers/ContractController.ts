@@ -803,10 +803,6 @@ function resolveApprovalSideLabel(
   contract: ContractRow,
   side: 'seller' | 'buyer'
 ): string {
-  if (isDoubleEndedDeal(contract)) {
-    return 'documentação do contrato';
-  }
-
   return side === 'seller' ? 'documentação do proprietário' : 'documentação do comprador';
 }
 
@@ -1779,13 +1775,6 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
   }
 
   return context.isCapturingBroker;
-}
-
-function isDoubleEndedDeal(contract: ContractRow): boolean {
-  if (contract.capturing_broker_id == null || contract.selling_broker_id == null) {
-    return false;
-  }
-  return Number(contract.capturing_broker_id) === Number(contract.selling_broker_id);
 }
 
 function shouldMoveToDraft(

@@ -138,13 +138,6 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   return context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide;
 }
 
-function isDoubleEndedDeal(contract: ContractRow): boolean {
-  if (contract.capturing_broker_id == null || contract.selling_broker_id == null) {
-    return false;
-  }
-  return Number(contract.capturing_broker_id) === Number(contract.selling_broker_id);
-}
-
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   const role = String(req.userRole ?? '').toLowerCase();
   if (role === 'admin') {
@@ -275,17 +268,16 @@ export async function updateContractData(
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
 
-  const doubleEnded = isDoubleEndedDeal(contract);
   const role = String(params.req.userRole ?? '').toLowerCase();
   const isAdmin = role === 'admin';
   const canEditSeller = canEditSellerSide(params.req, contract);
   const canEditBuyer = canEditBuyerSide(params.req, contract);
 
-  if (ownerPatch && !canEditSeller && !doubleEnded) {
+  if (ownerPatch && !canEditSeller) {
     throw mutationError(403, 'Somente o proprietário pode editar ownerInfo.');
   }
 
-  if (buyerPatch && !canEditBuyer && !doubleEnded) {
+  if (buyerPatch && !canEditBuyer) {
     throw mutationError(403, 'Somente o comprador pode editar buyerInfo.');
   }
 
@@ -298,17 +290,6 @@ export async function updateContractData(
 
   if (buyerPatch && !approvalStatusAllowsEditing(buyerStatus) && !isAdmin) {
     throw mutationError(403, 'Dados do lado buyer não podem ser alterados após aprovação.');
-  }
-
-  if (doubleEnded) {
-    const userId = Number(params.req.userId);
-    const sameBrokerId = Number(contract.capturing_broker_id ?? 0);
-    if (!isAdmin && userId !== sameBrokerId) {
-      throw mutationError(
-        403,
-        'Neste contrato de ponta dupla, apenas o corretor responsável pode editar os dois lados.'
-      );
-    }
   }
 
   const ownerInfo = parseStoredJsonObject(contract.seller_info);

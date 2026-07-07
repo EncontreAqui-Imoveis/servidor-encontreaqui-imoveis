@@ -1,10 +1,12 @@
 import type { AuthRequest } from '../middlewares/auth';
+import { normalizeCpfDigits } from './cpfValidator';
 
 export interface ContractIdentityLike {
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
   seller_client_id: number | null;
   buyer_client_id: number | null;
+  client_cpf: string | null;
   property_owner_id: number | null;
   proposal_initiator_user_id: number | null;
 }
@@ -37,10 +39,21 @@ export function resolveProposalInitiatorUserId(contract: ContractIdentityLike): 
   return Number.isFinite(initiatorUserId) && initiatorUserId > 0 ? initiatorUserId : 0;
 }
 
-export function isBuyerSideUser(contract: ContractIdentityLike, userId: number): boolean {
+function isSameCpf(left: string | null | undefined, right: string | null | undefined): boolean {
+  const normalizedLeft = normalizeCpfDigits(String(left ?? ''));
+  const normalizedRight = normalizeCpfDigits(String(right ?? ''));
+  return normalizedLeft.length === 11 && normalizedLeft === normalizedRight;
+}
+
+export function isBuyerSideUser(
+  contract: ContractIdentityLike,
+  userId: number,
+  userCpf?: string | null
+): boolean {
   return (
     userId === Number(contract.buyer_client_id ?? 0) ||
-    userId === resolveProposalInitiatorUserId(contract)
+    userId === resolveProposalInitiatorUserId(contract) ||
+    isSameCpf(userCpf, contract.client_cpf)
   );
 }
 
@@ -66,7 +79,7 @@ export function resolveContractAccessContext(
     isResponsible,
     isCapturingBroker: userId === Number(contract.capturing_broker_id ?? 0),
     isSellingBroker: userId === Number(contract.selling_broker_id ?? 0),
-    isBuyerSide: isBuyerSideUser(contract, userId),
+    isBuyerSide: isBuyerSideUser(contract, userId, req.userCpf),
     isSellerSide: isSellerSideUser(contract, userId),
   };
 }

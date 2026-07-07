@@ -9,6 +9,7 @@ interface UserFromDB extends RowDataPacket {
   role: string;
   broker_status?: string;
   token_version?: number | string | null;
+  cpf?: string | null;
 }
 
 interface BrokerRoleRow extends RowDataPacket {
@@ -25,6 +26,7 @@ interface AdminFromDB extends RowDataPacket {
 export interface AuthRequest extends Request {
   userId?: number;
   userRole?: string;
+  userCpf?: string | null;
   firebase_uid?: string;
   adminValidated?: boolean;
 }
@@ -137,20 +139,21 @@ async function validateAdminAccount(
 
 async function validateUserSession(
   userId: number
-): Promise<{ exists: boolean; tokenVersion: number }> {
+): Promise<{ exists: boolean; tokenVersion: number; cpf: string | null }> {
   try {
     const [userRows] = await connection.query<UserFromDB[]>(
-      'SELECT id, token_version FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, token_version, cpf FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
 
     if (userRows.length === 0) {
-      return { exists: false, tokenVersion: 0 };
+      return { exists: false, tokenVersion: 0, cpf: null };
     }
 
     return {
       exists: true,
       tokenVersion: normalizeTokenVersion(userRows[0].token_version),
+      cpf: String(userRows[0].cpf ?? '').trim() || null,
     };
   } catch (error: any) {
     if (error?.code !== 'ER_BAD_FIELD_ERROR') {
@@ -163,10 +166,10 @@ async function validateUserSession(
     );
 
     if (userRows.length === 0) {
-      return { exists: false, tokenVersion: 0 };
+      return { exists: false, tokenVersion: 0, cpf: null };
     }
 
-    return { exists: true, tokenVersion: 1 };
+    return { exists: true, tokenVersion: 1, cpf: null };
   }
 }
 
@@ -266,6 +269,8 @@ export async function authMiddleware(
         error: 'Sessao revogada. Faca login novamente.',
       });
     }
+
+    req.userCpf = userSession.cpf;
 
     if (decodedRole === 'broker' || decodedRole === 'auxiliary_administrative') {
       const [brokerRows] = await connection.query<BrokerRoleRow[]>(

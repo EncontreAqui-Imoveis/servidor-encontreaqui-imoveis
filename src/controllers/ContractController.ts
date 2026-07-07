@@ -88,6 +88,7 @@ import {
 import {
   findCategoryRequirement,
   isUploadBlockedForNotApplicableCategory,
+  resolveDocumentRequirementMatrixForContract,
   resolveDocumentRequirementsForContract,
   type ContractDocumentRuleContext,
 } from '../modules/contracts/domain/contractDocumentRuleMatrix';
@@ -1042,9 +1043,10 @@ function shouldExposeOwnerSensitiveDocument(
 }
 
 export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
-  const documentRequirements = resolveDocumentRequirementsForContract(
-    buildContractDocumentRuleContextFromRow(row)
-  );
+  const matrixContext = buildContractDocumentRuleContextFromRow(row);
+  const documentRequirements = resolveDocumentRequirementsForContract(matrixContext);
+  const documentRequirementMatrix =
+    resolveDocumentRequirementMatrixForContract(matrixContext);
   const ownerInfo = buildOwnerInfoFromContractRow(row);
   const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
   const ownerInfoForViewer = redactOwnerInfoByRole(ownerInfo, canViewSensitiveData);
@@ -1094,6 +1096,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     viewerSide,
     approvalProgress: summarizeContractApprovalProgress(row),
     documentRequirements,
+    documentRequirementMatrix,
     createdAt: toIsoString(row.created_at),
     updatedAt: toIsoString(row.updated_at),
   };

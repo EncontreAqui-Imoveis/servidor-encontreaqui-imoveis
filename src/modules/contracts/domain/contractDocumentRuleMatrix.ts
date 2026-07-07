@@ -1,4 +1,8 @@
-import type { ContractDocumentCategoryCode } from './contract.types';
+import type { ContractDocumentCategoryCode, ContractDocumentType } from './contract.types';
+import {
+  resolveAcceptedDocumentTypesForCategory,
+  resolveFallbackDocumentTypeByCategory,
+} from './contractDocumentValidation';
 
 export type MaritalBucket =
   | 'single'
@@ -16,6 +20,16 @@ export interface CategoryRequirement {
   /** Gate: exige documento aprovado quando true. */
   required: boolean;
   reasonCode: string;
+}
+
+export interface DocumentRequirementMatrixItem extends CategoryRequirement {
+  preferredDocumentType: ContractDocumentType;
+  acceptedDocumentTypes: ContractDocumentType[];
+}
+
+export interface DocumentRequirementMatrixPayload {
+  seller: DocumentRequirementMatrixItem[];
+  buyer: DocumentRequirementMatrixItem[];
 }
 
 export interface ContractDocumentRuleContext {
@@ -207,6 +221,22 @@ export function resolveDocumentRequirementsForContract(
   return {
     seller: resolveDocumentRequirements({ side: 'seller', ...base }),
     buyer: resolveDocumentRequirements({ side: 'buyer', ...base }),
+  };
+}
+
+export function resolveDocumentRequirementMatrixForContract(
+  context: ContractDocumentRuleContext
+): DocumentRequirementMatrixPayload {
+  const requirements = resolveDocumentRequirementsForContract(context);
+  const decorate = (item: CategoryRequirement): DocumentRequirementMatrixItem => ({
+    ...item,
+    preferredDocumentType: resolveFallbackDocumentTypeByCategory(item.category),
+    acceptedDocumentTypes: resolveAcceptedDocumentTypesForCategory(item.category),
+  });
+
+  return {
+    seller: requirements.seller.map(decorate),
+    buyer: requirements.buyer.map(decorate),
   };
 }
 

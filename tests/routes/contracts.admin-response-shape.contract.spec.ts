@@ -140,6 +140,10 @@ describe('GET /admin/contracts response shape contracts', () => {
           },
           agencyName: 'Encontre Aqui',
           agencyAddress: 'Rua Central, 100',
+          documentRequirementMatrix: {
+            seller: expect.any(Array),
+            buyer: expect.any(Array),
+          },
           documents: [
             {
               id: 501,

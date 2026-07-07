@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   isUploadBlockedForNotApplicableCategory,
+  resolveDocumentRequirementMatrixForContract,
   resolveDocumentRequirements,
   resolveMaritalBucket,
 } from '../../../src/modules/contracts/domain/contractDocumentRuleMatrix';
@@ -120,5 +121,27 @@ describe('contractDocumentRuleMatrix', () => {
     });
     const conj = req.find((r) => r.category === 'conjuge_documentos');
     expect(conj?.required).toBe(false);
+  });
+
+  it('resolveDocumentRequirementMatrixForContract expõe tipos aceitos por lado', () => {
+    const matrix = resolveDocumentRequirementMatrixForContract({
+      propertyPurpose: 'Aluguel',
+      sellerInfo: { estado_civil: 'Casado' },
+      buyerInfo: { estado_civil: 'Solteiro' },
+    });
+
+    const sellerIdentity = matrix.seller.find((item) => item.category === 'identidade');
+    const buyerRent = matrix.buyer.find((item) => item.category === 'comprovante_renda');
+    const sellerDocsImovel = matrix.seller.find((item) => item.category === 'docs_imovel');
+
+    expect(sellerIdentity?.acceptedDocumentTypes).toEqual(
+      expect.arrayContaining(['doc_identidade', 'cliente_cnh', 'cliente_identidade'])
+    );
+    expect(sellerIdentity?.preferredDocumentType).toBe('doc_identidade');
+    expect(buyerRent?.required).toBe(true);
+    expect(sellerDocsImovel?.applicability).toBe('not_applicable');
+    expect(sellerDocsImovel?.acceptedDocumentTypes).toEqual(
+      expect.arrayContaining(['certidao_inteiro_teor', 'certidao_onus_acoes'])
+    );
   });
 });

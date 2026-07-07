@@ -134,6 +134,10 @@ describe('Contract response shape contracts', () => {
         buyerClientName: 'Cliente Comprador',
         responsibleUserIds: [30003, 30005],
         viewerSide: 'both',
+        documentRequirementMatrix: {
+          seller: expect.any(Array),
+          buyer: expect.any(Array),
+        },
       },
       documents: [
         {

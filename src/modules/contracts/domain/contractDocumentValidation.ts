@@ -75,6 +75,12 @@ export function resolveDocumentCategoryFromType(
   return null;
 }
 
+export function resolveAcceptedDocumentTypesForCategory(
+  category: ContractDocumentCategoryCode
+): ContractDocumentType[] {
+  return Array.from(CATEGORY_DOCUMENT_TYPES[category] ?? []);
+}
+
 export function resolveFallbackDocumentTypeByCategory(
   category: ContractDocumentCategoryCode
 ): ContractDocumentType {

@@ -48,6 +48,13 @@ describe('contractCreationService', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([
+        [
+          {
+            proposal_initiator_user_id: 55555,
+          },
+        ],
+      ])
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([
@@ -66,6 +73,9 @@ describe('contractCreationService', () => {
             buyer_approval_reason: null,
             created_at: '2026-06-01 10:00:00',
             updated_at: '2026-06-01 10:00:00',
+            workflow_metadata: JSON.stringify({
+              proposalInitiatorUserId: 55555,
+            }),
             capturing_broker_id: 30003,
             selling_broker_id: 30004,
             seller_client_id: null,
@@ -115,6 +125,13 @@ describe('contractCreationService', () => {
       .mockResolvedValueOnce([
         [
           {
+            proposal_initiator_user_id: 55555,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
             id: 'contract-existing',
             negotiation_id: 'neg-1',
             property_id: 101,
@@ -128,6 +145,9 @@ describe('contractCreationService', () => {
             buyer_approval_reason: null,
             created_at: '2026-06-01 10:00:00',
             updated_at: '2026-06-01 10:00:00',
+            workflow_metadata: JSON.stringify({
+              proposalInitiatorUserId: 55555,
+            }),
             capturing_broker_id: 30003,
             selling_broker_id: 30004,
             seller_client_id: null,

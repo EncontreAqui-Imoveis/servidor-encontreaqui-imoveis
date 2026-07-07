@@ -1854,10 +1854,20 @@ export const CONTRACT_SELECT_BASE_SQL = `
     p.owner_id AS property_owner_id,
     COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
     p.owner_phone AS property_owner_phone,
-    (
-      SELECT MIN(npi.user_id)
-      FROM negotiation_proposal_idempotency npi
-      WHERE npi.negotiation_id = c.negotiation_id
+    COALESCE(
+      CAST(
+        NULLIF(
+          JSON_UNQUOTE(
+            JSON_EXTRACT(c.workflow_metadata, '$.proposalInitiatorUserId')
+          ),
+          ''
+        ) AS UNSIGNED
+      ),
+      (
+        SELECT MIN(npi.user_id)
+        FROM negotiation_proposal_idempotency npi
+        WHERE npi.negotiation_id = c.negotiation_id
+      )
     ) AS proposal_initiator_user_id,
     COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
     seller_user.name AS selling_broker_name,

@@ -21,6 +21,11 @@ function contractCreationError(statusCode: number, message: string) {
   return new ContractCreationError(statusCode, message);
 }
 
+function normalizePositiveId(value: unknown): number | null {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
   'IN_NEGOTIATION',
   'DOCUMENTATION_PHASE',
@@ -88,6 +93,22 @@ export async function createContractFromApprovedNegotiation(
       throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
     }
 
+    const [initiatorRows] = await tx.query<Array<RowDataPacket & {
+      proposal_initiator_user_id: number | null;
+    }>>(
+      `
+        SELECT MIN(npi.user_id) AS proposal_initiator_user_id
+        FROM negotiation_proposal_idempotency npi
+        WHERE npi.negotiation_id = ?
+        LIMIT 1
+      `,
+      [negotiationId],
+    );
+
+    const proposalInitiatorUserId = normalizePositiveId(
+      initiatorRows[0]?.proposal_initiator_user_id,
+    );
+
     const [existingRows] = await tx.query<Array<RowDataPacket & ContractRow>>(
       `
         SELECT
@@ -98,6 +119,22 @@ export async function createContractFromApprovedNegotiation(
           c.seller_info,
           c.buyer_info,
           c.commission_data,
+          c.workflow_metadata,
+          COALESCE(
+            CAST(
+              NULLIF(
+                JSON_UNQUOTE(
+                  JSON_EXTRACT(c.workflow_metadata, '$.proposalInitiatorUserId')
+                ),
+                ''
+              ) AS UNSIGNED
+            ),
+            (
+              SELECT MIN(npi.user_id)
+              FROM negotiation_proposal_idempotency npi
+              WHERE npi.negotiation_id = c.negotiation_id
+            )
+          ) AS proposal_initiator_user_id,
           c.seller_approval_status,
           c.buyer_approval_status,
           c.seller_approval_reason,
@@ -153,6 +190,7 @@ export async function createContractFromApprovedNegotiation(
           buyer_approval_status,
           seller_approval_reason,
           buyer_approval_reason,
+          workflow_metadata,
           created_at,
           updated_at
         ) VALUES (
@@ -167,6 +205,7 @@ export async function createContractFromApprovedNegotiation(
           'PENDING',
           NULL,
           NULL,
+          CAST(JSON_OBJECT('proposalInitiatorUserId', ?) AS JSON),
           CURRENT_TIMESTAMP,
           CURRENT_TIMESTAMP
         )
@@ -178,6 +217,7 @@ export async function createContractFromApprovedNegotiation(
         negotiation.property_owner_phone,
         negotiation.client_name,
         negotiation.client_cpf,
+        proposalInitiatorUserId,
       ],
     );
 
@@ -191,6 +231,22 @@ export async function createContractFromApprovedNegotiation(
           c.seller_info,
           c.buyer_info,
           c.commission_data,
+          c.workflow_metadata,
+          COALESCE(
+            CAST(
+              NULLIF(
+                JSON_UNQUOTE(
+                  JSON_EXTRACT(c.workflow_metadata, '$.proposalInitiatorUserId')
+                ),
+                ''
+              ) AS UNSIGNED
+            ),
+            (
+              SELECT MIN(npi.user_id)
+              FROM negotiation_proposal_idempotency npi
+              WHERE npi.negotiation_id = c.negotiation_id
+            )
+          ) AS proposal_initiator_user_id,
           c.seller_approval_status,
           c.buyer_approval_status,
           c.seller_approval_reason,

@@ -99,6 +99,10 @@ import {
   validateContractDocumentUpload,
 } from '../modules/contracts/domain/contractDocumentValidation';
 import {
+  getPropertyById as getPropertyByIdService,
+  mapProperty as mapPropertyFromDiscovery,
+} from '../services/propertyDiscoveryService';
+import {
   isBuyerSideUser,
   isSellerSideUser,
   resolveContractAccessContext,
@@ -2994,6 +2998,37 @@ class ContractController {
     } catch (error) {
       console.error('Erro ao buscar contrato por negociação:', error);
       return res.status(500).json({ error: 'Falha ao buscar contrato.' });
+    }
+  }
+
+  async getPropertyByNegotiationId(req: AuthRequest, res: Response): Promise<Response> {
+    const negotiationId = String(req.params.negotiationId ?? '').trim();
+    if (!negotiationId) {
+      return res.status(400).json({ error: 'ID da negociação inválido.' });
+    }
+
+    try {
+      const contract = await fetchContractByNegotiationId(negotiationId);
+      if (!contract) {
+        return res.status(404).json({ error: 'Contrato não encontrado para esta negociação.' });
+      }
+
+      if (!canAccessContract(req, contract)) {
+        return res.status(403).json({ error: 'Acesso negado ao contrato.' });
+      }
+
+      const property = await getPropertyByIdService(Number(contract.property_id), {
+        publicOnly: false,
+      });
+
+      if (!property) {
+        return res.status(404).json({ error: 'Imóvel não encontrado.' });
+      }
+
+      return res.status(200).json(mapPropertyFromDiscovery(property, true, 'detail'));
+    } catch (error) {
+      console.error('Erro ao buscar imóvel do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao buscar imóvel.' });
     }
   }
 

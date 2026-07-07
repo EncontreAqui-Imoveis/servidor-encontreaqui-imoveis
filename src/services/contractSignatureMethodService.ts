@@ -1,7 +1,12 @@
+import type { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
-import { resolveContractStatus, type ContractRow } from '../controllers/ContractController';
+import {
+  CONTRACT_SELECT_BASE_SQL,
+  resolveContractStatus,
+  type ContractRow,
+} from '../controllers/ContractController';
 import { resolveContractAccessContext } from '../utils/contractIdentity';
 
 interface SignatureMethodBody {
@@ -58,10 +63,21 @@ async function fetchContractForUpdate(
   tx: PoolConnection,
   contractId: string
 ): Promise<ContractRow | null> {
+  const includeResponsibles = await hasNegotiationResponsiblesTable(tx);
+  const responsibleUsersSelect = includeResponsibles
+    ? `(
+      SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
+      FROM negotiation_responsibles nr
+      WHERE nr.negotiation_id = c.negotiation_id
+    ) AS responsible_user_ids`
+    : 'NULL AS responsible_user_ids';
+  const contractSelectSql = CONTRACT_SELECT_BASE_SQL.replace(
+    '__RESPONSIBLE_USERS_SELECT__',
+    responsibleUsersSelect
+  );
   const [rows] = await tx.query<ContractRow[]>(
     `
-      SELECT *
-      FROM contracts c
+      ${contractSelectSql}
       WHERE c.id = ?
       LIMIT 1
       FOR UPDATE
@@ -211,4 +227,23 @@ export function isContractSignatureMethodError(
   error: unknown
 ): error is ContractSignatureMethodError {
   return error instanceof ContractSignatureMethodError;
+}
+let negotiationResponsiblesTableCache: boolean | null = null;
+
+async function hasNegotiationResponsiblesTable(tx: PoolConnection): Promise<boolean> {
+  if (negotiationResponsiblesTableCache != null) {
+    return negotiationResponsiblesTableCache;
+  }
+
+  const [rows] = await tx.query<Array<RowDataPacket & { has_table: number }>>(
+    `
+      SELECT 1 AS has_table
+      FROM information_schema.tables
+      WHERE table_schema = DATABASE()
+        AND table_name = 'negotiation_responsibles'
+      LIMIT 1
+    `
+  );
+  negotiationResponsiblesTableCache = rows.length > 0;
+  return negotiationResponsiblesTableCache;
 }

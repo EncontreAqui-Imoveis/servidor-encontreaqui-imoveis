@@ -79,6 +79,25 @@ describe('negotiationProposalConflictLookupService.lookupProposalConflict', () =
     expect(res.json).toHaveBeenCalledWith({ found: false, conflict: null });
   });
 
+  it('queries only active proposal statuses when checking conflict by cpf', async () => {
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([] as any);
+
+    const req = {
+      userId: 30003,
+      query: { propertyId: '90001', cpf: '09169443106' },
+    } as any;
+    const res = createMockResponse();
+
+    await lookupProposalConflict(req, res);
+
+    expect(queryNegotiationRows).toHaveBeenCalledWith(
+      expect.stringContaining("n.status IN (?, ?, ?)"),
+      [90001, 'PROPOSAL_DRAFT', 'PROPOSAL_SENT', 'IN_NEGOTIATION', '09169443106']
+    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ found: false, conflict: null });
+  });
+
   it('returns 400 for invalid cpf', async () => {
     const req = {
       userId: 30003,

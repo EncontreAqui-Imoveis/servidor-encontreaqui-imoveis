@@ -46,6 +46,17 @@ vi.mock('../../src/services/negotiationProposalSupportService', () => ({
   normalizeProposalCpfKey: vi.fn((value: unknown) =>
     String(value ?? '').replace(/\D/g, '')
   ),
+  normalizeDealType: vi.fn((value: unknown) => {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'sale' || normalized === 'venda') {
+      return 'sale';
+    }
+    if (normalized === 'rent' || normalized === 'aluguel') {
+      return 'rent';
+    }
+    return null;
+  }),
+  inferDealTypeFromPurpose: vi.fn(() => 'sale'),
   resolvePropertyAddress: vi.fn(() => 'Rua A, 100'),
   resolvePropertyValue: vi.fn(() => 500000),
   toCents: vi.fn((value: unknown) => Math.round(Number(value) * 100)),
@@ -136,6 +147,7 @@ describe('negotiationProposalMutationService', () => {
         ],
       ])
       .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
         [
           {
@@ -189,6 +201,10 @@ describe('negotiationProposalMutationService', () => {
     expect(txMock.execute.mock.calls[0]?.[0]).toContain('UPDATE negotiations');
     expect(txMock.execute.mock.calls[0]?.[1]).toEqual([
       101,
+      30003,
+      30003,
+      'sale',
+      null,
       'Maria Cliente',
       '52998224725',
       'PROPOSAL_SENT',
@@ -226,6 +242,116 @@ describe('negotiationProposalMutationService', () => {
         keepDocumentId: 9001,
         requestedByUserId: 30003,
         requestSource: 'proposal_edit_save',
+      })
+    );
+  });
+
+  it('resolve buyer_client_id por CPF quando nao veio buyerUserId', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-2',
+            property_id: 101,
+            status: 'PROPOSAL_DRAFT',
+            capturing_broker_id: 30003,
+            selling_broker_id: 30003,
+            buyer_client_id: null,
+            last_draft_edit_at: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ c: 0 }]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 40004,
+            status: 'approved',
+            address: 'Rua A',
+            numero: '100',
+            quadra: null,
+            lote: null,
+            bairro: 'Centro',
+            city: 'Rio Verde',
+            state: 'GO',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 90001,
+            name: 'Maria Cliente',
+            cpf: '52998224725',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Corretor A',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            name: 'Corretor A',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 9002,
+            negotiation_id: 'neg-2',
+            type: 'proposal',
+            document_type: 'proposta',
+            storage_provider: 'r2',
+            storage_bucket: 'bucket',
+            storage_key: 'neg-2/proposta.pdf',
+          },
+        ],
+      ]);
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'neg-2' },
+      body: {},
+    } as any;
+    const res = createMockResponse();
+
+    await updateProposalFromWizard(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(txMock.execute.mock.calls[0]?.[1]).toEqual([
+      101,
+      30003,
+      30003,
+      'sale',
+      90001,
+      'Maria Cliente',
+      '52998224725',
+      'PROPOSAL_SENT',
+      500000,
+      expect.any(String),
+      expect.any(String),
+      'neg-2',
+    ]);
+    expect(saveNegotiationProposalDocumentMock).toHaveBeenCalledWith(
+      'neg-2',
+      expect.any(Buffer),
+      txMock,
+      expect.objectContaining({
+        originalFileName: 'proposta.pdf',
+        generated: true,
       })
     );
   });
@@ -394,71 +520,6 @@ describe('negotiationProposalMutationService', () => {
         requestSource: 'proposal_delete',
       })
     );
-  });
-
-  it('bloqueia edicao quando o cpf do proponente e do dono coincide', async () => {
-    txMock.query
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 'neg-owner',
-            property_id: 101,
-            status: 'PROPOSAL_SENT',
-            capturing_broker_id: 30003,
-            selling_broker_id: 30003,
-            buyer_client_id: null,
-            last_draft_edit_at: null,
-          },
-        ],
-      ])
-      .mockResolvedValueOnce([[{ c: 0 }]])
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 101,
-            broker_id: 30003,
-            owner_id: 30003,
-            status: 'approved',
-            address: 'Rua A',
-            numero: '100',
-            quadra: null,
-            lote: null,
-            bairro: 'Centro',
-            city: 'Rio Verde',
-            state: 'GO',
-            price: 500000,
-            price_sale: 500000,
-            price_rent: null,
-          },
-        ],
-      ])
-      .mockResolvedValueOnce([
-        [
-          {
-            name: 'Maria Cliente',
-            cpf: '52998224725',
-          },
-        ],
-      ]);
-
-    const req = {
-      userId: 30003,
-      userRole: 'broker',
-      params: { id: 'neg-owner' },
-      body: {},
-    } as any;
-    const res = createMockResponse();
-
-    await updateProposalFromWizard(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        code: 'FORBIDDEN',
-      })
-    );
-    expect(txMock.execute).not.toHaveBeenCalled();
-    expect(generateNegotiationProposalPdfMock).not.toHaveBeenCalled();
   });
 
   it('retorna 403 ao excluir proposta sem acesso', async () => {

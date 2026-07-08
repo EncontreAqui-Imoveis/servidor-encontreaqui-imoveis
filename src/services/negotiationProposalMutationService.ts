@@ -194,6 +194,41 @@ async function resolveBuyerUserIdentity(
   };
 }
 
+async function resolveBuyerUserIdentityByCpf(
+  tx: PoolConnection,
+  clientCpf: string
+): Promise<{ id: number; name: string } | null> {
+  const cpfKey = normalizeCpfDigits(clientCpf);
+  if (cpfKey.length !== 11) {
+    return null;
+  }
+
+  const [rows] = await tx.query<UserRow[]>(
+    `
+      SELECT id, name, cpf
+      FROM users
+      WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
+      LIMIT 1
+    `,
+    [cpfKey]
+  );
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  const name = String(row.name ?? '').trim();
+  if (!name) {
+    return null;
+  }
+
+  return {
+    id: Number(row.id),
+    name,
+  };
+}
+
 async function resolveCurrentUserIdentity(
   tx: PoolConnection,
   userId: number
@@ -530,6 +565,10 @@ async function updateProposalFromWizardInternal(
       }
     }
 
+    if (!buyerUserIdentity) {
+      buyerUserIdentity = await resolveBuyerUserIdentityByCpf(tx, payload.clientCpf);
+    }
+
     const buyerClientId: number | null = buyerUserIdentity?.id ?? null;
     const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
 
@@ -596,6 +635,7 @@ async function updateProposalFromWizardInternal(
           capturing_broker_id = ?,
           selling_broker_id = ?,
           deal_type = ?,
+          buyer_client_id = ?,
           client_name = ?,
           client_cpf = ?,
           status = ?,
@@ -611,6 +651,7 @@ async function updateProposalFromWizardInternal(
         requestedCapturingBrokerId,
         requestedCapturingBrokerId,
         dealType,
+        buyerClientId,
         payload.clientName,
         payload.clientCpf,
         DEFAULT_WIZARD_STATUS,

@@ -721,6 +721,30 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
   `);
 
   await connection.query(`
+    UPDATE negotiations
+    SET buyer_client_id = COALESCE(
+      buyer_client_id,
+      CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')), '') AS UNSIGNED),
+      CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')), '') AS UNSIGNED)
+    )
+    WHERE buyer_client_id IS NULL
+      AND payment_details IS NOT NULL
+      AND (
+        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')), '') IS NOT NULL
+        OR NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')), '') IS NOT NULL
+      )
+  `);
+
+  await connection.query(`
+    UPDATE negotiations n
+    JOIN users u ON REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(u.cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') =
+      REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(n.client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')
+    SET n.buyer_client_id = u.id
+    WHERE n.buyer_client_id IS NULL
+      AND NULLIF(n.client_cpf, '') IS NOT NULL
+  `);
+
+  await connection.query(`
     UPDATE negotiations n
     JOIN properties p ON p.id = n.property_id
     SET n.seller_client_id = p.owner_id

@@ -307,6 +307,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
   });
 
   it('blocks owner self-proposal when CPF matches the logged user', async () => {
+    authState.userRole = 'client';
     txMock.query
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([

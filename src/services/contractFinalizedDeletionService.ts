@@ -42,6 +42,24 @@ function buildContractDocumentDeleteWhereClause(): string {
   `;
 }
 
+export async function markContractPropertyAvailable(
+  tx: PoolConnection,
+  propertyId: string | number
+): Promise<void> {
+  await tx.query(
+    `
+      UPDATE properties
+      SET
+        lifecycle_status = 'AVAILABLE',
+        status = 'approved',
+        visibility = 'PUBLIC',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+    [propertyId]
+  );
+}
+
 async function fetchDocumentsForContractScope(
   tx: PoolConnection,
   contract: Pick<ContractRow, 'id' | 'negotiation_id'>
@@ -116,6 +134,8 @@ export async function deleteFinalizedContract(
       [contract.negotiation_id, contract.id]
     );
   }
+
+  await markContractPropertyAvailable(tx, contract.property_id);
 
   await tx.query(
     `

@@ -4,10 +4,12 @@ import { stdin as input, stdout as output } from 'node:process';
 
 import connection from '../src/database/connection';
 import { enqueueNegotiationDocumentDeletion } from '../src/services/negotiationDocumentDeletionService';
+import { markContractPropertyAvailable } from '../src/services/contractFinalizedDeletionService';
 
 type ContractPurgeRow = RowDataPacket & {
   id: string;
   negotiation_id: string;
+  property_id: string;
   status: string;
 };
 
@@ -72,7 +74,7 @@ async function requireInteractiveConfirmation(targetDatabase: string, totalContr
 async function fetchAllContracts(): Promise<ContractPurgeRow[]> {
   const [rows] = await connection.query<ContractPurgeRow[]>(
     `
-      SELECT id, negotiation_id, status
+      SELECT id, negotiation_id, property_id, status
       FROM contracts
       ORDER BY id ASC
     `
@@ -138,6 +140,8 @@ async function purgeSingleContract(contract: ContractPurgeRow): Promise<{
         [contract.negotiation_id, contract.id]
       );
     }
+
+    await markContractPropertyAvailable(tx, contract.property_id);
 
     await tx.query(
       `

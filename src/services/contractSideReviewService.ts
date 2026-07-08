@@ -3,6 +3,7 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import { createUserNotification } from './notificationService';
 import { getContractDbConnection } from './contractPersistenceService';
+import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
 import type { ContractRow } from '../controllers/ContractController';
 import {
   isContractApprovalStatus,
@@ -157,20 +158,6 @@ function appendAuditTrailEvent(
   return {
     ...metadata,
     auditTrail: [...current, event],
-  };
-}
-
-function appendContractWorkflowAuditEvent(
-  source: unknown,
-  event: ContractAuditEvent
-): Record<string, unknown> {
-  const metadata = parseStoredJsonObject(source);
-  const current = Array.isArray(metadata.contractAuditTrail)
-    ? metadata.contractAuditTrail
-    : [];
-  return {
-    ...metadata,
-    contractAuditTrail: [...current, event],
   };
 }
 
@@ -723,7 +710,7 @@ export async function evaluateContractSide(
       ? 'IN_DRAFT'
       : 'AWAITING_DOCS';
     const shouldReleasePropertyAvailability = nextSideStatus === 'REJECTED';
-    const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
+    const nextWorkflowMetadata = appendWorkflowAuditEvent(
       contract.workflow_metadata,
       reviewAuditEvent
     );

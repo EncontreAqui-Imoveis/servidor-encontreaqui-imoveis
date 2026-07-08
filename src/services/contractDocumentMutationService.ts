@@ -9,6 +9,10 @@ import {
   type ContractRow,
   resolveContractStatus,
 } from '../controllers/ContractController';
+import {
+  appendWorkflowAuditEvent,
+  mergeWorkflowMetadata,
+} from './contractWorkflowMetadata';
 import { resolveContractAccessContext } from '../utils/contractIdentity';
 import {
   resolveDocumentCategoryFromType,
@@ -116,16 +120,6 @@ function normalizeContractDocumentCategory(
     : null;
 }
 
-function mergeStoredJsonObject(
-  originalValue: unknown,
-  patch: Record<string, unknown>
-): Record<string, unknown> {
-  return {
-    ...parseStoredJsonObject(originalValue),
-    ...patch,
-  };
-}
-
 function appendAuditTrailEvent(
   source: unknown,
   event: ContractAuditEvent
@@ -135,20 +129,6 @@ function appendAuditTrailEvent(
   return {
     ...metadata,
     auditTrail: [...current, event],
-  };
-}
-
-function appendContractWorkflowAuditEvent(
-  source: unknown,
-  event: ContractAuditEvent
-): Record<string, unknown> {
-  const metadata = parseStoredJsonObject(source);
-  const current = Array.isArray(metadata.contractAuditTrail)
-    ? metadata.contractAuditTrail
-    : [];
-  return {
-    ...metadata,
-    contractAuditTrail: [...current, event],
   };
 }
 
@@ -461,13 +441,13 @@ export async function uploadContractDocument(
 
   const shouldMarkOnlineSignatureMethod =
     role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
-  const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
+  const nextWorkflowMetadata = appendWorkflowAuditEvent(
     params.contract.workflow_metadata,
     uploadEvent
   );
 
   if (shouldMarkOnlineSignatureMethod) {
-    const signatureAwareWorkflowMetadata = mergeStoredJsonObject(nextWorkflowMetadata, {
+    const signatureAwareWorkflowMetadata = mergeWorkflowMetadata(nextWorkflowMetadata, {
       signatureMethod: 'online',
       signedContractUploadedOnlineAt: uploadEvent.at,
       signedContractUploadedOnlineBy: Number(params.req.userId ?? 0) || null,

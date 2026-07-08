@@ -7,6 +7,7 @@ import {
   resolveContractStatus,
   type ContractRow,
 } from '../controllers/ContractController';
+import { mergeWorkflowMetadata } from './contractWorkflowMetadata';
 import { resolveContractAccessContext } from '../utils/contractIdentity';
 
 interface SignatureMethodBody {
@@ -29,34 +30,6 @@ function mutationError(statusCode: number, message: string): ContractSignatureMe
 function parseSignatureMethodInput(value: unknown): 'in_person' | null {
   const normalized = String(value ?? '').trim().toLowerCase();
   return normalized === 'in_person' ? 'in_person' : null;
-}
-
-function mergeStoredJsonObject(
-  source: unknown,
-  patch: Record<string, unknown>
-): Record<string, unknown> {
-  if (source && typeof source === 'object' && !Array.isArray(source)) {
-    return {
-      ...(source as Record<string, unknown>),
-      ...patch,
-    };
-  }
-
-  if (typeof source === 'string') {
-    try {
-      const parsed = JSON.parse(source) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return {
-          ...(parsed as Record<string, unknown>),
-          ...patch,
-        };
-      }
-    } catch {
-      // fall through
-    }
-  }
-
-  return { ...patch };
 }
 
 async function fetchContractForUpdate(
@@ -186,7 +159,7 @@ export async function setContractSignatureMethod(
   }
 
   const brokerName = resolveActingBrokerName(params.req, contract);
-  const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
+  const nextWorkflowMetadata = mergeWorkflowMetadata(contract.workflow_metadata, {
     signatureMethod: method,
     signatureMethodDeclaredAt: new Date().toISOString(),
     signatureMethodDeclaredBy: Number(params.req.userId ?? 0) || null,

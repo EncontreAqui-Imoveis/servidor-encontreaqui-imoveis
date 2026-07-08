@@ -5,6 +5,7 @@ import { deleteCloudinaryAsset } from '../config/cloudinary';
 import {
   getContractDbConnection,
 } from './contractPersistenceService';
+import { resetWorkflowMetadata } from './contractWorkflowMetadata';
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import {
   isContractStatus,
@@ -112,27 +113,6 @@ function resolveContractStatus(value: unknown): ContractStatus {
 function toDocumentCount(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function resetWorkflowMetadataForStepBack(value: unknown): Record<string, unknown> | null {
-  const metadata = parseStoredJsonObject(value);
-  const nextMetadata = { ...metadata };
-  const keysToRemove = [
-    'signatureMethod',
-    'signatureMethodDeclaredAt',
-    'signatureMethodDeclaredBy',
-    'signatureMethodDeclaredByName',
-    'signedContractUploadedOnlineAt',
-    'signedContractUploadedOnlineBy',
-    'agencySignedContractReceivedAt',
-    'agencySignedContractReceivedBy',
-  ];
-
-  for (const key of keysToRemove) {
-    delete nextMetadata[key];
-  }
-
-  return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
 }
 
 function resolveRollbackDocumentTypes(targetStatus: ContractStatus): string[] {
@@ -520,9 +500,7 @@ export async function transitionContractStatus(
     }
 
     if (direction === 'previous') {
-      const nextWorkflowMetadata = resetWorkflowMetadataForStepBack(
-        contract.workflow_metadata
-      );
+      const nextWorkflowMetadata = resetWorkflowMetadata(contract.workflow_metadata);
 
       if (nextWorkflowMetadata) {
         await tx.query(

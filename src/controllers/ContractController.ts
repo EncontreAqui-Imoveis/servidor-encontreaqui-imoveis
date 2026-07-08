@@ -103,6 +103,10 @@ import {
   mapProperty as mapPropertyFromDiscovery,
 } from '../services/propertyDiscoveryService';
 import {
+  mergeWorkflowMetadata,
+  resetWorkflowMetadata,
+} from '../services/contractWorkflowMetadata';
+import {
   isBuyerSideUser,
   isSellerSideUser,
   resolveContractAccessContext,
@@ -435,16 +439,6 @@ function readMetadataText(
   return null;
 }
 
-function mergeStoredJsonObject(
-  originalValue: unknown,
-  patch: Record<string, unknown>
-): Record<string, unknown> {
-  return {
-    ...parseStoredJsonObject(originalValue),
-    ...patch,
-  };
-}
-
 function appendAuditTrailEvent(
   source: unknown,
   event: ContractAuditEvent
@@ -454,20 +448,6 @@ function appendAuditTrailEvent(
   return {
     ...metadata,
     auditTrail: [...current, event],
-  };
-}
-
-function appendContractWorkflowAuditEvent(
-  source: unknown,
-  event: ContractAuditEvent
-): Record<string, unknown> {
-  const metadata = parseStoredJsonObject(source);
-  const current = Array.isArray(metadata.contractAuditTrail)
-    ? metadata.contractAuditTrail
-    : [];
-  return {
-    ...metadata,
-    contractAuditTrail: [...current, event],
   };
 }
 
@@ -1430,48 +1410,6 @@ function extractCloudinaryAssetReference(
   };
 }
 
-function resetWorkflowMetadataForRestart(value: unknown): Record<string, unknown> | null {
-  const metadata = parseStoredJsonObject(value);
-  const nextMetadata = { ...metadata };
-  const keysToRemove = [
-    'signatureMethod',
-    'signatureMethodDeclaredAt',
-    'signatureMethodDeclaredBy',
-    'signatureMethodDeclaredByName',
-    'signedContractUploadedOnlineAt',
-    'signedContractUploadedOnlineBy',
-    'agencySignedContractReceivedAt',
-    'agencySignedContractReceivedBy',
-  ];
-
-  for (const key of keysToRemove) {
-    delete nextMetadata[key];
-  }
-
-  return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
-}
-
-function resetWorkflowMetadataForStepBack(value: unknown): Record<string, unknown> | null {
-  const metadata = parseStoredJsonObject(value);
-  const nextMetadata = { ...metadata };
-  const keysToRemove = [
-    'signatureMethod',
-    'signatureMethodDeclaredAt',
-    'signatureMethodDeclaredBy',
-    'signatureMethodDeclaredByName',
-    'signedContractUploadedOnlineAt',
-    'signedContractUploadedOnlineBy',
-    'agencySignedContractReceivedAt',
-    'agencySignedContractReceivedBy',
-  ];
-
-  for (const key of keysToRemove) {
-    delete nextMetadata[key];
-  }
-
-  return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
-}
-
 function resolveRollbackDocumentTypes(targetStatus: ContractStatus): string[] {
   if (targetStatus === 'IN_DRAFT') {
     return ['contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria', 'outro'];
@@ -2191,7 +2129,7 @@ class ContractController {
       });
 
       if (documentTypeRaw.toLowerCase() === 'contrato_assinado') {
-        const nextWorkflowMetadata = mergeStoredJsonObject(contract.workflow_metadata, {
+        const nextWorkflowMetadata = mergeWorkflowMetadata(contract.workflow_metadata, {
           agencySignedContractReceivedAt: new Date().toISOString(),
           agencySignedContractReceivedBy: 'admin',
         });
@@ -2549,9 +2487,7 @@ class ContractController {
         );
       }
 
-      const nextWorkflowMetadata = resetWorkflowMetadataForRestart(
-        contract.workflow_metadata
-      );
+      const nextWorkflowMetadata = resetWorkflowMetadata(contract.workflow_metadata);
 
       if (nextWorkflowMetadata) {
         await tx.query(

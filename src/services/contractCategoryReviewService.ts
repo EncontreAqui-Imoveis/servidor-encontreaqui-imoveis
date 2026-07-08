@@ -2,6 +2,7 @@ import { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
 import { getContractDbConnection } from './contractPersistenceService';
+import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
 import type { ContractRow } from '../controllers/ContractController';
 import {
   isContractDocumentCategoryStatus,
@@ -105,20 +106,6 @@ function appendAuditTrailEvent(
   return {
     ...metadata,
     auditTrail: [...current, event],
-  };
-}
-
-function appendContractWorkflowAuditEvent(
-  source: unknown,
-  event: ContractAuditEvent
-): Record<string, unknown> {
-  const metadata = parseStoredJsonObject(source);
-  const current = Array.isArray(metadata.contractAuditTrail)
-    ? metadata.contractAuditTrail
-    : [];
-  return {
-    ...metadata,
-    contractAuditTrail: [...current, event],
   };
 }
 
@@ -599,7 +586,7 @@ export async function evaluateContractCategory(
     const nextContractStatus: ContractStatus =
       mustMoveBySide && mustMoveByCategories ? 'IN_DRAFT' : 'AWAITING_DOCS';
 
-    const nextWorkflowMetadata = appendContractWorkflowAuditEvent(
+    const nextWorkflowMetadata = appendWorkflowAuditEvent(
       contract.workflow_metadata,
       auditEvent
     );

@@ -1678,7 +1678,7 @@ function resolveContractViewerSide(
   }
 
   if (context.isBuyerSide && context.isSellerSide) {
-    return 'buyer';
+    return 'seller';
   }
 
   if (context.isSellingBroker || context.isSellerSide) {

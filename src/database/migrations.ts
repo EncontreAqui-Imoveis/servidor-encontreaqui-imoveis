@@ -724,8 +724,16 @@ async function ensureNegotiationsClientColumns(): Promise<void> {
     UPDATE negotiations
     SET buyer_client_id = COALESCE(
       buyer_client_id,
-      CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')), '') AS UNSIGNED),
-      CAST(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')), '') AS UNSIGNED)
+      CASE
+        WHEN JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')) REGEXP '^[0-9]+$'
+        THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')) AS UNSIGNED)
+        ELSE NULL
+      END,
+      CASE
+        WHEN JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')) REGEXP '^[0-9]+$'
+        THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')) AS UNSIGNED)
+        ELSE NULL
+      END
     )
     WHERE buyer_client_id IS NULL
       AND payment_details IS NOT NULL

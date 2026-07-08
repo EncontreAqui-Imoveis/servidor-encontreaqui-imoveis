@@ -1661,7 +1661,7 @@ function resolveContractViewerSide(
     return 'both';
   }
 
-  if (context.isResponsible) {
+  if (context.isResponsible && !context.isBuyerSide && !context.isSellerSide) {
     return 'both';
   }
 

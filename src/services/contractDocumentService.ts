@@ -10,6 +10,7 @@ import {
   type ContractDocumentRow,
   type ContractRow,
 } from '../controllers/ContractController';
+import { resolveContractAccessContext } from '../utils/contractIdentity';
 import { readNegotiationDocumentObject } from './negotiationDocumentStorageService';
 
 type ContractDocumentListItem = ReturnType<typeof mapDocument> & {
@@ -39,14 +40,40 @@ type DownloadedContractDocumentsZip = {
   fileBuffer: Buffer;
 };
 
+function isNegotiationResponsibleUser(contract: ContractRow, userId: number): boolean {
+  if (!Number.isFinite(userId) || userId <= 0) {
+    return false;
+  }
+
+  const raw = String((contract as { responsible_user_ids?: unknown }).responsible_user_ids ?? '').trim();
+  if (!raw) {
+    return false;
+  }
+
+  return raw
+    .split(',')
+    .map((value) => Number(value))
+    .some((value) => Number.isInteger(value) && value === userId);
+}
+
 function canViewOwnerSensitiveData(req: AuthRequest | null, row: ContractRow): boolean {
   if (!req) return false;
-  const role = String(req.userRole ?? '').trim().toLowerCase();
-  if (role === 'admin') {
+  const context = resolveContractAccessContext(
+    req,
+    row,
+    isNegotiationResponsibleUser(row, Number(req.userId ?? 0)) &&
+      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
+        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+  );
+  if (!context) {
+    return false;
+  }
+
+  if (context.isAdmin || context.isResponsible) {
     return true;
   }
-  const userId = Number(req.userId ?? 0);
-  return Number.isFinite(userId) && userId > 0 && userId === Number(row.capturing_broker_id ?? 0);
+
+  return context.isSellerSide;
 }
 
 function shouldExposeOwnerSensitiveDocument(

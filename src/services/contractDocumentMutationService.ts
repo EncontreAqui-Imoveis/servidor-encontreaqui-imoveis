@@ -183,7 +183,7 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
     return context.isSellerSide;
   }
 
-  return context.isCapturingBroker;
+  return false;
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -202,7 +202,7 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
     return context.isBuyerSide;
   }
 
-  return context.isCapturingBroker;
+  return false;
 }
 
 function resolveDocumentStorageType(documentType: string): 'contract' | 'other' {

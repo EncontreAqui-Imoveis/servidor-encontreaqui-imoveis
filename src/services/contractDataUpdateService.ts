@@ -131,11 +131,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
     return context.isBuyerSide || context.isSellerSide;
   }
 
-  if (context.role !== 'broker' && context.role !== 'auxiliary_administrative') {
-    return false;
-  }
-
-  return context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide;
+  return false;
 }
 
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -163,7 +159,7 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
     return context.isSellerSide;
   }
 
-  return context.isCapturingBroker;
+  return false;
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -191,7 +187,7 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
     return context.isBuyerSide;
   }
 
-  return context.isCapturingBroker;
+  return false;
 }
 
 async function fetchContractForUpdate(

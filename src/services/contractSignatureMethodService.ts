@@ -113,11 +113,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
     return context.isBuyerSide || context.isSellerSide;
   }
 
-  if (context.role !== 'broker' && context.role !== 'auxiliary_administrative') {
-    return false;
-  }
-
-  return context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide;
+  return false;
 }
 
 export async function setContractSignatureMethod(

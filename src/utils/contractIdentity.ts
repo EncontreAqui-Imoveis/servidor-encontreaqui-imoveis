@@ -71,16 +71,14 @@ export function resolveContractAccessContext(
     return null;
   }
 
-  const isBuyerSide =
-    isBuyerSideUser(contract, userId, req.userCpf) ||
-    (role === 'client' && userId === resolveProposalInitiatorUserId(contract));
+  const isBuyerSide = isBuyerSideUser(contract, userId, req.userCpf);
 
   return {
     userId,
     role,
     isAdmin: role === 'admin',
     isResponsible,
-    isCapturingBroker: userId === Number(contract.capturing_broker_id ?? 0),
+    isCapturingBroker: false,
     isSellingBroker: userId === Number(contract.selling_broker_id ?? 0),
     isBuyerSide,
     isSellerSide: isSellerSideUser(contract, userId),

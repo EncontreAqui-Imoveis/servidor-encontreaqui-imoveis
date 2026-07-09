@@ -974,12 +974,22 @@ const OWNER_SENSITIVE_KEYS = new Set([
 
 function canViewOwnerSensitiveData(req: AuthRequest | null, row: ContractRow): boolean {
   if (!req) return false;
-  const role = String(req.userRole ?? '').trim().toLowerCase();
-  if (role === 'admin') {
+  const context = resolveContractAccessContext(
+    req,
+    row,
+    isNegotiationResponsibleUser(row, Number(req.userId ?? 0)) &&
+      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
+        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+  );
+  if (!context) {
+    return false;
+  }
+
+  if (context.isAdmin || context.isResponsible) {
     return true;
   }
-  const userId = Number(req.userId ?? 0);
-  return Number.isFinite(userId) && userId > 0 && userId === Number(row.capturing_broker_id ?? 0);
+
+  return context.isSellerSide;
 }
 
 function redactOwnerInfoByRole(
@@ -1603,11 +1613,7 @@ function resolveContractViewerSide(
     return 'both';
   }
 
-  if (context.isResponsible && !context.isBuyerSide && !context.isSellerSide) {
-    return 'both';
-  }
-
-  if (context.isCapturingBroker && context.isSellingBroker && !context.isBuyerSide && !context.isSellerSide) {
+  if (context.isResponsible) {
     return 'both';
   }
 
@@ -1620,15 +1626,7 @@ function resolveContractViewerSide(
   }
 
   if (context.isBuyerSide && context.isSellerSide) {
-    return 'seller';
-  }
-
-  if (context.isSellingBroker || context.isSellerSide) {
-    return 'seller';
-  }
-
-  if (context.isCapturingBroker) {
-    return 'seller';
+    return 'both';
   }
 
   return 'none';
@@ -1658,11 +1656,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
     return context.isBuyerSide || context.isSellerSide;
   }
 
-  if (context.role !== 'broker' && context.role !== 'auxiliary_administrative') {
-    return false;
-  }
-
-  return context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide;
+  return false;
 }
 
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -1689,7 +1683,7 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
     return context.isSellerSide;
   }
 
-  return context.isCapturingBroker;
+  return false;
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
@@ -1716,7 +1710,7 @@ function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
     return context.isBuyerSide;
   }
 
-  return context.isCapturingBroker;
+  return false;
 }
 
 function shouldMoveToDraft(
@@ -3039,7 +3033,7 @@ class ContractController {
     }
 
     return res.status(200).json({
-      message: 'Responsável operacional sincronizado com o captador.',
+      message: 'Responsável operacional atualizado.',
       contract: result?.contract ? mapContract(result.contract, req) : null,
     });
   }

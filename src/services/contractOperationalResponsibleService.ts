@@ -82,26 +82,22 @@ export async function updateContractOperationalResponsible(
     throw mutationError(404, 'Contrato não encontrado para esta negociação.');
   }
 
-  const role = String(params.req.userRole ?? '').toLowerCase();
   const context = resolveContractAccessContext(params.req, contract, false);
-  const canAccess =
-    context != null &&
-    (context.isAdmin ||
-      (context.role === 'client'
-        ? context.isBuyerSide || context.isSellerSide
-        : context.role === 'broker' || context.role === 'auxiliary_administrative'
-          ? context.isCapturingBroker || context.isSellingBroker || context.isBuyerSide || context.isSellerSide
-          : false));
+  const canAccess = context != null && context.isAdmin;
 
   if (!canAccess) {
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
 
   const capturingId = Number(contract.capturing_broker_id ?? 0);
-  if (userId !== capturingId) {
+  const explicitSellingBrokerId = Number(sellingBrokerIdRaw ?? 0);
+  const targetSellingBrokerId =
+    sameAsCapturing ? capturingId : explicitSellingBrokerId;
+
+  if (!Number.isFinite(targetSellingBrokerId) || targetSellingBrokerId <= 0) {
     throw mutationError(
-      403,
-      'Somente o corretor captador pode ajustar o responsável operacional.'
+      400,
+      'Informe o corretor responsável ou marque a opção de usar o captador.'
     );
   }
 
@@ -114,10 +110,10 @@ export async function updateContractOperationalResponsible(
   }
 
   if (!sameAsCapturing || sellingBrokerIdRaw != null) {
-    console.warn('Ignorando configuração legada de papel secundário.', {
+    console.warn('Atualizando responsável operacional do contrato.', {
       negotiationId: params.negotiationId,
       userId,
-      requestedSellingBrokerId: sellingBrokerIdRaw ?? null,
+      requestedSellingBrokerId: targetSellingBrokerId,
     });
   }
 
@@ -127,7 +123,7 @@ export async function updateContractOperationalResponsible(
       SET selling_broker_id = ?, version = version + 1
       WHERE id = ?
     `,
-    [capturingId, params.negotiationId]
+    [targetSellingBrokerId, params.negotiationId]
   );
 
   const updated = await fetchContractByNegotiationIdForUpdate(tx, params.negotiationId);

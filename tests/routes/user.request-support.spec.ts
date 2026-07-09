@@ -70,8 +70,22 @@ describe('POST /users/support-request', () => {
           phoneDigits: '64999990000',
           responseWindowHours: 24,
         }),
+        }),
+      );
+  });
+
+  it('bloqueia nova solicitacao quando ainda estiver no cooldown de 24h', async () => {
+    queryMock.mockResolvedValueOnce([[{ created_at: '2026-07-09T10:00:00.000Z' }]]);
+
+    const response = await request(app).post('/users/support-request');
+
+    expect(response.status).toBe(429);
+      expect(response.body).toEqual(
+        expect.objectContaining({
+        error: 'Você já enviou uma solicitação nas últimas 24 horas. Aguarde o prazo expirar para reenviar.',
+        retryAfterSeconds: expect.any(Number),
       }),
     );
+    expect(createAdminNotificationMock).not.toHaveBeenCalled();
   });
 });
-

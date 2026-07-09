@@ -75,6 +75,10 @@ import {
   isContractCategoryReviewError,
 } from '../services/contractCategoryReviewService';
 import {
+  isContractDocumentReviewError,
+  reviewContractDocument,
+} from '../services/contractDocumentReviewService';
+import {
   isContractApprovalStatus,
   isContractDocumentCategoryStatus,
   isContractDocumentType,
@@ -2062,6 +2066,39 @@ class ContractController {
       return res.status(500).json({
         error: 'Falha ao revisar categoria documental.',
       });
+    }
+  }
+
+  async reviewDocument(req: AuthRequest, res: Response): Promise<Response> {
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+
+      const result = await reviewContractDocument(tx, {
+        contractIdInput: req.params.id,
+        documentIdInput: req.params.documentId,
+        statusInput: req.body?.status,
+        reasonInput: req.body?.reason,
+        userIdInput: req.userId,
+        userRoleInput: req.userRole,
+        loadContractForUpdate: fetchContractForUpdate,
+      });
+
+      await tx.commit();
+
+      return res.status(200).json({
+        message: result.message,
+        contract: result.contract ? mapContract(result.contract, req) : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      if (isContractDocumentReviewError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error('Erro ao revisar documento do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao revisar documento.' });
+    } finally {
+      tx.release();
     }
   }
 

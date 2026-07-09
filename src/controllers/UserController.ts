@@ -1455,7 +1455,7 @@ class UserController {
       const cooldown = evaluateSupportRequestCooldown(lastRequestAt);
       if (!cooldown.allowed) {
         return res.status(429).json({
-          error: 'Voce ja enviou uma solicitacao nas ultimas 24 horas. Aguarde para reenviar.',
+          error: 'Você já enviou uma solicitação nas últimas 24 horas. Aguarde o prazo expirar para reenviar.',
           retryAfterSeconds: cooldown.retryAfterSeconds,
         });
       }

@@ -2055,7 +2055,7 @@ class ContractController {
         contractIdInput: req.params.id,
         documentIdInput: req.params.documentId,
         statusInput: req.body?.status,
-        reasonInput: req.body?.reason,
+        reasonInput: req.body?.description ?? req.body?.reason,
         userIdInput: req.userId,
         userRoleInput: req.userRole,
         loadContractForUpdate: fetchContractForUpdate,

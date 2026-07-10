@@ -49,6 +49,13 @@ contractRoutes.post(
   (req, res) => contractController.uploadDocument(req, res)
 );
 
+contractRoutes.patch(
+  '/contracts/:id/documents/:documentId/status',
+  authMiddleware,
+  isAdmin,
+  (req, res) => contractController.reviewDocument(req, res)
+);
+
 contractRoutes.delete('/contracts/:id/documents/:documentId', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.deleteDocument(req, res)
 );

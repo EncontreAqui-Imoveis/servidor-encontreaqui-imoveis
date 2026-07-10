@@ -40,7 +40,7 @@ type PropertyStatus = 'pending_approval' | 'approved' | 'rejected' | 'rented' | 
 type Nullable<T> = T | null;
 
 type PropertyRow = RowDataPacket & Record<string, any>;
-const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
+const MAX_PROPERTY_DESCRIPTION_LENGTH = 5000;
 const MAX_PROPERTY_COUNT = 99;
 const MAX_PROPERTY_PRICE = 9999999999.99;
 const MAX_PROPERTY_FEE = 99999999.99;

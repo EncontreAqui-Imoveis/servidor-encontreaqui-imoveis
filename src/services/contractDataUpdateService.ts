@@ -30,6 +30,43 @@ const BUYER_BLOCK_KEYS = new Set([
   'owner_info',
 ]);
 
+export type ContractDataSide = 'seller' | 'buyer';
+
+// Party fields are intentionally neutral. The enclosing side is the ownership boundary.
+export interface ContractPartyQualificationDto {
+  estado_civil?: string;
+  estadoCivil?: string;
+  profissao?: string;
+  dados_bancarios?: string;
+  dadosBancarios?: string;
+  regime_bens?: string;
+  regimeBens?: string;
+  conjuge_nome?: string;
+  conjugeNome?: string;
+  conjuge_cpf?: string;
+  conjugeCpf?: string;
+  conjuge_profissao?: string;
+  conjugeProfissao?: string;
+  [field: string]: unknown;
+}
+
+export interface ContractDataUpdateBody {
+  ownerInfo?: unknown;
+  owner_info?: unknown;
+  sellerInfo?: unknown;
+  seller_info?: unknown;
+  buyerInfo?: unknown;
+  buyer_info?: unknown;
+  side?: unknown;
+}
+
+function declaresOppositeParty(key: string, side: ContractDataSide): boolean {
+  const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+  const oppositePrefixes =
+    side === 'seller' ? ['buyer', 'comprador'] : ['seller', 'owner', 'anunciante', 'vendedor'];
+  return oppositePrefixes.some((prefix) => normalized.startsWith(prefix));
+}
+
 function sanitizeJsonValue(value: unknown, fieldName: string): unknown {
   if (value === undefined) {
     throw new Error(`${fieldName} contém um valor inválido.`);
@@ -59,12 +96,12 @@ function sanitizeJsonValue(value: unknown, fieldName: string): unknown {
 
 function rejectCrossSideBlocks(
   value: Record<string, unknown>,
-  side: 'seller' | 'buyer',
+  side: ContractDataSide,
   fieldName: string
 ): void {
   const blockedKeys = side === 'seller' ? SELLER_BLOCK_KEYS : BUYER_BLOCK_KEYS;
   for (const [key, nested] of Object.entries(value)) {
-    if (blockedKeys.has(key)) {
+    if (blockedKeys.has(key) || declaresOppositeParty(key, side)) {
       throw mutationError(
         400,
         `${fieldName} não pode conter dados do lado ${side === 'seller' ? 'comprador' : 'vendedor'}.`
@@ -130,7 +167,7 @@ function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   return {};
 }
 
-function parseDataSide(value: unknown): 'seller' | 'buyer' | null {
+function parseDataSide(value: unknown): ContractDataSide | null {
   const normalized = String(value ?? '').trim().toLowerCase();
   return normalized === 'seller' || normalized === 'buyer' ? normalized : null;
 }
@@ -169,15 +206,7 @@ export async function updateContractData(
   params: {
     req: AuthRequest;
     contractId: string;
-    body: {
-      ownerInfo?: unknown;
-      owner_info?: unknown;
-      sellerInfo?: unknown;
-      seller_info?: unknown;
-      buyerInfo?: unknown;
-      buyer_info?: unknown;
-      side?: unknown;
-    };
+    body: ContractDataUpdateBody;
   }
 ): Promise<{ contract: ContractRow | null }> {
   let sellerPatch: Record<string, unknown> | null = null;

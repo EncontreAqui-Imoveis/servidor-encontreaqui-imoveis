@@ -26,7 +26,7 @@ export {
 
 type Nullable<T> = T | null;
 
-const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
+const MAX_PROPERTY_DESCRIPTION_LENGTH = 5000;
 const MAX_PROPERTY_AREA = 99999999.99;
 
 type PropertyStatus = "pending_approval" | "approved" | "rejected" | "rented" | "sold";

@@ -9,7 +9,7 @@ export type ParsedAreaValues = {
 };
 
 export const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
-export const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
+export const MAX_PROPERTY_DESCRIPTION_LENGTH = 5000;
 export const MAX_PROPERTY_AREA = 99999999.99;
 
 type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";

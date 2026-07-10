@@ -40,6 +40,7 @@ type UploadNegotiationDocumentParams = {
   type: string;
   documentType: string | null;
   content: Buffer;
+  contentType?: string | null;
   metadataJson?: Record<string, unknown> | null;
 };
 
@@ -131,22 +132,34 @@ function resolveFileExtension(
   metadata: Record<string, unknown>,
   contentType: string
 ): string {
-  const originalFileName = String(metadata.originalFileName ?? '').trim();
-  const fromName = path.extname(originalFileName).replace(/^\./, '').toLowerCase();
-  if (fromName) return fromName;
-
   if (contentType === 'application/pdf') return 'pdf';
   if (contentType === 'image/jpeg') return 'jpg';
   if (contentType === 'image/png') return 'png';
   if (contentType === 'image/webp') return 'webp';
+
+  const originalFileName = String(metadata.originalFileName ?? '').trim();
+  const fromName = path.extname(originalFileName).replace(/^\./, '').toLowerCase();
+  if (fromName) return fromName;
   return 'bin';
 }
+
+const STORABLE_CONTENT_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 
 function resolveContentType(
   type: string,
   documentType: string | null,
-  metadata: Record<string, unknown>
+  metadata: Record<string, unknown>,
+  declaredContentType?: string | null
 ): string {
+  const normalizedDeclaredType = String(declaredContentType ?? '').trim().toLowerCase();
+  if (STORABLE_CONTENT_TYPES.has(normalizedDeclaredType)) {
+    return normalizedDeclaredType;
+  }
   const originalFileName = String(metadata.originalFileName ?? '').trim().toLowerCase();
   const ext = path.extname(originalFileName).replace(/^\./, '');
   if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
@@ -298,7 +311,12 @@ export async function storeNegotiationDocumentToR2(
   params: UploadNegotiationDocumentParams
 ): Promise<number> {
   const metadata = { ...(params.metadataJson ?? {}) };
-  const contentType = resolveContentType(params.type, params.documentType, metadata);
+  const contentType = resolveContentType(
+    params.type,
+    params.documentType,
+    metadata,
+    params.contentType
+  );
   const storageKey = buildStorageKey({
     negotiationId: params.negotiationId,
     documentType: params.documentType,

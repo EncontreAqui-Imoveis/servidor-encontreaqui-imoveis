@@ -58,7 +58,7 @@ type DealType = "sale" | "rent";
 type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
 
 const MAX_IMAGES_PER_PROPERTY = 20;
-const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
+const MAX_PROPERTY_DESCRIPTION_LENGTH = 5000;
 const MAX_PROPERTY_COUNT = 99;
 const MAX_PROPERTY_PRICE = 9999999999.99;
 const MAX_PROPERTY_FEE = 99999999.99;

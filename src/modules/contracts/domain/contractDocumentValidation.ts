@@ -43,7 +43,12 @@ export const SELLER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[]
 ];
 
 const ALLOWED_FILE_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
-const ALLOWED_MIME_PREFIXES = ['image/', 'application/pdf'];
+const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MIN_FILE_BYTES = 512;
 
@@ -156,7 +161,7 @@ export function validateContractDocumentUpload(input: {
   }
 
   const mime = String(input.file.mimetype ?? '').trim().toLowerCase();
-  if (!ALLOWED_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix))) {
+  if (!ALLOWED_DOCUMENT_MIME_TYPES.has(mime)) {
     issues.push({
       code: 'MIME_INVALID',
       field: 'file',

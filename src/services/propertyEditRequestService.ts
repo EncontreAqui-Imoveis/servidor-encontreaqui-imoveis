@@ -19,7 +19,7 @@ export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PropertyEditRequestRequesterRole = 'broker' | 'client';
 
 type PurposeValue = 'Venda' | 'Aluguel' | 'Venda e Aluguel';
-const MAX_PROPERTY_DESCRIPTION_LENGTH = 500;
+const MAX_PROPERTY_DESCRIPTION_LENGTH = 5000;
 const MAX_GENERIC_PROPERTY_TEXT_LENGTH = 120;
 const MAX_PROPERTY_COUNT = 99;
 const MAX_PROPERTY_AREA = 99999999.99;

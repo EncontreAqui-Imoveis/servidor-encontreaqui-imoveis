@@ -354,6 +354,7 @@ export async function uploadContractDocument(
       : 'PENDING';
   metadataWithAudit.validationResult = uploadValidation;
   metadataWithAudit.originalFileName = params.uploadedFile.originalname ?? null;
+  metadataWithAudit.contentType = params.uploadedFile.mimetype ?? null;
   metadataWithAudit.uploadedBy = Number(params.req.userId ?? 0) || null;
   metadataWithAudit.uploadedAt = uploadEvent.at;
 
@@ -363,6 +364,7 @@ export async function uploadContractDocument(
     type: resolveDocumentStorageType(normalizedDocumentType),
     documentType: normalizedDocumentType,
     content: params.uploadedFile.buffer,
+    contentType: params.uploadedFile.mimetype,
     metadataJson: metadataWithAudit,
   });
 

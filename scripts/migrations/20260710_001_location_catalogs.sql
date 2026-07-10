@@ -45,8 +45,12 @@ SELECT
   LOWER(TRIM(p.bairro)) AS normalized_name
 FROM properties p
 INNER JOIN location_cities c
-  ON c.normalized_name = LOWER(TRIM(p.city))
-  AND c.state = UPPER(LEFT(TRIM(COALESCE(p.state, '')), 2))
+  -- The first failed run may have created catalog tables with the database default
+  -- collation. Force both operands while backfilling legacy properties.
+  ON c.normalized_name COLLATE utf8mb4_unicode_ci =
+       LOWER(TRIM(p.city)) COLLATE utf8mb4_unicode_ci
+  AND c.state COLLATE utf8mb4_unicode_ci =
+       UPPER(LEFT(TRIM(COALESCE(p.state, '')), 2)) COLLATE utf8mb4_unicode_ci
 WHERE TRIM(COALESCE(p.city, '')) <> ''
   AND TRIM(COALESCE(p.bairro, '')) <> ''
 GROUP BY c.id, LOWER(TRIM(p.bairro))

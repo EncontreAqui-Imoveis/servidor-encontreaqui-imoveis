@@ -57,10 +57,10 @@ vi.mock('../../src/services/priceDropNotificationService', () => ({
   notifyPromotionStarted: vi.fn(),
 }));
 
-const description500 = `${'a'.repeat(499)}'`;
+const description5000 = `${'a'.repeat(4999)}'`;
 const basePayload = {
   title: 'Casa térrea',
-  description: description500,
+  description: description5000,
   type: 'Casa',
   purpose: 'Venda',
   price: 250000,
@@ -93,7 +93,7 @@ const mockPropertyRow = {
   broker_id: 30003,
   owner_id: null,
   title: 'Casa térrea',
-  description: description500,
+  description: description5000,
   type: 'Casa',
   purpose: 'Venda',
   status: 'approved',
@@ -176,7 +176,7 @@ describe('POST /properties description length contract', () => {
     });
   });
 
-  it('accepts a description with exactly 500 characters', async () => {
+  it('accepts a description with exactly 5000 characters', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
       if (sql.includes('SELECT id FROM properties')) return [[]];
@@ -197,10 +197,10 @@ describe('POST /properties description length contract', () => {
       String(sql).includes('INSERT INTO properties')
     );
     const insertParams = insertCall?.[1] as unknown[];
-    expect(insertParams).toEqual(expect.arrayContaining([description500]));
+    expect(insertParams).toEqual(expect.arrayContaining([description5000]));
   });
 
-  it('accepts a 500-character description even when line breaks arrive as CRLF', async () => {
+  it('accepts a 5000-character description even when line breaks arrive as CRLF', async () => {
     const crlfDescription = `${'a'.repeat(248)}\r\n${'b'.repeat(248)}\r\ncc`;
     expect(crlfDescription.length).toBe(502);
     expect(crlfDescription.replace(/\r\n/g, '\n').length).toBe(500);
@@ -1515,24 +1515,24 @@ describe('POST /properties description length contract', () => {
     expect(updateCall).toBeUndefined();
   });
 
-  it('rejects a description above 500 characters and logs the reason', async () => {
+  it('rejects a description above 5000 characters and logs the reason', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const response = await request(app)
       .post('/properties')
-      .set('x-request-id', 'desc-501')
+      .set('x-request-id', 'desc-5001')
       .send({
         ...basePayload,
-        description: `${'b'.repeat(500)}c`,
+        description: `${'b'.repeat(5000)}c`,
       });
 
     expect(response.status).toBe(400);
-    expect(response.body.error).toContain('Descrição deve ter entre 1 e 500 caracteres.');
+    expect(response.body.error).toContain('Descrição deve ter entre 1 e 5000 caracteres.');
     expect(queryMock).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
       'Property create validation failed:',
       expect.objectContaining({
-        requestId: 'desc-501',
+        requestId: 'desc-5001',
         flow: 'broker',
         reason: 'invalid_description_length',
       })

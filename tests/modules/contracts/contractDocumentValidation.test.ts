@@ -30,4 +30,33 @@ describe('contractDocumentValidation', () => {
       expect.arrayContaining(['SIDE_REQUIRED', 'EXTENSION_INVALID', 'MIME_INVALID', 'FILE_TOO_SMALL'])
     );
   });
+
+  it.each(['application/pdf', 'image/jpeg', 'image/png', 'image/webp'])(
+    'aceita o MIME documental %s',
+    (mimetype) => {
+      const extension = mimetype === 'application/pdf' ? 'pdf' : mimetype.split('/')[1];
+      const result = validateContractDocumentUpload({
+        file: { mimetype, originalname: `documento.${extension}`, size: 1024 },
+        documentType: 'doc_identidade',
+        category: 'identidade',
+        side: 'buyer',
+        requiresSide: true,
+      });
+
+      expect(result.isValid).toBe(true);
+    }
+  );
+
+  it('rejeita imagens fora da lista explícita de MIME', () => {
+    const result = validateContractDocumentUpload({
+      file: { mimetype: 'image/gif', originalname: 'documento.gif', size: 1024 },
+      documentType: 'doc_identidade',
+      category: 'identidade',
+      side: 'buyer',
+      requiresSide: true,
+    });
+
+    expect(result.isValid).toBe(false);
+    expect(result.issues.map((item) => item.code)).toContain('MIME_INVALID');
+  });
 });

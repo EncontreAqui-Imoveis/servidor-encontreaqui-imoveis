@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 
+import {
+  listLocationCities,
+  listLocationNeighborhoods,
+} from '../services/locationCatalogService';
+
 const CEP_DIGITS_REGEX = /^\d{8}$/;
 
 function sanitizeCep(value: unknown): string {
@@ -11,6 +16,33 @@ function sanitizeCep(value: unknown): string {
 }
 
 class LocationController {
+  async listCities(req: Request, res: Response) {
+    try {
+      return res.status(200).json(
+        await listLocationCities(req.query as Record<string, unknown>)
+      );
+    } catch (error) {
+      console.error('Erro ao listar cidades para autocomplete:', error);
+      return res.status(500).json({ error: 'Não foi possível listar cidades.' });
+    }
+  }
+
+  async listNeighborhoods(req: Request, res: Response) {
+    const cityId = Number(req.query.cityId);
+    if (!Number.isInteger(cityId) || cityId <= 0) {
+      return res.status(400).json({ error: 'cityId deve ser um inteiro positivo.' });
+    }
+
+    try {
+      return res.status(200).json(
+        await listLocationNeighborhoods(cityId, req.query as Record<string, unknown>)
+      );
+    } catch (error) {
+      console.error('Erro ao listar bairros para autocomplete:', error);
+      return res.status(500).json({ error: 'Não foi possível listar bairros.' });
+    }
+  }
+
   async getByCep(req: Request, res: Response) {
     const cep = sanitizeCep(req.params.cep);
 

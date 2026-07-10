@@ -3,6 +3,7 @@ import connection from '../database/connection';
 import { RowDataPacket } from 'mysql2';
 import jwt from 'jsonwebtoken';
 import { requireEnv } from '../config/env';
+import type { ContractAccessContext } from '../types/contractAuth';
 
 interface UserFromDB extends RowDataPacket {
   id: number;
@@ -29,6 +30,7 @@ export interface AuthRequest extends Request {
   userCpf?: string | null;
   firebase_uid?: string;
   adminValidated?: boolean;
+  contractContext?: ContractAccessContext;
 }
 
 const jwtSecret = requireEnv('JWT_SECRET');

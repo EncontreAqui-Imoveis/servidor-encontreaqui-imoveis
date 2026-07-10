@@ -19,6 +19,10 @@ const { txMock, getConnectionMock, queryMock } = vi.hoisted(() => {
   };
 });
 
+const { enqueueNegotiationDocumentDeletionMock } = vi.hoisted(() => ({
+  enqueueNegotiationDocumentDeletionMock: vi.fn(),
+}));
+
 vi.mock('../../src/database/connection', () => ({
   __esModule: true,
   default: {
@@ -28,6 +32,10 @@ vi.mock('../../src/database/connection', () => ({
   },
 }));
 
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
+}));
+
 import { contractController } from '../../src/controllers/ContractController';
 
 describe('DELETE /contracts/:id/documents/:documentId', () => {
@@ -35,7 +43,7 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as any).userId = 30003;
-    (req as any).userRole = 'broker';
+    (req as any).userRole = 'client';
     next();
   });
   app.delete('/contracts/:id/documents/:documentId', (req, res) =>
@@ -45,13 +53,16 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getConnectionMock.mockResolvedValue(txMock);
-    queryMock.mockResolvedValue([]);
+    queryMock.mockResolvedValue([[]]);
     txMock.beginTransaction.mockResolvedValue(undefined);
     txMock.commit.mockResolvedValue(undefined);
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
 
     txMock.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return [[]];
+      }
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
         return [
           [
@@ -60,6 +71,10 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
               negotiation_id: 'neg-1',
               property_id: 101,
               status: 'AWAITING_DOCS',
+              seller_client_id: 30003,
+              buyer_client_id: 30004,
+              seller_cpf: '111.111.111-11',
+              buyer_cpf: '222.222.222-22',
               seller_info: {},
               buyer_info: {},
               commission_data: {},
@@ -91,7 +106,7 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
               id: 501,
               type: 'contract',
               document_type: 'doc_identidade',
-              metadata_json: JSON.stringify({ side: 'seller' }),
+              metadata_json: JSON.stringify({ owner_side: 'seller', side: 'seller' }),
             },
           ],
         ];
@@ -105,16 +120,16 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
     });
   });
 
-  it('blocks deletion when document side is already approved', async () => {
+  it('allows the seller to remove its own document before the workflow is frozen', async () => {
     const response = await request(app).delete(
       '/contracts/contract-1/documents/501'
     );
 
-    expect(response.status).toBe(403);
-    expect(response.body.error).toContain('seller');
+    expect(response.status).toBe(200);
     const deleteCalls = txMock.query.mock.calls.filter(([sql]) =>
       String(sql).includes('DELETE FROM negotiation_documents')
     );
-    expect(deleteCalls).toHaveLength(0);
+    expect(deleteCalls).toHaveLength(1);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
   });
 });

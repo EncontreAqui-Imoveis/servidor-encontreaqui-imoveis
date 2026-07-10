@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware, isAdmin } from '../middlewares/auth';
+import { contractAuthMiddleware } from '../middlewares/contractAuth.middleware';
 import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 
 const contractRoutes = Router();
@@ -14,11 +15,11 @@ contractRoutes.get('/contracts/me', authMiddleware, (req, res) =>
   contractController.listMyContracts(req, res)
 );
 
-contractRoutes.get('/contracts/:id', authMiddleware, (req, res) =>
+contractRoutes.get('/contracts/:id', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.getById(req, res)
 );
 
-contractRoutes.get('/contracts/negotiation/:negotiationId', authMiddleware, (req, res) =>
+contractRoutes.get('/contracts/negotiation/:negotiationId', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.getByNegotiationId(req, res)
 );
 
@@ -32,22 +33,23 @@ contractRoutes.patch(
   (req, res) => contractController.updateSellingBrokerByNegotiation(req, res)
 );
 
-contractRoutes.put('/contracts/:id/data', authMiddleware, (req, res) =>
+contractRoutes.put('/contracts/:id/data', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.updateData(req, res)
 );
 
-contractRoutes.post('/contracts/:id/signature-method', authMiddleware, (req, res) =>
+contractRoutes.post('/contracts/:id/signature-method', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.setSignatureMethod(req, res)
 );
 
 contractRoutes.post(
   '/contracts/:id/documents',
   authMiddleware,
+  contractAuthMiddleware,
   contractDocumentUpload.single('file'),
   (req, res) => contractController.uploadDocument(req, res)
 );
 
-contractRoutes.delete('/contracts/:id/documents/:documentId', authMiddleware, (req, res) =>
+contractRoutes.delete('/contracts/:id/documents/:documentId', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.deleteDocument(req, res)
 );
 

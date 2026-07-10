@@ -25,7 +25,19 @@ describe('GET /contracts/:id excludes proposal documents', () => {
     (req as any).userRole = 'broker';
     next();
   });
-  app.get('/contracts/:id', (req, res) => contractController.getById(req as any, res));
+  app.get('/contracts/:id', (req, _res, next) => {
+    (req as any).contractContext = {
+      contractId: String(req.params.id),
+      userId: '30003',
+      userRole: 'responsible',
+      canReadMeta: true,
+      canReadSeller: true,
+      canEditSeller: true,
+      canReadBuyer: true,
+      canEditBuyer: true,
+    };
+    next();
+  }, (req, res) => contractController.getById(req as any, res));
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -49,6 +61,7 @@ describe('GET /contracts/:id excludes proposal documents', () => {
             updated_at: '2026-02-20 10:00:00',
             capturing_broker_id: 30003,
             selling_broker_id: 30004,
+            responsible_user_ids: '30003',
             property_title: 'Casa Teste',
             property_purpose: 'Venda',
             property_code: 'RV-101',

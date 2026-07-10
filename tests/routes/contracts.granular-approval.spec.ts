@@ -271,6 +271,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     const response = await request(app)
       .post('/admin/contracts/contract-1/signed-docs')
       .field('documentType', 'contrato_assinado')
+      .field('side', 'seller')
       .attach('file', Buffer.from('%PDF-1.4 signed contract'), 'contrato_assinado.pdf');
 
     expect(response.status).toBe(201);
@@ -307,6 +308,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     const response = await request(app)
       .post('/admin/contracts/contract-1/signed-docs')
       .field('documentType', 'outro')
+      .field('side', 'seller')
       .attach('file', Buffer.from('%PDF-1.4 admin supplemental'), 'anexo.pdf');
 
     expect(response.status).toBe(201);

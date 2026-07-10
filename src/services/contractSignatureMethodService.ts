@@ -8,7 +8,7 @@ import {
   type ContractRow,
 } from '../controllers/ContractController';
 import { mergeWorkflowMetadata } from './contractWorkflowMetadata';
-import { resolveContractAccessContext } from '../utils/contractIdentity';
+import { resolveContractAccessContext } from '../utils/contractAccessResolver';
 
 interface SignatureMethodBody {
   method?: unknown;
@@ -61,59 +61,9 @@ async function fetchContractForUpdate(
   return rows[0] ?? null;
 }
 
-function resolveActingBrokerName(req: AuthRequest, contract: ContractRow): string {
+function resolveActingBrokerName(req: AuthRequest): string {
   const userId = Number(req.userId ?? 0);
-  if (userId > 0 && userId === Number(contract.capturing_broker_id ?? 0)) {
-    const name = String(contract.capturing_broker_name ?? '').trim();
-    if (name) return name;
-  }
-  return userId > 0 ? `Corretor #${userId}` : 'Corretor';
-}
-
-function isNegotiationResponsibleUser(contract: ContractRow, userId: number): boolean {
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return false;
-  }
-  const raw = String(contract.responsible_user_ids ?? '').trim();
-  if (!raw) {
-    return false;
-  }
-  return raw
-    .split(',')
-    .map((value) => Number(value))
-    .some((value) => Number.isInteger(value) && value === userId);
-}
-
-function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
-  const role = String(req.userRole ?? '').toLowerCase();
-  if (role === 'admin') {
-    return true;
-  }
-
-  const userId = Number(req.userId);
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return false;
-  }
-
-  const context = resolveContractAccessContext(
-    req,
-    contract,
-    isNegotiationResponsibleUser(contract, userId) &&
-      (role === 'broker' || role === 'auxiliary_administrative')
-  );
-  if (!context) {
-    return false;
-  }
-
-  if (context.isAdmin || context.isResponsible) {
-    return true;
-  }
-
-  if (context.role === 'client') {
-    return context.isBuyerSide || context.isSellerSide;
-  }
-
-  return false;
+  return userId > 0 ? `Responsável #${userId}` : 'Responsável';
 }
 
 export async function setContractSignatureMethod(
@@ -143,7 +93,12 @@ export async function setContractSignatureMethod(
     throw mutationError(404, 'Contrato não encontrado.');
   }
 
-  if (!canAccessContract(params.req, contract)) {
+  const context = resolveContractAccessContext(
+    { id: params.req.userId, role: params.req.userRole, cpf: params.req.userCpf },
+    contract
+  );
+  params.req.contractContext = context;
+  if (context.userRole !== 'admin' && context.userRole !== 'responsible') {
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
 
@@ -154,7 +109,7 @@ export async function setContractSignatureMethod(
     );
   }
 
-  const brokerName = resolveActingBrokerName(params.req, contract);
+  const brokerName = resolveActingBrokerName(params.req);
   const nextWorkflowMetadata = mergeWorkflowMetadata(contract.workflow_metadata, {
     signatureMethod: method,
     signatureMethodDeclaredAt: new Date().toISOString(),

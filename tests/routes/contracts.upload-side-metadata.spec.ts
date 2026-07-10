@@ -48,6 +48,10 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     negotiation_id: 'neg-1',
     property_id: 101,
     status: 'AWAITING_DOCS',
+    seller_client_id: 30003,
+    buyer_client_id: 30004,
+    seller_cpf: '111.111.111-11',
+    buyer_cpf: '222.222.222-22',
     seller_info: {},
     buyer_info: {},
     commission_data: {},
@@ -66,9 +70,10 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     capturing_broker_name: 'Captador',
     selling_broker_name: 'Vendedor',
   };
+  let actingUserId = 30003;
   app.use((req, _res, next) => {
-    (req as any).userId = 30003;
-    (req as any).userRole = 'broker';
+    (req as any).userId = actingUserId;
+    (req as any).userRole = 'client';
     next();
   });
   app.post(
@@ -79,11 +84,16 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    actingUserId = 30003;
     activeContract = {
       id: 'contract-1',
       negotiation_id: 'neg-1',
       property_id: 101,
       status: 'AWAITING_DOCS',
+      seller_client_id: 30003,
+      buyer_client_id: 30004,
+      seller_cpf: '111.111.111-11',
+      buyer_cpf: '222.222.222-22',
       seller_info: {},
       buyer_info: {},
       commission_data: {},
@@ -110,6 +120,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     txMock.release.mockResolvedValue(undefined);
     storeNegotiationDocumentToR2Mock.mockImplementation(async (params: any) => {
       if (String(params.documentType ?? '') === 'doc_identidade') {
+        expect(params.metadataJson.owner_side).toBe('seller');
         expect(params.metadataJson.side).toBe('seller');
         expect(String(params.metadataJson.originalFileName ?? '')).toBe('identidade.pdf');
       }
@@ -152,6 +163,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       id: 999,
       documentType: 'doc_identidade',
       side: 'seller',
+      ownerSide: 'seller',
       originalFileName: 'identidade.pdf',
     });
   });
@@ -169,11 +181,13 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       documentType: 'cliente_outro_01',
       documentCategory: 'outro',
       side: 'seller',
+      ownerSide: 'seller',
       originalFileName: 'outro.pdf',
     });
   });
 
   it('accepts outro slots for buyer in AWAITING_DOCS', async () => {
+    actingUserId = 30004;
     const response = await request(app)
       .post('/contracts/contract-1/documents')
       .field('documentType', 'cliente_outro_01')
@@ -186,11 +200,12 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       documentType: 'cliente_outro_01',
       documentCategory: 'outro',
       side: 'buyer',
+      ownerSide: 'buyer',
       originalFileName: 'outro-comprador.pdf',
     });
   });
 
-  it('marks workflow metadata as online when broker uploads signed contract', async () => {
+  it('bloqueia documento assinado de participante quando assinatura está congelada', async () => {
     activeContract = {
       ...activeContract,
       status: 'AWAITING_SIGNATURES',
@@ -199,25 +214,10 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     const response = await request(app)
       .post('/contracts/contract-1/documents')
       .field('documentType', 'contrato_assinado')
+      .field('side', 'seller')
       .attach('file', Buffer.alloc(2048, 'b'), 'contrato_assinado.pdf');
 
-    expect(response.status).toBe(201);
-    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        negotiationId: 'neg-1',
-        documentType: 'contrato_assinado',
-        content: expect.any(Buffer),
-      })
-    );
-    expect(activeContract.workflow_metadata).toEqual(
-      expect.objectContaining({
-        signatureMethod: 'online',
-        signedContractUploadedOnlineBy: 30003,
-      })
-    );
-    expect(response.body.document).toMatchObject({
-      documentType: 'contrato_assinado',
-      originalFileName: 'contrato_assinado.pdf',
-    });
+    expect(response.status).toBe(403);
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
   });
 });

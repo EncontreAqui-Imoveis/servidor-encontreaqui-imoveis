@@ -107,6 +107,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Teste' }]])
       .mockResolvedValueOnce([[]]);
 
@@ -211,6 +212,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Captador' }]])
       .mockResolvedValueOnce([[]]);
 
@@ -238,7 +240,7 @@ describe('POST /negotiations/proposal', () => {
         params[2] === 30003 &&
         params[3] === 30003 &&
         params[4] === null &&
-        params[8] === 'PROPOSAL_SENT'
+        params[9] === 'PROPOSAL_SENT'
       )
     ).toBe(true);
     expect(generateProposalMock).toHaveBeenCalledWith(
@@ -319,6 +321,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Independente' }]])
       .mockResolvedValueOnce([[]]);
 
@@ -345,7 +348,7 @@ describe('POST /negotiations/proposal', () => {
         params[2] === 45555 &&
         params[3] === 45555 &&
         params[4] === 50001 &&
-        params[8] === 'PROPOSAL_SENT'
+        params[9] === 'PROPOSAL_SENT'
       )
     ).toBe(true);
   });
@@ -434,6 +437,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Existente' }]])
       .mockResolvedValueOnce([
         [
@@ -488,6 +492,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Existente' }]])
       .mockResolvedValueOnce([[]]);
 
@@ -538,6 +543,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -589,6 +595,7 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Teste' }]])
       .mockResolvedValueOnce([[]]);
 

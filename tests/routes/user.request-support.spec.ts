@@ -75,7 +75,7 @@ describe('POST /users/support-request', () => {
   });
 
   it('bloqueia nova solicitacao quando ainda estiver no cooldown de 24h', async () => {
-    queryMock.mockResolvedValueOnce([[{ created_at: '2026-07-09T10:00:00.000Z' }]]);
+    queryMock.mockResolvedValueOnce([[{ created_at: new Date().toISOString() }]]);
 
     const response = await request(app).post('/users/support-request');
 

@@ -13,7 +13,7 @@ import {
   appendWorkflowAuditEvent,
   mergeWorkflowMetadata,
 } from './contractWorkflowMetadata';
-import { resolveContractAccessContext } from '../utils/contractIdentity';
+import { resolveContractAccessContext } from '../utils/contractAccessResolver';
 import {
   resolveDocumentCategoryFromType,
   resolveFallbackDocumentTypeByCategory,
@@ -22,7 +22,6 @@ import {
 } from '../modules/contracts/domain/contractDocumentValidation';
 import { isUploadBlockedForNotApplicableCategory } from '../modules/contracts/domain/contractDocumentRuleMatrix';
 import type {
-  ContractApprovalStatus,
   ContractDocumentCategoryCode,
   ContractDocumentType,
 } from '../modules/contracts/domain/contract.types';
@@ -140,6 +139,13 @@ function parseDocumentSide(value: unknown): ContractDocumentSide | null {
   return null;
 }
 
+function readDocumentOwnerSide(
+  metadata: Record<string, unknown>
+): ContractDocumentSide | null {
+  // owner_side is immutable source of truth; side only supports legacy rows.
+  return parseDocumentSide(metadata.owner_side ?? metadata.side);
+}
+
 function isSignedDocumentType(value: string): boolean {
   return (
     value === 'contrato_assinado' ||
@@ -150,59 +156,6 @@ function isSignedDocumentType(value: string): boolean {
 
 function isAdminSupplementalDocumentType(value: string): boolean {
   return value === 'outro';
-}
-
-function parseContractApprovalStatus(value: unknown): ContractApprovalStatus {
-  const normalized = String(value ?? '').trim().toUpperCase();
-  return normalized === 'APPROVED_WITH_RES'
-    ? 'APPROVED_WITH_RES'
-    : normalized === 'APPROVED'
-      ? 'APPROVED'
-      : normalized === 'REJECTED'
-        ? 'REJECTED'
-        : 'PENDING';
-}
-
-function approvalStatusAllowsEditing(status: ContractApprovalStatus): boolean {
-  return status === 'PENDING' || status === 'REJECTED';
-}
-
-function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
-  const role = String(req.userRole ?? '').toLowerCase();
-  if (role === 'admin') {
-    return true;
-  }
-
-  const userId = Number(req.userId);
-  const context = resolveContractAccessContext(req, contract, false);
-  if (!context || !Number.isFinite(userId) || userId <= 0) {
-    return false;
-  }
-
-  if (context.role === 'client') {
-    return context.isSellerSide;
-  }
-
-  return false;
-}
-
-function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
-  const role = String(req.userRole ?? '').toLowerCase();
-  if (role === 'admin') {
-    return true;
-  }
-
-  const userId = Number(req.userId);
-  const context = resolveContractAccessContext(req, contract, false);
-  if (!context || !Number.isFinite(userId) || userId <= 0) {
-    return false;
-  }
-
-  if (context.role === 'client') {
-    return context.isBuyerSide;
-  }
-
-  return false;
 }
 
 function resolveDocumentStorageType(documentType: string): 'contract' | 'other' {
@@ -244,6 +197,7 @@ export async function uploadContractDocument(
     documentType: string;
     documentCategory: ContractDocumentCategoryCode | null;
     side: ContractDocumentSide | null;
+    ownerSide: ContractDocumentSide;
     originalFileName: string | null;
     contractId: string;
   };
@@ -265,13 +219,38 @@ export async function uploadContractDocument(
   }
 
   const requestedSide = parseDocumentSide(params.body.side);
-  const role = String(params.req.userRole ?? '').toLowerCase();
+  const context = resolveContractAccessContext(
+    { id: params.req.userId, role: params.req.userRole, cpf: params.req.userCpf },
+    params.contract
+  );
+  params.req.contractContext = context;
+  if (context.userRole === 'none') {
+    throw mutationError(403, 'Acesso negado ao contrato.');
+  }
+  const role = context.userRole;
+  const resolvedSide: ContractDocumentSide | null = requestedSide;
+  if (!resolvedSide) {
+    throw mutationError(
+      400,
+      'Informe o dono do documento (side: seller|buyer).'
+    );
+  }
+
+  if (resolvedSide === 'seller' && !context.canEditSeller) {
+    throw mutationError(403, 'Seu acesso não permite anexar documentos do lado vendedor nesta etapa.');
+  }
+
+  if (resolvedSide === 'buyer' && !context.canEditBuyer) {
+    throw mutationError(403, 'Seu acesso não permite anexar documentos do lado comprador nesta etapa.');
+  }
+
   const isSupplementalOther = normalizedDocumentType === 'outro';
   const isAdminSupplemental =
     role === 'admin' && isAdminSupplementalDocumentType(normalizedDocumentType);
   const currentStatus = resolveContractStatus(params.contract.status);
+  const bypassesWorkflowStage = role === 'admin';
 
-  if (isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental) {
+  if (!bypassesWorkflowStage && (isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental)) {
     if (currentStatus !== 'AWAITING_SIGNATURES') {
       throw mutationError(
         400,
@@ -283,7 +262,11 @@ export async function uploadContractDocument(
   const resolvedDocumentCategory =
     documentCategoryInput ??
     resolveDocumentCategoryFromType(normalizedDocumentType as ContractDocumentType);
-  if (!isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental) {
+  if (
+    !bypassesWorkflowStage &&
+    !isSignedDocumentType(normalizedDocumentType) &&
+    !isAdminSupplemental
+  ) {
     if (currentStatus !== 'AWAITING_DOCS' && currentStatus !== 'IN_DRAFT') {
       throw mutationError(
         400,
@@ -294,64 +277,6 @@ export async function uploadContractDocument(
       throw mutationError(
         400,
         'documentCategory é obrigatório para documentos da etapa AWAITING_DOCS.'
-      );
-    }
-  }
-
-  const canEditSeller = canEditSellerSide(params.req, params.contract);
-  const canEditBuyer = canEditBuyerSide(params.req, params.contract);
-
-  const resolvedSide: ContractDocumentSide | null = (
-    isSignedDocumentType(normalizedDocumentType) || isAdminSupplemental
-      ? requestedSide
-      : (() => {
-          if (requestedSide) {
-            return requestedSide;
-          }
-          if (canEditSeller && !canEditBuyer) {
-            return 'seller';
-          }
-          if (canEditBuyer && !canEditSeller) {
-            return 'buyer';
-          }
-          return null;
-        })()
-  );
-
-  if (
-    !isSignedDocumentType(normalizedDocumentType) &&
-    !isAdminSupplemental &&
-    resolvedSide == null
-  ) {
-    throw mutationError(
-      400,
-      'Informe o lado do documento (side: seller|buyer) para documentos de AWAITING_DOCS.'
-    );
-  }
-
-  if (resolvedSide === 'seller' && !canEditSeller && role !== 'admin') {
-    throw mutationError(403, 'Somente o proprietário pode anexar documentos do lado owner.');
-  }
-
-  if (resolvedSide === 'buyer' && !canEditBuyer && role !== 'admin') {
-    throw mutationError(403, 'Somente o comprador pode anexar documentos do lado buyer.');
-  }
-
-  if (!isSignedDocumentType(normalizedDocumentType) && role !== 'admin') {
-    const sellerStatus = parseContractApprovalStatus(params.contract.seller_approval_status);
-    const buyerStatus = parseContractApprovalStatus(params.contract.buyer_approval_status);
-
-    if (resolvedSide === 'seller' && !approvalStatusAllowsEditing(sellerStatus)) {
-      throw mutationError(
-        403,
-        'Documentos do lado seller não podem ser enviados após aprovação.'
-      );
-    }
-
-    if (resolvedSide === 'buyer' && !approvalStatusAllowsEditing(buyerStatus)) {
-      throw mutationError(
-        403,
-        'Documentos do lado buyer não podem ser enviados após aprovação.'
       );
     }
   }
@@ -395,7 +320,7 @@ export async function uploadContractDocument(
     documentType: normalizedDocumentType as ContractDocumentType,
     category: resolvedDocumentCategory,
     side: resolvedSide,
-    requiresSide: !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental,
+    requiresSide: true,
     requiresCategory:
       !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental,
   });
@@ -419,6 +344,8 @@ export async function uploadContractDocument(
 
   const metadataWithAudit = appendAuditTrailEvent({}, uploadEvent);
   metadataWithAudit.contractId = params.contractId;
+  metadataWithAudit.owner_side = resolvedSide;
+  // Keep the old response key while clients migrate to owner_side.
   metadataWithAudit.side = resolvedSide;
   metadataWithAudit.documentCategory = resolvedDocumentCategory;
   metadataWithAudit.categoryStatus =
@@ -463,6 +390,7 @@ export async function uploadContractDocument(
       documentType: documentTypeRaw || normalizedDocumentType,
       documentCategory: resolvedDocumentCategory,
       side: resolvedSide,
+      ownerSide: resolvedSide,
       originalFileName: params.uploadedFile.originalname ?? null,
       contractId: params.contractId,
     },
@@ -505,47 +433,24 @@ export async function deleteContractDocument(
   }
 
   const metadata = parseStoredJsonObject(document.metadata_json);
-  const side = parseDocumentSide(metadata.side);
+  const side = readDocumentOwnerSide(metadata);
   const documentType = String(document.document_type ?? '').trim().toLowerCase();
-  const signedDocument = isSignedDocumentType(documentType);
-
-  const role = String(params.req.userRole ?? '').toLowerCase();
-  const canEditSeller = canEditSellerSide(params.req, params.contract);
-  const canEditBuyer = canEditBuyerSide(params.req, params.contract);
-  if (side === 'seller' && !canEditSeller && role !== 'admin') {
-    throw mutationError(403, 'Somente o proprietário pode remover documentos do lado owner.');
+  const context = resolveContractAccessContext(
+    { id: params.req.userId, role: params.req.userRole, cpf: params.req.userCpf },
+    params.contract
+  );
+  params.req.contractContext = context;
+  if (context.userRole === 'none') {
+    throw mutationError(403, 'Acesso negado ao contrato.');
   }
-
-  if (side === 'buyer' && !canEditBuyer && role !== 'admin') {
-    throw mutationError(403, 'Somente o comprador pode remover documentos do lado buyer.');
+  if (!side) {
+    throw mutationError(409, 'Documento legado sem dono explícito. Corrija-o pelo painel administrativo.');
   }
-
-  if (!signedDocument) {
-    const sellerStatus = parseContractApprovalStatus(params.contract.seller_approval_status);
-    const buyerStatus = parseContractApprovalStatus(params.contract.buyer_approval_status);
-
-    if (side === 'seller' && !approvalStatusAllowsEditing(sellerStatus)) {
-      throw mutationError(
-        403,
-        'Documentos do lado seller não podem ser removidos após aprovação.'
-      );
-    }
-
-    if (side === 'buyer' && !approvalStatusAllowsEditing(buyerStatus)) {
-      throw mutationError(
-        403,
-        'Documentos do lado buyer não podem ser removidos após aprovação.'
-      );
-    }
-
-    if (side == null) {
-      const canEditAtLeastOneSide =
-        approvalStatusAllowsEditing(sellerStatus) ||
-        approvalStatusAllowsEditing(buyerStatus);
-      if (!canEditAtLeastOneSide) {
-        throw mutationError(403, 'Documento não pode ser removido após aprovação.');
-      }
-    }
+  if (side === 'seller' && !context.canEditSeller) {
+    throw mutationError(403, 'Seu acesso não permite remover documentos do lado vendedor nesta etapa.');
+  }
+  if (side === 'buyer' && !context.canEditBuyer) {
+    throw mutationError(403, 'Seu acesso não permite remover documentos do lado comprador nesta etapa.');
   }
 
   await tx.query(

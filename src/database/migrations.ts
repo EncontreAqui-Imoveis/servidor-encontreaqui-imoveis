@@ -1147,6 +1147,25 @@ async function ensureNegotiationDocumentMetadataColumn(): Promise<void> {
   }
 }
 
+async function backfillNegotiationDocumentOwnerSide(): Promise<void> {
+  if (!(await tableExists('negotiation_documents'))) {
+    return;
+  }
+
+  // Existing uploads used side; preserve them while making owner_side canonical.
+  await connection.query(`
+    UPDATE negotiation_documents
+    SET metadata_json = JSON_SET(
+      COALESCE(metadata_json, JSON_OBJECT()),
+      '$.owner_side',
+      JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.side'))
+    )
+    WHERE metadata_json IS NOT NULL
+      AND JSON_EXTRACT(metadata_json, '$.owner_side') IS NULL
+      AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.side')) IN ('seller', 'buyer')
+  `);
+}
+
 async function ensureNegotiationDocumentStorageColumns(): Promise<void> {
   if (!(await tableExists('negotiation_documents'))) {
     return;
@@ -1586,6 +1605,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureContractWorkflowMetadataColumn();
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
+    await backfillNegotiationDocumentOwnerSide();
     await ensureNegotiationDocumentStorageColumns();
     await ensureNegotiationDocumentDeletionJobsTable();
     await ensureAdminsTokenVersionColumn();

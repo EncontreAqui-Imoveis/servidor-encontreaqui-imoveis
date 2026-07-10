@@ -88,6 +88,7 @@ import {
   type ContractDocumentCategoryCode,
   type ContractDocumentCategoryStatus,
   type ContractStatus,
+  CONTRACT_DOCUMENT_CATEGORY_LABELS,
 } from '../modules/contracts/domain/contract.types';
 import {
   findCategoryRequirement,
@@ -111,11 +112,10 @@ import {
   resetWorkflowMetadata,
 } from '../services/contractWorkflowMetadata';
 import {
-  isBuyerSideUser,
-  isSellerSideUser,
   resolveContractAccessContext,
-  resolveSellerPartyId,
-} from '../utils/contractIdentity';
+} from '../utils/contractAccessResolver';
+import type { ContractAccessContext } from '../types/contractAuth';
+import { resolveSellerPartyId } from '../utils/contractIdentity';
 
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
   'IN_NEGOTIATION',
@@ -185,6 +185,8 @@ export interface ContractRow extends RowDataPacket {
   selling_broker_id: number | null;
   seller_client_id: number | null;
   buyer_client_id: number | null;
+  seller_cpf: string | null;
+  buyer_cpf: string | null;
   client_name: string | null;
   client_cpf: string | null;
   property_title: string | null;
@@ -259,6 +261,7 @@ interface ExistingContractRow extends RowDataPacket {
 }
 
 interface ContractDataBody {
+  side?: unknown;
   sellerInfo?: unknown;
   seller_info?: unknown;
   ownerInfo?: unknown;
@@ -972,24 +975,39 @@ const OWNER_SENSITIVE_KEYS = new Set([
   'commission_data',
 ]);
 
-function canViewOwnerSensitiveData(req: AuthRequest | null, row: ContractRow): boolean {
-  if (!req) return false;
-  const context = resolveContractAccessContext(
-    req,
-    row,
-    isNegotiationResponsibleUser(row, Number(req.userId ?? 0)) &&
-      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
-        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+function resolveContractReadContext(
+  req: AuthRequest | null,
+  row: ContractRow
+): ContractAccessContext | null {
+  if (!req) return null;
+  if (req.contractContext?.contractId === row.id) {
+    return req.contractContext;
+  }
+
+  return resolveContractAccessContext(
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    row
   );
-  if (!context) {
-    return false;
-  }
+}
 
-  if (context.isAdmin || context.isResponsible) {
-    return true;
-  }
+function canViewOwnerSensitiveData(req: AuthRequest | null, row: ContractRow): boolean {
+  const context = resolveContractReadContext(req, row);
+  return context?.canReadSeller ?? false;
+}
 
-  return context.isSellerSide;
+function canReadContractSide(
+  context: ContractAccessContext | null,
+  side: ContractDocumentSide
+): boolean {
+  return side === 'seller' ? Boolean(context?.canReadSeller) : Boolean(context?.canReadBuyer);
+}
+
+function restrictDocumentRequirementSide<T>(
+  requirements: T[],
+  context: ContractAccessContext | null,
+  side: ContractDocumentSide
+): T[] {
+  return canReadContractSide(context, side) ? requirements : [];
 }
 
 function redactOwnerInfoByRole(
@@ -1037,23 +1055,65 @@ function shouldExposeOwnerSensitiveDocument(
 }
 
 export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
+  const readContext = resolveContractReadContext(req, row);
   const matrixContext = buildContractDocumentRuleContextFromRow(row);
-  const documentRequirements = resolveDocumentRequirementsForContract(matrixContext);
-  const documentRequirementMatrix =
+  const rawDocumentRequirements = resolveDocumentRequirementsForContract(matrixContext);
+  const documentRequirements = {
+    seller: restrictDocumentRequirementSide(
+      rawDocumentRequirements.seller.map((item) => ({
+        ...item,
+        label: CONTRACT_DOCUMENT_CATEGORY_LABELS[item.category],
+      })),
+      readContext,
+      'seller'
+    ),
+    buyer: restrictDocumentRequirementSide(
+      rawDocumentRequirements.buyer.map((item) => ({
+        ...item,
+        label: CONTRACT_DOCUMENT_CATEGORY_LABELS[item.category],
+      })),
+      readContext,
+      'buyer'
+    ),
+  };
+  const rawDocumentRequirementMatrix =
     resolveDocumentRequirementMatrixForContract(matrixContext);
-  const ownerInfo = buildOwnerInfoFromContractRow(row);
-  const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
-  const ownerInfoForViewer = redactOwnerInfoByRole(ownerInfo, canViewSensitiveData);
+  const documentRequirementMatrix = {
+    seller: restrictDocumentRequirementSide(
+      rawDocumentRequirementMatrix.seller.map((item) => ({
+        ...item,
+        label: CONTRACT_DOCUMENT_CATEGORY_LABELS[item.category],
+      })),
+      readContext,
+      'seller'
+    ),
+    buyer: restrictDocumentRequirementSide(
+      rawDocumentRequirementMatrix.buyer.map((item) => ({
+        ...item,
+        label: CONTRACT_DOCUMENT_CATEGORY_LABELS[item.category],
+      })),
+      readContext,
+      'buyer'
+    ),
+  };
+  const sellerInfo = buildOwnerInfoFromContractRow(row);
+  const canReadSeller = canReadContractSide(readContext, 'seller');
+  const canReadBuyer = canReadContractSide(readContext, 'buyer');
+  const canViewSensitiveData = canReadSeller && canViewOwnerSensitiveData(req, row);
+  const sellerInfoForViewer = canReadSeller
+    ? redactOwnerInfoByRole(sellerInfo, canViewSensitiveData)
+    : {};
+  const buyerInfoForViewer = canReadBuyer ? parseStoredJsonObject(row.buyer_info) : {};
   const viewerSide = resolveContractViewerSide(req, row);
   return {
     id: row.id,
     negotiationId: row.negotiation_id,
     propertyId: Number(row.property_id),
     status: resolveContractStatus(row.status),
-    ownerInfo: ownerInfoForViewer,
-    // Compatibilidade legada: sellerInfo segue disponível no wire, mas semântica canônica é ownerInfo.
-    sellerInfo: ownerInfoForViewer,
-    buyerInfo: parseStoredJsonObject(row.buyer_info),
+    sellerInfo: sellerInfoForViewer,
+    // Compatibilidade legada: ownerInfo permanece somente como alias de sellerInfo.
+    ownerInfo: sellerInfoForViewer,
+    buyerInfo: buyerInfoForViewer,
     commissionData: canViewSensitiveData ? parseStoredJsonObject(row.commission_data) : {},
     workflowMetadata: parseStoredJsonObject(row.workflow_metadata),
     sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
@@ -1098,7 +1158,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
 
 export function mapDocument(row: ContractDocumentRow) {
   const metadata = parseStoredJsonObject(row.metadata_json);
-  const sideValue = String(metadata.side ?? '').trim().toLowerCase();
+  const sideValue = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
   const side: ContractDocumentSide | null =
     sideValue === 'seller' || sideValue === 'buyer'
       ? sideValue
@@ -1132,6 +1192,8 @@ export function mapDocument(row: ContractDocumentRow) {
     type: row.type,
     documentType: row.document_type,
     side,
+    owner_side: side,
+    ownerSide: side,
     documentCategory,
     categoryStatus,
     reviewReason: reviewReason || null,
@@ -1599,118 +1661,37 @@ function resolveContractViewerSide(
   }
 
   const context = resolveContractAccessContext(
-    req,
-    contract,
-    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
-      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
-        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    contract
   );
-  if (!context) {
-    return 'none';
-  }
-
-  if (context.isAdmin) {
-    return 'both';
-  }
-
-  if (context.isResponsible) {
-    return 'both';
-  }
-
-  if (context.isSellerSide && !context.isBuyerSide) {
-    return 'seller';
-  }
-
-  if (context.isBuyerSide && !context.isSellerSide) {
-    return 'buyer';
-  }
-
-  if (context.isBuyerSide && context.isSellerSide) {
-    return 'both';
-  }
-
+  if (context.userRole === 'admin' || context.userRole === 'responsible') return 'both';
+  if (context.userRole === 'seller') return 'seller';
+  if (context.userRole === 'buyer') return 'buyer';
   return 'none';
 }
 
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
-    req,
-    contract,
-    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
-      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
-        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    contract
   );
-  if (!context) {
-    return false;
-  }
-
-  if (context.isAdmin) {
-    return true;
-  }
-
-  if (context.isResponsible) {
-    return true;
-  }
-
-  if (context.role === 'client') {
-    return context.isBuyerSide || context.isSellerSide;
-  }
-
-  return false;
+  return context.canReadMeta;
 }
 
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
-    req,
-    contract,
-    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
-      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
-        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    contract
   );
-  if (!context) {
-    return false;
-  }
-
-  if (context.isAdmin) {
-    return true;
-  }
-
-  if (context.isResponsible) {
-    return true;
-  }
-
-  if (context.role === 'client') {
-    return context.isSellerSide;
-  }
-
-  return false;
+  return context.canEditSeller;
 }
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
-    req,
-    contract,
-    isNegotiationResponsibleUser(contract, Number(req.userId ?? 0)) &&
-      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
-        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    contract
   );
-  if (!context) {
-    return false;
-  }
-
-  if (context.isAdmin) {
-    return true;
-  }
-
-  if (context.isResponsible) {
-    return true;
-  }
-
-  if (context.role === 'client') {
-    return context.isBuyerSide;
-  }
-
-  return false;
+  return context.canEditBuyer;
 }
 
 function shouldMoveToDraft(
@@ -1770,6 +1751,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.buyer_client_id,
     n.client_name,
     n.client_cpf,
+    COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), NULLIF(TRIM(u_owner.cpf), '')) AS seller_cpf,
+    COALESCE(NULLIF(TRIM(n.client_cpf), ''), NULLIF(TRIM(buyer_user.cpf), '')) AS buyer_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,
@@ -2120,6 +2103,11 @@ class ContractController {
           "documentType inválido. Use contrato_assinado, comprovante_pagamento, boleto_vistoria ou outro.",
       });
     }
+    if (!side) {
+      return res.status(400).json({
+        error: 'Informe o dono do documento (side: seller|buyer).',
+      });
+    }
 
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
     if (!uploadedFile?.buffer || uploadedFile.buffer.length === 0) {
@@ -2152,6 +2140,7 @@ class ContractController {
         content: uploadedFile.buffer,
         metadataJson: {
           contractId,
+          owner_side: side,
           side,
           originalFileName: uploadedFile.originalname ?? null,
           uploadedAt: new Date().toISOString(),
@@ -2196,6 +2185,7 @@ class ContractController {
           contractId,
           documentType: documentTypeRaw,
           side,
+          owner_side: side,
           originalFileName: uploadedFile.originalname ?? null,
         },
       });
@@ -2215,6 +2205,12 @@ class ContractController {
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>;
+    const side = parseDocumentSide(body.side);
+    if (!side) {
+      return res.status(400).json({
+        error: 'Informe o dono da minuta (side: seller|buyer).',
+      });
+    }
     const reuseCurrentDraft = readBooleanLike(body.reuseCurrentDraft);
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
     if (!reuseCurrentDraft && (!uploadedFile?.buffer || uploadedFile.buffer.length === 0)) {
@@ -2262,6 +2258,8 @@ class ContractController {
           content: uploadedFile.buffer,
           metadataJson: {
             contractId,
+            owner_side: side,
+            side,
             originalFileName: uploadedFile.originalname ?? null,
             uploadedAt: new Date().toISOString(),
             uploadedVia: 'admin',
@@ -2875,7 +2873,10 @@ class ContractController {
         return res.status(404).json({ error: 'Contrato não encontrado.' });
       }
 
-      if (!canAccessContract(req, contract)) {
+      if (
+        req.contractContext?.contractId !== contract.id ||
+        !req.contractContext.canReadMeta
+      ) {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
@@ -2939,7 +2940,10 @@ class ContractController {
         return res.status(404).json({ error: 'Contrato não encontrado para esta negociação.' });
       }
 
-      if (!canAccessContract(req, contract)) {
+      if (
+        req.contractContext?.contractId !== contract.id ||
+        !req.contractContext.canReadMeta
+      ) {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 
@@ -3042,13 +3046,6 @@ class ContractController {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
-    }
-
-    const role = String(req.userRole ?? '').trim().toLowerCase();
-    if (role === 'admin') {
-      return res.status(403).json({
-        error: 'Este endpoint é exclusivo para o corretor responsável pelo contrato.',
-      });
     }
 
     const body = (req.body ?? {}) as SignatureMethodBody;

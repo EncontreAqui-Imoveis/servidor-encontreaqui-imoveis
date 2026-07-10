@@ -563,7 +563,8 @@ describe('Public property response shape contracts', () => {
       String(query).includes('FROM properties p') && String(query).includes('ORDER BY'),
     );
     const sqlText = String(listQuery?.[0] ?? '');
-    expect(sqlText).toContain('ORDER BY COALESCE(p.area_construida_m2, p.area_construida) ASC');
+    expect(sqlText).toContain('ORDER BY GREATEST(');
+    expect(sqlText).toContain('p.area_construida_m2');
   });
 
   it('returns the detail shape consumed by the public site details page', async () => {

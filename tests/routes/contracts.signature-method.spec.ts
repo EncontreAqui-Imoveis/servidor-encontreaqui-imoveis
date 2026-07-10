@@ -66,6 +66,7 @@ type MutableContractState = {
   selling_broker_name: string;
   capturing_agency_name: string | null;
   capturing_agency_address: string | null;
+  responsible_user_ids: string | null;
 };
 
 function createContractState(
@@ -95,6 +96,7 @@ function createContractState(
     selling_broker_name: 'Corretor Vendedor',
     capturing_agency_name: 'Imobiliária Centro',
     capturing_agency_address: 'Rua das Flores, 123, Centro',
+    responsible_user_ids: '30001',
     ...overrides,
   };
 }
@@ -163,7 +165,7 @@ describe('POST /contracts/:id/signature-method', () => {
       expect.objectContaining({
         signatureMethod: 'in_person',
         signatureMethodDeclaredBy: 30001,
-        signatureMethodDeclaredByName: 'Corretor Captador',
+        signatureMethodDeclaredByName: 'Responsável #30001',
       })
     );
 
@@ -226,16 +228,14 @@ describe('POST /contracts/:id/signature-method', () => {
     expect(createAdminNotificationMock).not.toHaveBeenCalled();
   });
 
-  it('rejects admin usage of the broker-only endpoint', async () => {
+  it('permite que admin informe o método de assinatura', async () => {
     actingUserRole = 'admin';
 
     const response = await request(app)
       .post('/contracts/contract-sign-1/signature-method')
       .send({ method: 'in_person' });
 
-    expect(response.status).toBe(403);
-    expect(String(response.body.error ?? '')).toContain('exclusivo para o corretor');
-    expect(txMock.beginTransaction).not.toHaveBeenCalled();
-    expect(createAdminNotificationMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(createAdminNotificationMock).toHaveBeenCalled();
   });
 });

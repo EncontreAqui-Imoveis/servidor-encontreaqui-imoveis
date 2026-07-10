@@ -254,6 +254,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
     const response = await request(app)
       .post('/admin/contracts/contract-1/draft')
+      .field('side', 'seller')
       .attach('file', Buffer.from('%PDF-1.4 draft%'), 'minuta.pdf');
 
     expect(response.status).toBe(200);
@@ -293,6 +294,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
     const response = await request(app)
       .post('/admin/contracts/contract-1/draft')
+      .field('side', 'seller')
       .field('reuseCurrentDraft', 'true');
 
     expect(response.status).toBe(200);
@@ -327,6 +329,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
     const response = await request(app)
       .post('/admin/contracts/contract-1/draft')
+      .field('side', 'seller')
       .attach('file', Buffer.from('%PDF-1.4 nova minuta%'), 'nova_minuta.pdf');
 
     expect(response.status).toBe(200);

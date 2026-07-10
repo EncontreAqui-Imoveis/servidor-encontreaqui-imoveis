@@ -240,7 +240,7 @@ interface ContractDocumentMapped {
 
 function mapDocument(row: ContractDocumentRow): ContractDocumentMapped {
   const metadata = parseStoredJsonObject(row.metadata_json);
-  const side = parseDocumentSide(metadata.side);
+  const side = parseDocumentSide(metadata.owner_side ?? metadata.side);
   const normalizedRowDocumentType = String(row.document_type ?? '').trim().toLowerCase();
   const rowCategory =
     normalizedRowDocumentType

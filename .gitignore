@@ -22,3 +22,4 @@ gitleaks-backend.json
 .log
 backend-threat-model.md
 docs/sast_negotiation_documents_r2.md
+cassino.code-workspace

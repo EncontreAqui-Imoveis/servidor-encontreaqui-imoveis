@@ -43,7 +43,7 @@ describe('GET /negotiations/:id/proposals/download', () => {
         seller_client_id: null,
         buyer_client_id: 40004,
       },
-    ]);
+    ]).mockResolvedValueOnce([]);
     findLatestNegotiationDocumentByTypeMock.mockResolvedValueOnce({
       id: 99,
       negotiationId: 'neg-1',
@@ -68,7 +68,7 @@ describe('GET /negotiations/:id/proposals/download', () => {
         seller_client_id: null,
         buyer_client_id: 40004,
       },
-    ]);
+    ]).mockResolvedValueOnce([]);
 
     const response = await request(app).get('/negotiations/neg-1/proposals/download');
 

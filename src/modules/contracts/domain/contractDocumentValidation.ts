@@ -6,9 +6,10 @@ import {
   type ContractDocumentCategoryStatus,
   type ContractDocumentType,
   type ContractDocumentValidationCode,
+  type ContractDocumentOwnerSide,
 } from './contract.types';
 
-export type ContractDocumentSide = 'seller' | 'buyer';
+export type ContractDocumentSide = ContractDocumentOwnerSide;
 
 export interface ContractDocumentValidationIssue {
   code: ContractDocumentValidationCode;

@@ -1,7 +1,10 @@
 import type { AuthRequest } from '../middlewares/auth';
 import { normalizeCpfDigits } from './cpfValidator';
+import { resolveContractAccessContext as resolveStrictContractAccessContext } from './contractAccessResolver';
 
 export interface ContractIdentityLike {
+  id?: string | null;
+  status?: string | null;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
   seller_client_id: number | null;
@@ -9,6 +12,9 @@ export interface ContractIdentityLike {
   client_cpf: string | null;
   property_owner_id: number | null;
   proposal_initiator_user_id: number | null;
+  seller_cpf?: string | null;
+  buyer_cpf?: string | null;
+  responsible_user_ids?: string | null;
 }
 
 export interface ContractAccessContext {
@@ -65,22 +71,34 @@ export function resolveContractAccessContext(
   contract: ContractIdentityLike,
   isResponsible: boolean,
 ): ContractAccessContext | null {
-  const role = String(req.userRole ?? '').trim().toLowerCase();
   const userId = Number(req.userId ?? 0);
   if (!Number.isFinite(userId) || userId <= 0) {
     return null;
   }
 
-  const isBuyerSide = isBuyerSideUser(contract, userId, req.userCpf);
+  const strictContext = resolveStrictContractAccessContext(
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    {
+      id: String(contract.id ?? ''),
+      status: contract.status,
+      seller_client_id: contract.seller_client_id,
+      buyer_client_id: contract.buyer_client_id,
+      seller_cpf: contract.seller_cpf,
+      buyer_cpf: contract.buyer_cpf ?? contract.client_cpf,
+      responsible_user_ids: isResponsible
+        ? [userId]
+        : contract.responsible_user_ids ?? null,
+    }
+  );
 
   return {
     userId,
-    role,
-    isAdmin: role === 'admin',
-    isResponsible,
+    role: String(req.userRole ?? '').trim().toLowerCase(),
+    isAdmin: strictContext.userRole === 'admin',
+    isResponsible: strictContext.userRole === 'responsible',
     isCapturingBroker: false,
     isSellingBroker: userId === Number(contract.selling_broker_id ?? 0),
-    isBuyerSide,
-    isSellerSide: isSellerSideUser(contract, userId),
+    isBuyerSide: strictContext.userRole === 'buyer',
+    isSellerSide: strictContext.userRole === 'seller',
   };
 }

@@ -62,6 +62,29 @@ export type ContractDocumentType = (typeof CONTRACT_DOCUMENT_TYPES)[number];
 
 export type ContractPartyInfo = Record<string, unknown>;
 
+export type ContractDocumentOwnerSide = 'seller' | 'buyer';
+
+export interface ContractDocumentMetadata {
+  owner_side: ContractDocumentOwnerSide;
+  /** @deprecated Read-only compatibility for records created before owner_side. */
+  side?: ContractDocumentOwnerSide;
+  [key: string]: unknown;
+}
+
+export const CONTRACT_DOCUMENT_CATEGORY_LABELS: Record<
+  (typeof CONTRACT_DOCUMENT_CATEGORY_CODES)[number],
+  string
+> = {
+  identidade: 'Identidade',
+  comprovante_endereco: 'Comprovante de Endereço',
+  estado_civil: 'Estado Civil',
+  conjuge_documentos: 'Documento Pessoal (Cônjuge)',
+  comprovante_renda: 'Comprovante de Renda',
+  dados_bancarios: 'Dados Bancários',
+  docs_imovel: 'Documentos do Imóvel',
+  outro: 'Outro',
+};
+
 export const CONTRACT_DOCUMENT_CATEGORY_CODES = [
   'identidade',
   'comprovante_endereco',

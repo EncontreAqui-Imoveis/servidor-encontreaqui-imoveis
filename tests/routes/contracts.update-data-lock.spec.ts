@@ -37,7 +37,7 @@ describe('PUT /contracts/:id/data', () => {
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as any).userId = 30003;
-    (req as any).userRole = 'broker';
+    (req as any).userRole = 'client';
     next();
   });
   app.put('/contracts/:id/data', (req, res) =>
@@ -54,7 +54,7 @@ describe('PUT /contracts/:id/data', () => {
     txMock.release.mockResolvedValue(undefined);
   });
 
-  it('bloqueia atualização do lado owner quando já está APPROVED', async () => {
+  it('bloqueia atualização do vendedor quando contrato está em assinatura', async () => {
     txMock.query.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
         return [[
@@ -62,7 +62,11 @@ describe('PUT /contracts/:id/data', () => {
             id: 'contract-1',
             negotiation_id: 'neg-1',
             property_id: 101,
-            status: 'AWAITING_DOCS',
+            status: 'AWAITING_SIGNATURES',
+            seller_client_id: 30003,
+            buyer_client_id: 30004,
+            seller_cpf: '111.111.111-11',
+            buyer_cpf: '222.222.222-22',
             seller_info: { email: 'old@test.com' },
             buyer_info: {},
             commission_data: {},
@@ -93,13 +97,14 @@ describe('PUT /contracts/:id/data', () => {
     const response = await request(app)
       .put('/contracts/contract-1/data')
       .send({
+        side: 'seller',
         sellerInfo: {
           email: 'new@test.com',
         },
       });
 
     expect(response.status).toBe(403);
-    expect(response.body.error).toContain('owner');
+    expect(response.body.error).toContain('lado vendedor');
     const updateCalls = txMock.query.mock.calls.filter(([sql]) =>
       String(sql).includes('UPDATE contracts') && String(sql).includes('seller_info')
     );
@@ -112,6 +117,10 @@ describe('PUT /contracts/:id/data', () => {
       negotiation_id: 'neg-1',
       property_id: 101,
       status: 'AWAITING_DOCS',
+      seller_client_id: 30003,
+      buyer_client_id: 30004,
+      seller_cpf: '111.111.111-11',
+      buyer_cpf: '222.222.222-22',
       seller_info: { email: 'old@test.com', legacy: 'remove-me' },
       buyer_info: { keep: true },
       commission_data: {},
@@ -162,6 +171,7 @@ describe('PUT /contracts/:id/data', () => {
     const response = await request(app)
       .put('/contracts/contract-1/data')
       .send({
+        side: 'seller',
         sellerInfo: {
           email: 'new@test.com',
         },
@@ -170,7 +180,7 @@ describe('PUT /contracts/:id/data', () => {
     expect(response.status).toBe(200);
     expect(response.body.contract.sellerInfo).toEqual({ email: 'new@test.com' });
     expect(response.body.contract.sellerInfo).not.toHaveProperty('legacy');
-    expect(response.body.contract.buyerInfo).toEqual({ keep: true });
+    expect(response.body.contract.buyerInfo).toEqual({});
   });
 
   it('aceita ownerInfo como alias de sellerInfo', async () => {
@@ -179,6 +189,10 @@ describe('PUT /contracts/:id/data', () => {
       negotiation_id: 'neg-1',
       property_id: 101,
       status: 'AWAITING_DOCS',
+      seller_client_id: 30003,
+      buyer_client_id: 30004,
+      seller_cpf: '111.111.111-11',
+      buyer_cpf: '222.222.222-22',
       seller_info: { email: 'owner-old@test.com', legacy: 'remove-me' },
       buyer_info: { keep: true },
       commission_data: {},
@@ -220,6 +234,7 @@ describe('PUT /contracts/:id/data', () => {
     const response = await request(app)
       .put('/contracts/contract-1/data')
       .send({
+        side: 'seller',
         ownerInfo: {
           email: 'owner-new@test.com',
         },
@@ -228,5 +243,35 @@ describe('PUT /contracts/:id/data', () => {
     expect(response.status).toBe(200);
     expect(response.body.contract.sellerInfo).toEqual({ email: 'owner-new@test.com' });
     expect(response.body.contract.ownerInfo).toEqual({ email: 'owner-new@test.com' });
+  });
+
+  it('rejeita bloco do comprador dentro da atualização do vendedor', async () => {
+    const response = await request(app)
+      .put('/contracts/contract-1/data')
+      .send({
+        side: 'seller',
+        sellerInfo: {
+          email: 'seller@test.com',
+          buyerInfo: { email: 'buyer@test.com' },
+        },
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('comprador');
+  });
+
+  it('rejeita bloco do vendedor dentro da atualização do comprador', async () => {
+    const response = await request(app)
+      .put('/contracts/contract-1/data')
+      .send({
+        side: 'buyer',
+        buyerInfo: {
+          email: 'buyer@test.com',
+          seller_info: { email: 'seller@test.com' },
+        },
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('vendedor');
   });
 });

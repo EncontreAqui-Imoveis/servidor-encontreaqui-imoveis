@@ -110,6 +110,7 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
           },
         ],
       ])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Contratual' }]])
       .mockResolvedValueOnce([[]]);
 

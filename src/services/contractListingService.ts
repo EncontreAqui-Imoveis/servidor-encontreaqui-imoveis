@@ -1,6 +1,7 @@
 import { Request } from 'express';
 import { RowDataPacket } from 'mysql2';
 import type { AuthRequest } from '../middlewares/auth';
+import { normalizeCpfDigits } from '../utils/cpfValidator';
 import { queryContractRows } from './contractPersistenceService';
 import {
   CONTRACT_SELECT_BASE_SQL,
@@ -111,6 +112,10 @@ export async function listMyContractsForUser(
     throw new Error('Usuário não autenticado.');
   }
 
+  if (String(req.userRole ?? '').trim().toLowerCase() === 'admin') {
+    return listContractsForAdmin(req);
+  }
+
   const statusFilter = parseContractStatusFilter(req.query.status);
   if (req.query.status != null && statusFilter == null) {
     throw new Error('Status de contrato inválido.');
@@ -124,17 +129,41 @@ export async function listMyContractsForUser(
   const statusParams = statusFilter ? [statusFilter] : [];
 
   const contractSelectSql = await getContractSelectSql();
-  const visibilityClause = `
-      (
-        n.capturing_broker_id = ?
-        OR n.selling_broker_id = ?
-        OR n.seller_client_id = ?
-        OR n.buyer_client_id = ?
+  const userCpf = normalizeCpfDigits(String(req.userCpf ?? ''));
+  const includeResponsibles = await hasNegotiationResponsiblesTable();
+  const responsibleVisibilityClause = includeResponsibles
+    ? `
         OR EXISTS (
           SELECT 1
-          FROM negotiation_proposal_idempotency npi
-          WHERE npi.negotiation_id = c.negotiation_id
-            AND npi.user_id = ?
+          FROM negotiation_responsibles nr
+          WHERE nr.negotiation_id = c.negotiation_id
+            AND nr.user_id = ?
+        )`
+    : '';
+  const visibilityClause = `
+      (
+        n.seller_client_id = ?
+        OR n.buyer_client_id = ?
+        OR (
+          ? <> ''
+          AND REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(n.client_cpf), ''), buyer_user.cpf, ''), '.', ''), '-', ''), ' ', '') = ?
+        )
+        ${responsibleVisibilityClause}
+      )
+  `;
+  const visibilityParams = includeResponsibles
+    ? [userId, userId, userCpf, userCpf, userId]
+    : [userId, userId, userCpf, userCpf];
+  const dualIdentityClause = `
+      AND NOT (
+        (
+          n.seller_client_id IS NOT NULL
+          AND n.buyer_client_id IS NOT NULL
+          AND n.seller_client_id = n.buyer_client_id
+        )
+        OR (
+          REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), owner_user.cpf, ''), '.', ''), '-', ''), ' ', '') <> ''
+          AND REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), owner_user.cpf, ''), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(n.client_cpf), ''), buyer_user.cpf, ''), '.', ''), '-', ''), ' ', '')
         )
       )
   `;
@@ -143,12 +172,15 @@ export async function listMyContractsForUser(
       SELECT COUNT(*) AS total
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id
+      JOIN properties p ON p.id = c.property_id
+      LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
+      LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
+      LEFT JOIN users owner_user ON owner_user.id = p.owner_id
       WHERE ${visibilityClause}
-        AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
-        AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
+      ${dualIdentityClause}
       ${statusClause}
     `,
-    [userId, userId, userId, userId, userId, ...statusParams],
+    [...visibilityParams, ...statusParams],
   );
   const total = Number(countRows[0]?.total ?? 0);
 
@@ -156,13 +188,12 @@ export async function listMyContractsForUser(
     `
       ${contractSelectSql}
       WHERE ${visibilityClause}
-        AND COALESCE(c.seller_approval_status, '') <> 'REJECTED'
-        AND COALESCE(c.buyer_approval_status, '') <> 'REJECTED'
+      ${dualIdentityClause}
       ${statusClause}
       ORDER BY c.updated_at DESC, c.created_at DESC
       LIMIT ? OFFSET ?
     `,
-    [userId, userId, userId, userId, userId, ...statusParams, limit, offset],
+    [...visibilityParams, ...statusParams, limit, offset],
   );
 
   if (rows.length === 0) {
@@ -204,8 +235,14 @@ export async function listMyContractsForUser(
   };
 }
 
-async function getContractSelectSql(): Promise<string> {
-  const hasTable = await queryContractRows<RowDataPacket>(
+let negotiationResponsiblesTableCache: boolean | null = null;
+
+async function hasNegotiationResponsiblesTable(): Promise<boolean> {
+  if (negotiationResponsiblesTableCache != null) {
+    return negotiationResponsiblesTableCache;
+  }
+
+  const rows = await queryContractRows<RowDataPacket>(
     `
       SELECT 1
       FROM information_schema.tables
@@ -215,8 +252,13 @@ async function getContractSelectSql(): Promise<string> {
     `,
     [],
   );
+  negotiationResponsiblesTableCache = rows.length > 0;
+  return negotiationResponsiblesTableCache;
+}
 
-  const responsibleUsersSelect = hasTable.length > 0
+async function getContractSelectSql(): Promise<string> {
+  const hasTable = await hasNegotiationResponsiblesTable();
+  const responsibleUsersSelect = hasTable
     ? `(
       SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
       FROM negotiation_responsibles nr

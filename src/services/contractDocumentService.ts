@@ -10,7 +10,10 @@ import {
   type ContractDocumentRow,
   type ContractRow,
 } from '../controllers/ContractController';
-import { resolveContractAccessContext } from '../utils/contractIdentity';
+import {
+  resolveContractAccessContext,
+} from '../utils/contractAccessResolver';
+import type { ContractAccessContext } from '../types/contractAuth';
 import { readNegotiationDocumentObject } from './negotiationDocumentStorageService';
 
 type ContractDocumentListItem = ReturnType<typeof mapDocument> & {
@@ -40,51 +43,29 @@ type DownloadedContractDocumentsZip = {
   fileBuffer: Buffer;
 };
 
-function isNegotiationResponsibleUser(contract: ContractRow, userId: number): boolean {
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return false;
-  }
+function resolveDocumentAccessContext(
+  req: AuthRequest | null,
+  contract: ContractRow
+): ContractAccessContext | null {
+  if (!req) return null;
+  if (req.contractContext?.contractId === contract.id) return req.contractContext;
 
-  const raw = String((contract as { responsible_user_ids?: unknown }).responsible_user_ids ?? '').trim();
-  if (!raw) {
-    return false;
-  }
-
-  return raw
-    .split(',')
-    .map((value) => Number(value))
-    .some((value) => Number.isInteger(value) && value === userId);
-}
-
-function canViewOwnerSensitiveData(req: AuthRequest | null, row: ContractRow): boolean {
-  if (!req) return false;
-  const context = resolveContractAccessContext(
-    req,
-    row,
-    isNegotiationResponsibleUser(row, Number(req.userId ?? 0)) &&
-      (String(req.userRole ?? '').trim().toLowerCase() === 'broker' ||
-        String(req.userRole ?? '').trim().toLowerCase() === 'auxiliary_administrative')
+  return resolveContractAccessContext(
+    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    contract
   );
-  if (!context) {
-    return false;
-  }
-
-  if (context.isAdmin || context.isResponsible) {
-    return true;
-  }
-
-  return context.isSellerSide;
 }
 
-function shouldExposeOwnerSensitiveDocument(
-  input: {
-    side: ReturnType<typeof mapDocument>['side'];
-    documentCategory: ReturnType<typeof mapDocument>['documentCategory'];
-  },
-  canViewSensitiveData: boolean
+function canReadDocument(
+  document: ReturnType<typeof mapDocument>,
+  context: ContractAccessContext | null
 ): boolean {
-  if (canViewSensitiveData) return true;
-  return !(input.side === 'seller' && input.documentCategory === 'dados_bancarios');
+  if (!context?.canReadMeta) return false;
+  if (document.side === 'seller') return context.canReadSeller;
+  if (document.side === 'buyer') return context.canReadBuyer;
+
+  // Legacy documents without owner_side cannot be safely attributed to a participant.
+  return context.userRole === 'admin' || context.userRole === 'responsible';
 }
 
 function isProposalDocument(document: {
@@ -117,22 +98,14 @@ async function fetchVisibleContractDocuments(
     [contract.negotiation_id]
   );
 
-  const canViewSensitiveData = canViewOwnerSensitiveData(req, contract as ContractRow);
+  const context = resolveDocumentAccessContext(req, contract as ContractRow);
   return documents
     .filter((document) => !isProposalDocument(document))
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
     }))
-    .filter((document) =>
-      shouldExposeOwnerSensitiveDocument(
-        {
-          side: document.side,
-          documentCategory: document.documentCategory,
-        },
-        canViewSensitiveData
-      )
-    );
+    .filter((document) => canReadDocument(document, context));
 }
 
 async function fetchVisibleContractDocumentsWithStorage(
@@ -171,7 +144,7 @@ async function fetchVisibleContractDocumentsWithStorage(
     [contract.negotiation_id]
   );
 
-  const canViewSensitiveData = canViewOwnerSensitiveData(req, contract as ContractRow);
+  const context = resolveDocumentAccessContext(req, contract as ContractRow);
   return documents
     .filter((document) => !isProposalDocument(document))
     .map((document) => ({
@@ -179,15 +152,7 @@ async function fetchVisibleContractDocumentsWithStorage(
       ...mapDocument(document),
       downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
     }))
-    .filter((document) =>
-      shouldExposeOwnerSensitiveDocument(
-        {
-          side: document.side,
-          documentCategory: document.documentCategory,
-        },
-        canViewSensitiveData
-      )
-    );
+    .filter((document) => canReadDocument(document, context));
 }
 
 export async function buildContractDocumentPayload(

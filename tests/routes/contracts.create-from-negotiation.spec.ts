@@ -48,8 +48,6 @@ describe('POST /admin/negotiations/:id/contract', () => {
         updated_at: '2026-06-01 10:00:00',
         capturing_broker_id: 30003,
         selling_broker_id: 30004,
-        seller_client_id: null,
-        buyer_client_id: null,
         property_title: 'Casa Centro',
         property_purpose: 'Venda',
         property_code: 'RV-101',

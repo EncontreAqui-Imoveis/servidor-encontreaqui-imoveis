@@ -183,12 +183,11 @@ export interface ContractRow extends RowDataPacket {
   updated_at: Date | string | null;
   capturing_broker_id: number | null;
   selling_broker_id: number | null;
-  seller_client_id: number | null;
-  buyer_client_id: number | null;
+  advertiser_id: number | null;
+  proposer_id: number | null;
   seller_cpf: string | null;
   buyer_cpf: string | null;
   client_name: string | null;
-  client_cpf: string | null;
   property_title: string | null;
   property_purpose: string | null;
   property_code: string | null;
@@ -806,8 +805,8 @@ function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
 /** Corretores envolvidos + cliente comprador (quando existir), para notificações de contrato. */
 function resolveContractNotificationRecipientIds(contract: ContractRow): number[] {
   const brokers = resolveNegotiationBrokerRecipientIds(contract);
-  const clientId = Number(contract.buyer_client_id ?? 0);
-  const ownerId = Number(contract.property_owner_id ?? 0);
+  const clientId = Number(contract.proposer_id ?? 0);
+  const ownerId = Number(contract.advertiser_id ?? contract.property_owner_id ?? 0);
   return Array.from(
     new Set(
       [...brokers, clientId, ownerId].filter(
@@ -985,7 +984,7 @@ function resolveContractReadContext(
   }
 
   return resolveContractAccessContext(
-    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    { id: req.userId, role: req.userRole },
     row
   );
 }
@@ -1126,11 +1125,9 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
       row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
       row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
-    sellerClientId:
-      row.seller_client_id !== null ? Number(row.seller_client_id) : null,
-    buyerClientId: row.buyer_client_id !== null ? Number(row.buyer_client_id) : null,
+    advertiserId: row.advertiser_id !== null ? Number(row.advertiser_id) : null,
+    proposerId: row.proposer_id !== null ? Number(row.proposer_id) : null,
     clientName: row.client_name ?? null,
-    clientCpf: row.client_cpf ?? null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
     ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
@@ -1661,7 +1658,7 @@ function resolveContractViewerSide(
   }
 
   const context = resolveContractAccessContext(
-    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    { id: req.userId, role: req.userRole },
     contract
   );
   if (context.userRole === 'admin' || context.userRole === 'responsible') return 'both';
@@ -1672,7 +1669,7 @@ function resolveContractViewerSide(
 
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
-    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    { id: req.userId, role: req.userRole },
     contract
   );
   return context.canReadMeta;
@@ -1680,7 +1677,7 @@ function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
 
 function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
-    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    { id: req.userId, role: req.userRole },
     contract
   );
   return context.canEditSeller;
@@ -1688,7 +1685,7 @@ function canEditSellerSide(req: AuthRequest, contract: ContractRow): boolean {
 
 function canEditBuyerSide(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
-    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    { id: req.userId, role: req.userRole },
     contract
   );
   return context.canEditBuyer;
@@ -1711,7 +1708,7 @@ function shouldMoveToDraft(
 
 function shouldTreatContractAsSingleClientFlow(contract: ContractRow): boolean {
   const sellerPartyId = resolveSellerPartyId(contract);
-  const buyerId = Number(contract.buyer_client_id ?? 0);
+  const buyerId = Number(contract.proposer_id ?? 0);
   return sellerPartyId > 0 && buyerId > 0 && sellerPartyId !== buyerId;
 }
 
@@ -1747,12 +1744,11 @@ export const CONTRACT_SELECT_BASE_SQL = `
     c.updated_at,
     n.capturing_broker_id,
     n.selling_broker_id,
-    n.seller_client_id,
-    n.buyer_client_id,
+    n.advertiser_id,
+    n.proposer_id,
     n.client_name,
-    n.client_cpf,
-    COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), NULLIF(TRIM(owner_user.cpf), '')) AS seller_cpf,
-    COALESCE(NULLIF(TRIM(n.client_cpf), ''), NULLIF(TRIM(buyer_user.cpf), '')) AS buyer_cpf,
+    NULL AS seller_cpf,
+    NULL AS buyer_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,
@@ -1783,8 +1779,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     ) AS proposal_initiator_user_id,
     COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
-    seller_client_user.name AS seller_client_name,
-    buyer_user.name AS buyer_client_name,
+    advertiser_user.name AS seller_client_name,
+    proposer_user.name AS buyer_client_name,
     capture_agency.name AS capturing_agency_name,
     NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address,
     __RESPONSIBLE_USERS_SELECT__
@@ -1795,8 +1791,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN brokers capture_broker ON capture_broker.id = n.capturing_broker_id
   LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
-  LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
-  LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
+  LEFT JOIN users proposer_user ON proposer_user.id = n.proposer_id
+  LEFT JOIN users advertiser_user ON advertiser_user.id = n.advertiser_id
   LEFT JOIN users owner_user ON owner_user.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;

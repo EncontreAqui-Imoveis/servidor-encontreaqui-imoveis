@@ -1343,14 +1343,14 @@ class UserController {
             ranked.id,
             ranked.status,
             ranked.final_value,
-            ranked.buyer_client_id
+            ranked.proposer_id
           FROM (
             SELECT
               n.property_id,
               n.id,
               n.status,
               n.final_value,
-              n.buyer_client_id,
+              n.proposer_id,
               ROW_NUMBER() OVER (
                 PARTITION BY n.property_id
                 ORDER BY n.version DESC, n.id DESC
@@ -1360,7 +1360,7 @@ class UserController {
           ) ranked
           WHERE ranked.rn = 1
         ) n ON n.property_id = p.id
-        LEFT JOIN users nbu ON nbu.id = n.buyer_client_id
+        LEFT JOIN users nbu ON nbu.id = n.proposer_id
         LEFT JOIN property_images pi ON p.id = pi.property_id
         WHERE p.owner_id = ?
         GROUP BY

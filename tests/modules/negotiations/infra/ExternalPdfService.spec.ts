@@ -67,7 +67,6 @@ describe('ExternalPdfService', () => {
       'http://pdf-service.internal/generate-proposal',
       {
         client_name: 'Ana Silva',
-        client_cpf: '123.456.789-00',
         deal_type: null,
         property_address: 'Rua A, 10',
         broker_name: 'Pedro',

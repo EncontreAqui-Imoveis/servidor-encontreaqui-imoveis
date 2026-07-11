@@ -21,8 +21,6 @@
     "migrate:status": "ts-node src/database/migrationRunner.ts status",
     "db:init": "ts-node src/database/init.ts",
     "db:verify": "ts-node src/database/schemaVerification.ts",
-    "contracts:legacy:audit": "ts-node scripts/audit-legacy-contracts.ts",
-    "contracts:legacy:apply": "ts-node scripts/audit-legacy-contracts.ts --apply",
     "sentry:test": "ts-node scripts/sentry-test.ts"
   },
   "keywords": [],

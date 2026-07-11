@@ -43,17 +43,7 @@ describe('GET /negotiations/mine', () => {
 
   it('returns the authenticated user negotiations in the site shape', async () => {
     queryMock
-      .mockResolvedValueOnce([[{ cpf: '52998224725' }]])
-      .mockResolvedValueOnce([
-        [
-          { column_name: 'buyer_client_id' },
-          { column_name: 'selling_broker_id' },
-          { column_name: 'client_name' },
-          { column_name: 'client_cpf' },
-          { column_name: 'updated_at' },
-          { column_name: 'payment_details' },
-        ],
-      ])
+      .mockResolvedValueOnce([[{ total: 1 }]])
       .mockResolvedValueOnce([
       [
         {
@@ -65,10 +55,11 @@ describe('GET /negotiations/mine', () => {
           property_image: 'https://res.cloudinary.com/demo/image/upload/casa.jpg',
           status: 'DOCUMENTATION_PHASE',
           client_name: 'Cliente 1',
-          client_cpf: '52998224725',
           proposal_validity_date: '2026-03-20 10:00:00',
           created_at: '2026-03-10 10:00:00',
           updated_at: '2026-03-11 12:00:00',
+          proposer_id: 30003,
+          advertiser_id: 77,
         },
       ],
     ]);
@@ -92,32 +83,15 @@ describe('GET /negotiations/mine', () => {
         updatedAt: '2026-03-11T15:00:00.000Z',
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledTimes(3);
-    const cpfSql = String(queryMock.mock.calls[0]?.[0] ?? '');
-    const cpfParams = queryMock.mock.calls[0]?.[1] as unknown[];
-    expect(cpfSql).toContain('SELECT cpf');
-    expect(cpfParams).toEqual([30003]);
-    const schemaSql = String(queryMock.mock.calls[1]?.[0] ?? '');
-    const params = queryMock.mock.calls[1]?.[1] as unknown[];
-    expect(schemaSql).toContain('information_schema.columns');
-    expect(params).toEqual([]);
-    const listParams = queryMock.mock.calls[2]?.[1] as unknown[];
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    const listParams = queryMock.mock.calls[1]?.[1] as unknown[];
     expect(listParams?.slice(0, 2)).toEqual([30003, 30003]);
-    expect(listParams).toContain('IN_NEGOTIATION');
+    expect(listParams?.slice(-2)).toEqual([20, 0]);
   });
 
-  it('uses schema-aware query for /negotiations/mine when optional columns are inspected', async () => {
+  it('does not infer actor identity from qualification fields', async () => {
     queryMock
-      .mockResolvedValueOnce([[{ cpf: '52998224725' }]])
-      .mockResolvedValueOnce([
-        [
-          { column_name: 'client_name' },
-          { column_name: 'client_cpf' },
-          { column_name: 'updated_at' },
-          { column_name: 'payment_details' },
-          { column_name: 'last_draft_edit_at' },
-        ],
-      ])
+      .mockResolvedValueOnce([[{ total: 1 }]])
       .mockResolvedValueOnce([
         [
           {
@@ -129,10 +103,11 @@ describe('GET /negotiations/mine', () => {
             property_image: null,
             status: 'IN_NEGOTIATION',
             client_name: null,
-            client_cpf: null,
             proposal_validity_date: null,
             created_at: '2026-03-01 10:00:00',
             updated_at: '2026-03-02 10:00:00',
+            proposer_id: 30003,
+            advertiser_id: 77,
             payment_details: JSON.stringify({
               details: {
                 clientName: 'Cliente Legacy',
@@ -152,26 +127,16 @@ describe('GET /negotiations/mine', () => {
         propertyId: 101,
         propertyTitle: 'Apartamento Centro',
         status: 'IN_NEGOTIATION',
-        clientName: 'Cliente Legacy',
-        clientCpf: '99988877766',
+        clientName: null,
+        clientCpf: null,
       }),
     ]);
-    expect(queryMock).toHaveBeenCalledTimes(3);
+    expect(queryMock).toHaveBeenCalledTimes(2);
   });
 
   it('is compatible with GET /negotiations/me as alias of /negotiations/mine', async () => {
     queryMock
-      .mockResolvedValueOnce([[{ cpf: '52998224725' }]])
-      .mockResolvedValueOnce([
-        [
-          { column_name: 'buyer_client_id' },
-          { column_name: 'selling_broker_id' },
-          { column_name: 'client_name' },
-          { column_name: 'client_cpf' },
-          { column_name: 'updated_at' },
-          { column_name: 'payment_details' },
-        ],
-      ])
+      .mockResolvedValueOnce([[{ total: 1 }]])
       .mockResolvedValueOnce([
         [
           {
@@ -183,10 +148,11 @@ describe('GET /negotiations/mine', () => {
             property_image: 'https://res.cloudinary.com/demo/image/upload/casa-alias.jpg',
             status: 'IN_NEGOTIATION',
             client_name: 'Cliente Alias',
-            client_cpf: '22233344455',
             proposal_validity_date: '2026-06-01 10:00:00',
             created_at: '2026-05-01 10:00:00',
             updated_at: '2026-05-02 12:00:00',
+            proposer_id: 30003,
+            advertiser_id: 77,
           },
         ],
       ]);

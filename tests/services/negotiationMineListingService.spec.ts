@@ -28,19 +28,7 @@ describe('negotiationMineListingService.listMine', () => {
 
   it('returns schema-aware negotiations for authenticated user', async () => {
     vi.mocked(queryNegotiationRows)
-      .mockResolvedValueOnce([
-        { cpf: '52998224725' },
-      ] as any)
-      .mockResolvedValueOnce([
-        { column_name: 'buyer_client_id' },
-        { column_name: 'seller_client_id' },
-        { column_name: 'client_name' },
-        { column_name: 'client_cpf' },
-        { column_name: 'updated_at' },
-        { column_name: 'payment_details' },
-        { column_name: 'last_draft_edit_at' },
-        { column_name: 'final_value' },
-      ] as any)
+      .mockResolvedValueOnce([{ total: 1 }] as any)
       .mockResolvedValueOnce([
         {
           id: 'neg-1',
@@ -51,7 +39,6 @@ describe('negotiationMineListingService.listMine', () => {
           property_image: 'https://res.cloudinary.com/demo/image/upload/casa.jpg',
           status: 'DOCUMENTATION_PHASE',
           client_name: 'Cliente 1',
-          client_cpf: '52998224725',
           proposal_validity_date: '2026-03-20 10:00:00',
           created_at: '2026-03-10 10:00:00',
           updated_at: '2026-03-11 12:00:00',
@@ -66,11 +53,10 @@ describe('negotiationMineListingService.listMine', () => {
               outros: 0,
             },
           }),
-          capturing_broker_id: 30003,
-          selling_broker_id: 30004,
-          seller_client_id: 90001,
-          buyer_client_id: 90002,
-          last_draft_edit_at: '2026-03-11 11:59:45',
+          proposer_id: 90002,
+          advertiser_id: 90001,
+          proposer_name: 'Proponente',
+          advertiser_name: 'Anunciante',
           final_value: 500000,
           signed_proposal_count: 1,
           property_broker_id: 45555,
@@ -96,7 +82,6 @@ describe('negotiationMineListingService.listMine', () => {
           clientName: 'Cliente 1',
           clientCpf: '52998224725',
           hasSignedProposal: true,
-          validadeDias: 12,
           proposalValue: 500000,
           paymentBreakdown: {
             dinheiro: 100000,
@@ -104,11 +89,17 @@ describe('negotiationMineListingService.listMine', () => {
             financiamento: 400000,
             outros: 0,
           },
-          sellerClientId: 90001,
-          buyerApprovalStatus: 'APPROVED',
-          sellerApprovalStatus: 'PENDING',
+          capabilities: expect.objectContaining({
+            canManageBuyerData: true,
+            canManageSellerData: false,
+            canOpenContract: true,
+          }),
         }),
       ],
+      page: 1,
+      limit: 20,
+      total: 1,
+      hasMore: false,
     });
   });
 
@@ -127,8 +118,7 @@ describe('negotiationMineListingService.listMine', () => {
 
   it('returns empty data when no negotiations are found', async () => {
     vi.mocked(queryNegotiationRows)
-      .mockResolvedValueOnce([{ cpf: '52998224725' }] as any)
-      .mockResolvedValueOnce([{ column_name: 'updated_at' }] as any)
+      .mockResolvedValueOnce([{ total: 0 }] as any)
       .mockResolvedValueOnce([] as any);
 
     const req = { userId: 30003 } as any;
@@ -137,19 +127,12 @@ describe('negotiationMineListingService.listMine', () => {
     await listMine(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({ data: [] });
+    expect(res.json).toHaveBeenCalledWith({ data: [], page: 1, limit: 20, total: 0, hasMore: false });
   });
 
   it('does not mark documentation-phase negotiation as signed without document', async () => {
     vi.mocked(queryNegotiationRows)
-      .mockResolvedValueOnce([
-        { cpf: '52998224725' },
-      ] as any)
-      .mockResolvedValueOnce([
-        { column_name: 'buyer_client_id' },
-        { column_name: 'seller_client_id' },
-        { column_name: 'updated_at' },
-      ] as any)
+      .mockResolvedValueOnce([{ total: 1 }] as any)
       .mockResolvedValueOnce([
         {
           id: 'neg-2',
@@ -160,16 +143,12 @@ describe('negotiationMineListingService.listMine', () => {
           property_image: null,
           status: 'DOCUMENTATION_PHASE',
           client_name: 'Cliente 2',
-          client_cpf: '12345678909',
           proposal_validity_date: '2026-03-20 10:00:00',
           created_at: '2026-03-10 10:00:00',
           updated_at: '2026-03-11 12:00:00',
           payment_details: JSON.stringify({ validadeDias: 10, details: {} }),
-          capturing_broker_id: 30003,
-          selling_broker_id: 30004,
-          seller_client_id: 90001,
-          buyer_client_id: 90002,
-          last_draft_edit_at: null,
+          proposer_id: 90002,
+          advertiser_id: 90001,
           final_value: 500000,
           signed_proposal_count: 0,
         },
@@ -181,7 +160,7 @@ describe('negotiationMineListingService.listMine', () => {
     await listMine(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
       data: [
         expect.objectContaining({
           id: 'neg-2',
@@ -189,54 +168,13 @@ describe('negotiationMineListingService.listMine', () => {
           hasSignedProposalDocument: false,
         }),
       ],
-    });
+    }));
   });
 
-  it('includes legacy proposals matched by client CPF', async () => {
+  it('does not expose legacy proposals without an explicit actor', async () => {
     vi.mocked(queryNegotiationRows)
-      .mockResolvedValueOnce([
-        { cpf: '52998224725' },
-      ] as any)
-      .mockResolvedValueOnce([
-        { column_name: 'client_name' },
-        { column_name: 'client_cpf' },
-        { column_name: 'updated_at' },
-        { column_name: 'payment_details' },
-      ] as any)
-      .mockResolvedValueOnce([
-        {
-          id: 'neg-legacy-cpf',
-          property_id: 90001,
-          property_title: 'Casa Região Norte',
-          property_city: 'Rio Verde',
-          property_state: 'GO',
-          property_image: null,
-          status: 'PROPOSAL_SENT',
-          client_name: null,
-          client_cpf: null,
-          proposal_validity_date: '2026-07-10 10:00:00',
-          created_at: '2026-07-04 10:00:00',
-          updated_at: '2026-07-04 10:58:19',
-          payment_details: JSON.stringify({
-            validadeDias: 10,
-            details: {
-              clientName: 'uidibidi',
-              clientCpf: '09169443106',
-              dinheiro: 450000,
-              permuta: 0,
-              financiamento: 0,
-              outros: 0,
-            },
-          }),
-          capturing_broker_id: 2,
-          selling_broker_id: 2,
-          seller_client_id: null,
-          buyer_client_id: null,
-          last_draft_edit_at: null,
-          final_value: 450000,
-          signed_proposal_count: 0,
-        },
-      ] as any);
+      .mockResolvedValueOnce([{ total: 0 }] as any)
+      .mockResolvedValueOnce([] as any);
 
     const req = { userId: 90002 } as any;
     const res = createMockResponse();
@@ -244,17 +182,6 @@ describe('negotiationMineListingService.listMine', () => {
     await listMine(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({
-      data: [
-        expect.objectContaining({
-          id: 'neg-legacy-cpf',
-          propertyId: 90001,
-          propertyTitle: 'Casa Região Norte',
-          clientName: 'uidibidi',
-          clientCpf: '09169443106',
-          status: 'PROPOSAL_SENT',
-        }),
-      ],
-    });
+    expect(res.json).toHaveBeenCalledWith({ data: [], page: 1, limit: 20, total: 0, hasMore: false });
   });
 });

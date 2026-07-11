@@ -9,29 +9,22 @@ import {
   saveNegotiationSignedProposalDocument,
   queryNegotiationRows,
 } from './negotiationPersistenceService';
+import { isNegotiationActor, isNegotiationAdmin } from '../utils/negotiationActorAccess';
 
 interface NegotiationUploadRow extends RowDataPacket {
   id: string;
   property_id: number;
   status: string;
-  capturing_broker_id: number | null;
-  selling_broker_id: number | null;
-  seller_client_id: number | null;
-  buyer_client_id: number | null;
+  proposer_id: number | null;
+  advertiser_id: number | null;
   property_title: string | null;
   broker_name: string | null;
 }
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
-  capturing_broker_id: number | null;
-  selling_broker_id: number | null;
-  seller_client_id: number | null;
-  buyer_client_id: number | null;
-}
-
-interface ProposalInitiatorRow extends RowDataPacket {
-  id: number;
+  proposer_id: number | null;
+  advertiser_id: number | null;
 }
 
 const SIGNED_PROPOSAL_REVIEW_STATUS = 'DOCUMENTATION_PHASE';
@@ -40,53 +33,6 @@ const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
   'DOCUMENTATION_PHASE',
   'AWAITING_SIGNATURES',
 ]);
-
-function canAccessNegotiationByOwnership(
-  userId: number,
-  negotiation: NegotiationAccessRow
-): boolean {
-  return (
-    userId === Number(negotiation.capturing_broker_id ?? 0) ||
-    userId === Number(negotiation.selling_broker_id ?? 0) ||
-    userId === Number(negotiation.seller_client_id ?? 0) ||
-    userId === Number(negotiation.buyer_client_id ?? 0)
-  );
-}
-
-function canManageOwnProposal(
-  userId: number,
-  role: string,
-  negotiation: NegotiationAccessRow
-): boolean {
-  const normalizedRole = String(role ?? '').trim().toLowerCase();
-  if (normalizedRole === 'client') {
-    return (
-      userId === Number(negotiation.buyer_client_id ?? 0) ||
-      userId === Number(negotiation.seller_client_id ?? 0)
-    );
-  }
-  if (normalizedRole === 'broker') {
-    return userId === Number(negotiation.capturing_broker_id ?? 0);
-  }
-  return canAccessNegotiationByOwnership(userId, negotiation);
-}
-
-async function hasProposalInitiatorAccess(
-  negotiationId: string,
-  userId: number
-): Promise<boolean> {
-  const rows = await queryNegotiationRows<ProposalInitiatorRow>(
-    `
-      SELECT 1 AS id
-      FROM negotiation_proposal_idempotency
-      WHERE negotiation_id = ?
-        AND user_id = ?
-      LIMIT 1
-    `,
-    [negotiationId, userId]
-  );
-  return rows.length > 0;
-}
 
 function toRowArray<T>(result: unknown): T[] {
   if (!Array.isArray(result)) {
@@ -135,9 +81,8 @@ export async function uploadSignedProposal(
           n.id,
           n.property_id,
           n.status,
-          n.capturing_broker_id,
-          n.selling_broker_id,
-          n.buyer_client_id,
+          n.proposer_id,
+          n.advertiser_id,
           p.title AS property_title,
           u.name AS broker_name
         FROM negotiations n
@@ -158,23 +103,11 @@ export async function uploadSignedProposal(
 
     const userId = Number(req.userId);
     const userRole = String(req.userRole ?? '');
-    const hasOwnershipAccess = canManageOwnProposal(
-      userId,
-      userRole,
-      negotiation as unknown as NegotiationAccessRow
-    );
-    const hasInitiatorAccess = hasOwnershipAccess
-      ? true
-      : await hasProposalInitiatorAccess(negotiationId, userId);
-    if (
-      userRole.trim().toLowerCase() !== 'admin' &&
-      !hasOwnershipAccess &&
-      !hasInitiatorAccess
-    ) {
+    if (!isNegotiationAdmin(userRole) && Number(negotiation.proposer_id ?? 0) !== userId) {
       await tx.rollback();
       return res
         .status(403)
-        .json({ error: 'Você não possui permissão para enviar esta proposta.' });
+        .json({ error: 'Apenas o proponente pode enviar esta proposta.' });
     }
 
     const currentStatus = String(negotiation.status ?? '').trim().toUpperCase();
@@ -306,7 +239,7 @@ export async function downloadLatestProposal(
   try {
     const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
       `
-        SELECT id, capturing_broker_id, selling_broker_id, seller_client_id, buyer_client_id
+        SELECT id, proposer_id, advertiser_id
         FROM negotiations
         WHERE id = ?
         LIMIT 1
@@ -318,15 +251,7 @@ export async function downloadLatestProposal(
       return res.status(404).json({ error: 'Negociação não encontrada.' });
     }
 
-    const hasOwnershipAccess = canManageOwnProposal(userId, role, negotiation);
-    const hasInitiatorAccess = hasOwnershipAccess
-      ? true
-      : await hasProposalInitiatorAccess(negotiationId, userId);
-    if (
-      role !== 'admin' &&
-      !hasOwnershipAccess &&
-      !hasInitiatorAccess
-    ) {
+    if (!isNegotiationAdmin(role) && !isNegotiationActor(userId, negotiation)) {
       return res.status(403).json({ error: 'Acesso negado à proposta.' });
     }
 

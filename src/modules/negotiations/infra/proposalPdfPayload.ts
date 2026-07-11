@@ -23,8 +23,8 @@ function toOptionalText(value: unknown): string | null {
 }
 
 export function buildProposalPdfPayload(data: ProposalData): {
-  client_name: string;
-  client_cpf: string;
+  clientName: string;
+  clientCpf: string;
   property_address: string;
   deal_type: string | null;
   broker_name: string;
@@ -42,8 +42,8 @@ export function buildProposalPdfPayload(data: ProposalData): {
   const payment = data.payment ?? {};
 
   return {
-    client_name: toRequiredText(data.clientName, 'clientName'),
-    client_cpf: toRequiredText(data.clientCpf, 'clientCpf'),
+    clientName: toRequiredText(data.clientName, 'clientName'),
+    clientCpf: toRequiredText(data.clientCpf, 'clientCpf'),
     property_address: toRequiredText(data.propertyAddress, 'propertyAddress'),
     deal_type: data.dealType ?? null,
     broker_name: toRequiredText(data.brokerName, 'brokerName'),

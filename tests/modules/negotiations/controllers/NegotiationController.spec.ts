@@ -46,7 +46,6 @@ describe('NegotiationController.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 55,
         selling_broker_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 
@@ -86,7 +85,6 @@ describe('NegotiationController.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 55,
         selling_broker_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 
@@ -118,7 +116,6 @@ describe('NegotiationController.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 10,
         selling_broker_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 
@@ -150,7 +147,6 @@ describe('NegotiationController.downloadLatestProposal', () => {
         id: 'neg-1',
         capturing_broker_id: 55,
         selling_broker_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 
@@ -194,7 +190,6 @@ describe('NegotiationController.downloadLatestProposal', () => {
         id: 'neg-1',
         capturing_broker_id: 55,
         selling_broker_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 

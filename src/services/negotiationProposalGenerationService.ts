@@ -76,16 +76,8 @@ type BrokerProposalContext = {
   sellingBrokerName: string | null;
 };
 
-// A user may have at most one active proposal per property while it is still in a proposal flow.
-const PROPOSAL_BLOCKING_STATUSES = [
-  'PROPOSAL_DRAFT',
-  'PROPOSAL_SENT',
-  'IN_NEGOTIATION',
-] as const;
-
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
-const DUPLICATE_PROPOSAL_CONFLICT_MESSAGE =
-  'Ja existe uma proposta ativa ou em andamento desta pessoa para este imovel.';
+const PROPOSAL_CREATION_COOLDOWN_MS = 60_000;
 
 function resolveIdempotencyKey(req: AuthRequest): string {
   const fromHeader = String(req.get('Idempotency-Key') ?? '').trim();
@@ -514,30 +506,6 @@ export async function generateProposalFromProperty(
       });
     }
 
-    let buyerUserIdentity: { id: number; name: string } | null = null;
-    if (payload.buyerUserId != null) {
-      try {
-        buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
-      } catch (error) {
-        await tx.rollback();
-        return res.status(400).json({
-          error: error instanceof Error ? error.message : 'Usuario comprador invalido.',
-        });
-      }
-
-      const resolvedBuyerUserIdentity = buyerUserIdentity;
-      if (!resolvedBuyerUserIdentity) {
-        await tx.rollback();
-        return res.status(400).json({
-          error: 'Usuario comprador invalido.',
-        });
-      }
-    }
-
-    if (!buyerUserIdentity) {
-      buyerUserIdentity = await resolveBuyerUserIdentityByCpf(tx, payload.clientCpf);
-    }
-
     const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
     const requestedCapturingBrokerId = propertyBrokerId ?? (isBrokerUser ? normalizeOptionalPositiveId(req.userId) : null);
     if (isBrokerUser && requestedCapturingBrokerId === null) {
@@ -566,38 +534,47 @@ export async function generateProposalFromProperty(
       return res.status(400).json({ error: 'CPF do cliente invalido na proposta.' });
     }
 
-    const buyerClientId: number | null = buyerUserIdentity?.id ?? null;
-    const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
+    const proposerId = normalizeOptionalPositiveId(req.userId);
+    const advertiserId = normalizeOptionalPositiveId(property.owner_id);
+    if (proposerId === null) {
+      await tx.rollback();
+      return res.status(401).json({ error: 'Usuario nao autenticado.' });
+    }
+    if (advertiserId !== null && advertiserId === proposerId) {
+      await tx.rollback();
+      return res.status(403).json({ error: 'O anunciante não pode enviar proposta para o próprio imóvel.' });
+    }
 
     const capturingBrokerId = brokerContext.capturingBrokerId;
     const sellerBrokerId = brokerContext.sellerBrokerId;
     const sellingBrokerName = brokerContext.sellingBrokerName;
-    const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
 
-    const [existingRows] = await tx.query<NegotiationRow[]>(
+    // Lock the account row so concurrent requests cannot bypass the one-minute cooldown.
+    await tx.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [proposerId]);
+    const [recentRows] = await tx.query<Array<RowDataPacket & { created_at: Date | string }>>(
       `
-        SELECT id, status
+        SELECT created_at
         FROM negotiations
-        WHERE property_id = ?
-          AND status IN (${PROPOSAL_BLOCKING_STATUSES.map(() => '?').join(', ')})
-          AND (
-            (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
-            OR ${normalizedCpfExpr} = ?
-          )
-          LIMIT 1
-        FOR UPDATE
+        WHERE proposer_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
       `,
-      [payload.propertyId, ...PROPOSAL_BLOCKING_STATUSES, buyerClientId, cpfKey]
+      [proposerId]
     );
-    if (existingRows.length > 0) {
+    const latestCreatedAt = recentRows[0]?.created_at ? new Date(recentRows[0].created_at).getTime() : 0;
+    const elapsed = latestCreatedAt > 0 ? Date.now() - latestCreatedAt : PROPOSAL_CREATION_COOLDOWN_MS;
+    if (elapsed < PROPOSAL_CREATION_COOLDOWN_MS) {
+      const secondsUntilNextProposal = Math.max(1, Math.ceil((PROPOSAL_CREATION_COOLDOWN_MS - elapsed) / 1000));
       await tx.rollback();
+      res.setHeader('Retry-After', String(secondsUntilNextProposal));
       return sendProposalError(
         req,
         res,
-        409,
-        'PROPOSAL_ALREADY_EXISTS',
-        DUPLICATE_PROPOSAL_CONFLICT_MESSAGE,
-        false
+        429,
+        'PROPOSAL_CREATION_COOLDOWN',
+        `Aguarde ${secondsUntilNextProposal} segundo(s) para enviar outra proposta.`,
+        false,
+        { retryAfterSeconds: secondsUntilNextProposal }
       );
     }
 
@@ -610,7 +587,6 @@ export async function generateProposalFromProperty(
         clientName: payload.clientName,
         clientCpf: payload.clientCpf,
         listingValue: Number(listingValue.toFixed(2)),
-        buyerUserId: buyerClientId,
       },
     });
     const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
@@ -625,29 +601,27 @@ export async function generateProposalFromProperty(
           property_id,
           capturing_broker_id,
           selling_broker_id,
-          seller_client_id,
-          buyer_client_id,
+          proposer_id,
+          advertiser_id,
           deal_type,
           client_name,
-          client_cpf,
           status,
           final_value,
           payment_details,
           proposal_validity_date,
           created_at,
           version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
       `,
       [
         negotiationId,
         payload.propertyId,
         capturingBrokerId,
         sellerBrokerId,
-        sellerClientId,
-        buyerClientId,
+        proposerId,
+        advertiserId,
         dealType,
         payload.clientName,
-        payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
         proposalValue,
         paymentDetails,
@@ -676,9 +650,9 @@ export async function generateProposalFromProperty(
           source: 'mobile_proposal_wizard',
           payment: payload.pagamento,
           sellerBrokerId,
-          sellerClientId,
+          advertiserId,
           capturingBrokerId,
-          buyerClientId,
+          proposerId,
           dealType,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
@@ -725,7 +699,8 @@ export async function generateProposalFromProperty(
       message: 'Proposta gerada com sucesso.',
       negotiationId,
       documentId,
-      buyerUserId: buyerClientId,
+      proposerId,
+      advertiserId,
       clientName: payload.clientName,
       clientCpf: payload.clientCpf,
     });

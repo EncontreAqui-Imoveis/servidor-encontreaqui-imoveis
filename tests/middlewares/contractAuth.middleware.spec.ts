@@ -16,7 +16,6 @@ describe('contractAuthMiddleware', () => {
   app.use((req, _res, next) => {
     (req as any).userId = 99;
     (req as any).userRole = 'client';
-    (req as any).userCpf = '222.222.222-22';
     next();
   });
   app.get('/contracts/:id', contractAuthMiddleware, (req, res) =>
@@ -32,16 +31,14 @@ describe('contractAuthMiddleware', () => {
       return [[{
         id: 'contract-1',
         status: 'AWAITING_DOCS',
-        seller_client_id: 10,
-        buyer_client_id: 20,
-        seller_cpf: '111.111.111-11',
-        buyer_cpf: '222.222.222-22',
+        advertiser_id: 10,
+        proposer_id: 99,
         responsible_user_ids: null,
       }]];
     });
   });
 
-  it('injeta contexto comprador quando CPF corresponde', async () => {
+  it('injeta contexto comprador quando proposer_id corresponde', async () => {
     const response = await request(app).get('/contracts/contract-1');
 
     expect(response.status).toBe(200);
@@ -61,10 +58,8 @@ describe('contractAuthMiddleware', () => {
       return [[{
         id: 'contract-1',
         status: 'AWAITING_DOCS',
-        seller_client_id: 20,
-        buyer_client_id: 20,
-        seller_cpf: '222.222.222-22',
-        buyer_cpf: '222.222.222-22',
+        advertiser_id: 99,
+        proposer_id: 99,
         responsible_user_ids: null,
       }]];
     });

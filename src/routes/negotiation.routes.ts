@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { negotiationController } from '../controllers/NegotiationController';
-import { authMiddleware, isBroker } from '../middlewares/auth';
+import { authMiddleware } from '../middlewares/auth';
 import { signedProposalUpload } from '../middlewares/uploadMiddleware';
 
 const negotiationRoutes = Router();
@@ -33,7 +33,7 @@ negotiationRoutes.delete('/:id', authMiddleware, (req, res) =>
   negotiationController.deleteMyProposal(req as any, res)
 );
 
-negotiationRoutes.post('/:id/proposals', authMiddleware, isBroker, (req, res) =>
+negotiationRoutes.post('/:id/proposals', authMiddleware, (req, res) =>
   negotiationController.generateProposal(req as any, res)
 );
 

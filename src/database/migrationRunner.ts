@@ -25,8 +25,7 @@ type NegotiationConstraintViolationRow = RowDataPacket & {
   id: number;
   property_id: number | null;
   selling_broker_id: number | null;
-  seller_client_id: number | null;
-  buyer_client_id: number | null;
+  advertiser_id: number | null;
   status: string | null;
 };
 
@@ -69,10 +68,10 @@ function isKnownNegotiationsConstraintStatement(statement: string): boolean {
 async function auditNegotiationsSellingBrokerConstraint(): Promise<NegotiationConstraintViolationRow[]> {
   const [rows] = await connection.query<NegotiationConstraintViolationRow[]>(
     `
-      SELECT id, property_id, selling_broker_id, seller_client_id, buyer_client_id, status
+      SELECT id, property_id, selling_broker_id, advertiser_id, status
       FROM negotiations
       WHERE selling_broker_id IS NULL
-        AND seller_client_id IS NULL
+        AND advertiser_id IS NULL
         AND COALESCE(UPPER(TRIM(status)), '') NOT IN ('REFUSED', 'CANCELLED')
       ORDER BY id ASC
       LIMIT 20

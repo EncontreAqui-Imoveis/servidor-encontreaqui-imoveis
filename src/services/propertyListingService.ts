@@ -525,14 +525,14 @@ export async function listUserProperties(userId: number) {
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC
@@ -542,21 +542,21 @@ export async function listUserProperties(userId: number) {
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
-      LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN users nbu ON nbu.id = an.proposer_id
       LEFT JOIN (
         SELECT
           ranked.property_id,
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC
@@ -743,14 +743,14 @@ export async function listPublicProperties(query: Record<string, unknown>) {
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC
@@ -760,21 +760,21 @@ export async function listPublicProperties(query: Record<string, unknown>) {
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
-      LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN users nbu ON nbu.id = an.proposer_id
       LEFT JOIN (
         SELECT
           ranked.property_id,
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC

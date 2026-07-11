@@ -42,7 +42,6 @@ describe('GET /negotiations/client-lookup', () => {
       .mockResolvedValueOnce([
         [
           { column_name: 'client_name' },
-          { column_name: 'client_cpf' },
           { column_name: 'updated_at' },
           { column_name: 'created_at' },
         ],
@@ -51,7 +50,6 @@ describe('GET /negotiations/client-lookup', () => {
         [
           {
             client_name: 'Cliente 1',
-            client_cpf: '52998224725',
             client_phone: '64999990000',
           },
         ],
@@ -79,7 +77,6 @@ describe('GET /negotiations/client-lookup', () => {
       .mockResolvedValueOnce([
         [
           { column_name: 'client_name' },
-          { column_name: 'client_cpf' },
           { column_name: 'created_at' },
         ],
       ])
@@ -87,7 +84,6 @@ describe('GET /negotiations/client-lookup', () => {
         [
           {
             client_name: 'Cliente 2',
-            client_cpf: '52998224725',
             client_phone: '64999990000',
           },
         ],

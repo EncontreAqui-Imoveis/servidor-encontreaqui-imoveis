@@ -32,7 +32,6 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
       .mockResolvedValueOnce([
         {
           client_name: 'Cliente Teste',
-          client_cpf: '52998224725',
           client_phone: '(64) 99999-0000',
         },
       ] as any);

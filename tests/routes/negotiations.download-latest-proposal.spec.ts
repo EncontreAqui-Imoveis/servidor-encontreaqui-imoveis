@@ -40,8 +40,6 @@ describe('GET /negotiations/:id/proposals/download', () => {
         id: 'neg-1',
         capturing_broker_id: 30003,
         selling_broker_id: 30003,
-        seller_client_id: null,
-        buyer_client_id: 40004,
       },
     ]).mockResolvedValueOnce([]);
     findLatestNegotiationDocumentByTypeMock.mockResolvedValueOnce({
@@ -65,8 +63,6 @@ describe('GET /negotiations/:id/proposals/download', () => {
         id: 'neg-1',
         capturing_broker_id: 30004,
         selling_broker_id: null,
-        seller_client_id: null,
-        buyer_client_id: 40004,
       },
     ]).mockResolvedValueOnce([]);
 
@@ -83,8 +79,6 @@ describe('GET /negotiations/:id/proposals/download', () => {
         id: 'neg-1',
         capturing_broker_id: 30003,
         selling_broker_id: null,
-        seller_client_id: null,
-        buyer_client_id: 40004,
       },
     ]);
     findLatestNegotiationDocumentByTypeMock.mockResolvedValueOnce(null);

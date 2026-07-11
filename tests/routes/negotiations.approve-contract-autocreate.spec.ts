@@ -119,7 +119,6 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
             property_broker_id: 30005,
             capturing_broker_id: 30003,
             client_name: 'FGFG',
-            client_cpf: '09169443106',
             property_title: 'Casa Centro',
             property_owner_name: 'Dona Maria',
             property_owner_phone: '(64) 99999-1111',

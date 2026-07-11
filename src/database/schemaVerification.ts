@@ -125,7 +125,6 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['negotiation_documents', 'storage_size_bytes'],
     ['negotiations', 'payment_details'],
     ['negotiations', 'client_name'],
-    ['negotiations', 'client_cpf'],
     ['negotiations', 'created_at'],
     ['negotiations', 'updated_at'],
     ['negotiations', 'last_draft_edit_at'],

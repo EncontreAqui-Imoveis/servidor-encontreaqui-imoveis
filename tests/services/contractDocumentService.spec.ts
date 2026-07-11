@@ -43,8 +43,6 @@ describe('contractDocumentService', () => {
     updated_at: '2026-03-01 10:00:00',
     capturing_broker_id: 30003,
     selling_broker_id: 30004,
-    seller_client_id: null,
-    buyer_client_id: 90001,
     property_title: 'Casa Centro',
     property_purpose: 'Venda',
     property_code: 'RV-101',

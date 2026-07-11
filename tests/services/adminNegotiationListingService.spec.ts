@@ -44,7 +44,6 @@ describe('adminNegotiationListingService', () => {
             property_id: 101,
             capturing_broker_id: 7,
             selling_broker_id: 8,
-            seller_client_id: 9,
             property_status: 'negociacao',
             property_code: 'EA-101',
             property_title: 'Casa Alto Padrão',
@@ -58,7 +57,6 @@ describe('adminNegotiationListingService', () => {
             selling_broker_name: 'Ana Broker',
             seller_client_name: 'Maria Cliente',
             client_name: 'Maria Cliente',
-            client_cpf: '11122233344',
             payment_dinheiro: 200000,
             payment_permuta: 0,
             payment_financiamento: 650000,
@@ -145,7 +143,6 @@ describe('adminNegotiationListingService', () => {
   it('lista resumo por imóvel com proposta principal', async () => {
     queryMock
       .mockResolvedValueOnce([
-        [{ column_name: 'client_name' }, { column_name: 'client_cpf' }, { column_name: 'payment_details' }],
       ])
       .mockResolvedValueOnce([
         [{ column_name: 'updated_at' }],
@@ -210,7 +207,6 @@ describe('adminNegotiationListingService', () => {
   it('lista solicitações por imóvel com status normalizado', async () => {
     queryMock
       .mockResolvedValueOnce([
-        [{ column_name: 'client_name' }, { column_name: 'client_cpf' }, { column_name: 'payment_details' }],
       ])
       .mockResolvedValueOnce([
         [{ column_name: 'created_at' }],
@@ -224,7 +220,6 @@ describe('adminNegotiationListingService', () => {
             property_id: 101,
             capturing_broker_id: 7,
             selling_broker_id: 8,
-            seller_client_id: null,
             property_status: 'pending_approval',
             property_code: 'EA-101',
             property_title: 'Casa Alto Padrão',
@@ -238,7 +233,6 @@ describe('adminNegotiationListingService', () => {
             selling_broker_name: null,
             seller_client_name: null,
             client_name: 'Maria Cliente',
-            client_cpf: '11122233344',
             payment_dinheiro: 200000,
             payment_permuta: 0,
             payment_financiamento: 650000,

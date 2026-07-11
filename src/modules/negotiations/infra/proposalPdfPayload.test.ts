@@ -22,7 +22,7 @@ describe('proposalPdfPayload', () => {
     });
 
     expect(payload.deal_type).toBe('rent');
-    expect(payload.client_name).toBe('Ana Silva');
+    expect(payload.clientName).toBe('Ana Silva');
     expect(payload.payment.cash).toBe(1500);
   });
 

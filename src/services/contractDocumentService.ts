@@ -51,7 +51,7 @@ function resolveDocumentAccessContext(
   if (req.contractContext?.contractId === contract.id) return req.contractContext;
 
   return resolveContractAccessContext(
-    { id: req.userId, role: req.userRole, cpf: req.userCpf },
+    { id: req.userId, role: req.userRole },
     contract
   );
 }

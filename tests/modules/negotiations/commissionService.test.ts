@@ -15,7 +15,6 @@ describe('CommissionService', () => {
             final_value: 100000,
             capturing_broker_id: 10,
             selling_broker_id: null,
-            seller_client_id: 77,
           },
         ];
       }

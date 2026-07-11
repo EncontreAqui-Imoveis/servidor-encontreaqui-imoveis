@@ -71,8 +71,6 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
               negotiation_id: 'neg-1',
               property_id: 101,
               status: 'AWAITING_DOCS',
-              seller_client_id: 30003,
-              buyer_client_id: 30004,
               seller_cpf: '111.111.111-11',
               buyer_cpf: '222.222.222-22',
               seller_info: {},

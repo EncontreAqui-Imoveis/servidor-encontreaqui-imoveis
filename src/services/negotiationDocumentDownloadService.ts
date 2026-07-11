@@ -6,13 +6,12 @@ import {
   findNegotiationDocumentById,
   queryNegotiationRows,
 } from './negotiationPersistenceService';
+import { isNegotiationActor, isNegotiationAdmin } from '../utils/negotiationActorAccess';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
-  capturing_broker_id: number | null;
-  selling_broker_id: number | null;
-  seller_client_id: number | null;
-  buyer_client_id: number | null;
+  proposer_id: number | null;
+  advertiser_id: number | null;
 }
 
 interface NegotiationDocumentRow {
@@ -59,18 +58,6 @@ function buildAttachmentDisposition(filename: string): string {
   return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
 }
 
-function canAccessNegotiationByOwnership(
-  userId: number,
-  negotiation: NegotiationAccessRow
-): boolean {
-  return (
-    userId === Number(negotiation.capturing_broker_id ?? 0) ||
-    userId === Number(negotiation.selling_broker_id ?? 0) ||
-    userId === Number(negotiation.seller_client_id ?? 0) ||
-    userId === Number(negotiation.buyer_client_id ?? 0)
-  );
-}
-
 export async function downloadDocument(
   req: AuthRequest,
   res: Response
@@ -94,7 +81,7 @@ export async function downloadDocument(
   try {
     const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
       `
-        SELECT id, capturing_broker_id, selling_broker_id, seller_client_id, buyer_client_id
+        SELECT id, proposer_id, advertiser_id
         FROM negotiations
         WHERE id = ?
         LIMIT 1
@@ -106,7 +93,7 @@ export async function downloadDocument(
       return res.status(404).json({ error: 'Negociação não encontrada.' });
     }
 
-    if (role !== 'admin' && !canAccessNegotiationByOwnership(userId, negotiation)) {
+    if (!isNegotiationAdmin(role) && !isNegotiationActor(userId, negotiation)) {
       return res.status(403).json({ error: 'Acesso negado ao documento.' });
     }
 

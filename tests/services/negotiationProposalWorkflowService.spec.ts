@@ -57,7 +57,7 @@ describe('negotiationProposalWorkflowService.generateProposal', () => {
   });
 
   it('returns 202 when pdf queue accepts job', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([{ id: 'neg-1', status: 'approved' }] as any);
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([{ id: 'neg-1', status: 'approved', proposer_id: 30003 }] as any);
     vi.mocked(addPdfJob).mockResolvedValueOnce(undefined as any);
 
     const req = {
@@ -89,7 +89,7 @@ describe('negotiationProposalWorkflowService.generateProposal', () => {
   });
 
   it('falls back to sync generation when queue is disabled', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([{ id: 'neg-1', status: 'approved' }] as any);
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([{ id: 'neg-1', status: 'approved', proposer_id: 30003 }] as any);
     vi.mocked(addPdfJob).mockRejectedValueOnce({ code: 'PDF_QUEUE_DISABLED', message: 'queue disabled' });
     vi.mocked(generateNegotiationProposalPdf).mockResolvedValueOnce(Buffer.from('%PDF-fallback'));
     vi.mocked(saveNegotiationProposalDocument).mockResolvedValueOnce(812 as any);
@@ -122,7 +122,7 @@ describe('negotiationProposalWorkflowService.generateProposal', () => {
   });
 
   it('maps dependency failures during fallback to 503', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([{ id: 'neg-1', status: 'approved' }] as any);
+    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([{ id: 'neg-1', status: 'approved', proposer_id: 30003 }] as any);
     vi.mocked(addPdfJob).mockRejectedValueOnce({ code: 'PDF_QUEUE_DISABLED', message: 'queue disabled' });
     vi.mocked(generateNegotiationProposalPdf).mockRejectedValueOnce(
       new Error('PDF_INTERNAL_API_KEY nao configurado')

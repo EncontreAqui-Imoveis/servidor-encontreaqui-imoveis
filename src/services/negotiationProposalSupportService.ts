@@ -5,7 +5,6 @@ export interface ProposalBody {
   clientName?: unknown;
   client_name?: unknown;
   clientCpf?: unknown;
-  client_cpf?: unknown;
   propertyAddress?: unknown;
   property_address?: unknown;
   brokerName?: unknown;
@@ -172,7 +171,7 @@ export function inferDealTypeFromPurpose(purpose: unknown): DealType {
 
 export function parseProposalData(body: ProposalBody): ProposalData {
   const clientName = String(body.clientName ?? body.client_name ?? '').trim();
-  const clientCpf = String(body.clientCpf ?? body.client_cpf ?? '').trim();
+  const clientCpf = String(body.clientCpf ?? '').trim();
   const propertyAddress = String(body.propertyAddress ?? body.property_address ?? '').trim();
   const brokerName = String(body.brokerName ?? body.broker_name ?? '').trim();
   const numericValue = Number(body.value);
@@ -202,7 +201,7 @@ export function parseProposalData(body: ProposalBody): ProposalData {
 
   if (!clientName || !clientCpf || !propertyAddress || !brokerName) {
     throw new Error(
-      'Campos obrigatorios ausentes. Informe client_name, client_cpf, property_address e broker_name.'
+      'Campos obrigatorios ausentes. Informe clientName, clientCpf, propertyAddress e brokerName.'
     );
   }
 

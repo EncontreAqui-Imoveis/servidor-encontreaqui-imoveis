@@ -326,14 +326,14 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC
@@ -343,21 +343,21 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
-      LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN users nbu ON nbu.id = an.proposer_id
       LEFT JOIN (
         SELECT
           ranked.property_id,
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC
@@ -384,14 +384,14 @@ function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): st
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC
@@ -401,21 +401,21 @@ function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): st
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
-      LEFT JOIN users nbu ON nbu.id = an.buyer_client_id
+      LEFT JOIN users nbu ON nbu.id = an.proposer_id
       LEFT JOIN (
         SELECT
           ranked.property_id,
           ranked.id,
           ranked.status,
           ranked.final_value,
-          ranked.buyer_client_id
+          ranked.proposer_id
         FROM (
           SELECT
             n.property_id,
             n.id,
             n.status,
             n.final_value,
-            n.buyer_client_id,
+            n.proposer_id,
             ROW_NUMBER() OVER (
               PARTITION BY n.property_id
               ORDER BY n.version DESC, n.id DESC

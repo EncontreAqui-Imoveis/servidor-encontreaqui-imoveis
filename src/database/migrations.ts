@@ -677,128 +677,6 @@ async function ensureNotificationsType(): Promise<void> {
   }
 }
 
-async function ensureNegotiationsClientColumns(): Promise<void> {
-  if (!(await tableExists('negotiations'))) {
-    return;
-  }
-
-  if (!(await columnExists('negotiations', 'seller_client_id'))) {
-    await connection.query('ALTER TABLE negotiations ADD COLUMN seller_client_id INT NULL AFTER selling_broker_id');
-  }
-
-  if (!(await columnExists('negotiations', 'client_name'))) {
-    await connection.query('ALTER TABLE negotiations ADD COLUMN client_name VARCHAR(255) NULL');
-  }
-
-  if (!(await columnExists('negotiations', 'client_cpf'))) {
-    await connection.query('ALTER TABLE negotiations ADD COLUMN client_cpf VARCHAR(20) NULL');
-  }
-
-  await connection.query(`
-    UPDATE negotiations
-    SET client_name = COALESCE(
-      NULLIF(client_name, ''),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.clientName')),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.client_name')),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.clientName')),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.client_name'))
-    )
-    WHERE (client_name IS NULL OR client_name = '')
-      AND payment_details IS NOT NULL
-  `);
-
-  await connection.query(`
-    UPDATE negotiations
-    SET client_cpf = COALESCE(
-      NULLIF(client_cpf, ''),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.clientCpf')),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.client_cpf')),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.clientCpf')),
-      JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.client_cpf'))
-    )
-    WHERE (client_cpf IS NULL OR client_cpf = '')
-      AND payment_details IS NOT NULL
-  `);
-
-  await connection.query(`
-    UPDATE negotiations
-    SET buyer_client_id = COALESCE(
-      buyer_client_id,
-      CASE
-        WHEN JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')) REGEXP '^[0-9]+$'
-        THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')) AS UNSIGNED)
-        ELSE NULL
-      END,
-      CASE
-        WHEN JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')) REGEXP '^[0-9]+$'
-        THEN CAST(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')) AS UNSIGNED)
-        ELSE NULL
-      END
-    )
-    WHERE buyer_client_id IS NULL
-      AND payment_details IS NOT NULL
-      AND (
-        NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.details.buyerUserId')), '') IS NOT NULL
-        OR NULLIF(JSON_UNQUOTE(JSON_EXTRACT(payment_details, '$.buyerUserId')), '') IS NOT NULL
-      )
-  `);
-
-  await connection.query(`
-    UPDATE negotiations n
-    JOIN (
-      SELECT npi.negotiation_id, MIN(npi.user_id) AS buyer_client_id
-      FROM negotiation_proposal_idempotency npi
-      WHERE npi.user_id IS NOT NULL
-        AND npi.user_id > 0
-      GROUP BY npi.negotiation_id
-    ) proposal_users ON proposal_users.negotiation_id = n.id
-    SET n.buyer_client_id = proposal_users.buyer_client_id
-    WHERE n.buyer_client_id IS NULL
-      AND proposal_users.buyer_client_id IS NOT NULL
-      AND proposal_users.buyer_client_id > 0
-  `);
-
-  await connection.query(`
-    UPDATE negotiations n
-    JOIN users u ON REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(u.cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') =
-      REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(n.client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')
-    SET n.buyer_client_id = u.id
-    WHERE n.buyer_client_id IS NULL
-      AND NULLIF(n.client_cpf, '') IS NOT NULL
-  `);
-
-  await connection.query(`
-    UPDATE negotiations n
-    JOIN properties p ON p.id = n.property_id
-    SET n.seller_client_id = p.owner_id
-    WHERE n.seller_client_id IS NULL
-      AND p.owner_id IS NOT NULL
-      AND COALESCE(UPPER(TRIM(n.status)), '') NOT IN ('REFUSED', 'CANCELLED')
-  `);
-
-  const sellerClientFk = await getForeignKeyMetadata(
-    'negotiations',
-    'fk_negotiations_seller_client',
-  );
-  if (sellerClientFk && (sellerClientFk.deleteRule !== 'RESTRICT' || sellerClientFk.updateRule !== 'RESTRICT')) {
-    await connection.query('ALTER TABLE negotiations DROP FOREIGN KEY fk_negotiations_seller_client');
-  }
-
-  if (!(await hasForeignKeyConstraint('negotiations', 'fk_negotiations_seller_client'))) {
-    await connection.query(
-      `ALTER TABLE negotiations
-       ADD CONSTRAINT fk_negotiations_seller_client
-       FOREIGN KEY (seller_client_id) REFERENCES users(id) ON DELETE RESTRICT`
-    );
-  }
-
-  if (!(await indexExists('negotiations', 'idx_negotiations_seller_client'))) {
-    await connection.query(
-      'ALTER TABLE negotiations ADD INDEX idx_negotiations_seller_client (seller_client_id)'
-    );
-  }
-}
-
 async function ensureNegotiationsDealTypeColumn(): Promise<void> {
   if (!(await tableExists('negotiations'))) {
     return;
@@ -806,7 +684,7 @@ async function ensureNegotiationsDealTypeColumn(): Promise<void> {
 
   if (!(await columnExists('negotiations', 'deal_type'))) {
     await connection.query(
-      "ALTER TABLE negotiations ADD COLUMN deal_type ENUM('sale', 'rent') NOT NULL DEFAULT 'sale' AFTER buyer_client_id"
+      "ALTER TABLE negotiations ADD COLUMN deal_type ENUM('sale', 'rent') NOT NULL DEFAULT 'sale' AFTER advertiser_id"
     );
   }
 
@@ -1593,7 +1471,6 @@ export async function applyMigrations(): Promise<void> {
     await ensureFeaturedPropertiesTable();
     await runFeaturedPropertiesScopeMigration();
     await ensureNotificationsType();
-    await ensureNegotiationsClientColumns();
     await ensureNegotiationsDealTypeColumn();
     await ensureNegotiationsTimestampColumns();
     await ensureNegotiationsTimestampBackfill();

@@ -40,8 +40,6 @@ describe('negotiationDocumentDownloadService.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 10,
         selling_broker_id: null,
-        seller_client_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 
@@ -83,8 +81,6 @@ describe('negotiationDocumentDownloadService.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 10,
         selling_broker_id: null,
-        seller_client_id: null,
-        buyer_client_id: null,
       },
     ] as any);
 
@@ -113,8 +109,6 @@ describe('negotiationDocumentDownloadService.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 10,
         selling_broker_id: null,
-        seller_client_id: null,
-        buyer_client_id: null,
       },
     ] as any);
     vi.mocked(findNegotiationDocumentById).mockResolvedValueOnce(null);
@@ -143,8 +137,6 @@ describe('negotiationDocumentDownloadService.downloadDocument', () => {
         id: 'neg-1',
         capturing_broker_id: 10,
         selling_broker_id: null,
-        seller_client_id: null,
-        buyer_client_id: null,
       },
     ] as any);
     vi.mocked(findNegotiationDocumentById).mockResolvedValueOnce({

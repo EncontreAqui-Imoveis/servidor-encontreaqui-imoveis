@@ -16,7 +16,7 @@ export class DocumentationPhaseState extends NegotiationState {
     return transactionManager.run(async (trx) => {
       if (!negotiation.sellingBrokerId && !negotiation.sellerClientId) {
         throw new ValidationError(
-          'selling_broker_id or seller_client_id is required before Contract Drafting.'
+          'selling_broker_id or advertiser_id is required before Contract Drafting.'
         );
       }
 

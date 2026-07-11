@@ -1,32 +1,23 @@
 import type { ContractAccessContext, ContractRole } from '../types/contractAuth';
-import { normalizeCpfDigits } from './cpfValidator';
 
 export interface ContractAccessUser {
   id: number | string | null | undefined;
   role: string | null | undefined;
+  /** Compatibility-only. Contract authorization never reads this field. */
   cpf?: string | null;
 }
 
 export interface ContractAccessRecord {
   id: string;
   status: string | null | undefined;
-  seller_client_id: number | string | null | undefined;
-  buyer_client_id: number | string | null | undefined;
-  seller_cpf?: string | null;
-  buyer_cpf?: string | null;
-  client_cpf?: string | null;
+  advertiser_id: number | string | null | undefined;
+  proposer_id: number | string | null | undefined;
   responsible_user_ids?: readonly number[] | string | null;
 }
 
 function normalizePositiveId(value: unknown): string | null {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? String(parsed) : null;
-}
-
-function sameCpf(left: string | null | undefined, right: string | null | undefined): boolean {
-  const normalizedLeft = normalizeCpfDigits(String(left ?? ''));
-  const normalizedRight = normalizeCpfDigits(String(right ?? ''));
-  return normalizedLeft.length === 11 && normalizedLeft === normalizedRight;
 }
 
 function responsibleIds(value: ContractAccessRecord['responsible_user_ids']): Set<string> {
@@ -79,12 +70,9 @@ export function resolveContractAccessContext(
   }
 
   const requestRole = String(user.role ?? '').trim().toLowerCase();
-  const sellerId = normalizePositiveId(contract.seller_client_id);
-  const buyerId = normalizePositiveId(contract.buyer_client_id);
-  const sellerCpf = contract.seller_cpf ?? null;
-  const buyerCpf = contract.buyer_cpf ?? contract.client_cpf ?? null;
-  const hasDualIdentity =
-    (sellerId != null && buyerId != null && sellerId === buyerId) || sameCpf(sellerCpf, buyerCpf);
+  const advertiserId = normalizePositiveId(contract.advertiser_id);
+  const proposerId = normalizePositiveId(contract.proposer_id);
+  const hasDualIdentity = advertiserId != null && advertiserId === proposerId;
 
   // Admin keeps operational access so duplicate identities can be repaired.
   if (requestRole === 'admin') {
@@ -99,9 +87,9 @@ export function resolveContractAccessContext(
   let role: ContractRole = 'none';
   if (responsibleIds(contract.responsible_user_ids).has(userId)) {
     role = 'responsible';
-  } else if (sellerId === userId) {
+  } else if (advertiserId === userId) {
     role = 'seller';
-  } else if (buyerId === userId || sameCpf(user.cpf, buyerCpf)) {
+  } else if (proposerId === userId) {
     role = 'buyer';
   }
 

@@ -47,17 +47,11 @@ async function findContractForAuthorization(
       SELECT
         c.id,
         c.status,
-        n.seller_client_id,
-        n.buyer_client_id,
-        COALESCE(NULLIF(TRIM(seller_user.cpf), ''), NULLIF(TRIM(owner_user.cpf), '')) AS seller_cpf,
-        COALESCE(NULLIF(TRIM(n.client_cpf), ''), NULLIF(TRIM(buyer_user.cpf), '')) AS buyer_cpf,
+        n.advertiser_id,
+        n.proposer_id,
         ${responsibleUsersSelect}
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id
-      JOIN properties p ON p.id = c.property_id
-      LEFT JOIN users seller_user ON seller_user.id = n.seller_client_id
-      LEFT JOIN users owner_user ON owner_user.id = p.owner_id
-      LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
       WHERE c.${field} = ?
       LIMIT 1
     `,
@@ -89,7 +83,7 @@ export async function contractAuthMiddleware(
     }
 
     const context = resolveContractAccessContext(
-      { id: req.userId, role: req.userRole, cpf: req.userCpf },
+      { id: req.userId, role: req.userRole },
       contract
     );
     if (context.userRole === 'none') {

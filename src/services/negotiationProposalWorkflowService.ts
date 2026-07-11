@@ -5,6 +5,7 @@ import { getRequestId } from '../middlewares/requestContext';
 import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
 import { addPdfJob } from '../modules/negotiations/infra/PdfQueue';
 import { parseProposalData } from './negotiationProposalSupportService';
+import { isNegotiationAdmin } from '../utils/negotiationActorAccess';
 import {
   executeNegotiationStatement,
   generateNegotiationProposalPdf,
@@ -15,13 +16,13 @@ import {
 interface NegotiationRow extends RowDataPacket {
   id: string;
   status: string;
+  proposer_id: number | null;
 }
 
 interface ProposalBody {
   clientName?: unknown;
   client_name?: unknown;
   clientCpf?: unknown;
-  client_cpf?: unknown;
   propertyAddress?: unknown;
   property_address?: unknown;
   brokerName?: unknown;
@@ -141,7 +142,7 @@ export async function generateProposal(
 
   try {
     const negotiationRows = await queryNegotiationRows<NegotiationRow>(
-      'SELECT id FROM negotiations WHERE id = ? LIMIT 1',
+      'SELECT id, proposer_id FROM negotiations WHERE id = ? LIMIT 1',
       [negotiationId]
     );
 
@@ -149,15 +150,27 @@ export async function generateProposal(
       return res.status(404).json({ error: 'Negociacao nao encontrada.' });
     }
 
+    const negotiation = negotiationRows[0];
+    if (
+      !isNegotiationAdmin(req.userRole) &&
+      Number(negotiation.proposer_id ?? 0) !== Number(req.userId)
+    ) {
+      return res.status(403).json({ error: 'Apenas o proponente pode atualizar a proposta.' });
+    }
+
     await executeNegotiationStatement(
       `
         UPDATE negotiations
         SET
           client_name = ?,
-          client_cpf = ?
+          payment_details = JSON_SET(
+            COALESCE(payment_details, JSON_OBJECT()),
+            '$.details.clientName', ?,
+            '$.details.clientCpf', ?
+          )
         WHERE id = ?
       `,
-      [proposalData.clientName, proposalData.clientCpf, negotiationId]
+      [proposalData.clientName, proposalData.clientName, proposalData.clientCpf, negotiationId]
     );
 
     try {

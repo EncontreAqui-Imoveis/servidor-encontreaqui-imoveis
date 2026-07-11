@@ -31,8 +31,6 @@ const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
   'DOCUMENTATION_PHASE',
   'CONTRACT_DRAFTING',
   'AWAITING_SIGNATURES',
-  'SOLD',
-  'RENTED',
 ]);
 
 export async function createContractFromApprovedNegotiation(
@@ -54,8 +52,10 @@ export async function createContractFromApprovedNegotiation(
       status: string;
       capturing_broker_id: number | null;
       selling_broker_id: number | null;
+      proposer_id: number | null;
+      advertiser_id: number | null;
       client_name: string | null;
-      client_cpf: string | null;
+      buyer_legal_cpf: string | null;
       property_title: string | null;
       property_owner_name: string | null;
       property_owner_phone: string | null;
@@ -67,8 +67,10 @@ export async function createContractFromApprovedNegotiation(
           n.status,
           n.capturing_broker_id,
           n.selling_broker_id,
+          n.proposer_id,
+          n.advertiser_id,
           n.client_name,
-          n.client_cpf,
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_legal_cpf,
           p.title AS property_title,
           p.owner_name AS property_owner_name,
           p.owner_phone AS property_owner_phone
@@ -87,27 +89,7 @@ export async function createContractFromApprovedNegotiation(
       throw contractCreationError(404, 'Negociação não encontrada.');
     }
 
-    const negotiationStatus = String(negotiation.status ?? '').toUpperCase();
-    if (!ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT.has(negotiationStatus)) {
-      await tx.rollback();
-      throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
-    }
-
-    const [initiatorRows] = await tx.query<Array<RowDataPacket & {
-      proposal_initiator_user_id: number | null;
-    }>>(
-      `
-        SELECT MIN(npi.user_id) AS proposal_initiator_user_id
-        FROM negotiation_proposal_idempotency npi
-        WHERE npi.negotiation_id = ?
-        LIMIT 1
-      `,
-      [negotiationId],
-    );
-
-    const proposalInitiatorUserId = normalizePositiveId(
-      initiatorRows[0]?.proposal_initiator_user_id,
-    );
+    const proposalInitiatorUserId = normalizePositiveId(negotiation.proposer_id);
 
     const [existingRows] = await tx.query<Array<RowDataPacket & ContractRow>>(
       `
@@ -143,10 +125,9 @@ export async function createContractFromApprovedNegotiation(
           c.updated_at,
           n.capturing_broker_id,
           n.selling_broker_id,
-          n.seller_client_id,
-          n.buyer_client_id,
+          n.advertiser_id,
+          n.proposer_id,
           n.client_name,
-          n.client_cpf,
           p.title AS property_title,
           p.purpose AS property_purpose,
           p.code AS property_code,
@@ -174,6 +155,12 @@ export async function createContractFromApprovedNegotiation(
     if (existingRows.length > 0) {
       await tx.commit();
       return { contract: existingRows[0], created: false };
+    }
+
+    const negotiationStatus = String(negotiation.status ?? '').toUpperCase();
+    if (!ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT.has(negotiationStatus)) {
+      await tx.rollback();
+      throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
     }
 
     await tx.query(
@@ -216,9 +203,18 @@ export async function createContractFromApprovedNegotiation(
         negotiation.property_owner_name,
         negotiation.property_owner_phone,
         negotiation.client_name,
-        negotiation.client_cpf,
+        negotiation.buyer_legal_cpf,
         proposalInitiatorUserId,
       ],
+    );
+
+    await tx.query(
+      `
+        UPDATE negotiations
+        SET status = 'CONTRACT_DRAFTING', version = COALESCE(version, 0) + 1
+        WHERE id = ?
+      `,
+      [negotiationId],
     );
 
     const [createdRows] = await tx.query<Array<RowDataPacket & ContractRow>>(
@@ -255,10 +251,9 @@ export async function createContractFromApprovedNegotiation(
           c.updated_at,
           n.capturing_broker_id,
           n.selling_broker_id,
-          n.seller_client_id,
-          n.buyer_client_id,
+          n.advertiser_id,
+          n.proposer_id,
           n.client_name,
-          n.client_cpf,
           p.title AS property_title,
           p.purpose AS property_purpose,
           p.code AS property_code,

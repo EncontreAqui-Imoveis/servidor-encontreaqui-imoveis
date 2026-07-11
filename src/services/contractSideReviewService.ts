@@ -281,7 +281,7 @@ function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
 
 function resolveContractNotificationRecipientIds(contract: ContractRow): number[] {
   const brokers = resolveNegotiationBrokerRecipientIds(contract);
-  const clientId = Number(contract.buyer_client_id ?? 0);
+  const clientId = Number(contract.proposer_id ?? 0);
   const ownerId = Number(contract.property_owner_id ?? 0);
   return Array.from(
     new Set(

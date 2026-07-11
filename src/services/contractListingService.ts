@@ -1,7 +1,6 @@
 import { Request } from 'express';
 import { RowDataPacket } from 'mysql2';
 import type { AuthRequest } from '../middlewares/auth';
-import { normalizeCpfDigits } from '../utils/cpfValidator';
 import { queryContractRows } from './contractPersistenceService';
 import {
   CONTRACT_SELECT_BASE_SQL,
@@ -129,7 +128,6 @@ export async function listMyContractsForUser(
   const statusParams = statusFilter ? [statusFilter] : [];
 
   const contractSelectSql = await getContractSelectSql();
-  const userCpf = normalizeCpfDigits(String(req.userCpf ?? ''));
   const includeResponsibles = await hasNegotiationResponsiblesTable();
   const responsibleVisibilityClause = includeResponsibles
     ? `
@@ -142,42 +140,20 @@ export async function listMyContractsForUser(
     : '';
   const visibilityClause = `
       (
-        n.seller_client_id = ?
-        OR n.buyer_client_id = ?
-        OR (
-          ? <> ''
-          AND REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(n.client_cpf), ''), buyer_user.cpf, ''), '.', ''), '-', ''), ' ', '') = ?
-        )
+        n.advertiser_id = ?
+        OR n.proposer_id = ?
         ${responsibleVisibilityClause}
       )
   `;
   const visibilityParams = includeResponsibles
-    ? [userId, userId, userCpf, userCpf, userId]
-    : [userId, userId, userCpf, userCpf];
-  const dualIdentityClause = `
-      AND NOT (
-        (
-          n.seller_client_id IS NOT NULL
-          AND n.buyer_client_id IS NOT NULL
-          AND n.seller_client_id = n.buyer_client_id
-        )
-        OR (
-          REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), owner_user.cpf, ''), '.', ''), '-', ''), ' ', '') <> ''
-          AND REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), owner_user.cpf, ''), '.', ''), '-', ''), ' ', '') = REPLACE(REPLACE(REPLACE(COALESCE(NULLIF(TRIM(n.client_cpf), ''), buyer_user.cpf, ''), '.', ''), '-', ''), ' ', '')
-        )
-      )
-  `;
+    ? [userId, userId, userId]
+    : [userId, userId];
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id
-      JOIN properties p ON p.id = c.property_id
-      LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
-      LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
-      LEFT JOIN users owner_user ON owner_user.id = p.owner_id
       WHERE ${visibilityClause}
-      ${dualIdentityClause}
       ${statusClause}
     `,
     [...visibilityParams, ...statusParams],
@@ -188,7 +164,6 @@ export async function listMyContractsForUser(
     `
       ${contractSelectSql}
       WHERE ${visibilityClause}
-      ${dualIdentityClause}
       ${statusClause}
       ORDER BY c.updated_at DESC, c.created_at DESC
       LIMIT ? OFFSET ?

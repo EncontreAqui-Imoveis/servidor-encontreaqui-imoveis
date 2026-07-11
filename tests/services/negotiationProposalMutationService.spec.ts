@@ -116,7 +116,8 @@ describe('negotiationProposalMutationService', () => {
             status: 'PROPOSAL_DRAFT',
             capturing_broker_id: 30003,
             selling_broker_id: 30003,
-            buyer_client_id: null,
+            proposer_id: 30003,
+            advertiser_id: 40004,
             last_draft_edit_at: null,
           },
         ],
@@ -204,7 +205,6 @@ describe('negotiationProposalMutationService', () => {
       30003,
       30003,
       'sale',
-      null,
       'Maria Cliente',
       '52998224725',
       'PROPOSAL_SENT',
@@ -214,15 +214,13 @@ describe('negotiationProposalMutationService', () => {
       'neg-1',
     ]);
     expect(
-      txMock.query.mock.calls.find(([sql]) => String(sql).includes('AND id <> ?'))?.[1]
-    ).toEqual([101, 'neg-1', null, '52998224725']);
+      txMock.query.mock.calls.some(([sql]) => String(sql).includes('AND id <> ?'))
+    ).toBe(false);
     expect(generateNegotiationProposalPdfMock).toHaveBeenCalledWith(
       expect.objectContaining({
         clientName: 'Maria Cliente',
         clientCpf: '52998224725',
         propertyAddress: 'Rua A, 100',
-        brokerName: 'Corretor A',
-        sellingBrokerName: 'Corretor A',
         value: 500000,
       })
     );
@@ -246,7 +244,7 @@ describe('negotiationProposalMutationService', () => {
     );
   });
 
-  it('resolve buyer_client_id por CPF quando nao veio buyerUserId', async () => {
+  it('preserva a qualificação textual sem vincular CPF a uma conta', async () => {
     txMock.query
       .mockResolvedValueOnce([
         [
@@ -256,7 +254,8 @@ describe('negotiationProposalMutationService', () => {
             status: 'PROPOSAL_DRAFT',
             capturing_broker_id: 30003,
             selling_broker_id: 30003,
-            buyer_client_id: null,
+            proposer_id: 30003,
+            advertiser_id: 40004,
             last_draft_edit_at: null,
           },
         ],
@@ -336,7 +335,6 @@ describe('negotiationProposalMutationService', () => {
       30003,
       30003,
       'sale',
-      90001,
       'Maria Cliente',
       '52998224725',
       'PROPOSAL_SENT',
@@ -399,7 +397,8 @@ describe('negotiationProposalMutationService', () => {
             status: 'PROPOSAL_DRAFT',
             capturing_broker_id: 30003,
             selling_broker_id: 30003,
-            buyer_client_id: null,
+            proposer_id: 30003,
+            advertiser_id: 40004,
             last_draft_edit_at: null,
           },
         ],
@@ -456,7 +455,8 @@ describe('negotiationProposalMutationService', () => {
             status: 'PROPOSAL_SENT',
             capturing_broker_id: 30003,
             selling_broker_id: 30003,
-            buyer_client_id: null,
+            proposer_id: 30003,
+            advertiser_id: 40004,
             last_draft_edit_at: null,
           },
         ],
@@ -491,8 +491,8 @@ describe('negotiationProposalMutationService', () => {
             id: 'neg-1',
             capturing_broker_id: 30003,
             selling_broker_id: 30003,
-            seller_client_id: null,
-            buyer_client_id: null,
+            proposer_id: 30003,
+            advertiser_id: 40004,
             status: 'PROPOSAL_SENT',
           },
         ],
@@ -529,8 +529,8 @@ describe('negotiationProposalMutationService', () => {
           id: 'neg-1',
           capturing_broker_id: 30003,
           selling_broker_id: 30003,
-          seller_client_id: null,
-          buyer_client_id: null,
+          proposer_id: 30003,
+          advertiser_id: 40004,
           status: 'PROPOSAL_SENT',
         },
       ],

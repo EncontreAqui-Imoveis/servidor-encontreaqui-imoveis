@@ -220,7 +220,7 @@ export async function uploadContractDocument(
 
   const requestedSide = parseDocumentSide(params.body.side);
   const context = resolveContractAccessContext(
-    { id: params.req.userId, role: params.req.userRole, cpf: params.req.userCpf },
+    { id: params.req.userId, role: params.req.userRole },
     params.contract
   );
   params.req.contractContext = context;
@@ -438,7 +438,7 @@ export async function deleteContractDocument(
   const side = readDocumentOwnerSide(metadata);
   const documentType = String(document.document_type ?? '').trim().toLowerCase();
   const context = resolveContractAccessContext(
-    { id: params.req.userId, role: params.req.userRole, cpf: params.req.userCpf },
+    { id: params.req.userId, role: params.req.userRole },
     params.contract
   );
   params.req.contractContext = context;

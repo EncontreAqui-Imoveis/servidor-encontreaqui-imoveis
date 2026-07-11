@@ -99,7 +99,6 @@ describe('PUT /admin/negotiations/:id/reject negotiation_history', () => {
               property_broker_id: useResponsiblesFallback ? null : 30002,
               capturing_broker_id: useResponsiblesFallback ? null : 30003,
               responsible_broker_id: useResponsiblesFallback ? 30007 : null,
-              buyer_client_id: null,
               property_title: 'Casa Centro',
               property_code: 'RV-101',
               property_address: 'Rua 1',

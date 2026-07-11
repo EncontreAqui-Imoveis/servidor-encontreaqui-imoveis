@@ -22,13 +22,12 @@ import {
 } from './negotiationProposalSupportService';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 import { purgeNegotiationProposalDocuments } from './negotiationProposalDocumentCleanupService';
+import { isNegotiationActor, isNegotiationAdmin } from '../utils/negotiationActorAccess';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
-  capturing_broker_id: number | null;
-  selling_broker_id: number | null;
-  seller_client_id: number | null;
-  buyer_client_id: number | null;
+  proposer_id: number | null;
+  advertiser_id: number | null;
   status?: string | null;
 }
 
@@ -78,42 +77,6 @@ function sendProposalError(
     code,
     ...(payload ?? {}),
   });
-}
-
-function canAccessNegotiationByOwnership(
-  userId: number,
-  negotiation: NegotiationAccessRow
-): boolean {
-  return (
-    userId === Number(negotiation.capturing_broker_id ?? 0) ||
-    userId === Number(negotiation.selling_broker_id ?? 0) ||
-    userId === Number(negotiation.seller_client_id ?? 0) ||
-    userId === Number(negotiation.buyer_client_id ?? 0)
-  );
-}
-
-function canManageOwnProposal(
-  userId: number,
-  role: string,
-  negotiation: NegotiationAccessRow
-): boolean {
-  const normalizedRole = String(role ?? '').trim().toLowerCase();
-  if (normalizedRole === 'admin') {
-    return true;
-  }
-  if (normalizedRole === 'client') {
-    return (
-      userId === Number(negotiation.buyer_client_id ?? 0) ||
-      userId === Number(negotiation.seller_client_id ?? 0)
-    );
-  }
-  if (normalizedRole === 'broker' || normalizedRole === 'auxiliary_administrative') {
-    return (
-      userId === Number(negotiation.buyer_client_id ?? 0) ||
-      userId === Number(negotiation.capturing_broker_id ?? 0)
-    );
-  }
-  return canAccessNegotiationByOwnership(userId, negotiation);
 }
 
 function isDependencyUnavailableError(error: unknown): boolean {
@@ -335,7 +298,8 @@ async function updateProposalFromWizardInternal(
           n.final_value,
           n.capturing_broker_id,
           n.selling_broker_id,
-          n.buyer_client_id,
+          n.proposer_id,
+          n.advertiser_id,
           n.last_draft_edit_at
         FROM negotiations n
         WHERE n.id = ?
@@ -351,7 +315,8 @@ async function updateProposalFromWizardInternal(
           final_value: number | string | null;
           capturing_broker_id: number | null;
           selling_broker_id: number | null;
-          buyer_client_id: number | null;
+          proposer_id: number | null;
+          advertiser_id: number | null;
           last_draft_edit_at: Date | string | null;
         }
       | undefined;
@@ -363,13 +328,8 @@ async function updateProposalFromWizardInternal(
 
     const roleForAccess = String(req.userRole ?? '').trim().toLowerCase();
     if (
-      !(allowAdmin && roleForAccess === 'admin') &&
-      !canManageOwnProposal(Number(req.userId), roleForAccess, {
-        id: nRow.id,
-        capturing_broker_id: nRow.capturing_broker_id,
-        selling_broker_id: nRow.selling_broker_id,
-        buyer_client_id: nRow.buyer_client_id,
-      } as NegotiationAccessRow)
+      !(allowAdmin && isNegotiationAdmin(roleForAccess)) &&
+      Number(nRow.proposer_id ?? 0) !== Number(req.userId)
     ) {
       await tx.rollback();
       return sendProposalError(res, 403, 'Acesso negado a esta proposta.', 'FORBIDDEN');
@@ -539,67 +499,6 @@ async function updateProposalFromWizardInternal(
       );
     }
 
-    let buyerUserIdentity: { id: number; name: string } | null = null;
-    if (payload.buyerUserId != null) {
-      try {
-        buyerUserIdentity = await resolveBuyerUserIdentity(tx, payload.buyerUserId);
-      } catch (error) {
-        await tx.rollback();
-        return sendProposalError(
-          res,
-          400,
-          error instanceof Error ? error.message : 'Usuario comprador invalido.',
-          'PROPOSAL_VALIDATION_FAILED'
-        );
-      }
-
-      const resolvedBuyerUserIdentity = buyerUserIdentity;
-      if (!resolvedBuyerUserIdentity) {
-        await tx.rollback();
-        return sendProposalError(
-          res,
-          400,
-          'Usuario comprador invalido.',
-          'PROPOSAL_VALIDATION_FAILED'
-        );
-      }
-    }
-
-    if (!buyerUserIdentity) {
-      buyerUserIdentity = await resolveBuyerUserIdentityByCpf(tx, payload.clientCpf);
-    }
-
-    const buyerClientId: number | null = buyerUserIdentity?.id ?? null;
-    const sellerClientId: number | null = normalizeOptionalPositiveId(property.owner_id);
-
-    const normalizedCpfExpr = `REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(client_cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '')`;
-
-    const [existingRows] = await tx.query<NegotiationAccessRow[]>(
-      `
-        SELECT id, status
-        FROM negotiations
-        WHERE property_id = ?
-          AND id <> ?
-          AND status IN ('PROPOSAL_DRAFT', 'PROPOSAL_SENT', 'IN_NEGOTIATION', 'DOCUMENTATION_PHASE', 'CONTRACT_DRAFTING', 'AWAITING_SIGNATURES')
-          AND (
-            (buyer_client_id IS NOT NULL AND buyer_client_id = ?)
-            OR ${normalizedCpfExpr} = ?
-          )
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [payload.propertyId, negotiationId, buyerClientId, cpfKey]
-    );
-    if (existingRows.length > 0) {
-      await tx.rollback();
-      return sendProposalError(
-        res,
-        409,
-        'Ja existe uma proposta ativa desta pessoa para este imovel.',
-        'PROPOSAL_ALREADY_EXISTS'
-      );
-    }
-
     const listingValue = Number(property.price ?? proposalValue ?? 0);
     const safeListingValue = Number.isFinite(listingValue) && listingValue > 0 ? listingValue : proposalValue;
 
@@ -612,7 +511,6 @@ async function updateProposalFromWizardInternal(
         clientName: payload.clientName,
         clientCpf: payload.clientCpf,
         listingValue: Number(safeListingValue.toFixed(2)),
-        buyerUserId: buyerClientId,
       },
     });
     let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();
@@ -635,9 +533,7 @@ async function updateProposalFromWizardInternal(
           capturing_broker_id = ?,
           selling_broker_id = ?,
           deal_type = ?,
-          buyer_client_id = ?,
           client_name = ?,
-          client_cpf = ?,
           status = ?,
           final_value = ?,
           payment_details = CAST(? AS JSON),
@@ -651,9 +547,7 @@ async function updateProposalFromWizardInternal(
         requestedCapturingBrokerId,
         requestedCapturingBrokerId,
         dealType,
-        buyerClientId,
         payload.clientName,
-        payload.clientCpf,
         DEFAULT_WIZARD_STATUS,
         proposalValue,
         paymentDetails,
@@ -683,9 +577,9 @@ async function updateProposalFromWizardInternal(
           source: 'mobile_proposal_wizard_update',
           payment: payload.pagamento,
           sellerBrokerId: requestedCapturingBrokerId,
-          sellerClientId,
+          advertiserId: nRow.advertiser_id,
           capturingBrokerId: requestedCapturingBrokerId,
-          buyerClientId,
+          proposerId: nRow.proposer_id,
           dealType,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
@@ -730,7 +624,8 @@ async function updateProposalFromWizardInternal(
       propertyId: payload.propertyId,
       clientName: payload.clientName,
       clientCpf: payload.clientCpf,
-      buyerUserId: buyerClientId,
+      proposerId: nRow.proposer_id,
+      advertiserId: nRow.advertiser_id,
       validityDays: payload.validadeDias,
       value: Number(proposalValue.toFixed(2)),
       payment: {
@@ -792,7 +687,7 @@ export async function deleteMyProposal(
     tx = await getNegotiationDbConnection();
     await tx.beginTransaction();
     const [rows] = await tx.query<NegotiationAccessRow[]>(
-      'SELECT id, capturing_broker_id, selling_broker_id, seller_client_id, buyer_client_id, status FROM negotiations WHERE id = ? FOR UPDATE',
+      'SELECT id, proposer_id, advertiser_id, status FROM negotiations WHERE id = ? FOR UPDATE',
       [negotiationId]
     );
     const row = rows[0];
@@ -800,7 +695,7 @@ export async function deleteMyProposal(
       await tx.rollback();
       return res.status(404).json({ error: 'Negociação não encontrada.' });
     }
-    if (!canManageOwnProposal(userId, String(req.userRole ?? ''), row)) {
+    if (!isNegotiationAdmin(req.userRole) && Number(row.proposer_id ?? 0) !== userId) {
       await tx.rollback();
       return res.status(403).json({ error: 'Acesso negado a esta proposta.' });
     }

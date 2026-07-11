@@ -163,7 +163,6 @@ describe('adminNegotiationMutationService', () => {
             property_broker_id: 30005,
             capturing_broker_id: 30003,
             responsible_broker_id: null,
-            buyer_client_id: 70001,
             property_title: 'Apartamento Vista Mar',
             property_code: 'RV-202',
             property_address: 'Rua 2',

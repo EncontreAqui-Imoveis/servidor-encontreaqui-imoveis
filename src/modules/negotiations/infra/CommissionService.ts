@@ -14,7 +14,6 @@ interface NegotiationRow {
   final_value: number | string | null;
   capturing_broker_id: number;
   selling_broker_id: number | null;
-  seller_client_id?: number | null;
 }
 
 export class CommissionService {

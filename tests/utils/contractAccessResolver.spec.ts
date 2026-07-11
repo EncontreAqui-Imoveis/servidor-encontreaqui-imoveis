@@ -5,17 +5,15 @@ import { resolveContractAccessContext } from '../../src/utils/contractAccessReso
 const baseContract = {
   id: 'contract-1',
   status: 'AWAITING_DOCS',
-  seller_client_id: 10,
-  buyer_client_id: 20,
-  seller_cpf: '111.111.111-11',
-  buyer_cpf: '222.222.222-22',
+  advertiser_id: 10,
+  proposer_id: 20,
   responsible_user_ids: '30',
 };
 
 describe('resolveContractAccessContext', () => {
-  it('reconhece comprador pelo CPF normalizado quando buyer_client_id não confere', () => {
+  it('reconhece comprador exclusivamente pelo proposer_id', () => {
     const context = resolveContractAccessContext(
-      { id: 99, role: 'client', cpf: '22222222222' },
+      { id: 20, role: 'client' },
       baseContract
     );
 
@@ -31,7 +29,7 @@ describe('resolveContractAccessContext', () => {
 
   it('não concede acesso para captador, corretor de venda ou iniciador implícitos', () => {
     const context = resolveContractAccessContext(
-      { id: 40, role: 'broker', cpf: null },
+      { id: 40, role: 'broker' },
       {
         ...baseContract,
         capturing_broker_id: 40,
@@ -46,7 +44,7 @@ describe('resolveContractAccessContext', () => {
 
   it('concede ambos os lados somente ao responsável vinculado à negociação', () => {
     const context = resolveContractAccessContext(
-      { id: 30, role: 'broker', cpf: null },
+      { id: 30, role: 'broker' },
       baseContract
     );
 
@@ -62,15 +60,15 @@ describe('resolveContractAccessContext', () => {
   it('bloqueia identidade dupla para usuário comum, mas mantém admin para correção operacional', () => {
     const duplicatedContract = {
       ...baseContract,
-      seller_client_id: 20,
+      advertiser_id: 20,
     };
 
     expect(
-      resolveContractAccessContext({ id: 20, role: 'client', cpf: '22222222222' }, duplicatedContract)
+      resolveContractAccessContext({ id: 20, role: 'client' }, duplicatedContract)
         .userRole
     ).toBe('none');
     expect(
-      resolveContractAccessContext({ id: 1, role: 'admin', cpf: null }, duplicatedContract)
+      resolveContractAccessContext({ id: 1, role: 'admin' }, duplicatedContract)
         .userRole
     ).toBe('admin');
   });
@@ -79,11 +77,11 @@ describe('resolveContractAccessContext', () => {
     const frozenContract = { ...baseContract, status: 'AWAITING_SIGNATURES' };
 
     const responsible = resolveContractAccessContext(
-      { id: 30, role: 'broker', cpf: null },
+      { id: 30, role: 'broker' },
       frozenContract
     );
     const admin = resolveContractAccessContext(
-      { id: 1, role: 'admin', cpf: null },
+      { id: 1, role: 'admin' },
       frozenContract
     );
 

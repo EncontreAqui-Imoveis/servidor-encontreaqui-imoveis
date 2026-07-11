@@ -17,7 +17,9 @@ type DecisionNegotiationRow = RowDataPacket & {
   property_broker_id: number | string | null;
   capturing_broker_id: number | string | null;
   responsible_broker_id: number | string | null;
-  buyer_client_id?: number | string | null;
+  proposer_id?: number | string | null;
+  client_name?: string | null;
+  buyer_legal_cpf?: string | null;
   property_title: string | null;
   property_owner_name: string | null;
   property_owner_phone: string | null;
@@ -74,9 +76,9 @@ function resolveOperationalBrokerId(row: DecisionNegotiationRow): number {
 async function loadDecisionNegotiationRow(
   tx: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
   negotiationId: string,
-  includeBuyerClientId = false
+  includeProposerId = false
 ): Promise<DecisionNegotiationRow | null> {
-  const buyerClientSelect = includeBuyerClientId ? ', n.buyer_client_id' : '';
+  const proposerSelect = includeProposerId ? ', n.proposer_id' : '';
   const [rows] = (await tx.query(
     `
       SELECT
@@ -95,7 +97,9 @@ async function loadDecisionNegotiationRow(
           ORDER BY nr.created_at ASC, nr.id ASC
           LIMIT 1
         ) AS responsible_broker_id
-        ${buyerClientSelect},
+        ${proposerSelect},
+        n.client_name,
+        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_legal_cpf,
         p.title AS property_title,
         p.owner_name AS property_owner_name,
         p.owner_phone AS property_owner_phone,
@@ -257,9 +261,9 @@ export async function approveNegotiation(params: {
           negotiation.property_owner_name,
           negotiation.property_owner_phone,
           negotiation.client_name,
-          negotiation.client_cpf,
+          negotiation.buyer_legal_cpf,
           negotiation.client_name,
-          negotiation.client_cpf,
+          negotiation.buyer_legal_cpf,
         ]
       );
     }
@@ -476,7 +480,7 @@ export async function rejectNegotiation(params: {
 
     const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
     const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
-    const recipientClientId = Number(negotiation.buyer_client_id ?? 0);
+    const recipientClientId = Number(negotiation.proposer_id ?? 0);
 
     const notifyIds = new Set<number>();
     if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {

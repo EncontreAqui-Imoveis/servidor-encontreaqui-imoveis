@@ -23,7 +23,6 @@ const negotiationDocumentsRepository = new NegotiationDocumentsRepository(execut
 interface NegotiationProposalRow extends RowDataPacket {
   negotiation_id: string;
   client_name: string | null;
-  client_cpf: string | null;
   payment_details: unknown;
   final_value: number | string | null;
   validity_days: number | string | null;
@@ -110,7 +109,6 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
       SELECT
         n.id AS negotiation_id,
         n.client_name,
-        n.client_cpf,
         n.payment_details,
         n.final_value,
         n.proposal_validity_date,
@@ -174,7 +172,7 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
 
   return {
     clientName: String(row.client_name ?? details.clientName ?? details.client_name ?? '').trim(),
-    clientCpf: String(row.client_cpf ?? details.clientCpf ?? details.client_cpf ?? '').trim(),
+    clientCpf: String(details.clientCpf ?? '').trim(),
     propertyAddress: fallbackPropertyAddress,
     dealType,
     brokerName: String(row.capturing_broker_name ?? '').trim(),

@@ -41,7 +41,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   property_owner_name: string | null;
   capturing_broker_id: number | string | null;
   selling_broker_id: number | string | null;
-  seller_client_id: number | string | null;
+  advertiser_id: number | string | null;
   property_status: string | null;
   property_code: string | null;
   property_title: string | null;
@@ -54,7 +54,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   selling_broker_name: string | null;
   seller_client_name: string | null;
   client_name: string | null;
-  client_cpf: string | null;
+  buyer_legal_cpf: string | null;
   payment_dinheiro: number | string | null;
   payment_permuta: number | string | null;
   payment_financiamento: number | string | null;
@@ -274,13 +274,12 @@ async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClient
         FROM information_schema.columns
         WHERE table_schema = DATABASE()
           AND table_name = 'negotiations'
-          AND column_name IN ('client_name', 'client_cpf', 'payment_details')
+          AND column_name IN ('client_name', 'payment_details')
       `
     );
 
     const available = new Set(rows.map((row) => String(row.column_name ?? '').toLowerCase()));
     const hasClientName = available.has('client_name');
-    const hasClientCpf = available.has('client_cpf');
     const hasPaymentDetails = available.has('payment_details');
 
     const paymentDetailsClientNameExpr = hasPaymentDetails
@@ -294,9 +293,7 @@ async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClient
     const paymentDetailsClientCpfExpr = hasPaymentDetails
       ? `COALESCE(
             JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.client_cpf')),
             JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_cpf'))
           )`
       : 'NULL';
     const paymentDetailsDinheiroExpr = hasPaymentDetails
@@ -332,9 +329,7 @@ async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClient
       clientName: hasClientName
         ? 'n.client_name'
         : paymentDetailsClientNameExpr,
-      clientCpf: hasClientCpf
-        ? 'n.client_cpf'
-        : paymentDetailsClientCpfExpr,
+      clientCpf: paymentDetailsClientCpfExpr,
       paymentDinheiro: paymentDetailsDinheiroExpr,
       paymentPermuta: paymentDetailsPermutaExpr,
       paymentFinanciamento: paymentDetailsFinanciamentoExpr,
@@ -399,13 +394,13 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     propertyOwnerName: row.property_owner_name ?? null,
     capturingBrokerId: row.capturing_broker_id != null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId: row.selling_broker_id != null ? Number(row.selling_broker_id) : null,
-    sellerClientId: row.seller_client_id != null ? Number(row.seller_client_id) : null,
+    advertiserId: row.advertiser_id != null ? Number(row.advertiser_id) : null,
     brokerName: row.capturing_broker_name ?? row.selling_broker_name ?? null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
     sellerClientName: row.seller_client_name ?? null,
     clientName: row.client_name ?? null,
-    clientCpf: row.client_cpf ?? null,
+    clientCpf: row.buyer_legal_cpf ?? null,
     value: toNullableNumber(row.final_value),
     createdAt: toNullableIsoDate(row.created_at),
     validityDate: row.proposal_validity_date ? String(row.proposal_validity_date) : null,
@@ -460,7 +455,7 @@ export async function listNegotiations(params: {
         COALESCE(property_owner_user.name, p.owner_name) AS property_owner_name,
         n.capturing_broker_id,
         n.selling_broker_id,
-        n.seller_client_id,
+        n.advertiser_id,
         p.status AS property_status,
         p.code AS property_code,
         p.title AS property_title,
@@ -479,7 +474,7 @@ export async function listNegotiations(params: {
         seller_user.name AS selling_broker_name,
         seller_client_user.name AS seller_client_name,
         ${clientSql.clientName} AS client_name,
-        ${clientSql.clientCpf} AS client_cpf,
+        ${clientSql.clientCpf} AS buyer_legal_cpf,
         ${clientSql.paymentDinheiro} AS payment_dinheiro,
         ${clientSql.paymentPermuta} AS payment_permuta,
         ${clientSql.paymentFinanciamento} AS payment_financiamento,
@@ -496,7 +491,7 @@ export async function listNegotiations(params: {
       LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
       LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
-      LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
+      LEFT JOIN users seller_client_user ON seller_client_user.id = n.advertiser_id
       LEFT JOIN (
         SELECT
           h.negotiation_id,
@@ -748,7 +743,7 @@ export async function listNegotiationRequestsByProperty(params: {
         COALESCE(property_owner_user.name, p.owner_name) AS property_owner_name,
         n.capturing_broker_id,
         n.selling_broker_id,
-        n.seller_client_id,
+        n.advertiser_id,
         p.status AS property_status,
         p.code AS property_code,
         p.title AS property_title,
@@ -767,7 +762,7 @@ export async function listNegotiationRequestsByProperty(params: {
         seller_user.name AS selling_broker_name,
         seller_client_user.name AS seller_client_name,
         ${clientSql.clientName} AS client_name,
-        ${clientSql.clientCpf} AS client_cpf,
+        ${clientSql.clientCpf} AS buyer_legal_cpf,
         ${clientSql.paymentDinheiro} AS payment_dinheiro,
         ${clientSql.paymentPermuta} AS payment_permuta,
         ${clientSql.paymentFinanciamento} AS payment_financiamento,
@@ -784,7 +779,7 @@ export async function listNegotiationRequestsByProperty(params: {
       LEFT JOIN users property_capture_user ON property_capture_user.id = p.broker_id
       LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
       LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
-      LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
+      LEFT JOIN users seller_client_user ON seller_client_user.id = n.advertiser_id
       LEFT JOIN (
         SELECT
           d.negotiation_id,

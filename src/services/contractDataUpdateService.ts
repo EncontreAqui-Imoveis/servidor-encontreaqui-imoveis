@@ -349,7 +349,7 @@ export async function updateContractData(
   }
 
   const context = resolveContractAccessContext(
-    { id: params.req.userId, role: params.req.userRole, cpf: params.req.userCpf },
+    { id: params.req.userId, role: params.req.userRole },
     contract
   );
   params.req.contractContext = context;

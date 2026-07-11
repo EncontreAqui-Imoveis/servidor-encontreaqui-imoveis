@@ -32,13 +32,10 @@ const BUYER_BLOCK_KEYS = new Set([
 
 export type ContractDataSide = 'seller' | 'buyer';
 
-// Party fields are intentionally neutral. The enclosing side is the ownership boundary.
-export interface ContractPartyQualificationDto {
+interface ContractPartyQualificationBase {
   estado_civil?: string;
   estadoCivil?: string;
   profissao?: string;
-  dados_bancarios?: string;
-  dadosBancarios?: string;
   regime_bens?: string;
   regimeBens?: string;
   conjuge_nome?: string;
@@ -47,8 +44,85 @@ export interface ContractPartyQualificationDto {
   conjugeCpf?: string;
   conjuge_profissao?: string;
   conjugeProfissao?: string;
-  [field: string]: unknown;
 }
+
+export interface SellerQualification extends ContractPartyQualificationBase {
+  nome?: string;
+  name?: string;
+  fullName?: string;
+  full_name?: string;
+  telefone?: string;
+  phone?: string;
+  email?: string;
+  cpf?: string;
+  dados_bancarios?: string;
+  dadosBancarios?: string;
+}
+
+export interface BuyerQualification extends ContractPartyQualificationBase {
+  nome?: string;
+  name?: string;
+  fullName?: string;
+  full_name?: string;
+  clientName?: string;
+  telefone?: string;
+  phone?: string;
+  email?: string;
+  cpf?: string;
+  clientCpf?: string;
+  garantia_locacao?: string;
+  garantiaLocacao?: string;
+}
+
+const SELLER_QUALIFICATION_KEYS = new Set<keyof SellerQualification>([
+  'nome',
+  'name',
+  'fullName',
+  'full_name',
+  'telefone',
+  'phone',
+  'email',
+  'cpf',
+  'estado_civil',
+  'estadoCivil',
+  'profissao',
+  'dados_bancarios',
+  'dadosBancarios',
+  'regime_bens',
+  'regimeBens',
+  'conjuge_nome',
+  'conjugeNome',
+  'conjuge_cpf',
+  'conjugeCpf',
+  'conjuge_profissao',
+  'conjugeProfissao',
+]);
+
+const BUYER_QUALIFICATION_KEYS = new Set<keyof BuyerQualification>([
+  'nome',
+  'name',
+  'fullName',
+  'full_name',
+  'clientName',
+  'telefone',
+  'phone',
+  'email',
+  'cpf',
+  'clientCpf',
+  'estado_civil',
+  'estadoCivil',
+  'profissao',
+  'regime_bens',
+  'regimeBens',
+  'conjuge_nome',
+  'conjugeNome',
+  'conjuge_cpf',
+  'conjugeCpf',
+  'conjuge_profissao',
+  'conjugeProfissao',
+  'garantia_locacao',
+  'garantiaLocacao',
+]);
 
 export interface ContractDataUpdateBody {
   ownerInfo?: unknown;
@@ -109,6 +183,23 @@ function rejectCrossSideBlocks(
     }
     if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
       rejectCrossSideBlocks(nested as Record<string, unknown>, side, `${fieldName}.${key}`);
+    }
+  }
+}
+
+function validateQualificationAllowlist(
+  value: Record<string, unknown>,
+  side: ContractDataSide,
+  fieldName: string
+): void {
+  const allowedKeys: ReadonlySet<string> =
+    side === 'seller' ? SELLER_QUALIFICATION_KEYS : BUYER_QUALIFICATION_KEYS;
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (!allowedKeys.has(key)) {
+      throw mutationError(400, `${fieldName}.${key} não é permitido para o lado ${side}.`);
+    }
+    if (fieldValue !== null && typeof fieldValue !== 'string') {
+      throw mutationError(400, `${fieldName}.${key} deve ser texto ou nulo.`);
     }
   }
 }
@@ -245,9 +336,11 @@ export async function updateContractData(
   }
   if (side === 'seller' && sellerPatch) {
     rejectCrossSideBlocks(sellerPatch, side, 'sellerInfo');
+    validateQualificationAllowlist(sellerPatch, side, 'sellerInfo');
   }
   if (side === 'buyer' && buyerPatch) {
     rejectCrossSideBlocks(buyerPatch, side, 'buyerInfo');
+    validateQualificationAllowlist(buyerPatch, side, 'buyerInfo');
   }
 
   const contract = await fetchContractForUpdate(tx, params.contractId);

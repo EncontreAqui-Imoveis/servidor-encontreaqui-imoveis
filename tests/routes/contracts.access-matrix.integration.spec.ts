@@ -149,8 +149,8 @@ describe('Contract access matrix HTTP integration', () => {
       .set(asActor(actor))
       .send(
         side === 'seller'
-          ? { side, sellerInfo: { editedBy: actor } }
-          : { side, buyerInfo: { editedBy: actor } },
+          ? { side, sellerInfo: { profissao: `seller-${actor}` } }
+          : { side, buyerInfo: { profissao: `buyer-${actor}` } },
       );
 
   const uploadDocument = (actor: keyof typeof actors, side: 'seller' | 'buyer') =>
@@ -250,7 +250,9 @@ describe('Contract access matrix HTTP integration', () => {
       .set(asActor('buyer'));
     expect(details.status).toBe(200);
     expect(details.body.contract.sellerInfo).toEqual({});
-    expect(details.body.contract.buyerInfo).toEqual(expect.objectContaining({ editedBy: 'buyer' }));
+    expect(details.body.contract.buyerInfo).toEqual(
+      expect.objectContaining({ profissao: 'buyer-buyer' })
+    );
     expect(details.body.documents).toEqual([
       expect.objectContaining({ ownerSide: 'buyer' }),
     ]);
@@ -273,6 +275,63 @@ describe('Contract access matrix HTTP integration', () => {
     expect((await updateData('responsible', 'buyer')).status).toBe(200);
     expect((await uploadDocument('responsible', 'seller')).status).toBe(201);
     expect((await uploadDocument('responsible', 'buyer')).status).toBe(201);
+  });
+
+  it('isola qualificações cadastrais e não persiste tentativa cruzada', async () => {
+    state.sellerInfo = {
+      estado_civil: 'Casado',
+      profissao: 'Vendedor',
+      regime_bens: 'Comunhão parcial',
+      conjuge_nome: 'Cônjuge vendedor',
+    };
+    state.buyerInfo = {
+      estado_civil: 'Solteiro',
+      profissao: 'Comprador',
+    };
+
+    const buyerQualification = {
+      estado_civil: 'Casado',
+      profissao: 'Analista',
+      regime_bens: 'Separação total',
+      conjuge_nome: 'Cônjuge comprador',
+      conjuge_cpf: '22222222222',
+      conjuge_profissao: 'Arquiteta',
+    };
+    const ownSide = await request(app)
+      .put('/contracts/contract-matrix-1/data')
+      .set(asActor('buyer'))
+      .send({ side: 'buyer', buyerInfo: buyerQualification });
+
+    expect(ownSide.status).toBe(200);
+    expect(state.buyerInfo).toEqual(buyerQualification);
+    expect(state.sellerInfo).toEqual({
+      estado_civil: 'Casado',
+      profissao: 'Vendedor',
+      regime_bens: 'Comunhão parcial',
+      conjuge_nome: 'Cônjuge vendedor',
+    });
+
+    expectForbidden(
+      await request(app)
+        .put('/contracts/contract-matrix-1/data')
+        .set(asActor('buyer'))
+        .send({
+          side: 'seller',
+          sellerInfo: { regime_bens: 'Tentativa indevida' },
+        })
+    );
+    expect(state.sellerInfo.regime_bens).toBe('Comunhão parcial');
+
+    const malformedCrossSide = await request(app)
+      .put('/contracts/contract-matrix-1/data')
+      .set(asActor('buyer'))
+      .send({
+        side: 'buyer',
+        buyerInfo: { seller_regime_bens: 'Tentativa indevida' },
+      });
+    expect(malformedCrossSide.status).toBe(400);
+    expect(malformedCrossSide.body.error).toContain('vendedor');
+    expect(state.buyerInfo).toEqual(buyerQualification);
   });
 
   it('bloqueia corretor captador sem pivot e usuário sem vínculo antes do controller', async () => {

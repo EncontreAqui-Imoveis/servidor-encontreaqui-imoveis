@@ -1751,7 +1751,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.buyer_client_id,
     n.client_name,
     n.client_cpf,
-    COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), NULLIF(TRIM(u_owner.cpf), '')) AS seller_cpf,
+    COALESCE(NULLIF(TRIM(seller_client_user.cpf), ''), NULLIF(TRIM(owner_user.cpf), '')) AS seller_cpf,
     COALESCE(NULLIF(TRIM(n.client_cpf), ''), NULLIF(TRIM(buyer_user.cpf), '')) AS buyer_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
@@ -1764,7 +1764,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
       LIMIT 1
     ) AS property_image_url,
     p.owner_id AS property_owner_id,
-    COALESCE(u_owner.name, p.owner_name) AS property_owner_name,
+    COALESCE(owner_user.name, p.owner_name) AS property_owner_name,
     p.owner_phone AS property_owner_phone,
     COALESCE(
       CAST(
@@ -1797,7 +1797,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
   LEFT JOIN users buyer_user ON buyer_user.id = n.buyer_client_id
   LEFT JOIN users seller_client_user ON seller_client_user.id = n.seller_client_id
-  LEFT JOIN users u_owner ON u_owner.id = p.owner_id
+  LEFT JOIN users owner_user ON owner_user.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
 `;
 

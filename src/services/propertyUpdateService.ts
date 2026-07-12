@@ -62,7 +62,6 @@ const PROPERTY_ERROR_CODES = {
   INVALID_OWNER_PHONE: 'PROPERTY_OWNER_PHONE_INVALID',
   PROMOTION_PARSE_ERROR: 'PROPERTY_PROMOTION_PARSE_ERROR',
   NUMERIC_RANGE_ERROR: 'PROPERTY_NUMERIC_RANGE_ERROR',
-  AREA_RELATION_ERROR: 'PROPERTY_AREA_RELATION_INVALID',
 } as const;
 
 const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
@@ -816,22 +815,6 @@ export async function updateProperty(req: AuthRequest, res: Response) {
       bodyKeys.includes('area_terreno_valor') ||
       bodyKeys.includes('area_construida_unidade') ||
       bodyKeys.includes('area_terreno_unidade');
-    const nextAreaConstruidaState =
-      hasAreaUpdate
-        ? nextAreaConstruidaM2
-        : property.area_construida_m2 != null
-          ? Number(property.area_construida_m2)
-          : property.area_construida != null
-            ? Number(property.area_construida)
-            : null;
-    const nextAreaTerrenoState =
-      hasAreaUpdate
-        ? nextAreaTerrenoM2
-        : property.area_terreno_m2 != null
-          ? Number(property.area_terreno_m2)
-          : property.area_terreno != null
-            ? Number(property.area_terreno)
-            : null;
     const numericValidationError = [
       validatePropertyNumericRange(nextBasePrice, 'Preço base', { max: MAX_PROPERTY_PRICE }),
       validatePropertyNumericRange(nextSalePrice, 'Preço de venda', { max: MAX_PROPERTY_PRICE, allowNull: true }),
@@ -914,20 +897,6 @@ export async function updateProperty(req: AuthRequest, res: Response) {
         error: numericValidationError,
         code: PROPERTY_ERROR_CODES.NUMERIC_RANGE_ERROR,
         field: resolveValidationFieldFromMessage(numericValidationError),
-      });
-    }
-
-    if (
-      nextAreaConstruidaState != null &&
-      nextAreaTerrenoState != null &&
-      nextAreaConstruidaState > 0 &&
-      nextAreaTerrenoState > 0 &&
-      nextAreaConstruidaState > nextAreaTerrenoState
-    ) {
-      return sendPropertyError(req, res, 400, {
-        error: 'Área construída não pode ser maior que a área do terreno.',
-        code: PROPERTY_ERROR_CODES.AREA_RELATION_ERROR,
-        field: 'area_terreno',
       });
     }
 

@@ -81,7 +81,6 @@ const PROPERTY_ERROR_CODES = {
   NUMERIC_PARSE_ERROR: "PROPERTY_NUMERIC_PARSE_ERROR",
   NUMERIC_RANGE_ERROR: "PROPERTY_NUMERIC_RANGE_EXCEEDED",
   NUMERIC_RANGE_MISMATCH: "PROPERTY_NUMERIC_RANGE_INVALID",
-  AREA_RELATION_ERROR: "PROPERTY_AREA_RELATION_INVALID",
   IMAGE_REQUIRED: "PROPERTY_IMAGES_REQUIRED",
   IMAGE_LIMIT_EXCEEDED: "PROPERTY_IMAGES_LIMIT_EXCEEDED",
   IMAGE_UPLOAD_TOO_LARGE: "PROPERTY_IMAGE_TOO_LARGE",
@@ -645,14 +644,6 @@ async function createPropertyInternal(
           propertyType: normalizedType,
           requiredAreaField: "area_terreno_valor",
         },
-      });
-    }
-
-    if (areaConstruida.m2 != null && areaTerreno.m2 != null && areaConstruida.m2 > areaTerreno.m2) {
-      return sendPropertyError(res, req, 400, {
-        error: 'Área construída não pode ser maior que a área do terreno.',
-        code: PROPERTY_ERROR_CODES.AREA_RELATION_ERROR,
-        field: "area_terreno",
       });
     }
 

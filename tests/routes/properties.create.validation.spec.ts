@@ -609,7 +609,7 @@ describe('POST /properties description length contract', () => {
     expect(response.body.requestId).toBe('broker-code-conflict');
   });
 
-  it('returns structured area validation error on create with structured response', async () => {
+  it('accepts create when constructed area is greater than terrain area', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('SELECT status FROM brokers')) return [[{ status: 'approved' }]];
       if (sql.includes('SELECT id FROM properties')) return [[]];
@@ -627,11 +627,8 @@ describe('POST /properties description length contract', () => {
         area_terreno: 100,
       });
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('Área construída não pode ser maior que a área do terreno.');
-    expect(response.body.code).toBe('PROPERTY_AREA_RELATION_INVALID');
-    expect(response.body.field).toBe('area_terreno');
-    expect(response.body.requestId).toBe('broker-area-error');
+    expect(response.status).toBe(201);
+    expect(response.body.propertyId).toBeDefined();
   });
 
   it('accepts createForClient with bedrooms/bathrooms/garage_spots as 0', async () => {
@@ -1213,7 +1210,7 @@ describe('POST /properties description length contract', () => {
     expect(updateParams).toContain('hectare');
   });
 
-  it('rejects area de terreno abaixo da área construída via PATCH /properties/:id', async () => {
+  it('accepts area construída greater than terrain area via PATCH /properties/:id', async () => {
     queryMock.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('SELECT * FROM properties WHERE id = ?')) {
         return [[mockPropertyRow]];
@@ -1232,11 +1229,7 @@ describe('POST /properties description length contract', () => {
         area_construida_unidade: 'm2',
       });
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toBe('Área construída não pode ser maior que a área do terreno.');
-    expect(response.body.code).toBe('PROPERTY_AREA_RELATION_INVALID');
-    expect(response.body.field).toBe('area_terreno');
-    expect(response.body.requestId).toBe('update-patch-area-incoerente');
+    expect(response.status).toBe(200);
   });
 
   it('returns structured mandatory-data error on PATCH /properties/:id with empty body', async () => {

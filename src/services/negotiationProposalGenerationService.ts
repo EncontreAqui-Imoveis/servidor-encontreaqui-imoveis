@@ -611,7 +611,7 @@ export async function generateProposalFromProperty(
           proposal_validity_date,
           created_at,
           version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
       `,
       [
         negotiationId,

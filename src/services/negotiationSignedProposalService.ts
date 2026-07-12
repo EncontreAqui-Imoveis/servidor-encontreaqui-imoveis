@@ -200,6 +200,7 @@ export async function uploadSignedProposal(
         brokerId: req.userId,
         documentId,
       },
+      target: 'proposal_details',
     });
 
     return res.status(201).json({

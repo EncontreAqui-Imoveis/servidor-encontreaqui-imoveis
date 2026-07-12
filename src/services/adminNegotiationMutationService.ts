@@ -8,7 +8,6 @@ import {
 } from '../errors/ApplicationError';
 import { adminDb } from './adminPersistenceService';
 import { createUserNotification } from './notificationService';
-import { sendPushNotifications } from './pushNotificationService';
 
 type DecisionNegotiationRow = RowDataPacket & {
   id: string;
@@ -360,6 +359,7 @@ export async function approveNegotiation(params: {
             propertyTitle,
             ...buildAdminIdMetadata(actorId),
           },
+          target: 'contracts_tab',
         });
       } catch (notifyError) {
         console.error('Erro ao notificar corretor sobre aprovação da proposta:', notifyError);
@@ -505,6 +505,7 @@ export async function rejectNegotiation(params: {
             status: 'REJECTED',
             ...buildAdminIdMetadata(actorId),
           },
+          target: 'proposal_details',
         });
       } catch (notifyError) {
         console.error('Erro ao notificar sobre rejeição da proposta:', notifyError);
@@ -640,13 +641,7 @@ export async function cancelNegotiation(params: {
             status: 'CANCELLED',
             ...buildAdminIdMetadata(actorId),
           },
-        });
-
-        await sendPushNotifications({
-          message: brokerMessage,
-          recipientIds: [recipientBrokerId],
-          relatedEntityType: 'negotiation',
-          relatedEntityId: Number(negotiation.property_id),
+          target: 'proposal_details',
         });
       } catch (notifyError) {
         console.error('Erro ao notificar corretor sobre cancelamento da negociação:', notifyError);

@@ -1,6 +1,12 @@
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
 import { sendPushNotifications } from './pushNotificationService';
+import {
+  buildNotificationDeepLinkMetadata,
+  withNotificationId,
+  type NotificationDeepLinkMetadata,
+  type NotificationTarget,
+} from './notificationDeepLinkMetadata';
 
 type RelatedEntityType =
   | 'property'
@@ -21,6 +27,7 @@ interface CreateAdminNotificationInput {
   message: string;
   relatedEntityId?: number | null;
   metadata?: Record<string, unknown> | null;
+  target?: NotificationTarget;
 }
 
 interface CreateUserNotificationInput {
@@ -31,6 +38,13 @@ interface CreateUserNotificationInput {
   relatedEntityId?: number | null;
   metadata?: Record<string, unknown> | null;
   recipientRole?: 'client' | 'broker';
+  target?: NotificationTarget;
+}
+
+export interface PersistedUserNotification {
+  id: number;
+  recipientId: number;
+  metadata: NotificationDeepLinkMetadata;
 }
 
 const RELATED_ENTITY_TYPES: Set<RelatedEntityType> = new Set([
@@ -63,18 +77,20 @@ export async function notifyAdmins(
     return;
   }
 
-  const values = adminIds.map((adminId) => [
-    null,
-    message,
-    relatedEntityType,
-    relatedEntityId,
-    null,
-    adminId,
-    'admin',
-    'admin',
-  ]);
-
-  await insertNotifications(values);
+  await Promise.all(
+    adminIds.map((adminId) =>
+      persistNotification({
+        title: null,
+        message,
+        type: relatedEntityType,
+        relatedEntityId,
+        metadata: null,
+        recipientId: adminId,
+        recipientType: 'admin',
+        recipientRole: 'admin',
+      })
+    )
+  );
 }
 
 export async function createAdminNotification({
@@ -83,6 +99,7 @@ export async function createAdminNotification({
   message,
   relatedEntityId = null,
   metadata = null,
+  target,
 }: CreateAdminNotificationInput): Promise<void> {
   if (!isValidRelatedEntityType(type)) {
     throw new Error(`Invalid related entity type: ${type}`);
@@ -105,20 +122,21 @@ export async function createAdminNotification({
     relatedEntityId != null && Number.isFinite(relatedEntityId)
       ? Number(relatedEntityId)
       : null;
-  const metadataJson = metadata ? JSON.stringify(metadata) : null;
-
-  const values = adminIds.map((adminId) => [
-    trimmedTitle,
-    trimmedMessage,
-    type,
-    normalizedEntityId,
-    metadataJson,
-    adminId,
-    'admin',
-    'admin',
-  ]);
-
-  await insertNotifications(values);
+  await Promise.all(
+    adminIds.map((adminId) =>
+      persistNotification({
+        title: trimmedTitle,
+        message: trimmedMessage,
+        type,
+        relatedEntityId: normalizedEntityId,
+        metadata,
+        target,
+        recipientId: adminId,
+        recipientType: 'admin',
+        recipientRole: 'admin',
+      })
+    )
+  );
 }
 
 async function resolveRecipientRole(recipientId: number): Promise<'client' | 'broker'> {
@@ -144,6 +162,7 @@ export async function createUserNotification({
   relatedEntityId = null,
   metadata = null,
   recipientRole,
+  target,
 }: CreateUserNotificationInput): Promise<void> {
   if (!isValidRelatedEntityType(type)) {
     throw new Error(`Invalid related entity type: ${type}`);
@@ -164,27 +183,22 @@ export async function createUserNotification({
     relatedEntityId != null && Number.isFinite(relatedEntityId)
       ? Number(relatedEntityId)
       : null;
-  const metadataJson = metadata ? JSON.stringify(metadata) : null;
   const resolvedRole = recipientRole ?? (await resolveRecipientRole(numericRecipientId));
-
-  const values = [[
-    trimmedTitle,
-    trimmedMessage,
+  const persisted = await persistUserNotification({
     type,
-    normalizedEntityId,
-    metadataJson,
-    numericRecipientId,
-    'user',
-    resolvedRole,
-  ]];
-
-  await insertNotifications(values);
+    title: trimmedTitle,
+    message: trimmedMessage,
+    recipientId: numericRecipientId,
+    relatedEntityId: normalizedEntityId,
+    metadata,
+    recipientRole: resolvedRole,
+    target,
+  });
   try {
     const pushSummary = await sendPushNotifications({
       message: trimmedMessage,
-      recipientIds: [numericRecipientId],
-      relatedEntityType: type,
-      relatedEntityId: normalizedEntityId,
+      recipients: [{ recipientId: numericRecipientId, metadata: persisted.metadata }],
+      title: trimmedTitle,
     });
     console.info('create_user_notification_push_dispatched', {
       recipientId: numericRecipientId,
@@ -206,50 +220,75 @@ export async function createUserNotification({
   }
 }
 
-async function insertNotifications(values: Array<Array<unknown>>): Promise<void> {
-  try {
-    await connection.query(
-      `
-        INSERT INTO notifications (
-          title,
-          message,
-          related_entity_type,
-          related_entity_id,
-          metadata_json,
-          recipient_id,
-          recipient_type,
-          recipient_role
-        )
-        VALUES ?
-      `,
-      [values]
-    );
-  } catch (error: any) {
-    if (error?.code !== 'ER_BAD_FIELD_ERROR') {
-      throw error;
-    }
+export async function persistUserNotification(input: {
+  type: RelatedEntityType;
+  title: string;
+  message: string;
+  recipientId: number;
+  relatedEntityId?: number | null;
+  metadata?: Record<string, unknown> | null;
+  recipientRole: 'client' | 'broker';
+  target?: NotificationTarget;
+}): Promise<PersistedUserNotification> {
+  const persisted = await persistNotification({
+    ...input,
+    relatedEntityId: input.relatedEntityId ?? null,
+    metadata: input.metadata ?? null,
+    recipientType: 'user',
+  });
+  return {
+    id: persisted.id,
+    recipientId: input.recipientId,
+    metadata: persisted.metadata,
+  };
+}
 
-    const fallbackValues = values.map((row) => [
-      row[1],
-      row[2],
-      row[3],
-      row[5],
-      row[6],
-      row[7],
-    ]);
-    await connection.query(
-      `
-        INSERT INTO notifications (
-          message,
-          related_entity_type,
-          related_entity_id,
-          recipient_id,
-          recipient_type,
-          recipient_role
-        )
-        VALUES ?
-      `,
-      [fallbackValues]
-    );
-  }
+async function persistNotification(input: {
+  title: string | null;
+  message: string;
+  type: RelatedEntityType;
+  relatedEntityId: number | null;
+  metadata: Record<string, unknown> | null;
+  target?: NotificationTarget;
+  recipientId: number;
+  recipientType: 'user' | 'admin';
+  recipientRole: 'client' | 'broker' | 'admin';
+}): Promise<{ id: number; metadata: NotificationDeepLinkMetadata }> {
+  const metadata = buildNotificationDeepLinkMetadata({
+    target: input.target,
+    metadata: input.metadata,
+    relatedEntityType: input.type,
+    relatedEntityId: input.relatedEntityId,
+  });
+  const [result] = await connection.query<ResultSetHeader>(
+    `
+      INSERT INTO notifications (
+        title,
+        message,
+        related_entity_type,
+        related_entity_id,
+        metadata_json,
+        recipient_id,
+        recipient_type,
+        recipient_role
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      input.title,
+      input.message,
+      input.type,
+      input.relatedEntityId,
+      JSON.stringify(metadata),
+      input.recipientId,
+      input.recipientType,
+      input.recipientRole,
+    ]
+  );
+  const notificationId = Number(result.insertId);
+  const persistedMetadata = withNotificationId(metadata, notificationId);
+  await connection.query(
+    'UPDATE notifications SET metadata_json = ? WHERE id = ?',
+    [JSON.stringify(persistedMetadata), notificationId]
+  );
+  return { id: notificationId, metadata: persistedMetadata };
 }

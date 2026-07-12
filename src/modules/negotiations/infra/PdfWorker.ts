@@ -62,6 +62,7 @@ export function setupPdfWorker() {
               negotiationId,
               documentId,
             },
+            target: 'proposal_details',
           });
 
         } catch (error) {
@@ -78,6 +79,7 @@ export function setupPdfWorker() {
               negotiationId,
               error: error instanceof Error ? error.message : String(error),
             },
+            target: 'proposal_details',
           });
 
           throw error; // Let BullMQ handle retries

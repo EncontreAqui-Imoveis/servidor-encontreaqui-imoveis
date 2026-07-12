@@ -4,6 +4,11 @@ import {
   sendPushNotifications,
   type PushNotificationResult,
 } from './pushNotificationService';
+import {
+  persistUserNotification,
+  type PersistedUserNotification,
+} from './notificationService';
+import type { NotificationTarget } from './notificationDeepLinkMetadata';
 
 type RelatedEntityType =
   | 'property'
@@ -31,6 +36,10 @@ interface NotifyUsersInput {
   pushAction?: string | null;
   /** Título da notificação. */
   title?: string | null;
+  /** Destino autenticado aceito pelo aplicativo. */
+  target?: NotificationTarget;
+  /** Somente IDs de rota; campos não permitidos serão descartados. */
+  metadata?: Record<string, unknown> | null;
 }
 
 function normalizeOutgoingMessage(input: string): string {
@@ -52,6 +61,8 @@ export async function notifyUsers({
   sendPush = true,
   pushAction = null,
   title = null,
+  target,
+  metadata = null,
 }: NotifyUsersInput): Promise<PushNotificationResult | null> {
   const trimmed = normalizeOutgoingMessage(message);
   if (!trimmed) {
@@ -70,16 +81,7 @@ export async function notifyUsers({
     return null;
   }
 
-  const values = uniqueRecipients.map((rid) => [
-    trimmed,
-    relatedEntityType,
-    relatedEntityId,
-    rid,
-    'user',
-    recipientRole,
-  ]);
-
-  const batchSize = 500;
+  const persistedNotifications: PersistedUserNotification[] = [];
   console.info('notify_users_dispatch_started', {
     relatedEntityType,
     relatedEntityId,
@@ -89,14 +91,18 @@ export async function notifyUsers({
     pushAction: pushAction ?? null,
     title: title ?? null,
   });
-  for (let i = 0; i < values.length; i += batchSize) {
-    const chunk = values.slice(i, i + batchSize);
-    await connection.query(
-      `
-        INSERT INTO notifications (message, related_entity_type, related_entity_id, recipient_id, recipient_type, recipient_role)
-        VALUES ?
-      `,
-      [chunk]
+  for (const recipientId of uniqueRecipients) {
+    persistedNotifications.push(
+      await persistUserNotification({
+        type: relatedEntityType,
+        title: title?.trim() || 'Encontre Aqui',
+        message: trimmed,
+        recipientId,
+        relatedEntityId,
+        recipientRole,
+        target,
+        metadata,
+      })
     );
   }
 
@@ -116,10 +122,10 @@ export async function notifyUsers({
 
   const summary = await sendPushNotifications({
     message: trimmed,
-    recipientIds: uniqueRecipients,
-    relatedEntityType,
-    relatedEntityId,
-    action: pushAction,
+    recipients: persistedNotifications.map((notification) => ({
+      recipientId: notification.recipientId,
+      metadata: notification.metadata,
+    })),
     title,
   });
   console.info('notify_users_dispatch_finished', {

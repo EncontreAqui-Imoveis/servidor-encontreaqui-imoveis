@@ -2,24 +2,23 @@ import { RowDataPacket } from 'mysql2';
 import crypto from 'crypto';
 import admin from '../config/firebaseAdmin';
 import connection from '../database/connection';
+import type { NotificationDeepLinkMetadata } from './notificationDeepLinkMetadata';
 
 const PUSH_BATCH_LIMIT = 500;
 
 interface DeviceTokenRow extends RowDataPacket {
+  user_id: number;
   fcm_token: string | null;
+}
+
+export interface PushNotificationRecipient {
+  recipientId: number;
+  metadata: NotificationDeepLinkMetadata;
 }
 
 export interface PushNotificationPayload {
   message: string;
-  recipientIds: number[] | null;
-  relatedEntityType: string;
-  relatedEntityId: number | null;
-  /**
-   * Deep link semântico (ex.: `edit_rejected`). Repetido no `data` FCM como `action`.
-   * Clientes antigos ignoram; clientes novos usam com prioridade sobre só tipo/estado.
-   */
-  action?: string | null;
-  /** Título da notificação (ex.: 'Nova Proposta', 'Imóvel em Promoção'). */
+  recipients: PushNotificationRecipient[];
   title?: string | null;
 }
 
@@ -38,20 +37,25 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-async function fetchDeviceTokens(recipientIds: number[] | null): Promise<string[]> {
-  const params: Array<number> = [];
-  let sql = 'SELECT DISTINCT fcm_token FROM user_device_tokens';
+async function fetchDeviceTokens(recipientIds: number[]): Promise<Map<number, string[]>> {
+  const uniqueRecipientIds = Array.from(new Set(recipientIds));
+  if (uniqueRecipientIds.length === 0) return new Map();
 
-  if (recipientIds && recipientIds.length > 0) {
-    const placeholders = recipientIds.map(() => '?').join(', ');
-    sql += ` WHERE user_id IN (${placeholders})`;
-    params.push(...recipientIds);
+  const placeholders = uniqueRecipientIds.map(() => '?').join(', ');
+  const [rows] = await connection.query<DeviceTokenRow[]>(
+    `SELECT user_id, fcm_token FROM user_device_tokens WHERE user_id IN (${placeholders})`,
+    uniqueRecipientIds,
+  );
+  const tokensByRecipient = new Map<number, string[]>();
+  for (const row of rows ?? []) {
+    const recipientId = Number(row.user_id);
+    const token = (row.fcm_token ?? '').trim();
+    if (!Number.isFinite(recipientId) || !token) continue;
+    const tokens = tokensByRecipient.get(recipientId) ?? [];
+    tokens.push(token);
+    tokensByRecipient.set(recipientId, tokens);
   }
-
-  const [rows] = await connection.query<DeviceTokenRow[]>(sql, params);
-  return (rows ?? [])
-    .map((row) => (row.fcm_token ?? '').trim())
-    .filter((token) => token.length > 0);
+  return tokensByRecipient;
 }
 
 async function removeInvalidTokens(tokens: string[]) {
@@ -64,120 +68,113 @@ async function removeInvalidTokens(tokens: string[]) {
 export async function sendPushNotifications(
   payload: PushNotificationPayload,
 ): Promise<PushNotificationResult> {
-  const tokens = await fetchDeviceTokens(payload.recipientIds);
+  const recipients = payload.recipients.filter(
+    (recipient) => Number.isFinite(Number(recipient.recipientId)),
+  );
+  const tokensByRecipient = await fetchDeviceTokens(
+    recipients.map((recipient) => Number(recipient.recipientId)),
+  );
   const errorCodes = new Set<string>();
   const summary: PushNotificationResult = {
-    requested: tokens.length,
+    requested: 0,
     success: 0,
     failure: 0,
     errorCodes: [],
   };
 
-  if (tokens.length === 0) {
+  const requestedTokens = Array.from(tokensByRecipient.values()).reduce(
+    (total, tokens) => total + tokens.length,
+    0,
+  );
+  summary.requested = requestedTokens;
+  if (requestedTokens === 0) {
     console.info('push_dispatch_skipped_no_tokens', {
-      relatedEntityType: payload.relatedEntityType,
-      relatedEntityId: payload.relatedEntityId,
-      action: payload.action ?? null,
-      recipientCount: payload.recipientIds?.length ?? null,
+      recipientCount: recipients.length,
     });
     return summary;
   }
 
-  const batches = chunkArray(tokens, PUSH_BATCH_LIMIT);
-  const actionPart = (payload.action ?? '').trim();
-  const notificationTag = crypto
-    .createHash('sha1')
-    .update(
-      `${payload.relatedEntityType}:${payload.relatedEntityId ?? ''}:${actionPart}:${payload.message}`,
-    )
-    .digest('hex')
-    .slice(0, 24);
   console.info('push_dispatch_started', {
-    relatedEntityType: payload.relatedEntityType,
-    relatedEntityId: payload.relatedEntityId,
-    action: actionPart || null,
-    requestedTokens: tokens.length,
-    batchCount: batches.length,
+    requestedTokens,
+    recipientCount: recipients.length,
   });
-  for (const batch of batches) {
-    const response = await admin.messaging().sendEachForMulticast({
-      tokens: batch,
-      notification: {
-        title: (payload.title ?? '').trim() || 'Encontre Aqui',
-        body: payload.message,
-      },
-      android: {
-        priority: 'high',
-        collapseKey: notificationTag,
+  for (const recipient of recipients) {
+    const tokens = tokensByRecipient.get(Number(recipient.recipientId)) ?? [];
+    const notificationTag = crypto
+      .createHash('sha1')
+      .update(`${recipient.metadata.notification_id}:${payload.message}`)
+      .digest('hex')
+      .slice(0, 24);
+
+    for (const batch of chunkArray(tokens, PUSH_BATCH_LIMIT)) {
+      const response = await admin.messaging().sendEachForMulticast({
+        tokens: batch,
         notification: {
-          channelId: 'default_channel',
-          tag: notificationTag,
+          title: (payload.title ?? '').trim() || 'Encontre Aqui',
+          body: payload.message,
         },
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: 'default',
+        android: {
+          priority: 'high',
+          collapseKey: notificationTag,
+          notification: {
+            channelId: 'default_channel',
+            tag: notificationTag,
           },
         },
-      },
-      data: {
-        message: payload.message,
-        related_entity_type: payload.relatedEntityType,
-        related_entity_id: payload.relatedEntityId != null ? String(payload.relatedEntityId) : '',
-        action: actionPart,
-      },
-    });
-
-    const invalidTokens: string[] = [];
-    response.responses.forEach((item, index) => {
-      if (item.success) {
-        return;
-      }
-      const code = item.error?.code ?? '';
-      if (code) {
-        errorCodes.add(code);
-      }
-      if (
-        code === 'messaging/invalid-registration-token' ||
-        code === 'messaging/registration-token-not-registered'
-      ) {
-        invalidTokens.push(batch[index]);
-      }
-    });
-
-    if (response.failureCount > 0) {
-      const batchErrorCodes = response.responses
-        .map((item) => item.error?.code)
-        .filter((code): code is string => Boolean(code));
-      const onlyStaleTokens = response.responses.every((item) => {
-        if (item.success) return true;
-        const c = item.error?.code ?? '';
-        return c === 'messaging/invalid-registration-token' || c === 'messaging/registration-token-not-registered';
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+            },
+          },
+        },
+        // FCM permits string values only. This object is the canonical deep-link contract.
+        data: recipient.metadata,
       });
-      if (onlyStaleTokens) {
-        console.info('push_stale_tokens_pruned', { batchFailures: response.failureCount, codes: batchErrorCodes });
-      } else {
-        console.warn('Falhas ao enviar push:', {
-          failures: response.failureCount,
-          codes: batchErrorCodes,
+
+      const invalidTokens: string[] = [];
+      response.responses.forEach((item, index) => {
+        if (item.success) return;
+        const code = item.error?.code ?? '';
+        if (code) errorCodes.add(code);
+        if (
+          code === 'messaging/invalid-registration-token' ||
+          code === 'messaging/registration-token-not-registered'
+        ) {
+          invalidTokens.push(batch[index]);
+        }
+      });
+
+      if (response.failureCount > 0) {
+        const batchErrorCodes = response.responses
+          .map((item) => item.error?.code)
+          .filter((code): code is string => Boolean(code));
+        const onlyStaleTokens = response.responses.every((item) => {
+          if (item.success) return true;
+          const code = item.error?.code ?? '';
+          return code === 'messaging/invalid-registration-token' || code === 'messaging/registration-token-not-registered';
         });
+        if (onlyStaleTokens) {
+          console.info('push_stale_tokens_pruned', { batchFailures: response.failureCount, codes: batchErrorCodes });
+        } else {
+          console.warn('Falhas ao enviar push:', {
+            failures: response.failureCount,
+            codes: batchErrorCodes,
+          });
+        }
       }
-    }
 
-    if (invalidTokens.length > 0) {
-      await removeInvalidTokens(invalidTokens);
-    }
+      if (invalidTokens.length > 0) {
+        await removeInvalidTokens(invalidTokens);
+      }
 
-    summary.success += response.successCount;
-    summary.failure += response.failureCount;
+      summary.success += response.successCount;
+      summary.failure += response.failureCount;
+    }
   }
 
   summary.errorCodes = Array.from(errorCodes);
   console.info('push_dispatch_finished', {
-    relatedEntityType: payload.relatedEntityType,
-    relatedEntityId: payload.relatedEntityId,
-    action: actionPart || null,
     requested: summary.requested,
     success: summary.success,
     failure: summary.failure,

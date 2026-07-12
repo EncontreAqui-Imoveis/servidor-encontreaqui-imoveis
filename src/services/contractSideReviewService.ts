@@ -782,10 +782,12 @@ export async function evaluateContractSide(
             metadata: {
               contractId,
               negotiationId: contract.negotiation_id,
+              propertyId: Number(contract.property_id),
               side,
               status: nextSideStatus,
               reason: reasonText,
             },
+            target: 'contract_details',
           });
         } catch (notificationError) {
           console.error(
@@ -812,10 +814,12 @@ export async function evaluateContractSide(
             metadata: {
               contractId,
               negotiationId: contract.negotiation_id,
+              propertyId: Number(contract.property_id),
               side,
               status: nextSideStatus,
               reason: reasonText,
             },
+            target: 'contract_details',
           });
         } catch (notificationError) {
           console.error(

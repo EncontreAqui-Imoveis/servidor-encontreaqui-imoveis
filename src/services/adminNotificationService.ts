@@ -2,6 +2,10 @@ import { RowDataPacket } from 'mysql2';
 import { adminDb } from './adminPersistenceService';
 import { notifyUsers, splitRecipientsByRole } from './userNotificationService';
 import type { PushNotificationResult } from './pushNotificationService';
+import {
+  resolveNotificationTarget,
+  type NotificationTarget,
+} from './notificationDeepLinkMetadata';
 
 type AdminNotificationEntityType =
   | 'property'
@@ -22,6 +26,7 @@ export type AdminNotificationRequestBody = {
   related_entity_id?: unknown;
   audience?: unknown;
   pushAction?: unknown;
+  target?: unknown;
   title?: unknown;
 };
 
@@ -173,6 +178,15 @@ export async function sendAdminNotification(
   const audience = normalizeAudience(body.audience);
   const normalizedRecipients = normalizeRecipients(body.recipientId, body.recipientIds);
   const numericEntityId = entityId != null && Number.isFinite(entityId) ? Number(entityId) : null;
+  let target: NotificationTarget;
+  try {
+    target = resolveNotificationTarget(body.target, entityType);
+  } catch (error) {
+    return {
+      statusCode: 400,
+      body: { error: error instanceof Error ? error.message : 'Target de notificação inválido.' },
+    };
+  }
 
   let notificationRecipients: number[];
   try {
@@ -221,6 +235,7 @@ export async function sendAdminNotification(
       relatedEntityId: numericEntityId,
       pushAction: normalizeOptionalText(body.pushAction),
       title: normalizeOptionalText(body.title),
+      target,
     });
     if (summary) {
       summaries.push(summary);
@@ -236,6 +251,7 @@ export async function sendAdminNotification(
       relatedEntityId: numericEntityId,
       pushAction: normalizeOptionalText(body.pushAction),
       title: normalizeOptionalText(body.title),
+      target,
     });
     if (summary) {
       summaries.push(summary);

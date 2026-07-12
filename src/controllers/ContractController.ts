@@ -2325,8 +2325,10 @@ class ContractController {
             metadata: {
               contractId,
               negotiationId: contract.negotiation_id,
+              propertyId: Number(contract.property_id),
               stage: 'AWAITING_SIGNATURES',
             },
+            target: 'contract_details',
           });
         } catch (notificationError) {
           console.error('Falha ao notificar corretor sobre minuta:', notificationError);

@@ -293,7 +293,7 @@ async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClient
     const paymentDetailsClientCpfExpr = hasPaymentDetails
       ? `COALESCE(
             JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf')),
+            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf'))
           )`
       : 'NULL';
     const paymentDetailsDinheiroExpr = hasPaymentDetails

@@ -26,11 +26,10 @@ SET @legacy_check_drop_sql := (
       GROUP_CONCAT(CONCAT('DROP CHECK `', constraint_name, '`') SEPARATOR ', ')
     )
   END
-  FROM information_schema.constraint_column_usage
+  FROM information_schema.table_constraints
   WHERE table_schema = DATABASE()
     AND table_name = 'negotiations'
-    AND column_name IN ('client_cpf', 'buyer_client_id', 'seller_client_id')
-    AND constraint_name <> 'PRIMARY'
+    AND constraint_type = 'CHECK'
 );
 PREPARE stmt FROM @legacy_check_drop_sql;
 EXECUTE stmt;

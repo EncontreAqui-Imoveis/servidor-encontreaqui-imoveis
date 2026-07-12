@@ -63,7 +63,7 @@ const CATEGORY_DOCUMENT_TYPES: Record<
   ]),
   comprovante_endereco: new Set(['comprovante_endereco']),
   estado_civil: new Set(['certidao_casamento_nascimento']),
-  conjuge_documentos: new Set(['outro']),
+  conjuge_documentos: new Set(['doc_identidade_conjuge', 'outro']),
   comprovante_renda: new Set(['comprovante_renda']),
   dados_bancarios: new Set(['outro']),
   outro: new Set(['outro', ...CLIENTE_OUTRO_SLOT_TYPES]),
@@ -98,7 +98,7 @@ export function resolveFallbackDocumentTypeByCategory(
     case 'estado_civil':
       return 'certidao_casamento_nascimento';
     case 'conjuge_documentos':
-      return 'outro';
+      return 'doc_identidade_conjuge';
     case 'comprovante_renda':
       return 'comprovante_renda';
     case 'dados_bancarios':

@@ -1024,22 +1024,34 @@ function redactOwnerInfoByRole(
 
 function buildOwnerInfoFromContractRow(row: ContractRow): Record<string, unknown> {
   const fromStored = parseStoredJsonObject(row.seller_info);
-  if (Object.keys(fromStored).length > 0) {
-    return fromStored;
-  }
-
-  const fallback: Record<string, unknown> = {};
+  const fallback: Record<string, unknown> = { ...fromStored };
   const ownerName = String(row.property_owner_name ?? '').trim();
   const ownerPhone = String(row.property_owner_phone ?? '').trim();
+  const ownerCpf = String(row.seller_cpf ?? '').trim();
 
-  if (ownerName) {
+  if (ownerName && !String(fallback.nome ?? fallback.name ?? '').trim()) {
     fallback.nome = ownerName;
   }
-  if (ownerPhone) {
+  if (ownerPhone && !String(fallback.telefone ?? fallback.phone ?? '').trim()) {
     fallback.telefone = ownerPhone;
   }
+  if (ownerCpf && !String(fallback.cpf ?? '').trim()) fallback.cpf = ownerCpf;
 
   return fallback;
+}
+
+function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown> {
+  const buyerInfo = parseStoredJsonObject(row.buyer_info);
+  const buyerName = String(row.client_name ?? '').trim();
+  const buyerCpf = String(row.buyer_cpf ?? '').trim();
+
+  if (buyerName && !String(buyerInfo.nome ?? buyerInfo.clientName ?? buyerInfo.name ?? '').trim()) {
+    buyerInfo.nome = buyerName;
+  }
+  if (buyerCpf && !String(buyerInfo.cpf ?? buyerInfo.clientCpf ?? '').trim()) {
+    buyerInfo.cpf = buyerCpf;
+  }
+  return buyerInfo;
 }
 
 function shouldExposeOwnerSensitiveDocument(
@@ -1102,7 +1114,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const sellerInfoForViewer = canReadSeller
     ? redactOwnerInfoByRole(sellerInfo, canViewSensitiveData)
     : {};
-  const buyerInfoForViewer = canReadBuyer ? parseStoredJsonObject(row.buyer_info) : {};
+  const buyerInfoForViewer = canReadBuyer ? buildBuyerInfoFromContractRow(row) : {};
   const viewerSide = resolveContractViewerSide(req, row);
   return {
     id: row.id,
@@ -1127,6 +1139,8 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
       row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
     advertiserId: row.advertiser_id !== null ? Number(row.advertiser_id) : null,
     proposerId: row.proposer_id !== null ? Number(row.proposer_id) : null,
+    advertiserName: row.seller_client_name ?? null,
+    proposerName: row.buyer_client_name ?? null,
     clientName: row.client_name ?? null,
     capturingBrokerName: row.capturing_broker_name ?? null,
     sellingBrokerName: row.selling_broker_name ?? null,
@@ -1747,8 +1761,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.advertiser_id,
     n.proposer_id,
     n.client_name,
-    NULL AS seller_cpf,
-    NULL AS buyer_cpf,
+    owner_user.cpf AS seller_cpf,
+    JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
     p.code AS property_code,

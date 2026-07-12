@@ -44,6 +44,12 @@ interface ContractPartyQualificationBase {
   conjugeCpf?: string;
   conjuge_profissao?: string;
   conjugeProfissao?: string;
+  spouse_name?: string;
+  spouseName?: string;
+  spouse_cpf?: string;
+  spouseCpf?: string;
+  spouse_profession?: string;
+  spouseProfession?: string;
 }
 
 export interface SellerQualification extends ContractPartyQualificationBase {
@@ -96,6 +102,12 @@ const SELLER_QUALIFICATION_KEYS = new Set<keyof SellerQualification>([
   'conjugeCpf',
   'conjuge_profissao',
   'conjugeProfissao',
+  'spouse_name',
+  'spouseName',
+  'spouse_cpf',
+  'spouseCpf',
+  'spouse_profession',
+  'spouseProfession',
 ]);
 
 const BUYER_QUALIFICATION_KEYS = new Set<keyof BuyerQualification>([
@@ -120,6 +132,12 @@ const BUYER_QUALIFICATION_KEYS = new Set<keyof BuyerQualification>([
   'conjugeCpf',
   'conjuge_profissao',
   'conjugeProfissao',
+  'spouse_name',
+  'spouseName',
+  'spouse_cpf',
+  'spouseCpf',
+  'spouse_profession',
+  'spouseProfession',
   'garantia_locacao',
   'garantiaLocacao',
 ]);
@@ -263,6 +281,91 @@ function parseDataSide(value: unknown): ContractDataSide | null {
   return normalized === 'seller' || normalized === 'buyer' ? normalized : null;
 }
 
+function readNonEmptyText(source: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+function mergeQualification(
+  stored: Record<string, unknown>,
+  patch: Record<string, unknown> | null
+): Record<string, unknown> {
+  return patch ? { ...stored, ...patch } : { ...stored };
+}
+
+function requiresSpouse(civilStatus: unknown): boolean {
+  const normalized = String(civilStatus ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return normalized.includes('casad') || (normalized.includes('uniao') && normalized.includes('estav'));
+}
+
+function normalizeSpouseQualification(
+  qualification: Record<string, unknown>,
+  fieldName: string
+): Record<string, unknown> {
+  const civilStatus = qualification.estado_civil ?? qualification.estadoCivil;
+  const spouseFields = [
+    ['conjuge_nome', ['conjuge_nome', 'conjugeNome', 'spouse_name', 'spouseName']],
+    ['conjuge_cpf', ['conjuge_cpf', 'conjugeCpf', 'spouse_cpf', 'spouseCpf']],
+    ['conjuge_profissao', ['conjuge_profissao', 'conjugeProfissao', 'spouse_profession', 'spouseProfession']],
+  ] as const;
+
+  if (requiresSpouse(civilStatus)) {
+    const normalized = { ...qualification };
+    for (const [canonicalKey, aliases] of spouseFields) {
+      const value = readNonEmptyText(normalized, aliases);
+      if (!value) {
+        throw mutationError(
+          400,
+          `${fieldName}.${canonicalKey} é obrigatório para Casado(a) ou União Estável.`
+        );
+      }
+      normalized[canonicalKey] = value;
+    }
+    return normalized;
+  }
+
+  const normalized = { ...qualification };
+  for (const [canonicalKey, aliases] of spouseFields) {
+    for (const alias of aliases) {
+      if (alias !== canonicalKey) delete normalized[alias];
+    }
+    normalized[canonicalKey] = null;
+  }
+  return normalized;
+}
+
+function inheritPartyIdentity(
+  contract: ContractRow,
+  side: ContractDataSide,
+  qualification: Record<string, unknown>
+): Record<string, unknown> {
+  const normalized = { ...qualification };
+  const identityKeys =
+    side === 'seller'
+      ? ['nome', 'name', 'fullName', 'full_name']
+      : ['nome', 'name', 'fullName', 'full_name', 'clientName'];
+  const cpfKeys = side === 'seller' ? ['cpf'] : ['cpf', 'clientCpf'];
+  const inheritedName = side === 'seller' ? contract.property_owner_name : contract.client_name;
+  const inheritedCpf = side === 'seller' ? contract.seller_cpf : contract.buyer_cpf;
+
+  const name = readNonEmptyText(normalized, identityKeys) ?? String(inheritedName ?? '').trim();
+  const cpf = readNonEmptyText(normalized, cpfKeys) ?? String(inheritedCpf ?? '').trim();
+
+  if (name) normalized.nome = name;
+  if (cpf) normalized.cpf = cpf;
+
+  return normalized;
+}
+
 async function fetchContractForUpdate(
   tx: PoolConnection,
   contractId: string
@@ -368,8 +471,20 @@ export async function updateContractData(
   const sellerInfo = parseStoredJsonObject(contract.seller_info);
   const buyerInfo = parseStoredJsonObject(contract.buyer_info);
 
-  const nextSellerInfo = sellerPatch ?? sellerInfo;
-  const nextBuyerInfo = buyerPatch ?? buyerInfo;
+  const nextSellerInfo =
+    side === 'seller'
+      ? normalizeSpouseQualification(
+          inheritPartyIdentity(contract, 'seller', mergeQualification(sellerInfo, sellerPatch)),
+          'sellerInfo'
+        )
+      : sellerInfo;
+  const nextBuyerInfo =
+    side === 'buyer'
+      ? normalizeSpouseQualification(
+          inheritPartyIdentity(contract, 'buyer', mergeQualification(buyerInfo, buyerPatch)),
+          'buyerInfo'
+        )
+      : buyerInfo;
 
   await tx.query(
     `

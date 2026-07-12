@@ -42,6 +42,7 @@ export const CLIENTE_OUTRO_SLOT_TYPES = [
 
 export const CONTRACT_DOCUMENT_TYPES = [
   'doc_identidade',
+  'doc_identidade_conjuge',
   'comprovante_endereco',
   'certidao_casamento_nascimento',
   'certidao_inteiro_teor',

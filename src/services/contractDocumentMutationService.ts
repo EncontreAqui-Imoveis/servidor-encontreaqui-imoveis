@@ -21,6 +21,10 @@ import {
   type ContractDocumentSide,
 } from '../modules/contracts/domain/contractDocumentValidation';
 import { isUploadBlockedForNotApplicableCategory } from '../modules/contracts/domain/contractDocumentRuleMatrix';
+import {
+  assertParticipantMutationAllowed,
+  isContractWorkflowGuardError,
+} from './contractWorkflowGuard';
 import type {
   ContractDocumentCategoryCode,
   ContractDocumentType,
@@ -110,6 +114,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
+    'comprovante_garantia',
     'dados_bancarios',
     'docs_imovel',
     'outro',
@@ -227,6 +232,14 @@ export async function uploadContractDocument(
   if (context.userRole === 'none') {
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
+  try {
+    assertParticipantMutationAllowed(params.contract, context, 'document_upload');
+  } catch (error) {
+    if (isContractWorkflowGuardError(error)) {
+      throw mutationError(error.statusCode, error.message, { code: error.code });
+    }
+    throw error;
+  }
   const role = context.userRole;
   const resolvedSide: ContractDocumentSide | null = requestedSide;
   if (!resolvedSide) {
@@ -267,7 +280,7 @@ export async function uploadContractDocument(
     !isSignedDocumentType(normalizedDocumentType) &&
     !isAdminSupplemental
   ) {
-    if (currentStatus !== 'AWAITING_DOCS' && currentStatus !== 'IN_DRAFT') {
+    if (currentStatus !== 'AWAITING_DOCS') {
       throw mutationError(
         400,
         'Categorias documentais só podem ser enviadas na etapa de documentação.'
@@ -331,7 +344,10 @@ export async function uploadContractDocument(
   }
 
   const uploadEvent: ContractAuditEvent = {
-    action: 'document_upload',
+    action:
+      role === 'admin' && currentStatus !== 'AWAITING_DOCS'
+        ? 'admin_read_only_bypass_document_upload'
+        : 'document_upload',
     at: new Date().toISOString(),
     by: Number(params.req.userId ?? 0) || null,
     role: role || null,
@@ -445,6 +461,14 @@ export async function deleteContractDocument(
   if (context.userRole === 'none') {
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
+  try {
+    assertParticipantMutationAllowed(params.contract, context, 'document_delete');
+  } catch (error) {
+    if (isContractWorkflowGuardError(error)) {
+      throw mutationError(error.statusCode, error.message, { code: error.code });
+    }
+    throw error;
+  }
   if (!side) {
     throw mutationError(409, 'Documento legado sem dono explícito. Corrija-o pelo painel administrativo.');
   }
@@ -469,13 +493,34 @@ export async function deleteContractDocument(
     requestSource: 'contract_document_delete',
   });
 
+  const status = resolveContractStatus(params.contract.status);
+  const workflowMetadata =
+    context.userRole === 'admin' && status !== 'AWAITING_DOCS'
+      ? appendWorkflowAuditEvent(params.contract.workflow_metadata, {
+          action: 'admin_read_only_bypass_document_delete',
+          at: new Date().toISOString(),
+          by: Number(params.req.userId ?? 0) || null,
+          role: 'admin',
+          details: { side, documentType, status },
+        })
+      : null;
+
   await tx.query(
     `
       UPDATE contracts
-      SET updated_at = CURRENT_TIMESTAMP
+      SET
+        workflow_metadata = CASE
+          WHEN ? IS NULL THEN workflow_metadata
+          ELSE CAST(? AS JSON)
+        END,
+        updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `,
-    [params.contractId]
+    [
+      workflowMetadata ? JSON.stringify(workflowMetadata) : null,
+      workflowMetadata ? JSON.stringify(workflowMetadata) : null,
+      params.contractId,
+    ]
   );
 
   return { document };

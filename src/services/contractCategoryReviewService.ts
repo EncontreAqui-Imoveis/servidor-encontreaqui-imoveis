@@ -3,6 +3,7 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import { getContractDbConnection } from './contractPersistenceService';
 import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
+import { calculateContractReadiness } from './contractReadinessService';
 import type { ContractRow } from '../controllers/ContractController';
 import {
   isContractDocumentCategoryStatus,
@@ -147,6 +148,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
+    'comprovante_garantia',
     'dados_bancarios',
     'docs_imovel',
   ]);
@@ -583,8 +585,21 @@ export async function evaluateContractCategory(
       rows: updatedRows,
       contract,
     });
+    const readiness = calculateContractReadiness({
+      ...matrixContext,
+      documents: updatedRows.map((row) => {
+        const mapped = mapDocument(row);
+        return {
+          side: mapped.side,
+          documentCategory: mapped.documentCategory,
+          categoryStatus: mapped.categoryStatus,
+        };
+      }),
+    });
     const nextContractStatus: ContractStatus =
-      mustMoveBySide && mustMoveByCategories ? 'IN_DRAFT' : 'AWAITING_DOCS';
+      mustMoveBySide && mustMoveByCategories && readiness.eligibleForAdminApproval
+        ? 'IN_DRAFT'
+        : 'AWAITING_DOCS';
 
     const nextWorkflowMetadata = appendWorkflowAuditEvent(
       contract.workflow_metadata,

@@ -31,6 +31,7 @@ export const BUYER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[] 
   'estado_civil',
   'conjuge_documentos',
   'comprovante_renda',
+  'comprovante_garantia',
 ];
 
 export const SELLER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[] = [
@@ -65,6 +66,7 @@ const CATEGORY_DOCUMENT_TYPES: Record<
   estado_civil: new Set(['certidao_casamento_nascimento']),
   conjuge_documentos: new Set(['doc_identidade_conjuge', 'outro']),
   comprovante_renda: new Set(['comprovante_renda']),
+  comprovante_garantia: new Set(['comprovante_garantia']),
   dados_bancarios: new Set(['outro']),
   outro: new Set(['outro', ...CLIENTE_OUTRO_SLOT_TYPES]),
   docs_imovel: new Set(['certidao_inteiro_teor', 'certidao_onus_acoes']),
@@ -101,6 +103,8 @@ export function resolveFallbackDocumentTypeByCategory(
       return 'doc_identidade_conjuge';
     case 'comprovante_renda':
       return 'comprovante_renda';
+    case 'comprovante_garantia':
+      return 'comprovante_garantia';
     case 'dados_bancarios':
       return 'outro';
     case 'outro':

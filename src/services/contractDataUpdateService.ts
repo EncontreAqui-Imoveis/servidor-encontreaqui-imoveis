@@ -7,18 +7,29 @@ import {
   type ContractRow,
 } from '../controllers/ContractController';
 import { resolveContractAccessContext } from '../utils/contractAccessResolver';
+import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
+import {
+  assertParticipantMutationAllowed,
+  isContractWorkflowGuardError,
+} from './contractWorkflowGuard';
 
 class ContractDataUpdateError extends Error {
   statusCode: number;
+  body?: Record<string, unknown>;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, body?: Record<string, unknown>) {
     super(message);
     this.statusCode = statusCode;
+    this.body = body;
   }
 }
 
-function mutationError(statusCode: number, message: string): ContractDataUpdateError {
-  return new ContractDataUpdateError(statusCode, message);
+function mutationError(
+  statusCode: number,
+  message: string,
+  body?: Record<string, unknown>
+): ContractDataUpdateError {
+  return new ContractDataUpdateError(statusCode, message, body);
 }
 
 const JSON_BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -76,6 +87,8 @@ export interface BuyerQualification extends ContractPartyQualificationBase {
   email?: string;
   cpf?: string;
   clientCpf?: string;
+  dados_bancarios?: string | null;
+  dadosBancarios?: string | null;
   garantia_locacao?: string;
   garantiaLocacao?: string;
 }
@@ -121,6 +134,8 @@ const BUYER_QUALIFICATION_KEYS = new Set<keyof BuyerQualification>([
   'email',
   'cpf',
   'clientCpf',
+  'dados_bancarios',
+  'dadosBancarios',
   'estado_civil',
   'estadoCivil',
   'profissao',
@@ -307,7 +322,7 @@ function requiresSpouse(civilStatus: unknown): boolean {
   return normalized.includes('casad') || (normalized.includes('uniao') && normalized.includes('estav'));
 }
 
-function normalizeSpouseQualification(
+function normalizeSpouseQualificationForDraft(
   qualification: Record<string, unknown>,
   fieldName: string
 ): Record<string, unknown> {
@@ -319,14 +334,13 @@ function normalizeSpouseQualification(
   ] as const;
 
   if (requiresSpouse(civilStatus)) {
+    // Draft saves are intentionally partial. Completeness is assessed separately
+    // by contractReadinessService during the administrative review.
     const normalized = { ...qualification };
     for (const [canonicalKey, aliases] of spouseFields) {
       const value = readNonEmptyText(normalized, aliases);
-      if (!value) {
-        throw mutationError(
-          400,
-          `${fieldName}.${canonicalKey} é obrigatório para Casado(a) ou União Estável.`
-        );
+      for (const alias of aliases) {
+        if (alias !== canonicalKey) delete normalized[alias];
       }
       normalized[canonicalKey] = value;
     }
@@ -460,6 +474,15 @@ export async function updateContractData(
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
 
+  try {
+    assertParticipantMutationAllowed(contract, context, 'data_update');
+  } catch (error) {
+    if (isContractWorkflowGuardError(error)) {
+      throw mutationError(error.statusCode, error.message, { code: error.code });
+    }
+    throw error;
+  }
+
   if (side === 'seller' && !context.canEditSeller) {
     throw mutationError(403, 'Seu acesso não permite editar o lado vendedor nesta etapa.');
   }
@@ -473,18 +496,29 @@ export async function updateContractData(
 
   const nextSellerInfo =
     side === 'seller'
-      ? normalizeSpouseQualification(
+      ? normalizeSpouseQualificationForDraft(
           inheritPartyIdentity(contract, 'seller', mergeQualification(sellerInfo, sellerPatch)),
           'sellerInfo'
         )
       : sellerInfo;
   const nextBuyerInfo =
     side === 'buyer'
-      ? normalizeSpouseQualification(
+      ? normalizeSpouseQualificationForDraft(
           inheritPartyIdentity(contract, 'buyer', mergeQualification(buyerInfo, buyerPatch)),
           'buyerInfo'
         )
       : buyerInfo;
+  const status = String(contract.status ?? '').trim().toUpperCase();
+  const workflowMetadata =
+    context.userRole === 'admin' && status !== 'AWAITING_DOCS'
+      ? appendWorkflowAuditEvent(contract.workflow_metadata, {
+          action: 'admin_read_only_bypass_data_update',
+          at: new Date().toISOString(),
+          by: Number(params.req.userId ?? 0) || null,
+          role: 'admin',
+          details: { side, status },
+        })
+      : null;
 
   await tx.query(
     `
@@ -492,10 +526,20 @@ export async function updateContractData(
       SET
         seller_info = CAST(? AS JSON),
         buyer_info = CAST(? AS JSON),
+        workflow_metadata = CASE
+          WHEN ? IS NULL THEN workflow_metadata
+          ELSE CAST(? AS JSON)
+        END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `,
-    [JSON.stringify(nextSellerInfo), JSON.stringify(nextBuyerInfo), params.contractId]
+    [
+      JSON.stringify(nextSellerInfo),
+      JSON.stringify(nextBuyerInfo),
+      workflowMetadata ? JSON.stringify(workflowMetadata) : null,
+      workflowMetadata ? JSON.stringify(workflowMetadata) : null,
+      params.contractId,
+    ]
   );
 
   return {

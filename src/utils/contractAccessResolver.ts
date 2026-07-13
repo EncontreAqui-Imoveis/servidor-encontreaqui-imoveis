@@ -37,7 +37,8 @@ function buildContext(
   contractId: string,
   userId: string,
   userRole: ContractRole,
-  editable: boolean
+  editable: boolean,
+  workflowStatus: string
 ): ContractAccessContext {
   const canReadMeta = userRole !== 'none';
   const canReadSeller = userRole === 'seller' || userRole === 'responsible' || userRole === 'admin';
@@ -52,6 +53,8 @@ function buildContext(
     canEditSeller: editable && canReadSeller,
     canReadBuyer,
     canEditBuyer: editable && canReadBuyer,
+    isReadOnly: !editable,
+    workflowStatus,
   };
 }
 
@@ -65,8 +68,9 @@ export function resolveContractAccessContext(
 ): ContractAccessContext {
   const contractId = String(contract.id ?? '').trim();
   const userId = normalizePositiveId(user.id) ?? '';
+  const workflowStatus = String(contract.status ?? '').trim().toUpperCase();
   if (!contractId || !userId) {
-    return buildContext(contractId, userId, 'none', false);
+    return buildContext(contractId, userId, 'none', false, workflowStatus);
   }
 
   const requestRole = String(user.role ?? '').trim().toLowerCase();
@@ -76,12 +80,12 @@ export function resolveContractAccessContext(
 
   // Admin keeps operational access so duplicate identities can be repaired.
   if (requestRole === 'admin') {
-    return buildContext(contractId, userId, 'admin', true);
+    return buildContext(contractId, userId, 'admin', true, workflowStatus);
   }
 
   // A duplicated participant identity must be repaired by an admin, never inferred.
   if (hasDualIdentity) {
-    return buildContext(contractId, userId, 'none', false);
+    return buildContext(contractId, userId, 'none', false, workflowStatus);
   }
 
   let role: ContractRole = 'none';
@@ -93,7 +97,15 @@ export function resolveContractAccessContext(
     role = 'buyer';
   }
 
-  const status = String(contract.status ?? '').trim().toUpperCase();
-  const workflowFrozen = status === 'FINALIZED' || status === 'AWAITING_SIGNATURES';
-  return buildContext(contractId, userId, role, role !== 'none' && !workflowFrozen);
+  const workflowFrozen =
+    workflowStatus === 'IN_DRAFT' ||
+    workflowStatus === 'AWAITING_SIGNATURES' ||
+    workflowStatus === 'FINALIZED';
+  return buildContext(
+    contractId,
+    userId,
+    role,
+    role !== 'none' && !workflowFrozen,
+    workflowStatus
+  );
 }

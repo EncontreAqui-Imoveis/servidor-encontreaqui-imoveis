@@ -90,4 +90,15 @@ describe('resolveContractAccessContext', () => {
     expect(admin.canEditSeller).toBe(true);
     expect(admin.canEditBuyer).toBe(true);
   });
+
+  it('congela edição para participantes durante a confecção', () => {
+    const context = resolveContractAccessContext(
+      { id: 20, role: 'client' },
+      { ...baseContract, status: 'IN_DRAFT' }
+    );
+
+    expect(context.canEditBuyer).toBe(false);
+    expect(context.isReadOnly).toBe(true);
+    expect(context.workflowStatus).toBe('IN_DRAFT');
+  });
 });

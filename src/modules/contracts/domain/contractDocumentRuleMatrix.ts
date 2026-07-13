@@ -53,7 +53,7 @@ function isSalePurpose(value: string | null): boolean {
 
 function isRentalPurpose(value: string | null): boolean {
   const purpose = normalizePurpose(value);
-  return purpose.includes('alug') || purpose.includes('rent');
+  return purpose.includes('alug') || purpose.includes('loca') || purpose.includes('rent');
 }
 
 /**
@@ -200,6 +200,14 @@ export function resolveDocumentRequirements(input: {
         salePurpose && !rentalPurpose
           ? 'COMPROVANTE_RENDA_NA_SALE_ONLY'
           : 'COMPROVANTE_RENDA_REQUIRED',
+    },
+    {
+      category: 'comprovante_garantia',
+      applicability: rentalPurpose ? 'required' : 'not_applicable',
+      required: rentalPurpose,
+      reasonCode: rentalPurpose
+        ? 'COMPROVANTE_GARANTIA_REQUIRED_RENTAL'
+        : 'COMPROVANTE_GARANTIA_NA_SALE_ONLY',
     },
     {
       category: 'outro',

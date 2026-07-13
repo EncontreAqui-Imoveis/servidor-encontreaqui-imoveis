@@ -9,4 +9,7 @@ export interface ContractAccessContext {
   canEditSeller: boolean;
   canReadBuyer: boolean;
   canEditBuyer: boolean;
+  /** True when participant-facing data and document mutations are frozen. */
+  isReadOnly: boolean;
+  workflowStatus: string;
 }

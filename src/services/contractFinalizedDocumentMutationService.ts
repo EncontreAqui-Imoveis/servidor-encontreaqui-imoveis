@@ -54,6 +54,7 @@ function normalizeDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
+    'comprovante_garantia',
     'dados_bancarios',
     'docs_imovel',
     'outro',

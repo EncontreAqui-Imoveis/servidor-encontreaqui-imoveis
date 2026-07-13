@@ -53,6 +53,25 @@ describe('contractDocumentRuleMatrix', () => {
     expect(rent.find((r) => r.category === 'docs_imovel')?.applicability).toBe('not_applicable');
   });
 
+  it('comprovante de garantia: obrigatório no comprador em aluguel e N/A em venda', () => {
+    const base = {
+      side: 'buyer' as const,
+      sellerInfo: {},
+      buyerInfo: { estado_civil: 'Solteiro' },
+    };
+    const sale = resolveDocumentRequirements({ ...base, propertyPurpose: 'Venda' });
+    const rent = resolveDocumentRequirements({ ...base, propertyPurpose: 'Locação' });
+
+    expect(sale.find((item) => item.category === 'comprovante_garantia')).toMatchObject({
+      applicability: 'not_applicable',
+      required: false,
+    });
+    expect(rent.find((item) => item.category === 'comprovante_garantia')).toMatchObject({
+      applicability: 'required',
+      required: true,
+    });
+  });
+
   it('cônjuge: obrigatório só casado/união; solteiro N/A; unknown N/A cônjuge', () => {
     const married = resolveDocumentRequirements({
       side: 'buyer',

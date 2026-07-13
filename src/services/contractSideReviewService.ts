@@ -4,6 +4,7 @@ import type { PoolConnection } from 'mysql2/promise';
 import { createUserNotification } from './notificationService';
 import { getContractDbConnection } from './contractPersistenceService';
 import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
+import { calculateContractReadiness } from './contractReadinessService';
 import type { ContractRow } from '../controllers/ContractController';
 import {
   isContractApprovalStatus,
@@ -182,6 +183,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
+    'comprovante_garantia',
     'dados_bancarios',
     'docs_imovel',
   ]);
@@ -706,7 +708,23 @@ export async function evaluateContractSide(
       effectiveStatuses.sellerStatus,
       effectiveStatuses.buyerStatus
     );
-    const nextContractStatus: ContractStatus = mustMoveToDraft
+    const reviewedDocuments = [
+      ...(await fetchRowsForSide(tx, contract, 'seller')),
+      ...(await fetchRowsForSide(tx, contract, 'buyer')),
+    ];
+    const readiness = calculateContractReadiness({
+      ...buildContractDocumentRuleContextFromRow(contract),
+      documents: reviewedDocuments.map((row) => {
+        const mapped = mapDocument(row);
+        return {
+          side: mapped.side,
+          documentCategory: mapped.documentCategory,
+          categoryStatus: mapped.categoryStatus,
+        };
+      }),
+    });
+    const canMoveToDraft = mustMoveToDraft && readiness.eligibleForAdminApproval;
+    const nextContractStatus: ContractStatus = canMoveToDraft
       ? 'IN_DRAFT'
       : 'AWAITING_DOCS';
     const shouldReleasePropertyAvailability = nextSideStatus === 'REJECTED';
@@ -833,7 +851,7 @@ export async function evaluateContractSide(
     return {
       message: 'Avaliação do lado atualizada com sucesso.',
       contract: updated,
-      movedToDraft: mustMoveToDraft,
+      movedToDraft: canMoveToDraft,
     };
   } catch (error) {
     await tx.rollback();

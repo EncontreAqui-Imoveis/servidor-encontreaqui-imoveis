@@ -628,6 +628,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
+    'comprovante_garantia',
     'dados_bancarios',
     'docs_imovel',
   ]);
@@ -1116,11 +1117,34 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     : {};
   const buyerInfoForViewer = canReadBuyer ? buildBuyerInfoFromContractRow(row) : {};
   const viewerSide = resolveContractViewerSide(req, row);
+  const status = resolveContractStatus(row.status);
+  const capabilities = readContext
+    ? {
+        canReadMeta: readContext.canReadMeta,
+        canReadSeller: readContext.canReadSeller,
+        canEditSeller: readContext.canEditSeller,
+        canReadBuyer: readContext.canReadBuyer,
+        canEditBuyer: readContext.canEditBuyer,
+        isReadOnly: readContext.isReadOnly,
+      }
+    : {
+        canReadMeta: false,
+        canReadSeller: false,
+        canEditSeller: false,
+        canReadBuyer: false,
+        canEditBuyer: false,
+        isReadOnly: true,
+      };
   return {
     id: row.id,
     negotiationId: row.negotiation_id,
     propertyId: Number(row.property_id),
-    status: resolveContractStatus(row.status),
+    status,
+    capabilities,
+    workflow: {
+      status,
+      isReadOnly: capabilities.isReadOnly,
+    },
     sellerInfo: sellerInfoForViewer,
     // Compatibilidade legada: ownerInfo permanece somente como alias de sellerInfo.
     ownerInfo: sellerInfoForViewer,
@@ -3244,7 +3268,10 @@ class ContractController {
     } catch (error) {
       await tx.rollback();
       if (isContractDataUpdateError(error)) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...error.body,
+        });
       }
       console.error('Erro ao atualizar dados do contrato:', error);
       return res.status(500).json({ error: 'Falha ao atualizar dados do contrato.' });

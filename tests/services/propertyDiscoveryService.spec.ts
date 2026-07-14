@@ -130,6 +130,27 @@ describe('propertyDiscoveryService', () => {
       broker_name: 'Broker A',
       images: ['a.jpg', 'b.jpg'],
     });
+
+    const [featuredSql, featuredParams] = runPropertyQueryMock.mock.calls[0];
+    const placeholderCount = (String(featuredSql).match(/\?/g) ?? []).length;
+    expect(featuredParams).toHaveLength(placeholderCount);
+    expect(featuredParams).toEqual([
+      'sale',
+      'DOCUMENTATION_PHASE',
+      'IN_NEGOTIATION',
+      'CONTRACT_DRAFTING',
+      'AWAITING_SIGNATURES',
+      'SOLD',
+      'RENTED',
+      'DOCUMENTATION_PHASE',
+      'IN_NEGOTIATION',
+      'CONTRACT_DRAFTING',
+      'AWAITING_SIGNATURES',
+      'SOLD',
+      'RENTED',
+      5,
+      0,
+    ]);
   });
 
   it('maps property payload with owner info and amenities', () => {

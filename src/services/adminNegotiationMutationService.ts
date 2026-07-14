@@ -8,6 +8,7 @@ import {
 } from '../errors/ApplicationError';
 import { adminDb } from './adminPersistenceService';
 import { createUserNotification } from './notificationService';
+import { createContractFromApprovedNegotiation } from './contractCreationService';
 
 type DecisionNegotiationRow = RowDataPacket & {
   id: string;
@@ -26,10 +27,6 @@ type DecisionNegotiationRow = RowDataPacket & {
   property_address: string | null;
   property_status: string | null;
   lifecycle_status: string | null;
-};
-
-type ExistingContractByNegotiationRow = RowDataPacket & {
-  id: string;
 };
 
 type PendingProposalCountRow = RowDataPacket & {
@@ -171,6 +168,30 @@ export async function approveNegotiation(params: {
       );
     }
 
+    const [existingContractRows] = await tx.query<RowDataPacket[]>(
+      `
+        SELECT id
+        FROM contracts
+        WHERE negotiation_id = ?
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [negotiationId],
+    );
+
+    if (existingContractRows.length > 0) {
+      // Never replay the approval transition. The canonical service keeps its
+      // own idempotent party/link reconciliation under this same transaction.
+      await createContractFromApprovedNegotiation(negotiationId, null, tx);
+      await tx.commit();
+      return {
+        message: 'Negociação já estava aprovada.',
+        id: negotiationId,
+        status: 'APPROVED',
+        internalStatus: 'IN_NEGOTIATION',
+      };
+    }
+
     await tx.query(
       `
         UPDATE negotiations
@@ -215,57 +236,9 @@ export async function approveNegotiation(params: {
       [negotiation.property_id]
     );
 
-    const [existingContractRows] = await tx.query<ExistingContractByNegotiationRow[]>(
-      `
-        SELECT id
-        FROM contracts
-        WHERE negotiation_id = ?
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [negotiationId]
-    );
-
-    if (existingContractRows.length === 0) {
-      await tx.query(
-        `
-          INSERT INTO contracts (
-            id,
-            negotiation_id,
-          property_id,
-          status,
-          seller_info,
-          buyer_info,
-          seller_approval_status,
-            buyer_approval_status,
-            created_at,
-            updated_at
-          ) VALUES (
-            UUID(),
-            ?,
-            ?,
-            'AWAITING_DOCS',
-            CAST(JSON_OBJECT('nome', ?, 'name', ?, 'telefone', ?) AS JSON),
-            CAST(JSON_OBJECT('clientName', ?, 'clientCpf', ?, 'nome', ?, 'cpf', ?) AS JSON),
-            'PENDING',
-            'PENDING',
-            CURRENT_TIMESTAMP,
-            CURRENT_TIMESTAMP
-          )
-        `,
-        [
-          negotiationId,
-          negotiation.property_id,
-          negotiation.property_owner_name,
-          negotiation.property_owner_name,
-          negotiation.property_owner_phone,
-          negotiation.client_name,
-          negotiation.buyer_legal_cpf,
-          negotiation.client_name,
-          negotiation.buyer_legal_cpf,
-        ]
-      );
-    }
+    // This is the only contract-creation path. It is idempotent and receives
+    // the current lock so approval and party resolution remain atomic.
+    await createContractFromApprovedNegotiation(negotiationId, null, tx);
 
     const [competingRows] = await tx.query<RowDataPacket[]>(
       `

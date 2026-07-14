@@ -143,19 +143,21 @@ export async function listMyContractsForUser(
   const visibilityClause = `
       (
         n.advertiser_id = ?
+        OR p.owner_id = ?
         OR n.proposer_id = ?
         OR n.legal_buyer_user_id = ?
         ${responsibleVisibilityClause}
       )
   `;
   const visibilityParams = includeResponsibles
-    ? [userId, userId, userId, userId]
-    : [userId, userId, userId];
+    ? [userId, userId, userId, userId, userId]
+    : [userId, userId, userId, userId];
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id
+      JOIN properties p ON p.id = c.property_id
       WHERE ${visibilityClause}
       ${statusClause}
     `,
@@ -174,11 +176,17 @@ export async function listMyContractsForUser(
     [...visibilityParams, ...statusParams, limit, offset],
   );
 
-  if (rows.length === 0) {
-    return { data: [], total, page, limit };
+  // SQL narrows candidates for pagination. The resolver remains the single
+  // authorization source and removes ambiguous or otherwise invalid matches.
+  const readableRows = rows.filter(
+    (row) => resolveContractAccessContext({ id: req.userId, role: req.userRole }, row).canReadMeta,
+  );
+
+  if (readableRows.length === 0) {
+    return { data: [], total: 0, page, limit };
   }
 
-  const negotiationIds = rows.map((row) => row.negotiation_id);
+  const negotiationIds = readableRows.map((row) => row.negotiation_id);
   const placeholders = negotiationIds.map(() => '?').join(', ');
   const documentRows = await queryContractRows<ContractDocumentListRow>(
     `
@@ -194,7 +202,7 @@ export async function listMyContractsForUser(
 
   const documentsByNegotiation = buildDocumentsByNegotiation(documentRows);
   return {
-    data: rows.map((row) => ({
+    data: readableRows.map((row) => ({
       ...mapContract(row, req),
       documentProgress: resolveContractAccessContext(
         { id: req.userId, role: req.userRole },

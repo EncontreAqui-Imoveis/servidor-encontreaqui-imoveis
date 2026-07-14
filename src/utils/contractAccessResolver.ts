@@ -11,6 +11,7 @@ export interface ContractAccessRecord {
   id: string;
   status: string | null | undefined;
   advertiser_id: number | string | null | undefined;
+  property_owner_id?: number | string | null;
   proposer_id: number | string | null | undefined;
   initiator_side?: 'buyer' | 'seller' | string | null;
   legal_buyer_user_id?: number | string | null;
@@ -86,6 +87,7 @@ export function resolveContractAccessContext(
 
   const requestRole = String(user.role ?? '').trim().toLowerCase();
   const advertiserId = normalizePositiveId(contract.advertiser_id);
+  const propertyOwnerId = normalizePositiveId(contract.property_owner_id);
   const proposerId = normalizePositiveId(contract.proposer_id);
   const legalBuyerUserId = normalizePositiveId(contract.legal_buyer_user_id);
   const initiatorSide = String(contract.initiator_side ?? '').trim().toLowerCase();
@@ -105,6 +107,9 @@ export function resolveContractAccessContext(
   const sellerIds = new Set<string>();
   const buyerIds = new Set<string>();
 
+  // Both the property owner and the explicitly assigned advertiser operate
+  // the seller side. These are identity links, never textual inferences.
+  if (propertyOwnerId) sellerIds.add(propertyOwnerId);
   if (advertiserId) sellerIds.add(advertiserId);
   if (initiatorSide === 'seller') {
     if (proposerId) sellerIds.add(proposerId);

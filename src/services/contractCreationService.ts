@@ -1,4 +1,5 @@
 import { RowDataPacket } from 'mysql2';
+import type { PoolConnection } from 'mysql2/promise';
 import type { AuthRequest } from '../middlewares/auth';
 import { getContractDbConnection } from './contractPersistenceService';
 import type { ContractRow } from '../controllers/ContractController';
@@ -46,15 +47,21 @@ const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
 export async function createContractFromApprovedNegotiation(
   negotiationIdInput: unknown,
   req: AuthRequest | null = null,
+  transaction?: PoolConnection,
 ): Promise<CreatedContractResult> {
   const negotiationId = String(negotiationIdInput ?? '').trim();
   if (!negotiationId) {
     throw contractCreationError(400, 'ID da negociação inválido.');
   }
 
-  const tx = await getContractDbConnection();
+  // Administrative approval can pass its locked transaction so the status
+  // transition and the canonical contract creation are committed atomically.
+  const tx = transaction ?? await getContractDbConnection();
+  const managesTransaction = transaction == null;
   try {
-    await tx.beginTransaction();
+    if (managesTransaction) {
+      await tx.beginTransaction();
+    }
 
     const [negotiationRows] = await tx.query<Array<RowDataPacket & {
       id: string;
@@ -148,7 +155,6 @@ export async function createContractFromApprovedNegotiation(
 
     const negotiation = negotiationRows[0];
     if (!negotiation) {
-      await tx.rollback();
       throw contractCreationError(404, 'Negociação não encontrada.');
     }
 
@@ -276,13 +282,14 @@ export async function createContractFromApprovedNegotiation(
           [partyResolution.legalBuyerUserId, negotiationId],
         );
       }
-      await tx.commit();
+      if (managesTransaction) {
+        await tx.commit();
+      }
       return { contract: existingRows[0], created: false, handshakePin: null };
     }
 
     const negotiationStatus = String(negotiation.status ?? '').toUpperCase();
     if (!ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT.has(negotiationStatus)) {
-      await tx.rollback();
       throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
     }
 
@@ -436,9 +443,11 @@ export async function createContractFromApprovedNegotiation(
       [negotiationId],
     );
 
-    await tx.commit();
     if (!createdRows[0]) {
       throw contractCreationError(500, 'Falha ao criar contrato.');
+    }
+    if (managesTransaction) {
+      await tx.commit();
     }
     return {
       contract: createdRows[0],
@@ -446,10 +455,14 @@ export async function createContractFromApprovedNegotiation(
       handshakePin: buyerHandshake?.pin ?? null,
     };
   } catch (error) {
-    await tx.rollback();
+    if (managesTransaction) {
+      await tx.rollback();
+    }
     throw error;
   } finally {
-    tx.release();
+    if (managesTransaction) {
+      tx.release();
+    }
   }
 }
 

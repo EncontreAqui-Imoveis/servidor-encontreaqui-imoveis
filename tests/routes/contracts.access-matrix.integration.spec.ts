@@ -28,6 +28,7 @@ const {
 
 const actors = {
   seller: { id: 10, role: 'client', cpf: '11111111111' },
+  propertyOwner: { id: 11, role: 'client', cpf: '10101010101' },
   buyer: { id: 20, role: 'client', cpf: '22222222222' },
   legalBuyer: { id: 21, role: 'client', cpf: '21212121212' },
   responsible: { id: 30, role: 'broker', cpf: '33333333333' },
@@ -88,6 +89,7 @@ type ContractState = {
   handshakeStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
   handshakePin?: string | null;
   handshakeAttempts?: number;
+  propertyOwnerId?: number;
 };
 
 function createContractRow(state: ContractState) {
@@ -117,7 +119,7 @@ function createContractRow(state: ContractState) {
     property_purpose: 'Venda',
     property_code: 'MAT-101',
     property_image_url: null,
-    property_owner_id: 10,
+    property_owner_id: state.propertyOwnerId ?? 10,
     property_owner_name: 'Vendedor',
     property_owner_phone: '11999999999',
     proposal_initiator_user_id: 20,
@@ -296,6 +298,56 @@ describe('Contract access matrix HTTP integration', () => {
     expectForbidden(await uploadDocument('buyer', 'seller'));
     expectForbidden(await deleteDocument('buyer'));
     expect(enqueueNegotiationDocumentDeletionMock).not.toHaveBeenCalled();
+  });
+
+  it('entrega ao anunciante somente o lado do vendedor', async () => {
+    const details = await request(app)
+      .get('/contracts/contract-matrix-1')
+      .set(asActor('seller'));
+
+    expect(details.status).toBe(200);
+    expect(details.body.contract.viewerSide).toBe('seller');
+    expect(details.body.contract.sellerInfo).toEqual(
+      expect.objectContaining({ privateSellerField: 'seller-only' }),
+    );
+    expect(details.body.contract.buyerInfo).toEqual({});
+    expect(details.body.documents).toEqual([
+      expect.objectContaining({ ownerSide: 'seller' }),
+    ]);
+  });
+
+  it('entrega ao comprador legal verificado somente o lado do comprador', async () => {
+    state.legalBuyerUserId = actors.legalBuyer.id;
+    state.handshakeStatus = 'VERIFIED';
+
+    const details = await request(app)
+      .get('/contracts/contract-matrix-1')
+      .set(asActor('legalBuyer'));
+
+    expect(details.status).toBe(200);
+    expect(details.body.contract.viewerSide).toBe('buyer');
+    expect(details.body.contract.sellerInfo).toEqual({});
+    expect(details.body.contract.buyerInfo).toEqual(
+      expect.objectContaining({ privateBuyerField: 'buyer-only' }),
+    );
+    expect(details.body.documents).toEqual([
+      expect.objectContaining({ ownerSide: 'buyer' }),
+    ]);
+  });
+
+  it('permite que o proprietário distinto do anunciante veja apenas o lado vendedor', async () => {
+    state.propertyOwnerId = actors.propertyOwner.id;
+
+    const details = await request(app)
+      .get('/contracts/contract-matrix-1')
+      .set(asActor('propertyOwner'));
+
+    expect(details.status).toBe(200);
+    expect(details.body.contract.viewerSide).toBe('seller');
+    expect(details.body.contract.sellerInfo).toEqual(
+      expect.objectContaining({ privateSellerField: 'seller-only' }),
+    );
+    expect(details.body.contract.buyerInfo).toEqual({});
   });
 
   it('redige PII bilateral para comprador legal enquanto o handshake está pendente', async () => {

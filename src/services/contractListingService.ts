@@ -80,6 +80,12 @@ export async function listContractsForAdmin(
       WHERE negotiation_id IN (${placeholders})
         AND COALESCE(document_type, '') <> 'proposal'
         AND COALESCE(type, '') <> 'proposal'
+        AND UPPER(COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+          'APPROVED'
+        )) <> 'REJECTED'
       ORDER BY created_at DESC, id DESC
     `,
     negotiationIds,
@@ -200,6 +206,12 @@ export async function listMyContractsForUser(
       WHERE negotiation_id IN (${placeholders})
         AND COALESCE(document_type, '') <> 'proposal'
         AND COALESCE(type, '') <> 'proposal'
+        AND UPPER(COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+          'APPROVED'
+        )) <> 'REJECTED'
       ORDER BY created_at DESC, id DESC
     `,
     negotiationIds,

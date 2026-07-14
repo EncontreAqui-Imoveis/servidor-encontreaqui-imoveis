@@ -939,7 +939,7 @@ async function fetchContractCategoryValidationRows(
     `,
     [contract.negotiation_id, contract.id]
   );
-  return rows;
+  return rows.filter((row) => !isRejectedNegotiationDocumentRow(row));
 }
 
 function hasRequiredCategoryGateApproval(input: {
@@ -1430,6 +1430,9 @@ function mapContractWithDocumentProgress(
   const readContext = resolveContractReadContext(req, row);
   const documents = documentRows
     .filter((document) => !isProposalDocument(document))
+    // Rejections delete the current document. This also keeps legacy rows marked
+    // as rejected out of every contract-detail representation.
+    .filter((document) => !isRejectedNegotiationDocumentRow(document))
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${row.negotiation_id}/documents/${document.id}/download`,

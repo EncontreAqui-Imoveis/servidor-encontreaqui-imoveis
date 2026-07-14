@@ -15,7 +15,8 @@ export type NotificationDeepLinkMetadata = Record<
   | 'property_id'
   | 'negotiation_id'
   | 'contract_id'
-  | 'notification_id',
+  | 'notification_id'
+  | 'route',
   string
 >;
 
@@ -58,6 +59,26 @@ function defaultTarget(relatedEntityType: string | null | undefined): Notificati
       return 'proposal_details';
     default:
       return 'proposal_list';
+  }
+}
+
+function resolveNotificationRoute(input: {
+  target: NotificationTarget;
+  propertyId: string;
+  negotiationId: string;
+  contractId: string;
+}): string {
+  switch (input.target) {
+    case 'property_details':
+      return input.propertyId ? `/properties/${input.propertyId}` : '/properties';
+    case 'proposal_list':
+      return '/proposals';
+    case 'proposal_details':
+      return input.negotiationId ? `/proposals/${input.negotiationId}` : '/proposals';
+    case 'contracts_tab':
+      return '/contracts';
+    case 'contract_details':
+      return input.contractId ? `/contracts/${input.contractId}` : '/contracts';
   }
 }
 
@@ -122,6 +143,7 @@ export function buildNotificationDeepLinkMetadata(
     negotiation_id: negotiationId,
     contract_id: contractId,
     notification_id: '',
+    route: resolveNotificationRoute({ target, propertyId, negotiationId, contractId }),
   };
 }
 

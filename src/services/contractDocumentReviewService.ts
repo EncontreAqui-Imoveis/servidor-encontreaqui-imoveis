@@ -6,12 +6,17 @@ import {
   isContractDocumentCategoryStatus,
   type ContractDocumentCategoryStatus,
 } from '../modules/contracts/domain/contract.types';
+import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
+import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
   type: string | null;
   document_type: string | null;
   metadata_json: unknown;
+  storage_provider: string | null;
+  storage_bucket: string | null;
+  storage_key: string | null;
   created_at: string | Date | null;
 };
 
@@ -36,6 +41,13 @@ type ContractDocumentReviewInput = {
 type ContractDocumentReviewResult = {
   message: string;
   contract: ContractRow | null;
+  rejectedDocument?: {
+    id: number;
+    documentType: string | null;
+    originalFileName: string | null;
+    uploadedByUserId: number | null;
+    deletionJobId: number | null;
+  };
 };
 
 class ContractDocumentReviewError extends Error {
@@ -105,6 +117,11 @@ function normalizeReviewReason(reason: unknown): string {
   return String(reason ?? '').trim();
 }
 
+function readPositiveUserId(value: unknown): number | null {
+  const parsed = Number(value ?? 0);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export async function reviewContractDocument(
   tx: PoolConnection,
   params: ContractDocumentReviewInput
@@ -141,6 +158,9 @@ export async function reviewContractDocument(
         type,
         document_type,
         metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
         created_at
       FROM negotiation_documents
       WHERE id = ? AND negotiation_id = ?
@@ -162,6 +182,60 @@ export async function reviewContractDocument(
   const role = String(params.userRoleInput ?? '').trim().toLowerCase() || null;
 
   const normalizedReason = reason.length > 0 ? reason : null;
+  const documentType = String(document.document_type ?? '').trim().toLowerCase() || null;
+  const originalFileName = String(metadata.originalFileName ?? '').trim() || null;
+  const uploadedByUserId = readPositiveUserId(metadata.uploadedBy);
+
+  if (status === 'REJECTED') {
+    const workflowMetadata = appendWorkflowAuditEvent(contract.workflow_metadata, {
+      action: 'admin_document_rejected_and_removed',
+      at: now,
+      by: actorId,
+      role,
+      details: {
+        documentId,
+        documentType,
+        originalFileName,
+        reason: normalizedReason,
+        uploadedByUserId,
+      },
+    });
+
+    await tx.query(
+      `
+        DELETE FROM negotiation_documents
+        WHERE id = ? AND negotiation_id = ?
+        LIMIT 1
+      `,
+      [documentId, contract.negotiation_id]
+    );
+    const deletionJobId = await enqueueNegotiationDocumentDeletion(tx, document, {
+      negotiationId: contract.negotiation_id,
+      requestedByUserId: actorId,
+      requestSource: 'contract_document_rejected_by_admin',
+    });
+    await tx.query(
+      `
+        UPDATE contracts
+        SET workflow_metadata = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      [JSON.stringify(workflowMetadata), contractId]
+    );
+
+    return {
+      message: 'Documento rejeitado e removido. Solicite um novo envio.',
+      contract,
+      rejectedDocument: {
+        id: documentId,
+        documentType,
+        originalFileName,
+        uploadedByUserId,
+        deletionJobId,
+      },
+    };
+  }
+
   const nextMetadata = appendAuditTrailEvent(metadata, {
     action: 'admin_document_review',
     at: now,
@@ -169,7 +243,7 @@ export async function reviewContractDocument(
     role,
     details: {
       documentId,
-      documentType: String(document.document_type ?? '').trim().toLowerCase() || null,
+      documentType,
       status,
       reason: normalizedReason,
     },
@@ -206,9 +280,7 @@ export async function reviewContractDocument(
 
   return {
     message:
-      status === 'REJECTED'
-        ? 'Documento rejeitado com sucesso.'
-        : status === 'PENDING'
+      status === 'PENDING'
           ? 'Revisão do documento reiniciada com sucesso.'
           : 'Documento aprovado com sucesso.',
     contract,

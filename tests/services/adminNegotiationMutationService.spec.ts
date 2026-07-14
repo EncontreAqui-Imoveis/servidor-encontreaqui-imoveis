@@ -10,6 +10,7 @@ const {
   txMock,
   createUserNotificationMock,
   sendPushNotificationsMock,
+  createContractFromApprovedNegotiationMock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -24,6 +25,7 @@ const {
     txMock: tx,
     createUserNotificationMock: vi.fn(),
     sendPushNotificationsMock: vi.fn(),
+    createContractFromApprovedNegotiationMock: vi.fn(),
   };
 });
 
@@ -42,6 +44,10 @@ vi.mock('../../src/services/pushNotificationService', () => ({
   sendPushNotifications: sendPushNotificationsMock,
 }));
 
+vi.mock('../../src/services/contractCreationService', () => ({
+  createContractFromApprovedNegotiation: createContractFromApprovedNegotiationMock,
+}));
+
 import {
   approveNegotiation,
   cancelNegotiation,
@@ -58,6 +64,9 @@ describe('adminNegotiationMutationService', () => {
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
     createUserNotificationMock.mockResolvedValue(undefined);
+    createContractFromApprovedNegotiationMock.mockResolvedValue({
+      contract: { id: 'contract-1', negotiation_id: 'neg-1' },
+    });
     sendPushNotificationsMock.mockResolvedValue({
       requested: 1,
       success: 1,
@@ -66,7 +75,7 @@ describe('adminNegotiationMutationService', () => {
     });
   });
 
-  it('aprova negociação, cria contrato e notifica o corretor captador', async () => {
+  it('aprova negociação, cria contrato e notifica comprador e vendedor com deep link do contrato', async () => {
     txMock.query
       .mockResolvedValueOnce([
         [
@@ -77,6 +86,9 @@ describe('adminNegotiationMutationService', () => {
             property_broker_id: 30005,
             capturing_broker_id: 30003,
             proposer_id: 30004,
+            advertiser_id: 30003,
+            property_owner_id: 30003,
+            initiator_side: 'buyer',
             responsible_broker_id: null,
             property_title: 'Casa Centro',
             property_code: 'RV-101',
@@ -89,7 +101,6 @@ describe('adminNegotiationMutationService', () => {
       .mockResolvedValueOnce([[{ id: 501 }]])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
-      .mockResolvedValueOnce([[{ id: 'contract-1' }]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
@@ -105,15 +116,17 @@ describe('adminNegotiationMutationService', () => {
       status: 'APPROVED',
       internalStatus: 'IN_NEGOTIATION',
     });
-    expect(createUserNotificationMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        recipientId: 30003,
-        metadata: expect.objectContaining({
-          adminId: 9,
-          status: 'APPROVED',
-        }),
-      })
-    );
+    expect(createUserNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
+      recipientId: 30004,
+      message: 'Sua proposta foi aprovada.',
+      target: 'contract_details',
+      metadata: expect.objectContaining({ adminId: 9, status: 'APPROVED' }),
+    }));
+    expect(createUserNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
+      recipientId: 30003,
+      message: 'Você aprovou a proposta, siga para a aba contrato.',
+      target: 'contract_details',
+    }));
     expect(txMock.commit).toHaveBeenCalledTimes(1);
   });
 

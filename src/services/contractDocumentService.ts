@@ -6,11 +6,13 @@ import {
   buildContractDocumentProgress,
   buildEmptyContractDocumentProgress,
   buildContractDocumentRuleContextFromRow,
+  buildDocumentSlots,
   mapContract,
   mapDocument,
   type ContractDocumentRow,
   type ContractRow,
 } from '../controllers/ContractController';
+import { resolveDocumentRequirementMatrixForContract } from '../modules/contracts/domain/contractDocumentRuleMatrix';
 import {
   resolveContractAccessContext,
 } from '../utils/contractAccessResolver';
@@ -37,6 +39,7 @@ type ContractDocumentPayload = {
     documentProgress: ReturnType<typeof buildContractDocumentProgress>;
   };
   documents: ContractDocumentListItem[];
+  documentSlots: ReturnType<typeof buildDocumentSlots>;
 };
 
 type DownloadedContractDocumentsZip = {
@@ -163,6 +166,11 @@ export async function buildContractDocumentPayload(
   const documents = await fetchVisibleContractDocuments(contract, req);
   const matrixContext = buildContractDocumentRuleContextFromRow(contract);
   const accessContext = resolveDocumentAccessContext(req, contract);
+  const requirementMatrix = resolveDocumentRequirementMatrixForContract(matrixContext);
+  const visibleRequirementMatrix = {
+    seller: accessContext?.canReadSeller ? requirementMatrix.seller : [],
+    buyer: accessContext?.canReadBuyer ? requirementMatrix.buyer : [],
+  };
 
   return {
     contract: {
@@ -178,6 +186,9 @@ export async function buildContractDocumentPayload(
           ),
     },
     documents,
+    documentSlots: accessContext?.requiresHandshakeVerification
+      ? []
+      : buildDocumentSlots(visibleRequirementMatrix, documents),
   };
 }
 

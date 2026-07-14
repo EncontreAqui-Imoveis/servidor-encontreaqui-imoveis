@@ -18,7 +18,10 @@ import {
   readNegotiationDocumentObject,
   storeNegotiationDocumentToR2,
 } from '../services/negotiationDocumentStorageService';
-import { enqueueNegotiationDocumentDeletion } from '../services/negotiationDocumentDeletionService';
+import {
+  enqueueNegotiationDocumentDeletion,
+  processNegotiationDocumentDeletionJob,
+} from '../services/negotiationDocumentDeletionService';
 import {
   listContractsForAdmin,
   listMyContractsForUser,
@@ -1280,6 +1283,45 @@ export function mapDocument(row: ContractDocumentRow) {
   };
 }
 
+export function buildDocumentSlots(
+  requirements: ReturnType<typeof resolveDocumentRequirementMatrixForContract>,
+  documents: Array<ReturnType<typeof mapDocument> & { downloadUrl: string }>
+) {
+  const latestBySideAndCategory = new Map<string, (typeof documents)[number]>();
+  for (const document of documents) {
+    if (!document.side || !document.documentCategory) continue;
+    const key = `${document.side}:${document.documentCategory}`;
+    const previous = latestBySideAndCategory.get(key);
+    const previousTime = previous?.createdAt ? new Date(previous.createdAt).getTime() : 0;
+    const currentTime = document.createdAt ? new Date(document.createdAt).getTime() : 0;
+    if (!previous || currentTime >= previousTime) {
+      latestBySideAndCategory.set(key, document);
+    }
+  }
+
+  return (['seller', 'buyer'] as const).flatMap((side) =>
+    requirements[side]
+      .filter((requirement) => requirement.required && requirement.applicability !== 'not_applicable')
+      .map((requirement) => {
+        const document = latestBySideAndCategory.get(`${side}:${requirement.category}`);
+        const status = document?.categoryStatus ?? 'PENDING';
+        return {
+          id: document?.id ?? null,
+          side,
+          ownerSide: side,
+          documentCategory: requirement.category,
+          documentType: document?.documentType ?? requirement.preferredDocumentType,
+          label: CONTRACT_DOCUMENT_CATEGORY_LABELS[requirement.category],
+          required: true,
+          status,
+          categoryStatus: status,
+          originalFileName: document?.originalFileName ?? null,
+          downloadUrl: document?.downloadUrl ?? null,
+        };
+      })
+  );
+}
+
 function buildInitialCategoryProgress(
   side: ContractDocumentSide,
   matrixContext: ContractDocumentRuleContext
@@ -1382,14 +1424,19 @@ function mapContractWithDocumentProgress(
 ): ReturnType<typeof mapContract> & {
   documentProgress: ContractDocumentProgressSummary;
   documents: Array<ReturnType<typeof mapDocument> & { downloadUrl: string }>;
+  documentSlots: ReturnType<typeof buildDocumentSlots>;
 } {
   const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
+  const readContext = resolveContractReadContext(req, row);
   const documents = documentRows
     .filter((document) => !isProposalDocument(document))
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${row.negotiation_id}/documents/${document.id}/download`,
     }))
+    .filter((document) =>
+      document.side == null || canReadContractSide(readContext, document.side)
+    )
     .filter((document) =>
       shouldExposeOwnerSensitiveDocument(
         {
@@ -1401,6 +1448,11 @@ function mapContractWithDocumentProgress(
     );
 
   const matrixContext = buildContractDocumentRuleContextFromRow(row);
+  const rawRequirementMatrix = resolveDocumentRequirementMatrixForContract(matrixContext);
+  const visibleRequirementMatrix = {
+    seller: restrictDocumentRequirementSide(rawRequirementMatrix.seller, readContext, 'seller'),
+    buyer: restrictDocumentRequirementSide(rawRequirementMatrix.buyer, readContext, 'buyer'),
+  };
   const progress = buildContractDocumentProgress(
     documents.map((document) => ({
       ...document,
@@ -1413,6 +1465,7 @@ function mapContractWithDocumentProgress(
     ...mapContract(row, req),
     documentProgress: progress,
     documents,
+    documentSlots: buildDocumentSlots(visibleRequirementMatrix, documents),
   };
 }
 
@@ -2156,6 +2209,40 @@ class ContractController {
       });
 
       await tx.commit();
+
+      if (result.rejectedDocument?.deletionJobId) {
+        try {
+          await processNegotiationDocumentDeletionJob(result.rejectedDocument.deletionJobId);
+        } catch (deletionError) {
+          // The job remains queued for the worker; the administrative review
+          // itself was already committed and must not be reported as failed.
+          console.error('Erro ao excluir imediatamente documento rejeitado:', deletionError);
+        }
+      }
+      if (result.rejectedDocument?.uploadedByUserId) {
+        const documentName =
+          result.rejectedDocument.originalFileName ??
+          result.rejectedDocument.documentType ??
+          'enviado';
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Documento rejeitado',
+            message: `O documento ${documentName} foi rejeitado. Por favor, envie novamente.`,
+            recipientId: result.rejectedDocument.uploadedByUserId,
+            relatedEntityId: Number(result.contract?.property_id ?? 0) || null,
+            metadata: {
+              contractId: String(result.contract?.id ?? req.params.id),
+              negotiationId: result.contract?.negotiation_id ?? null,
+              propertyId: Number(result.contract?.property_id ?? 0) || null,
+              documentId: result.rejectedDocument.id,
+            },
+            target: 'contract_details',
+          });
+        } catch (notifyError) {
+          console.error('Erro ao notificar rejeição de documento:', notifyError);
+        }
+      }
 
       return res.status(200).json({
         message: result.message,
@@ -3004,6 +3091,7 @@ class ContractController {
       return res.status(200).json({
         contract: payload.contract,
         documents: payload.documents,
+        documentSlots: payload.documentSlots,
       });
     } catch (error) {
       console.error('Erro ao buscar contrato:', error);
@@ -3073,6 +3161,7 @@ class ContractController {
           ...payload.contract,
         },
         documents: payload.documents,
+        documentSlots: payload.documentSlots,
       });
     } catch (error) {
       console.error('Erro ao buscar contrato por negociação:', error);

@@ -29,6 +29,7 @@ describe('notificationDeepLinkMetadata', () => {
       negotiation_id: 'negotiation-8',
       contract_id: 'contract-7',
       notification_id: '99',
+      route: '/contracts/contract-7',
     });
   });
 

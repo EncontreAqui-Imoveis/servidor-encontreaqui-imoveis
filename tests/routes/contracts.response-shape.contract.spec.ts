@@ -170,6 +170,13 @@ describe('Contract response shape contracts', () => {
         },
       ],
     });
+    expect(response.body.documentSlots).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'PENDING',
+        originalFileName: null,
+        downloadUrl: null,
+      }),
+    ]));
   });
 
   it('blocks the proposal initiator when it has no contract-side or responsible binding', async () => {
@@ -337,6 +344,21 @@ describe('Contract response shape contracts', () => {
     });
 
     const response = await request(initiatorApp).get('/contracts/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ data: [], total: 0 });
+  });
+
+  it('excludes cancelled contracts from contracts/me for non-admin users', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('COUNT(*) AS total')) {
+        expect(sql).toContain("UPPER(TRIM(COALESCE(c.status, ''))) <> 'CANCELLED'");
+        return [[{ total: 0 }]];
+      }
+      return [[]];
+    });
+
+    const response = await request(app).get('/contracts/me');
 
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ data: [], total: 0 });

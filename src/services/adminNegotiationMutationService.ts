@@ -18,6 +18,10 @@ type DecisionNegotiationRow = RowDataPacket & {
   capturing_broker_id: number | string | null;
   responsible_broker_id: number | string | null;
   proposer_id?: number | string | null;
+  advertiser_id?: number | string | null;
+  property_owner_id?: number | string | null;
+  legal_buyer_user_id?: number | string | null;
+  initiator_side?: 'buyer' | 'seller' | null;
   client_name?: string | null;
   buyer_legal_cpf?: string | null;
   property_title: string | null;
@@ -82,7 +86,11 @@ async function loadDecisionNegotiationRow(
         n.status,
         n.property_id,
         p.broker_id AS property_broker_id,
+        p.owner_id AS property_owner_id,
         n.capturing_broker_id,
+        n.advertiser_id,
+        n.legal_buyer_user_id,
+        n.initiator_side,
         (
           SELECT nr.user_id
           FROM negotiation_responsibles nr
@@ -127,7 +135,7 @@ export async function approveNegotiation(params: {
   try {
     await tx.beginTransaction();
 
-    const negotiation = await loadDecisionNegotiationRow(tx, negotiationId);
+    const negotiation = await loadDecisionNegotiationRow(tx, negotiationId, true);
     if (!negotiation) {
       await tx.rollback();
       throw new NotFoundError('Negociação não encontrada.');
@@ -238,7 +246,7 @@ export async function approveNegotiation(params: {
 
     // This is the only contract-creation path. It is idempotent and receives
     // the current lock so approval and party resolution remain atomic.
-    await createContractFromApprovedNegotiation(negotiationId, null, tx);
+    const contractCreation = await createContractFromApprovedNegotiation(negotiationId, null, tx);
 
     const [competingRows] = await tx.query<RowDataPacket[]>(
       `
@@ -314,28 +322,62 @@ export async function approveNegotiation(params: {
 
     await tx.commit();
 
-    const recipientBrokerId = Number(negotiation.capturing_broker_id ?? 0);
-    if (Number.isFinite(recipientBrokerId) && recipientBrokerId > 0) {
-      const propertyTitle = resolveNegotiationPropertyTitle(negotiation.property_title);
-      try {
-        await createUserNotification({
+    const propertyId = Number(negotiation.property_id);
+    const initiatorSide = String(negotiation.initiator_side ?? '').trim().toLowerCase();
+    const proposerId = Number(negotiation.proposer_id ?? 0);
+    const legalBuyerId = Number(negotiation.legal_buyer_user_id ?? 0);
+    const buyerRecipientIds = new Set<number>();
+    if (initiatorSide === 'seller' && Number.isFinite(legalBuyerId) && legalBuyerId > 0) {
+      buyerRecipientIds.add(legalBuyerId);
+    } else if (Number.isFinite(proposerId) && proposerId > 0) {
+      buyerRecipientIds.add(proposerId);
+    }
+
+    const sellerRecipientIds = new Set(
+      [negotiation.advertiser_id, negotiation.property_owner_id]
+        .map((value) => Number(value ?? 0))
+        .filter((value) => Number.isFinite(value) && value > 0),
+    );
+    if (initiatorSide === 'seller' && Number.isFinite(proposerId) && proposerId > 0) {
+      sellerRecipientIds.add(proposerId);
+    }
+    for (const buyerId of buyerRecipientIds) sellerRecipientIds.delete(buyerId);
+
+    const metadata = {
+      contractId: contractCreation.contract.id,
+      negotiationId,
+      propertyId,
+      status: 'APPROVED',
+      ...buildAdminIdMetadata(actorId),
+    };
+    const notifications = [
+      ...Array.from(buyerRecipientIds, (recipientId) =>
+        createUserNotification({
           type: 'negotiation',
-          title: 'Proposta Aprovada!',
-          message:
-            'Sua proposta foi aprovada! Acesse a aba Contratos no aplicativo para enviar a documentação.',
-          recipientId: recipientBrokerId,
-          relatedEntityId: Number(negotiation.property_id),
-          metadata: {
-            negotiationId,
-            propertyId: Number(negotiation.property_id),
-            status: 'APPROVED',
-            propertyTitle,
-            ...buildAdminIdMetadata(actorId),
-          },
-          target: 'contracts_tab',
-        });
-      } catch (notifyError) {
-        console.error('Erro ao notificar corretor sobre aprovação da proposta:', notifyError);
+          title: 'Proposta aprovada',
+          message: 'Sua proposta foi aprovada.',
+          recipientId,
+          relatedEntityId: propertyId,
+          metadata,
+          target: 'contract_details',
+        })
+      ),
+      ...Array.from(sellerRecipientIds, (recipientId) =>
+        createUserNotification({
+          type: 'negotiation',
+          title: 'Proposta aprovada',
+          message: 'Você aprovou a proposta, siga para a aba contrato.',
+          recipientId,
+          relatedEntityId: propertyId,
+          metadata,
+          target: 'contract_details',
+        })
+      ),
+    ];
+    const notificationResults = await Promise.allSettled(notifications);
+    for (const notificationResult of notificationResults) {
+      if (notificationResult.status === 'rejected') {
+        console.error('Erro ao notificar aprovação da proposta:', notificationResult.reason);
       }
     }
 

@@ -53,6 +53,7 @@ describe('pushNotificationService branding', () => {
             negotiation_id: 'negotiation-1',
             contract_id: '',
             notification_id: '99',
+            route: '/proposals/negotiation-1',
           },
         },
       ],
@@ -72,6 +73,7 @@ describe('pushNotificationService branding', () => {
           negotiation_id: 'negotiation-1',
           contract_id: '',
           notification_id: '99',
+          route: '/proposals/negotiation-1',
         },
       })
     );

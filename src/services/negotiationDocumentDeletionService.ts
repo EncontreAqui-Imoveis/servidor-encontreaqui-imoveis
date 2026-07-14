@@ -1,4 +1,4 @@
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import crypto from 'crypto';
 
 import connection from '../database/connection';
@@ -100,7 +100,7 @@ export async function enqueueNegotiationDocumentDeletion(
     requestedByUserId?: number | null;
     requestSource?: string | null;
   }
-): Promise<void> {
+): Promise<number | null> {
   const hasTable = await hasDeletionJobsTable();
   if (!hasTable) {
     throw new Error('Tabela de fila de deleção de documentos não encontrada.');
@@ -113,7 +113,7 @@ export async function enqueueNegotiationDocumentDeletion(
   }
   const storageKeyHash = toStorageKeyHash(row.storageKey);
 
-  await tx.query(
+  const [result] = await tx.query<ResultSetHeader>(
     `
       INSERT INTO negotiation_document_deletion_jobs (
         negotiation_document_id,
@@ -144,6 +144,7 @@ export async function enqueueNegotiationDocumentDeletion(
         last_error = NULL,
         available_at = CURRENT_TIMESTAMP,
         processed_at = NULL,
+        id = LAST_INSERT_ID(id),
         updated_at = CURRENT_TIMESTAMP
     `,
     [
@@ -158,6 +159,9 @@ export async function enqueueNegotiationDocumentDeletion(
       context?.requestSource ?? null,
     ]
   );
+
+  const jobId = Number(result.insertId ?? 0);
+  return Number.isInteger(jobId) && jobId > 0 ? jobId : null;
 }
 
 async function claimNextDeletionJob(
@@ -209,6 +213,48 @@ async function claimNextDeletionJob(
     status: 'PROCESSING',
     attempts: Number(job.attempts ?? 0) + 1,
   };
+}
+
+async function claimDeletionJobById(
+  tx: PoolConnection,
+  jobId: number
+): Promise<NegotiationDocumentDeletionJobRow | null> {
+  const [rows] = await tx.query<NegotiationDocumentDeletionJobRow[]>(
+    `
+      SELECT
+        id,
+        negotiation_document_id,
+        negotiation_id,
+        document_type,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        requested_by_user_id,
+        request_source,
+        status,
+        attempts,
+        last_error
+      FROM negotiation_document_deletion_jobs
+      WHERE id = ?
+        AND status IN ('PENDING', 'FAILED')
+        AND available_at <= CURRENT_TIMESTAMP
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [jobId]
+  );
+  const job = rows[0];
+  if (!job) return null;
+
+  await tx.query(
+    `
+      UPDATE negotiation_document_deletion_jobs
+      SET status = 'PROCESSING', attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `,
+    [job.id]
+  );
+  return { ...job, status: 'PROCESSING', attempts: Number(job.attempts ?? 0) + 1 };
 }
 
 async function markDeletionJobDone(jobId: number): Promise<void> {
@@ -301,6 +347,46 @@ export async function processPendingNegotiationDocumentDeletionJobs(
   }
 
   return { processed, failed };
+}
+
+/**
+ * Attempts an exact queued deletion immediately after the database commit.
+ * Failures stay queued and are retried by the regular worker.
+ */
+export async function processNegotiationDocumentDeletionJob(jobId: number): Promise<boolean> {
+  if (!Number.isInteger(jobId) || jobId <= 0) return false;
+
+  const tx = await connection.getConnection();
+  let job: NegotiationDocumentDeletionJobRow | null = null;
+  try {
+    await tx.beginTransaction();
+    job = await claimDeletionJobById(tx, jobId);
+    await tx.commit();
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    tx.release();
+  }
+
+  if (!job) return false;
+  try {
+    await deleteNegotiationDocumentObject({
+      storage_provider: job.storage_provider,
+      storage_bucket: job.storage_bucket,
+      storage_key: job.storage_key,
+    });
+    await markDeletionJobDone(job.id);
+    return true;
+  } catch (error) {
+    await markDeletionJobFailed(job.id, Number(job.attempts ?? 1), error);
+    console.error('Falha ao excluir imediatamente documento rejeitado; job reagendado.', {
+      jobId: job.id,
+      negotiationId: job.negotiation_id,
+      error,
+    });
+    return false;
+  }
 }
 
 export function setupNegotiationDocumentDeletionWorker(intervalMs = DEFAULT_WORKER_INTERVAL_MS): (() => void) | null {

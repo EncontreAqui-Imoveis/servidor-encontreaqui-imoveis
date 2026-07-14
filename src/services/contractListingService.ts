@@ -126,8 +126,11 @@ export async function listMyContractsForUser(
   const limit = Math.min(Math.max(Number(req.query.limit ?? 20) || 20, 1), 100);
   const offset = (page - 1) * limit;
 
+  // Cancelled contracts remain auditable through the admin route only. A
+  // participant must not see stale contract actions in the mobile listing.
   const statusClause = statusFilter ? 'AND c.status = ?' : '';
   const statusParams = statusFilter ? [statusFilter] : [];
+  const activeContractClause = "AND UPPER(TRIM(COALESCE(c.status, ''))) <> 'CANCELLED'";
 
   const contractSelectSql = await getContractSelectSql();
   const includeResponsibles = await hasNegotiationResponsiblesTable();
@@ -159,6 +162,7 @@ export async function listMyContractsForUser(
       JOIN negotiations n ON n.id = c.negotiation_id
       JOIN properties p ON p.id = c.property_id
       WHERE ${visibilityClause}
+      ${activeContractClause}
       ${statusClause}
     `,
     [...visibilityParams, ...statusParams],
@@ -169,6 +173,7 @@ export async function listMyContractsForUser(
     `
       ${contractSelectSql}
       WHERE ${visibilityClause}
+      ${activeContractClause}
       ${statusClause}
       ORDER BY c.updated_at DESC, c.created_at DESC
       LIMIT ? OFFSET ?

@@ -21,15 +21,17 @@ type CreatedContractResult = {
 
 class ContractCreationError extends Error {
   statusCode: number;
+  code: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, code = 'CONTRACT_CREATION_FAILED') {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
-function contractCreationError(statusCode: number, message: string) {
-  return new ContractCreationError(statusCode, message);
+function contractCreationError(statusCode: number, message: string, code?: string) {
+  return new ContractCreationError(statusCode, message, code);
 }
 
 function normalizePositiveId(value: unknown): number | null {
@@ -83,6 +85,7 @@ export async function createContractFromApprovedNegotiation(
       property_owner_name: string | null;
       property_owner_phone: string | null;
       property_owner_cpf: string | null;
+      property_broker_id: number | null;
       proposer_user_id: number | null;
       proposer_user_name: string | null;
       proposer_user_email: string | null;
@@ -120,6 +123,7 @@ export async function createContractFromApprovedNegotiation(
           COALESCE(owner_user.name, p.owner_name) AS property_owner_name,
           p.owner_phone AS property_owner_phone,
           owner_user.cpf AS property_owner_cpf,
+          p.broker_id AS property_broker_id,
           proposer_user.id AS proposer_user_id,
           proposer_user.name AS proposer_user_name,
           proposer_user.email AS proposer_user_email,
@@ -156,6 +160,17 @@ export async function createContractFromApprovedNegotiation(
     const negotiation = negotiationRows[0];
     if (!negotiation) {
       throw contractCreationError(404, 'Negociação não encontrada.');
+    }
+
+    if (
+      normalizePositiveId(negotiation.advertiser_id) === null &&
+      normalizePositiveId(negotiation.owner_user_id) === null
+    ) {
+      throw contractCreationError(
+        422,
+        'A negociação não possui anunciante ou proprietário vinculado para o lado vendedor.',
+        'CONTRACT_SELLER_ACTOR_MISSING'
+      );
     }
 
     const proposalInitiatorUserId = normalizePositiveId(negotiation.proposer_id);

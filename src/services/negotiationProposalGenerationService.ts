@@ -29,6 +29,10 @@ import {
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
+import {
+  resolveAdvertiserIdFromProperty,
+  resolveNegotiationInitiatorSide,
+} from '../utils/negotiationActorResolution';
 
 interface NegotiationRow extends RowDataPacket {
   id: string;
@@ -535,12 +539,19 @@ export async function generateProposalFromProperty(
     }
 
     const proposerId = normalizeOptionalPositiveId(req.userId);
-    const advertiserId = normalizeOptionalPositiveId(property.owner_id);
+    const advertiserId = resolveAdvertiserIdFromProperty({
+      brokerId: property.broker_id,
+      ownerId: property.owner_id,
+    });
     if (proposerId === null) {
       await tx.rollback();
       return res.status(401).json({ error: 'Usuario nao autenticado.' });
     }
-    const initiatorSide = advertiserId !== null && advertiserId === proposerId ? 'seller' : 'buyer';
+    const initiatorSide = resolveNegotiationInitiatorSide({
+      proposerId,
+      advertiserId,
+      propertyOwnerId: property.owner_id,
+    });
 
     const capturingBrokerId = brokerContext.capturingBrokerId;
     const sellerBrokerId = brokerContext.sellerBrokerId;

@@ -14,7 +14,7 @@ import { contractAuthMiddleware } from '../../src/middlewares/contractAuth.middl
 describe('contractAuthMiddleware', () => {
   const app = express();
   app.use((req, _res, next) => {
-    (req as any).userId = 99;
+    (req as any).userId = Number(req.header('x-contract-test-user-id') ?? 99);
     (req as any).userRole = 'client';
     next();
   });
@@ -68,5 +68,35 @@ describe('contractAuthMiddleware', () => {
 
     expect(response.status).toBe(403);
     expect(response.body.error).toBe('Acesso negado ao contrato.');
+  });
+
+  it('reconhece o proprietário do imóvel como seller sem advertiser legado', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return [[{ present: 1 }]];
+      }
+      return [[{
+        id: 'contract-1',
+        status: 'AWAITING_DOCS',
+        advertiser_id: null,
+        proposer_id: 20,
+        property_owner_id: 11,
+        responsible_user_ids: null,
+      }]];
+    });
+
+    const response = await request(app)
+      .get('/contracts/contract-1')
+      .set('x-contract-test-user-id', '11');
+
+    expect(response.status).toBe(200);
+    expect(response.body.context).toMatchObject({
+      userRole: 'seller',
+      canReadSeller: true,
+      canEditSeller: true,
+      canReadBuyer: false,
+    });
+    expect(queryMock.mock.calls.some(([sql]) => String(sql).includes('p.owner_id AS property_owner_id')))
+      .toBe(true);
   });
 });

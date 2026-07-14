@@ -21,6 +21,10 @@ import {
   type ProposalWizardBody,
 } from './negotiationProposalSupportService';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
+import {
+  resolveAdvertiserIdFromProperty,
+  resolveNegotiationInitiatorSide,
+} from '../utils/negotiationActorResolution';
 import { purgeNegotiationProposalDocuments } from './negotiationProposalDocumentCleanupService';
 import { isNegotiationActor, isNegotiationAdmin } from '../utils/negotiationActorAccess';
 
@@ -463,6 +467,15 @@ async function updateProposalFromWizardInternal(
       proposalValue = Number(parsedDeclared.toFixed(2));
     }
     const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
+    const advertiserId = resolveAdvertiserIdFromProperty({
+      brokerId: property.broker_id,
+      ownerId: property.owner_id,
+    });
+    const initiatorSide = resolveNegotiationInitiatorSide({
+      proposerId: nRow.proposer_id,
+      advertiserId,
+      propertyOwnerId: property.owner_id,
+    });
     const existingCapturingBrokerId = normalizeOptionalPositiveId(nRow.capturing_broker_id);
     const requestedCapturingBrokerId =
       propertyBrokerId ?? existingCapturingBrokerId ?? (isBrokerUser ? normalizeOptionalPositiveId(req.userId) : null);
@@ -532,6 +545,8 @@ async function updateProposalFromWizardInternal(
           property_id = ?,
           capturing_broker_id = ?,
           selling_broker_id = ?,
+          advertiser_id = ?,
+          initiator_side = ?,
           deal_type = ?,
           client_name = ?,
           status = ?,
@@ -546,6 +561,8 @@ async function updateProposalFromWizardInternal(
         payload.propertyId,
         requestedCapturingBrokerId,
         requestedCapturingBrokerId,
+        advertiserId,
+        initiatorSide,
         dealType,
         payload.clientName,
         DEFAULT_WIZARD_STATUS,

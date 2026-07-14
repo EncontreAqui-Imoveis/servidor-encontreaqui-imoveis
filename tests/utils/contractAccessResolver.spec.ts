@@ -58,6 +58,20 @@ describe('resolveContractAccessContext', () => {
     });
   });
 
+  it('concede o lado seller ao proprietário do imóvel mesmo sem advertiser vinculado', () => {
+    const context = resolveContractAccessContext(
+      { id: 11, role: 'client' },
+      { ...baseContract, advertiser_id: null, property_owner_id: 11 }
+    );
+
+    expect(context).toMatchObject({
+      userRole: 'seller',
+      canReadSeller: true,
+      canEditSeller: true,
+      canReadBuyer: false,
+    });
+  });
+
   it('bloqueia identidade dupla para usuário comum, mas mantém admin para correção operacional', () => {
     const duplicatedContract = {
       ...baseContract,

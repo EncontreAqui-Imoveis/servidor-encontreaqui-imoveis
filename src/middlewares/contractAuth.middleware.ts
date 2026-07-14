@@ -54,9 +54,11 @@ async function findContractForAuthorization(
         n.handshake_pin,
         n.handshake_status,
         n.handshake_attempts,
+        p.owner_id AS property_owner_id,
         ${responsibleUsersSelect}
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id
+      JOIN properties p ON p.id = c.property_id
       WHERE c.${field} = ?
       LIMIT 1
     `,

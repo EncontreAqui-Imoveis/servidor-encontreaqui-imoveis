@@ -25,6 +25,7 @@ import { createContractFromApprovedNegotiation } from '../../src/services/contra
 describe('contractCreationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('CONTRACT_HANDSHAKE_PIN_SECRET', 'test-handshake-secret');
     getContractDbConnectionMock.mockResolvedValue(txMock);
     txMock.beginTransaction.mockResolvedValue(undefined);
     txMock.commit.mockResolvedValue(undefined);
@@ -120,8 +121,15 @@ describe('contractCreationService', () => {
     expect(result.created).toBe(true);
     expect(result.contract.id).toBe('contract-1');
     expect(txMock.commit).toHaveBeenCalledTimes(1);
-    expect(txMock.query.mock.calls[2]?.[1]).toEqual([20, 'neg-1']);
+    expect(txMock.query.mock.calls[2]?.[1]).toEqual([
+      20,
+      expect.stringMatching(/^[a-f0-9]{64}$/),
+      'PENDING',
+      0,
+      'neg-1',
+    ]);
     expect(String(txMock.query.mock.calls[3]?.[0])).toContain('INSERT INTO contracts');
+    expect(result.handshakePin).toMatch(/^\d{4}$/);
   });
 
   it('returns existing contract when already created', async () => {

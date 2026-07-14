@@ -90,6 +90,52 @@ describe('resolveContractAccessContext', () => {
     });
   });
 
+  it('mantém o comprador jurídico em metadados mínimos até confirmar o PIN', () => {
+    const context = resolveContractAccessContext(
+      { id: 40, role: 'client' },
+      {
+        ...baseContract,
+        proposer_id: 10,
+        initiator_side: 'seller',
+        legal_buyer_user_id: 40,
+        handshake_pin: 'a'.repeat(64),
+        handshake_status: 'PENDING',
+      }
+    );
+
+    expect(context).toMatchObject({
+      userRole: 'buyer',
+      canReadMeta: true,
+      canReadSeller: false,
+      canReadBuyer: false,
+      canEditBuyer: false,
+      isReadOnly: true,
+      requiresHandshakeVerification: true,
+      handshakeStatus: 'PENDING',
+    });
+  });
+
+  it('libera o lado buyer após confirmação do PIN', () => {
+    const context = resolveContractAccessContext(
+      { id: 40, role: 'client' },
+      {
+        ...baseContract,
+        proposer_id: 10,
+        initiator_side: 'seller',
+        legal_buyer_user_id: 40,
+        handshake_pin: 'a'.repeat(64),
+        handshake_status: 'VERIFIED',
+      }
+    );
+
+    expect(context).toMatchObject({
+      userRole: 'buyer',
+      canReadBuyer: true,
+      canEditBuyer: true,
+      requiresHandshakeVerification: false,
+    });
+  });
+
   it('mapeia proposta iniciada pelo vendedor para o lado seller', () => {
     const context = resolveContractAccessContext(
       { id: 10, role: 'client' },

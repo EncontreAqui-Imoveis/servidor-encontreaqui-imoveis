@@ -6,10 +6,16 @@ import {
   resolveContractParties,
   type ContractInitiatorSide,
 } from './contractPartyResolutionService';
+import {
+  createBuyerHandshake,
+  shouldCreateBuyerHandshake,
+} from './contractBuyerHandshakeService';
 
 type CreatedContractResult = {
   contract: ContractRow;
   created: boolean;
+  /** Returned only to the admin creation flow; never persisted in plain text. */
+  handshakePin: string | null;
 };
 
 class ContractCreationError extends Error {
@@ -60,6 +66,9 @@ export async function createContractFromApprovedNegotiation(
       advertiser_id: number | null;
       initiator_side: ContractInitiatorSide;
       legal_buyer_user_id: number | null;
+      handshake_pin: string | null;
+      handshake_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
+      handshake_attempts: number | null;
       client_name: string | null;
       buyer_legal_cpf: string | null;
       buyer_legal_email: string | null;
@@ -94,6 +103,9 @@ export async function createContractFromApprovedNegotiation(
           n.advertiser_id,
           n.initiator_side,
           n.legal_buyer_user_id,
+          n.handshake_pin,
+          n.handshake_status,
+          n.handshake_attempts,
           n.client_name,
           JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_legal_cpf,
           JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientEmail')) AS buyer_legal_email,
@@ -229,6 +241,9 @@ export async function createContractFromApprovedNegotiation(
           n.proposer_id,
           n.initiator_side,
           n.legal_buyer_user_id,
+          n.handshake_pin,
+          n.handshake_status,
+          n.handshake_attempts,
           n.client_name,
           p.title AS property_title,
           p.purpose AS property_purpose,
@@ -262,7 +277,7 @@ export async function createContractFromApprovedNegotiation(
         );
       }
       await tx.commit();
-      return { contract: existingRows[0], created: false };
+      return { contract: existingRows[0], created: false, handshakePin: null };
     }
 
     const negotiationStatus = String(negotiation.status ?? '').toUpperCase();
@@ -271,10 +286,31 @@ export async function createContractFromApprovedNegotiation(
       throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
     }
 
-    if (shouldPersistLegalBuyerLink) {
+    const buyerHandshake = shouldCreateBuyerHandshake({
+      initiatorSide: negotiation.initiator_side,
+      legalBuyerUserId: partyResolution.legalBuyerUserId,
+    })
+      ? createBuyerHandshake()
+      : null;
+
+    if (shouldPersistLegalBuyerLink || buyerHandshake) {
       await tx.query(
-        `UPDATE negotiations SET legal_buyer_user_id = ? WHERE id = ? AND legal_buyer_user_id IS NULL`,
-        [partyResolution.legalBuyerUserId, negotiationId],
+        `
+          UPDATE negotiations
+          SET
+            legal_buyer_user_id = COALESCE(legal_buyer_user_id, ?),
+            handshake_pin = ?,
+            handshake_status = ?,
+            handshake_attempts = ?
+          WHERE id = ?
+        `,
+        [
+          partyResolution.legalBuyerUserId,
+          buyerHandshake?.pinHash ?? negotiation.handshake_pin,
+          buyerHandshake ? 'PENDING' : negotiation.handshake_status ?? 'PENDING',
+          buyerHandshake ? 0 : Number(negotiation.handshake_attempts ?? 0),
+          negotiationId,
+        ],
       );
     }
 
@@ -373,6 +409,9 @@ export async function createContractFromApprovedNegotiation(
           n.proposer_id,
           n.initiator_side,
           n.legal_buyer_user_id,
+          n.handshake_pin,
+          n.handshake_status,
+          n.handshake_attempts,
           n.client_name,
           p.title AS property_title,
           p.purpose AS property_purpose,
@@ -401,7 +440,11 @@ export async function createContractFromApprovedNegotiation(
     if (!createdRows[0]) {
       throw contractCreationError(500, 'Falha ao criar contrato.');
     }
-    return { contract: createdRows[0], created: true };
+    return {
+      contract: createdRows[0],
+      created: true,
+      handshakePin: buyerHandshake?.pin ?? null,
+    };
   } catch (error) {
     await tx.rollback();
     throw error;

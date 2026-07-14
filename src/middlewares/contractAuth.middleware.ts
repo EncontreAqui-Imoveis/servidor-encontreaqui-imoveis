@@ -51,6 +51,9 @@ async function findContractForAuthorization(
         n.proposer_id,
         n.initiator_side,
         n.legal_buyer_user_id,
+        n.handshake_pin,
+        n.handshake_status,
+        n.handshake_attempts,
         ${responsibleUsersSelect}
       FROM contracts c
       JOIN negotiations n ON n.id = c.negotiation_id

@@ -12,6 +12,9 @@ interface NegotiationAccessRow extends RowDataPacket {
   id: string;
   proposer_id: number | null;
   advertiser_id: number | null;
+  legal_buyer_user_id: number | null;
+  handshake_pin: string | null;
+  handshake_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
 }
 
 interface NegotiationDocumentRow {
@@ -81,7 +84,8 @@ export async function downloadDocument(
   try {
     const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
       `
-        SELECT id, proposer_id, advertiser_id
+        SELECT id, proposer_id, advertiser_id,
+          legal_buyer_user_id, handshake_pin, handshake_status
         FROM negotiations
         WHERE id = ?
         LIMIT 1
@@ -93,7 +97,15 @@ export async function downloadDocument(
       return res.status(404).json({ error: 'Negociação não encontrada.' });
     }
 
-    if (!isNegotiationAdmin(role) && !isNegotiationActor(userId, negotiation)) {
+    const isVerifiedLegalBuyer =
+      Number(negotiation.legal_buyer_user_id) === userId &&
+      String(negotiation.handshake_pin ?? '').trim().length > 0 &&
+      String(negotiation.handshake_status ?? '').trim().toUpperCase() === 'VERIFIED';
+    if (
+      !isNegotiationAdmin(role) &&
+      !isNegotiationActor(userId, negotiation) &&
+      !isVerifiedLegalBuyer
+    ) {
       return res.status(403).json({ error: 'Acesso negado ao documento.' });
     }
 

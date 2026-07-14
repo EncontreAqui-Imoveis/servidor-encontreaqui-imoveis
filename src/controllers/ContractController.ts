@@ -54,6 +54,11 @@ import {
   setContractSignatureMethod,
 } from '../services/contractSignatureMethodService';
 import {
+  isContractBuyerHandshakeError,
+  rejectBuyerHandshakeAssociation,
+  verifyBuyerHandshakePin,
+} from '../services/contractBuyerHandshakeService';
+import {
   buildContractDocumentPayload,
   buildContractDocumentsZip,
 } from '../services/contractDocumentService';
@@ -187,6 +192,9 @@ export interface ContractRow extends RowDataPacket {
   proposer_id: number | null;
   initiator_side: 'buyer' | 'seller' | null;
   legal_buyer_user_id: number | null;
+  handshake_pin: string | null;
+  handshake_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
+  handshake_attempts: number | null;
   seller_cpf: string | null;
   buyer_cpf: string | null;
   client_name: string | null;
@@ -334,7 +342,7 @@ interface ContractDocumentCategoryProgressItem {
   latestUploadedAt: string | null;
 }
 
-interface ContractDocumentProgressSide {
+export interface ContractDocumentProgressSide {
   side: ContractDocumentSide;
   categories: ContractDocumentCategoryProgressItem[];
   totals: {
@@ -344,7 +352,7 @@ interface ContractDocumentProgressSide {
   };
 }
 
-interface ContractDocumentProgressSummary {
+export interface ContractDocumentProgressSummary {
   seller: ContractDocumentProgressSide;
   buyer: ContractDocumentProgressSide;
 }
@@ -1089,6 +1097,7 @@ function shouldExposeOwnerSensitiveDocument(
 
 export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const readContext = resolveContractReadContext(req, row);
+  const handshakeRestricted = Boolean(readContext?.requiresHandshakeVerification);
   const matrixContext = buildContractDocumentRuleContextFromRow(row);
   const rawDocumentRequirements = resolveDocumentRequirementsForContract(matrixContext);
   const documentRequirements = {
@@ -1130,7 +1139,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ),
   };
   const sellerInfo = buildOwnerInfoFromContractRow(row);
-  const workflowMetadata = parseStoredJsonObject(row.workflow_metadata);
+  const workflowMetadata = handshakeRestricted ? {} : parseStoredJsonObject(row.workflow_metadata);
   const canReadSeller = canReadContractSide(readContext, 'seller');
   const canReadBuyer = canReadContractSide(readContext, 'buyer');
   const canViewSensitiveData = canReadSeller && canViewOwnerSensitiveData(req, row);
@@ -1148,6 +1157,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
         canReadBuyer: readContext.canReadBuyer,
         canEditBuyer: readContext.canEditBuyer,
         isReadOnly: readContext.isReadOnly,
+        requiresHandshakeVerification: readContext.requiresHandshakeVerification,
       }
     : {
         canReadMeta: false,
@@ -1156,6 +1166,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
         canReadBuyer: false,
         canEditBuyer: false,
         isReadOnly: true,
+        requiresHandshakeVerification: false,
       };
   return {
     id: row.id,
@@ -1167,6 +1178,10 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
       status,
       isReadOnly: capabilities.isReadOnly,
     },
+    handshake: {
+      status: readContext?.handshakeStatus ?? null,
+      requiresVerification: Boolean(readContext?.requiresHandshakeVerification),
+    },
     sellerInfo: sellerInfoForViewer,
     // Compatibilidade legada: ownerInfo permanece somente como alias de sellerInfo.
     ownerInfo: sellerInfoForViewer,
@@ -1174,42 +1189,42 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     commissionData: canViewSensitiveData ? parseStoredJsonObject(row.commission_data) : {},
     workflowMetadata,
     identityCapabilities: resolveIdentityCapabilities(workflowMetadata),
-    sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
-    ownerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
-    buyerApprovalStatus: resolveContractApprovalStatus(row.buyer_approval_status),
-    sellerApprovalReason: parseStoredJsonObject(row.seller_approval_reason),
-    ownerApprovalReason: parseStoredJsonObject(row.seller_approval_reason),
-    buyerApprovalReason: parseStoredJsonObject(row.buyer_approval_reason),
+    sellerApprovalStatus: handshakeRestricted ? 'PENDING' : resolveContractApprovalStatus(row.seller_approval_status),
+    ownerApprovalStatus: handshakeRestricted ? 'PENDING' : resolveContractApprovalStatus(row.seller_approval_status),
+    buyerApprovalStatus: handshakeRestricted ? 'PENDING' : resolveContractApprovalStatus(row.buyer_approval_status),
+    sellerApprovalReason: handshakeRestricted ? {} : parseStoredJsonObject(row.seller_approval_reason),
+    ownerApprovalReason: handshakeRestricted ? {} : parseStoredJsonObject(row.seller_approval_reason),
+    buyerApprovalReason: handshakeRestricted ? {} : parseStoredJsonObject(row.buyer_approval_reason),
     capturingBrokerId:
-      row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
+      !handshakeRestricted && row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
-      row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
-    advertiserId: row.advertiser_id !== null ? Number(row.advertiser_id) : null,
-    proposerId: row.proposer_id !== null ? Number(row.proposer_id) : null,
-    initiatorSide: row.initiator_side ?? null,
+      !handshakeRestricted && row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
+    advertiserId: !handshakeRestricted && row.advertiser_id !== null ? Number(row.advertiser_id) : null,
+    proposerId: !handshakeRestricted && row.proposer_id !== null ? Number(row.proposer_id) : null,
+    initiatorSide: handshakeRestricted ? null : row.initiator_side ?? null,
     legalBuyerUserId:
-      row.legal_buyer_user_id !== null ? Number(row.legal_buyer_user_id) : null,
-    advertiserName: row.seller_client_name ?? null,
-    proposerName: row.buyer_client_name ?? null,
-    clientName: row.client_name ?? null,
-    capturingBrokerName: row.capturing_broker_name ?? null,
-    sellingBrokerName: row.selling_broker_name ?? null,
-    ownerId: row.property_owner_id !== null ? Number(row.property_owner_id) : null,
-    ownerName: row.property_owner_name ?? null,
-    propertyOwnerPhone: row.property_owner_phone ?? null,
+      !handshakeRestricted && row.legal_buyer_user_id !== null ? Number(row.legal_buyer_user_id) : null,
+    advertiserName: handshakeRestricted ? null : row.seller_client_name ?? null,
+    proposerName: handshakeRestricted ? null : row.buyer_client_name ?? null,
+    clientName: handshakeRestricted ? null : row.client_name ?? null,
+    capturingBrokerName: handshakeRestricted ? null : row.capturing_broker_name ?? null,
+    sellingBrokerName: handshakeRestricted ? null : row.selling_broker_name ?? null,
+    ownerId: !handshakeRestricted && row.property_owner_id !== null ? Number(row.property_owner_id) : null,
+    ownerName: handshakeRestricted ? null : row.property_owner_name ?? null,
+    propertyOwnerPhone: handshakeRestricted ? null : row.property_owner_phone ?? null,
     proposalInitiatorUserId:
-      row.proposal_initiator_user_id !== null ? Number(row.proposal_initiator_user_id) : null,
+      !handshakeRestricted && row.proposal_initiator_user_id !== null ? Number(row.proposal_initiator_user_id) : null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
     propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'detail' }) ?? null,
     propertyPurpose: row.property_purpose ?? null,
-    agencyName: row.capturing_agency_name ?? null,
-    agencyAddress: row.capturing_agency_address ?? null,
-    sellerClientName: row.seller_client_name ?? null,
-    buyerClientName: row.buyer_client_name ?? null,
-    responsibleUserIds: parseResponsibleUserIds(row.responsible_user_ids),
-    viewerSide,
-    approvalProgress: summarizeContractApprovalProgress(row),
+    agencyName: handshakeRestricted ? null : row.capturing_agency_name ?? null,
+    agencyAddress: handshakeRestricted ? null : row.capturing_agency_address ?? null,
+    sellerClientName: handshakeRestricted ? null : row.seller_client_name ?? null,
+    buyerClientName: handshakeRestricted ? null : row.buyer_client_name ?? null,
+    responsibleUserIds: handshakeRestricted ? [] : parseResponsibleUserIds(row.responsible_user_ids),
+    viewerSide: handshakeRestricted ? null : viewerSide,
+    approvalProgress: handshakeRestricted ? { seller: null, buyer: null } : summarizeContractApprovalProgress(row),
     documentRequirements,
     documentRequirementMatrix,
     createdAt: toIsoString(row.created_at),
@@ -1731,6 +1746,15 @@ function resolveContractViewerSide(
   return 'none';
 }
 
+export function buildEmptyContractDocumentProgress(): ContractDocumentProgressSummary {
+  const emptySide = (side: ContractDocumentSide): ContractDocumentProgressSide => ({
+    side,
+    categories: [],
+    totals: { pending: 0, approved: 0, rejected: 0 },
+  });
+  return { seller: emptySide('seller'), buyer: emptySide('buyer') };
+}
+
 function canAccessContract(req: AuthRequest, contract: ContractRow): boolean {
   const context = resolveContractAccessContext(
     { id: req.userId, role: req.userRole },
@@ -1812,6 +1836,9 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.proposer_id,
     n.initiator_side,
     n.legal_buyer_user_id,
+    n.handshake_pin,
+    n.handshake_status,
+    n.handshake_attempts,
     n.client_name,
     owner_user.cpf AS seller_cpf,
     JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_cpf,
@@ -1991,6 +2018,11 @@ class ContractController {
           ? 'Contrato criado com sucesso.'
           : 'Contrato já existente para esta negociação.',
         contract: mapContract(result.contract, req as AuthRequest),
+        // This value is intentionally transient and is only returned by the
+        // admin-only creation endpoint. It is never stored in plain text.
+        handshake: result.handshakePin
+          ? { status: 'PENDING', pin: result.handshakePin }
+          : null,
       });
     } catch (error) {
       if (isContractCreationError(error)) {
@@ -2398,6 +2430,29 @@ class ContractController {
           });
         } catch (notificationError) {
           console.error('Falha ao notificar corretor sobre minuta:', notificationError);
+        }
+      }
+
+      const legalBuyerRecipientId = Number(updatedContract?.legal_buyer_user_id ?? 0);
+      const handshakeStatus = String(updatedContract?.handshake_status ?? '').trim().toUpperCase();
+      if (legalBuyerRecipientId > 0 && handshakeStatus !== 'REJECTED') {
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Minuta pronta para revisão',
+            message: `A minuta do contrato do imóvel ${propertyTitle} está disponível para revisão.`,
+            recipientId: legalBuyerRecipientId,
+            relatedEntityId: Number(contract.property_id),
+            recipientRole: 'client',
+            metadata: {
+              contractId,
+              negotiationId: contract.negotiation_id,
+              propertyId: Number(contract.property_id),
+            },
+            target: 'contract_details',
+          });
+        } catch (notificationError) {
+          console.error('Falha ao notificar comprador vinculado sobre minuta:', notificationError);
         }
       }
 
@@ -3155,6 +3210,118 @@ class ContractController {
       return res
         .status(500)
         .json({ error: 'Falha ao registrar o método de assinatura.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async verifyBuyerHandshakePin(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      const result = await verifyBuyerHandshakePin(tx, {
+        req,
+        contract,
+        pin: (req.body ?? {}).pin,
+      });
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      if (!updatedContract) {
+        throw new Error('Contrato não encontrado após confirmar PIN.');
+      }
+      req.contractContext = resolveContractAccessContext(
+        { id: req.userId, role: req.userRole },
+        updatedContract
+      );
+      await tx.commit();
+
+      return res.status(200).json({
+        message: 'Acesso do comprador confirmado com sucesso.',
+        handshake: {
+          status: result.status,
+          attemptsRemaining: result.attemptsRemaining,
+        },
+        contract: mapContract(updatedContract, req),
+      });
+    } catch (error) {
+      await tx.rollback();
+      if (isContractBuyerHandshakeError(error)) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          ...error.body,
+        });
+      }
+      console.error('Erro ao confirmar PIN de associação do comprador:', error);
+      return res.status(500).json({ error: 'Falha ao confirmar acesso do comprador.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async rejectBuyerHandshakeAssociation(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+
+      const result = await rejectBuyerHandshakeAssociation(tx, { req, contract });
+      await tx.commit();
+
+      for (const recipientId of result.sellerRecipientIds) {
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Associação de comprador recusada',
+            message: 'O comprador informou que não reconhece a associação deste contrato. Revise o e-mail cadastrado.',
+            recipientId,
+            relatedEntityId: Number(contract.property_id),
+            recipientRole: 'client',
+            metadata: {
+              contractId: contract.id,
+              negotiationId: contract.negotiation_id,
+              propertyId: Number(contract.property_id),
+            },
+            target: 'contract_details',
+          });
+        } catch (notificationError) {
+          console.error('Falha ao notificar vendedor sobre associação recusada:', notificationError);
+        }
+      }
+
+      return res.status(200).json({
+        message: 'Associação recusada. O vendedor foi avisado para corrigir o cadastro.',
+      });
+    } catch (error) {
+      await tx.rollback();
+      if (isContractBuyerHandshakeError(error)) {
+        return res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          ...error.body,
+        });
+      }
+      console.error('Erro ao recusar associação do comprador:', error);
+      return res.status(500).json({ error: 'Falha ao recusar associação do comprador.' });
     } finally {
       tx.release();
     }

@@ -154,7 +154,10 @@ describe('POST /contracts/:id/signature-method', () => {
     );
   });
 
-  it('stores in-person choice, returns updated contract and notifies admins', async () => {
+  it('stores in-person choice only for admin, returns updated contract and notifies admins', async () => {
+    actingUserId = 1;
+    actingUserRole = 'admin';
+    actingUserName = 'Admin Teste';
     const response = await request(app)
       .post('/contracts/contract-sign-1/signature-method')
       .send({ method: 'in_person' });
@@ -164,8 +167,8 @@ describe('POST /contracts/:id/signature-method', () => {
     expect(response.body.contract.workflowMetadata).toEqual(
       expect.objectContaining({
         signatureMethod: 'in_person',
-        signatureMethodDeclaredBy: 30001,
-        signatureMethodDeclaredByName: 'Responsável #30001',
+        signatureMethodDeclaredBy: 1,
+        signatureMethodDeclaredByName: 'Responsável #1',
       })
     );
 
@@ -185,7 +188,7 @@ describe('POST /contracts/:id/signature-method', () => {
         metadata: expect.objectContaining({
           contractId: 'contract-sign-1',
           negotiationId: 'neg-sign-1',
-          brokerId: 30001,
+          brokerId: 1,
           method: 'in_person',
         }),
       })
@@ -193,6 +196,8 @@ describe('POST /contracts/:id/signature-method', () => {
   });
 
   it('blocks the choice when contract is not in awaiting signatures', async () => {
+    actingUserId = 1;
+    actingUserRole = 'admin';
     contractState = createContractState({ status: 'IN_DRAFT' });
 
     const response = await request(app)
@@ -219,6 +224,16 @@ describe('POST /contracts/:id/signature-method', () => {
     actingUserId = 99999;
     actingUserName = 'Intruso';
 
+    const response = await request(app)
+      .post('/contracts/contract-sign-1/signature-method')
+      .send({ method: 'in_person' });
+
+    expect(response.status).toBe(403);
+    expect(String(response.body.error ?? '')).toContain('Acesso negado');
+    expect(createAdminNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('blocks the responsible broker because signature-method is administrative', async () => {
     const response = await request(app)
       .post('/contracts/contract-sign-1/signature-method')
       .send({ method: 'in_person' });

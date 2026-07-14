@@ -4,6 +4,7 @@ import type { AuthRequest } from '../middlewares/auth';
 import { queryContractRows } from './contractPersistenceService';
 import {
   buildContractDocumentProgress,
+  buildEmptyContractDocumentProgress,
   buildContractDocumentRuleContextFromRow,
   mapContract,
   mapDocument,
@@ -161,17 +162,20 @@ export async function buildContractDocumentPayload(
 ): Promise<ContractDocumentPayload> {
   const documents = await fetchVisibleContractDocuments(contract, req);
   const matrixContext = buildContractDocumentRuleContextFromRow(contract);
+  const accessContext = resolveDocumentAccessContext(req, contract);
 
   return {
     contract: {
       ...mapContract(contract, req),
-      documentProgress: buildContractDocumentProgress(
-        documents.map((document) => ({
-          ...document,
-          metadata: document.metadata as Record<string, unknown>,
-        })),
-        matrixContext
-      ),
+      documentProgress: accessContext?.requiresHandshakeVerification
+        ? buildEmptyContractDocumentProgress()
+        : buildContractDocumentProgress(
+            documents.map((document) => ({
+              ...document,
+              metadata: document.metadata as Record<string, unknown>,
+            })),
+            matrixContext
+          ),
     },
     documents,
   };

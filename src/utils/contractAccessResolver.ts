@@ -14,6 +14,9 @@ export interface ContractAccessRecord {
   proposer_id: number | string | null | undefined;
   initiator_side?: 'buyer' | 'seller' | string | null;
   legal_buyer_user_id?: number | string | null;
+  handshake_pin?: string | null;
+  handshake_status?: 'PENDING' | 'VERIFIED' | 'REJECTED' | string | null;
+  handshake_attempts?: number | string | null;
   responsible_user_ids?: readonly number[] | string | null;
 }
 
@@ -40,7 +43,11 @@ function buildContext(
   userId: string,
   userRole: ContractRole,
   editable: boolean,
-  workflowStatus: string
+  workflowStatus: string,
+  options: {
+    requiresHandshakeVerification?: boolean;
+    handshakeStatus?: ContractAccessContext['handshakeStatus'];
+  } = {}
 ): ContractAccessContext {
   const canReadMeta = userRole !== 'none';
   const canReadSeller = userRole === 'seller' || userRole === 'responsible' || userRole === 'admin';
@@ -51,11 +58,13 @@ function buildContext(
     userId,
     userRole,
     canReadMeta,
-    canReadSeller,
-    canEditSeller: editable && canReadSeller,
-    canReadBuyer,
-    canEditBuyer: editable && canReadBuyer,
-    isReadOnly: !editable,
+    canReadSeller: options.requiresHandshakeVerification ? false : canReadSeller,
+    canEditSeller: editable && canReadSeller && !options.requiresHandshakeVerification,
+    canReadBuyer: options.requiresHandshakeVerification ? false : canReadBuyer,
+    canEditBuyer: editable && canReadBuyer && !options.requiresHandshakeVerification,
+    isReadOnly: !editable || Boolean(options.requiresHandshakeVerification),
+    requiresHandshakeVerification: Boolean(options.requiresHandshakeVerification),
+    handshakeStatus: options.handshakeStatus ?? null,
     workflowStatus,
   };
 }
@@ -80,6 +89,13 @@ export function resolveContractAccessContext(
   const proposerId = normalizePositiveId(contract.proposer_id);
   const legalBuyerUserId = normalizePositiveId(contract.legal_buyer_user_id);
   const initiatorSide = String(contract.initiator_side ?? '').trim().toLowerCase();
+  const handshakeStatusRaw = String(contract.handshake_status ?? '').trim().toUpperCase();
+  const handshakeStatus =
+    handshakeStatusRaw === 'PENDING' ||
+    handshakeStatusRaw === 'VERIFIED' ||
+    handshakeStatusRaw === 'REJECTED'
+      ? handshakeStatusRaw
+      : null;
 
   // Admin keeps operational access so duplicate identities can be repaired.
   if (requestRole === 'admin') {
@@ -117,11 +133,17 @@ export function resolveContractAccessContext(
     workflowStatus === 'IN_DRAFT' ||
     workflowStatus === 'AWAITING_SIGNATURES' ||
     workflowStatus === 'FINALIZED';
+  const requiresHandshakeVerification =
+    role === 'buyer' &&
+    legalBuyerUserId === userId &&
+    handshakeStatus === 'PENDING' &&
+    String(contract.handshake_pin ?? '').trim().length > 0;
   return buildContext(
     contractId,
     userId,
     role,
     role !== 'none' && !workflowFrozen,
-    workflowStatus
+    workflowStatus,
+    { requiresHandshakeVerification, handshakeStatus }
   );
 }

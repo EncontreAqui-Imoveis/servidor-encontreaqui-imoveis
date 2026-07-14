@@ -5,6 +5,7 @@ import { queryContractRows } from './contractPersistenceService';
 import {
   CONTRACT_SELECT_BASE_SQL,
   buildContractDocumentProgress,
+  buildEmptyContractDocumentProgress,
   buildContractDocumentRuleContextFromRow,
   mapContract,
   mapDocument,
@@ -12,6 +13,7 @@ import {
   type ContractDocumentListRow,
   type ContractRow,
 } from '../controllers/ContractController';
+import { resolveContractAccessContext } from '../utils/contractAccessResolver';
 
 function buildDocumentsByNegotiation(documentRows: ContractDocumentListRow[]) {
   const documentsByNegotiation = new Map<string, ContractDocumentListRow[]>();
@@ -194,16 +196,21 @@ export async function listMyContractsForUser(
   return {
     data: rows.map((row) => ({
       ...mapContract(row, req),
-      documentProgress: buildContractDocumentProgress(
-        (documentsByNegotiation.get(row.negotiation_id) ?? []).map((doc) => {
-          const mapped = mapDocument(doc);
-          return {
-            ...mapped,
-            metadata: mapped.metadata as Record<string, unknown>,
-          };
-        }),
-        buildContractDocumentRuleContextFromRow(row),
-      ),
+      documentProgress: resolveContractAccessContext(
+        { id: req.userId, role: req.userRole },
+        row
+      ).requiresHandshakeVerification
+        ? buildEmptyContractDocumentProgress()
+        : buildContractDocumentProgress(
+            (documentsByNegotiation.get(row.negotiation_id) ?? []).map((doc) => {
+              const mapped = mapDocument(doc);
+              return {
+                ...mapped,
+                metadata: mapped.metadata as Record<string, unknown>,
+              };
+            }),
+            buildContractDocumentRuleContextFromRow(row),
+          ),
     })),
     total,
     page,

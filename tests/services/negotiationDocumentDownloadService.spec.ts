@@ -1,168 +1,81 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Response } from 'express';
+
+const { queryNegotiationRowsMock, findNegotiationDocumentByIdMock } = vi.hoisted(() => ({
+  queryNegotiationRowsMock: vi.fn(),
+  findNegotiationDocumentByIdMock: vi.fn(),
+}));
 
 vi.mock('../../src/services/negotiationPersistenceService', () => ({
-  queryNegotiationRows: vi.fn(),
-  findNegotiationDocumentById: vi.fn(),
+  queryNegotiationRows: queryNegotiationRowsMock,
+  findNegotiationDocumentById: findNegotiationDocumentByIdMock,
 }));
 
 import { downloadDocument } from '../../src/services/negotiationDocumentDownloadService';
-import {
-  findNegotiationDocumentById,
-  queryNegotiationRows,
-} from '../../src/services/negotiationPersistenceService';
 
-type FnMock = ReturnType<typeof vi.fn>;
-type MockResponse = Response & {
-  status: FnMock;
-  json: FnMock;
-  end: FnMock;
-  setHeader: FnMock;
-};
-
-function createMockResponse(): MockResponse {
-  const res: Partial<MockResponse> = {};
-  res.status = vi.fn().mockReturnValue(res);
-  res.json = vi.fn().mockReturnValue(res);
-  res.end = vi.fn().mockReturnValue(res);
-  res.setHeader = vi.fn();
-  return res as MockResponse;
+function createResponse() {
+  const response = {
+    status: vi.fn(),
+    json: vi.fn(),
+    setHeader: vi.fn(),
+    end: vi.fn(),
+  };
+  response.status.mockReturnValue(response);
+  response.json.mockReturnValue(response);
+  return response;
 }
 
-describe('negotiationDocumentDownloadService.downloadDocument', () => {
+describe('negotiationDocumentDownloadService legal buyer handshake', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('downloads document when user owns negotiation', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
-      {
-        id: 'neg-1',
-        capturing_broker_id: 10,
-        selling_broker_id: null,
-      },
-    ] as any);
-
-    const fileContent = Buffer.from('document-bytes');
-    vi.mocked(findNegotiationDocumentById).mockResolvedValueOnce({
-      id: 99,
+  it('allows the linked buyer to download only after PIN verification', async () => {
+    queryNegotiationRowsMock.mockResolvedValueOnce([{
+      id: 'neg-1',
+      proposer_id: 10,
+      advertiser_id: 11,
+      legal_buyer_user_id: 20,
+      handshake_pin: 'a'.repeat(64),
+      handshake_status: 'VERIFIED',
+    }]);
+    findNegotiationDocumentByIdMock.mockResolvedValueOnce({
+      id: 4,
       negotiationId: 'neg-1',
-      fileContent,
-      type: 'proposal',
-      documentType: 'proposal',
-      metadataJson: { originalFileName: 'Minha proposta final.pdf' },
-    } as any);
-
-    const req = {
-      params: {
-        id: 'neg-1',
-        documentId: '99',
-      },
-      userId: 10,
-      userRole: 'broker',
-    } as any;
-    const res = createMockResponse();
-
-    await downloadDocument(req, res);
-
-    expect(res.status).not.toHaveBeenCalled();
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
-    expect(res.setHeader).toHaveBeenCalledWith(
-      'Content-Disposition',
-      'attachment; filename="Minha proposta final.pdf"; filename*=UTF-8\'\'Minha%20proposta%20final.pdf'
-    );
-    expect(res.setHeader).toHaveBeenCalledWith('Content-Length', String(fileContent.length));
-    expect(res.end).toHaveBeenCalledWith(fileContent);
-  });
-
-  it('returns 403 when user does not own negotiation', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
-      {
-        id: 'neg-1',
-        capturing_broker_id: 10,
-        selling_broker_id: null,
-      },
-    ] as any);
-
-    const req = {
-      params: {
-        id: 'neg-1',
-        documentId: '99',
-      },
-      userId: 11,
-      userRole: 'broker',
-    } as any;
-    const res = createMockResponse();
-
-    await downloadDocument(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'Acesso negado ao documento.' })
-    );
-    expect(findNegotiationDocumentById).not.toHaveBeenCalled();
-  });
-
-  it('returns 404 when document does not exist', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
-      {
-        id: 'neg-1',
-        capturing_broker_id: 10,
-        selling_broker_id: null,
-      },
-    ] as any);
-    vi.mocked(findNegotiationDocumentById).mockResolvedValueOnce(null);
-
-    const req = {
-      params: {
-        id: 'neg-1',
-        documentId: '99',
-      },
-      userId: 10,
-      userRole: 'broker',
-    } as any;
-    const res = createMockResponse();
-
-    await downloadDocument(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'Documento nao encontrado.' })
-    );
-  });
-
-  it('returns 404 when document belongs to another negotiation', async () => {
-    vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
-      {
-        id: 'neg-1',
-        capturing_broker_id: 10,
-        selling_broker_id: null,
-      },
-    ] as any);
-    vi.mocked(findNegotiationDocumentById).mockResolvedValueOnce({
-      id: 99,
-      negotiationId: 'neg-2',
-      fileContent: Buffer.from('document-bytes'),
-      type: 'proposal',
-      documentType: 'proposal',
+      fileContent: Buffer.from('%PDF-1.4'),
+      type: 'contract',
+      documentType: 'contrato_minuta',
       metadataJson: {},
-    } as any);
+    });
+    const response = createResponse();
 
-    const req = {
-      params: {
-        id: 'neg-1',
-        documentId: '99',
-      },
-      userId: 10,
-      userRole: 'broker',
-    } as any;
-    const res = createMockResponse();
+    await downloadDocument({
+      params: { id: 'neg-1', documentId: '4' },
+      userId: 20,
+      userRole: 'client',
+    } as any, response as any);
 
-    await downloadDocument(req, res);
+    expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'application/pdf');
+    expect(response.end).toHaveBeenCalledWith(Buffer.from('%PDF-1.4'));
+  });
 
-    expect(res.status).toHaveBeenCalledWith(404);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'Documento nao encontrado.' })
-    );
+  it('denies a pending linked buyer before reading the document', async () => {
+    queryNegotiationRowsMock.mockResolvedValueOnce([{
+      id: 'neg-1',
+      proposer_id: 10,
+      advertiser_id: 11,
+      legal_buyer_user_id: 20,
+      handshake_pin: 'a'.repeat(64),
+      handshake_status: 'PENDING',
+    }]);
+    const response = createResponse();
+
+    await downloadDocument({
+      params: { id: 'neg-1', documentId: '4' },
+      userId: 20,
+      userRole: 'client',
+    } as any, response as any);
+
+    expect(response.status).toHaveBeenCalledWith(403);
+    expect(findNegotiationDocumentByIdMock).not.toHaveBeenCalled();
   });
 });

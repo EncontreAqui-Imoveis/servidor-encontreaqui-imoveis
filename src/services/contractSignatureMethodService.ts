@@ -98,7 +98,7 @@ export async function setContractSignatureMethod(
     contract
   );
   params.req.contractContext = context;
-  if (context.userRole !== 'admin' && context.userRole !== 'responsible') {
+  if (context.userRole !== 'admin') {
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
 

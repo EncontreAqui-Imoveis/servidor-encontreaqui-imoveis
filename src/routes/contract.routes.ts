@@ -37,8 +37,16 @@ contractRoutes.put('/contracts/:id/data', authMiddleware, contractAuthMiddleware
   contractController.updateData(req, res)
 );
 
-contractRoutes.post('/contracts/:id/signature-method', authMiddleware, contractAuthMiddleware, (req, res) =>
+contractRoutes.post('/contracts/:id/signature-method', authMiddleware, isAdmin, (req, res) =>
   contractController.setSignatureMethod(req, res)
+);
+
+contractRoutes.post('/contracts/:id/verify-pin', authMiddleware, contractAuthMiddleware, (req, res) =>
+  contractController.verifyBuyerHandshakePin(req, res)
+);
+
+contractRoutes.post('/contracts/:id/reject-association', authMiddleware, contractAuthMiddleware, (req, res) =>
+  contractController.rejectBuyerHandshakeAssociation(req, res)
 );
 
 contractRoutes.post(

@@ -87,8 +87,8 @@ describe('POST /negotiations/:id/proposals/signed', () => {
           id: 'neg-uuid-1',
           property_id: 101,
           status: 'PROPOSAL_SENT',
-          capturing_broker_id: 30003,
-          selling_broker_id: 30003,
+          proposer_id: 30003,
+          advertiser_id: 40001,
           property_code: 'RV101',
           property_address: 'Rua 1',
           broker_name: 'Pedro Corretor',
@@ -130,11 +130,11 @@ describe('POST /negotiations/:id/proposals/signed', () => {
       .mockResolvedValueOnce([
         [
           {
-            id: 'neg-uuid-2',
-            property_id: 102,
-            status: 'DOCUMENTATION_PHASE',
-            capturing_broker_id: 30003,
-            selling_broker_id: 30003,
+          id: 'neg-uuid-2',
+          property_id: 102,
+          status: 'DOCUMENTATION_PHASE',
+          proposer_id: 30003,
+          advertiser_id: 40001,
             property_code: 'RV102',
             property_address: 'Rua 2',
             broker_name: 'Pedro Corretor',
@@ -160,11 +160,11 @@ describe('POST /negotiations/:id/proposals/signed', () => {
       .mockResolvedValueOnce([
         [
           {
-            id: 'neg-uuid-3',
-            property_id: 103,
-            status: 'PROPOSAL_SENT',
-            capturing_broker_id: 30003,
-            selling_broker_id: 30003,
+          id: 'neg-uuid-3',
+          property_id: 103,
+          status: 'PROPOSAL_SENT',
+          proposer_id: 30003,
+          advertiser_id: 40001,
             property_code: 'RV103',
             property_address: 'Rua 3',
             broker_name: 'Pedro Corretor',

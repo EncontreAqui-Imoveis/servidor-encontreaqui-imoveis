@@ -33,6 +33,9 @@ const CONTRACT_READY_NEGOTIATION_STATUSES = new Set([
 ]);
 
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
+const NEGOTIATION_TERMINAL_STATUS_SQL = NEGOTIATION_TERMINAL_STATUSES
+  .map((status) => `'${status}'`)
+  .join(', ');
 
 interface PropertyRow extends RowDataPacket {
   id: number;
@@ -340,6 +343,7 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
             ) AS rn
           FROM negotiations n
           WHERE n.status NOT IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
+            AND UPPER(TRIM(n.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUS_SQL})
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
@@ -366,7 +370,9 @@ function buildPropertyAggregateJoins(includePendingEditRequest: boolean): string
         ) ranked
         WHERE ranked.rn = 1
       ) ln ON ln.property_id = p.id
-      LEFT JOIN contracts c ON c.negotiation_id = ln.id
+      LEFT JOIN contracts c
+        ON c.negotiation_id = ln.id
+       AND UPPER(TRIM(ln.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUS_SQL})
       ${includePendingEditRequest ? 'LEFT JOIN property_edit_requests per\n        ON per.property_id = p.id\n       AND per.status = \'PENDING\'' : ''}
       LEFT JOIN property_images pi ON pi.property_id = p.id
   `;
@@ -398,6 +404,7 @@ function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): st
             ) AS rn
           FROM negotiations n
           WHERE n.status NOT IN (${NEGOTIATION_PUBLIC_BLOCKING_STATUSES.map(() => '?').join(', ')})
+            AND UPPER(TRIM(n.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUS_SQL})
         ) ranked
         WHERE ranked.rn = 1
       ) an ON an.property_id = p.id
@@ -424,7 +431,9 @@ function buildPropertyAggregateJoinsOnly(includePendingEditRequest: boolean): st
         ) ranked
         WHERE ranked.rn = 1
       ) ln ON ln.property_id = p.id
-      LEFT JOIN contracts c ON c.negotiation_id = ln.id
+      LEFT JOIN contracts c
+        ON c.negotiation_id = ln.id
+       AND UPPER(TRIM(ln.status)) NOT IN (${NEGOTIATION_TERMINAL_STATUS_SQL})
       ${includePendingEditRequest ? 'LEFT JOIN property_edit_requests per\n        ON per.property_id = p.id\n       AND per.status = \'PENDING\'' : ''}
       LEFT JOIN property_images pi ON pi.property_id = p.id
   `;
@@ -495,10 +504,13 @@ export function mapProperty(
   const latestContractStatus = row.latest_contract_status
     ? String(row.latest_contract_status).trim().toUpperCase()
     : null;
+  const hasTerminalLatestNegotiation =
+    latestNegotiationStatus != null && NEGOTIATION_TERMINAL_STATUSES.includes(latestNegotiationStatus);
   const contractReadyProposal =
-    Boolean(latestContractId) ||
+    !hasTerminalLatestNegotiation &&
+    (Boolean(latestContractId) ||
     (latestNegotiationStatus != null &&
-      CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus));
+      CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus)));
   const negotiation = activeNegotiationId
     ? {
         id: activeNegotiationId,
@@ -643,9 +655,9 @@ export function mapProperty(
     activeNegotiation: negotiation,
     contractReadyProposal,
     contractReadyProposalReason:
-      latestContractId != null
+      !hasTerminalLatestNegotiation && latestContractId != null
         ? 'contract_created'
-        : latestNegotiationStatus != null &&
+        : !hasTerminalLatestNegotiation && latestNegotiationStatus != null &&
             CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus)
           ? 'contract_stage'
           : null,

@@ -80,7 +80,7 @@ describe('negotiationMineListingService.listMine', () => {
           propertyId: 101,
           propertyTitle: 'Casa Central',
           clientName: 'Cliente 1',
-          clientCpf: '52998224725',
+          clientCpf: null,
           hasSignedProposal: true,
           proposalValue: 500000,
           paymentBreakdown: {

@@ -22,7 +22,8 @@ describe('proposalPdfPayload', () => {
         validityDays: 10,
       })
     ).toEqual({
-      client_name: 'Ana Silva',
+      clientName: 'Ana Silva',
+      clientCpf: '123.456.789-00',
       deal_type: null,
       property_address: 'Rua A, 10',
       broker_name: 'Pedro',

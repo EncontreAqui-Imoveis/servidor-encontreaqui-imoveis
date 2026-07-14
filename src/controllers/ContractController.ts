@@ -3254,14 +3254,22 @@ class ContractController {
         contract: mapContract(updatedContract, req),
       });
     } catch (error) {
-      await tx.rollback();
       if (isContractBuyerHandshakeError(error)) {
+        // Invalid PIN attempts are a deliberate state transition. Persist the
+        // counter (and the terminal rejection on the fifth failure) instead
+        // of rolling it back with the HTTP error response.
+        if (error.code === 'INVALID_HANDSHAKE_PIN' || error.code === 'CONTRACT_HANDSHAKE_LOCKED') {
+          await tx.commit();
+        } else {
+          await tx.rollback();
+        }
         return res.status(error.statusCode).json({
           error: error.message,
           code: error.code,
           ...error.body,
         });
       }
+      await tx.rollback();
       console.error('Erro ao confirmar PIN de associação do comprador:', error);
       return res.status(500).json({ error: 'Falha ao confirmar acesso do comprador.' });
     } finally {

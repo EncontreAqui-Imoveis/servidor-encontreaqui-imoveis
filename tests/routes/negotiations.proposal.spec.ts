@@ -107,8 +107,8 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Teste' }]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -133,7 +133,7 @@ describe('POST /negotiations/proposal', () => {
     });
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([101, 30003, 30003, null, 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, 30003, 30003, 30003, 'buyer', 'sale', 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledTimes(1);
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
@@ -212,8 +212,8 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Captador' }]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -239,7 +239,8 @@ describe('POST /negotiations/proposal', () => {
         params[1] === 101 &&
         params[2] === 30003 &&
         params[3] === 30003 &&
-        params[4] === null &&
+        params[4] === 30003 &&
+        params[6] === 'buyer' &&
         params[9] === 'PROPOSAL_SENT'
       )
     ).toBe(true);
@@ -321,8 +322,8 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Independente' }]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -347,7 +348,9 @@ describe('POST /negotiations/proposal', () => {
         params[1] === 101 &&
         params[2] === 45555 &&
         params[3] === 45555 &&
-        params[4] === 50001 &&
+        params[4] === 30003 &&
+        params[5] === 50001 &&
+        params[6] === 'buyer' &&
         params[9] === 'PROPOSAL_SENT'
       )
     ).toBe(true);
@@ -414,7 +417,7 @@ describe('POST /negotiations/proposal', () => {
     expect(String(response.body.error ?? '')).toContain('próprio dono do imóvel');
   });
 
-  it('rejects a new proposal when the property already has an active negotiation', async () => {
+  it('allows another proposal for the property when there is an existing negotiation', async () => {
     txMock.query
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
@@ -437,8 +440,8 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Existente' }]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
         [
           {
@@ -462,14 +465,12 @@ describe('POST /negotiations/proposal', () => {
       },
     });
 
-    expect(response.status).toBe(409);
-    expect(response.body.code).toBe('PROPOSAL_ALREADY_EXISTS');
-    expect(response.body.error).toContain('proposta ativa');
-    expect(generateProposalMock).not.toHaveBeenCalled();
-    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(generateProposalMock).toHaveBeenCalledTimes(1);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not include contract-stage statuses in the duplicate proposal lookup', async () => {
+  it('does not block creation based on contract-stage negotiation statuses', async () => {
     txMock.query
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([
@@ -492,8 +493,8 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Existente' }]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]]);
 
     const response = await request(app).post('/negotiations/proposal').send({
@@ -511,10 +512,7 @@ describe('POST /negotiations/proposal', () => {
     });
 
     expect(response.status).toBe(201);
-    const duplicateSql = String(txMock.query.mock.calls[3]?.[0] ?? '');
-    expect(duplicateSql).not.toContain('DOCUMENTATION_PHASE');
-    expect(duplicateSql).not.toContain('CONTRACT_DRAFTING');
-    expect(duplicateSql).not.toContain('AWAITING_SIGNATURES');
+    expect(generateProposalMock).toHaveBeenCalledTimes(1);
   });
 
   it('allows client to create proposal when property has no responsible broker', async () => {
@@ -563,7 +561,7 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(201);
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([101, null, null, 90001, 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, null, 90002, 90001, 'buyer', 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -595,8 +593,8 @@ describe('POST /negotiations/proposal', () => {
           },
         ],
       ])
-      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[{ name: 'Broker Teste' }]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]]);
 
     generateProposalMock.mockRejectedValueOnce(

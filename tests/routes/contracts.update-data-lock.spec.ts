@@ -38,6 +38,15 @@ describe('PUT /contracts/:id/data', () => {
   app.use((req, _res, next) => {
     (req as any).userId = 30003;
     (req as any).userRole = 'client';
+    (req as any).contractContext = {
+      userRole: 'seller',
+      canReadMeta: true,
+      canReadSeller: true,
+      canReadBuyer: false,
+      canEditSeller: true,
+      canEditBuyer: false,
+      isReadOnly: false,
+    };
     next();
   });
   app.put('/contracts/:id/data', (req, res) =>
@@ -61,6 +70,9 @@ describe('PUT /contracts/:id/data', () => {
           {
             id: 'contract-1',
             negotiation_id: 'neg-1',
+            advertiser_id: 30003,
+            proposer_id: 30004,
+            initiator_side: 'buyer',
             property_id: 101,
             status: 'AWAITING_SIGNATURES',
             seller_cpf: '111.111.111-11',
@@ -102,17 +114,20 @@ describe('PUT /contracts/:id/data', () => {
       });
 
     expect(response.status).toBe(403);
-    expect(response.body.error).toContain('lado vendedor');
+    expect(response.body.error).toContain('modo somente leitura');
     const updateCalls = txMock.query.mock.calls.filter(([sql]) =>
       String(sql).includes('UPDATE contracts') && String(sql).includes('seller_info')
     );
     expect(updateCalls).toHaveLength(0);
   });
 
-  it('sobrescreve sellerInfo sem mesclar chaves antigas', async () => {
+  it('preserva os campos existentes do vendedor em salvamento parcial', async () => {
     const contractState: MutableContractRow = {
       id: 'contract-1',
       negotiation_id: 'neg-1',
+      advertiser_id: 30003,
+      proposer_id: 30004,
+      initiator_side: 'buyer',
       property_id: 101,
       status: 'AWAITING_DOCS',
       seller_cpf: '111.111.111-11',
@@ -151,8 +166,11 @@ describe('PUT /contracts/:id/data', () => {
             unknown
           >;
 
-          expect(sellerPayload).toEqual({ email: 'new@test.com' });
-          expect(sellerPayload).not.toHaveProperty('legacy');
+          expect(sellerPayload).toMatchObject({
+            email: 'new@test.com',
+            legacy: 'remove-me',
+            cpf: '111.111.111-11',
+          });
           expect(buyerPayload).toEqual({ keep: true });
 
           contractState.seller_info = sellerPayload;
@@ -174,8 +192,11 @@ describe('PUT /contracts/:id/data', () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.sellerInfo).toEqual({ email: 'new@test.com' });
-    expect(response.body.contract.sellerInfo).not.toHaveProperty('legacy');
+    expect(response.body.contract.sellerInfo).toMatchObject({
+      email: 'new@test.com',
+      legacy: 'remove-me',
+      cpf: '111.111.111-11',
+    });
     expect(response.body.contract.buyerInfo).toEqual({});
   });
 
@@ -183,6 +204,9 @@ describe('PUT /contracts/:id/data', () => {
     const contractState: MutableContractRow = {
       id: 'contract-1',
       negotiation_id: 'neg-1',
+      advertiser_id: 30003,
+      proposer_id: 30004,
+      initiator_side: 'buyer',
       property_id: 101,
       status: 'AWAITING_DOCS',
       seller_cpf: '111.111.111-11',
@@ -216,7 +240,11 @@ describe('PUT /contracts/:id/data', () => {
             string,
             unknown
           >;
-          expect(sellerPayload).toEqual({ email: 'owner-new@test.com' });
+          expect(sellerPayload).toMatchObject({
+            email: 'owner-new@test.com',
+            legacy: 'remove-me',
+            cpf: '111.111.111-11',
+          });
           contractState.seller_info = sellerPayload;
           return [{ affectedRows: 1 }];
         }
@@ -235,8 +263,16 @@ describe('PUT /contracts/:id/data', () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.sellerInfo).toEqual({ email: 'owner-new@test.com' });
-    expect(response.body.contract.ownerInfo).toEqual({ email: 'owner-new@test.com' });
+    expect(response.body.contract.sellerInfo).toMatchObject({
+      email: 'owner-new@test.com',
+      legacy: 'remove-me',
+      cpf: '111.111.111-11',
+    });
+    expect(response.body.contract.ownerInfo).toMatchObject({
+      email: 'owner-new@test.com',
+      legacy: 'remove-me',
+      cpf: '111.111.111-11',
+    });
   });
 
   it('rejeita bloco do comprador dentro da atualização do vendedor', async () => {

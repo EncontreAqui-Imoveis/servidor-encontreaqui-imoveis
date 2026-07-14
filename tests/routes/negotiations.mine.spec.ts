@@ -78,7 +78,7 @@ describe('GET /negotiations/mine', () => {
           'https://res.cloudinary.com/demo/image/upload/c_limit/w_480/q_auto/f_auto/casa.jpg',
         status: 'DOCUMENTATION_PHASE',
         clientName: 'Cliente 1',
-        clientCpf: '52998224725',
+        clientCpf: null,
         createdAt: '2026-03-10T13:00:00.000Z',
         updatedAt: '2026-03-11T15:00:00.000Z',
       }),

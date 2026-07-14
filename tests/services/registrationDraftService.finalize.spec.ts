@@ -156,6 +156,7 @@ describe('finalizeRegistrationDraft', () => {
     getDraftByDraftIdAndTokenMock.mockResolvedValueOnce(lockedDraft);
     authQueryMock
       .mockResolvedValueOnce([[lockedDraft], []])
+      .mockResolvedValueOnce([[], []])
       .mockResolvedValueOnce([{ insertId: 101 }, []])
       .mockResolvedValueOnce([{}, []])
       .mockResolvedValueOnce([{}, []])
@@ -216,6 +217,7 @@ describe('finalizeRegistrationDraft', () => {
     getDraftByDraftIdAndTokenMock.mockResolvedValueOnce(lockedDraft);
     authQueryMock
       .mockResolvedValueOnce([[lockedDraft], []])
+      .mockResolvedValueOnce([[], []])
       .mockResolvedValueOnce([{ insertId: 202 }, []])
       .mockResolvedValueOnce([{}, []])
       .mockResolvedValueOnce([{}, []])

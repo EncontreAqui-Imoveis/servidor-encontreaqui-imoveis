@@ -44,6 +44,15 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
   app.use((req, _res, next) => {
     (req as any).userId = 30003;
     (req as any).userRole = 'client';
+    (req as any).contractContext = {
+      userRole: 'seller',
+      canReadMeta: true,
+      canReadSeller: true,
+      canReadBuyer: false,
+      canEditSeller: true,
+      canEditBuyer: false,
+      isReadOnly: false,
+    };
     next();
   });
   app.delete('/contracts/:id/documents/:documentId', (req, res) =>
@@ -69,6 +78,9 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
             {
               id: 'contract-1',
               negotiation_id: 'neg-1',
+              advertiser_id: 30003,
+              proposer_id: 30004,
+              initiator_side: 'buyer',
               property_id: 101,
               status: 'AWAITING_DOCS',
               seller_cpf: '111.111.111-11',

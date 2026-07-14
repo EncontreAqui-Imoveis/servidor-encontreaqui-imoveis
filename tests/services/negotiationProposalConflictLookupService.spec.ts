@@ -26,7 +26,7 @@ describe('negotiationProposalConflictLookupService.lookupProposalConflict', () =
     vi.clearAllMocks();
   });
 
-  it('returns the active conflict for matching property and cpf', async () => {
+  it('does not expose proposal conflicts through CPF lookup', async () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
       {
         id: 'neg-1',
@@ -48,17 +48,8 @@ describe('negotiationProposalConflictLookupService.lookupProposalConflict', () =
     await lookupProposalConflict(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({
-      found: true,
-      conflict: expect.objectContaining({
-        id: 'neg-1',
-        propertyId: 90001,
-        propertyTitle: 'Casa Região Norte',
-        status: 'PROPOSAL_SENT',
-        clientName: 'Cliente',
-        clientCpf: '09169443106',
-      }),
-    });
+    expect(res.json).toHaveBeenCalledWith({ found: false, conflict: null });
+    expect(queryNegotiationRows).not.toHaveBeenCalled();
   });
 
   it('returns found false when there is no blocking proposal', async () => {
@@ -76,7 +67,7 @@ describe('negotiationProposalConflictLookupService.lookupProposalConflict', () =
     expect(res.json).toHaveBeenCalledWith({ found: false, conflict: null });
   });
 
-  it('queries only active proposal statuses when checking conflict by cpf', async () => {
+  it('does not query proposals when checking a compatibility CPF conflict route', async () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([] as any);
 
     const req = {
@@ -87,15 +78,12 @@ describe('negotiationProposalConflictLookupService.lookupProposalConflict', () =
 
     await lookupProposalConflict(req, res);
 
-    expect(queryNegotiationRows).toHaveBeenCalledWith(
-      expect.stringContaining("n.status IN (?, ?, ?)"),
-      [90001, 'PROPOSAL_DRAFT', 'PROPOSAL_SENT', 'IN_NEGOTIATION', '09169443106']
-    );
+    expect(queryNegotiationRows).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith({ found: false, conflict: null });
   });
 
-  it('returns 400 for invalid cpf', async () => {
+  it('keeps a neutral response for an invalid CPF', async () => {
     const req = {
       userId: 30003,
       query: { propertyId: '90001', cpf: '123' },
@@ -104,9 +92,7 @@ describe('negotiationProposalConflictLookupService.lookupProposalConflict', () =
 
     await lookupProposalConflict(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'CPF inválido. Informe um CPF válido.' })
-    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ found: false, conflict: null });
   });
 });

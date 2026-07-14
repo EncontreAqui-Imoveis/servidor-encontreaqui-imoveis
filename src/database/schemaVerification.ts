@@ -3,6 +3,7 @@ import connection from './connection';
 import {
   CONTRACT_APPROVAL_STATUSES,
   CONTRACT_DOCUMENT_TYPES,
+  CONTRACT_STATUSES,
 } from '../modules/contracts/domain/contract.types';
 
 type SchemaVerificationSummary = {
@@ -160,6 +161,12 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
 
   await assertEnumContains(
     'contracts',
+    'status',
+    Array.from(CONTRACT_STATUSES)
+  );
+
+  await assertEnumContains(
+    'contracts',
     'seller_approval_status',
     Array.from(CONTRACT_APPROVAL_STATUSES)
   );
@@ -191,7 +198,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
   return {
     checkedTables: requiredTables.length,
     checkedColumns: requiredColumns.length,
-    checkedEnums: 5,
+    checkedEnums: 6,
   };
 }
 

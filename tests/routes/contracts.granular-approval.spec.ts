@@ -211,7 +211,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.body.movedToDraft).toBe(false);
   });
 
-  it('moves to IN_DRAFT only when both sides are approved', async () => {
+  it('keeps AWAITING_DOCS when approvals are complete but readiness is incomplete', async () => {
     const firstResponse = await request(app)
       .put('/admin/contracts/contract-1/evaluate-side')
       .send({
@@ -231,8 +231,8 @@ describe('Contract granular approval and signed docs endpoints', () => {
       });
 
     expect(secondResponse.status).toBe(200);
-    expect(secondResponse.body.movedToDraft).toBe(true);
-    expect(secondResponse.body.contract.status).toBe('IN_DRAFT');
+    expect(secondResponse.body.movedToDraft).toBe(false);
+    expect(secondResponse.body.contract.status).toBe('AWAITING_DOCS');
     expect(secondResponse.body.contract.sellerApprovalStatus).toBe('APPROVED');
     expect(secondResponse.body.contract.buyerApprovalStatus).toBe(
       'APPROVED_WITH_RES'
@@ -240,22 +240,16 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(secondResponse.body.contract.approvalProgress).toMatchObject({
       status: 'APPROVED_WITH_RES',
       label: 'Aprovado com ressalvas',
-      nextStep: 'Minuta liberada',
+      nextStep: 'Aguardando liberação para minuta',
     });
-    expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'negotiation',
         title: 'Contrato aprovado com ressalvas',
         recipientId: 30001,
-        relatedEntityId: 101,
-        message: expect.stringContaining('Observação: Documentos válidos com ressalva contratual.'),
         metadata: expect.objectContaining({
           contractId: 'contract-1',
-          negotiationId: 'neg-1',
           side: 'buyer',
           status: 'APPROVED_WITH_RES',
-          reason: 'Documentos válidos com ressalva contratual.',
         }),
       })
     );

@@ -37,7 +37,7 @@ describe('GET /negotiations/client-lookup', () => {
     vi.clearAllMocks();
   });
 
-  it('orders by updated_at when the column exists', async () => {
+  it('does not expose account data through CPF lookup', async () => {
     queryMock
       .mockResolvedValueOnce([
         [
@@ -60,19 +60,11 @@ describe('GET /negotiations/client-lookup', () => {
       .query({ cpf: '529.982.247-25' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      found: true,
-      clientName: 'Cliente 1',
-      clientPhone: '64999990000',
-    });
-
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    const sql = String(queryMock.mock.calls[1]?.[0] ?? '');
-    expect(sql).toContain('ORDER BY n.updated_at DESC');
-    expect(sql).toContain('n.id DESC');
+    expect(response.body).toEqual({ found: false, clientName: null, clientPhone: null });
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to created_at when updated_at is unavailable', async () => {
+  it('keeps the compatibility endpoint neutral regardless of CPF format', async () => {
     queryMock
       .mockResolvedValueOnce([
         [
@@ -94,16 +86,7 @@ describe('GET /negotiations/client-lookup', () => {
       .query({ cpf: '52998224725' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual({
-      found: true,
-      clientName: 'Cliente 2',
-      clientPhone: '64999990000',
-    });
-
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    const sql = String(queryMock.mock.calls[1]?.[0] ?? '');
-    expect(sql).not.toContain('n.updated_at DESC');
-    expect(sql).toContain('n.created_at DESC');
-    expect(sql).toContain('n.id DESC');
+    expect(response.body).toEqual({ found: false, clientName: null, clientPhone: null });
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });

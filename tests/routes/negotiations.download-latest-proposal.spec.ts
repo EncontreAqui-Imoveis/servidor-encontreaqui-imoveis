@@ -38,8 +38,8 @@ describe('GET /negotiations/:id/proposals/download', () => {
     queryMock.mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 30003,
-        selling_broker_id: 30003,
+        proposer_id: 30003,
+        advertiser_id: 40001,
       },
     ]).mockResolvedValueOnce([]);
     findLatestNegotiationDocumentByTypeMock.mockResolvedValueOnce({
@@ -61,8 +61,8 @@ describe('GET /negotiations/:id/proposals/download', () => {
     queryMock.mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 30004,
-        selling_broker_id: null,
+        proposer_id: 30004,
+        advertiser_id: 40001,
       },
     ]).mockResolvedValueOnce([]);
 
@@ -77,8 +77,8 @@ describe('GET /negotiations/:id/proposals/download', () => {
     queryMock.mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 30003,
-        selling_broker_id: null,
+        proposer_id: 30003,
+        advertiser_id: 40001,
       },
     ]);
     findLatestNegotiationDocumentByTypeMock.mockResolvedValueOnce(null);

@@ -26,7 +26,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
     vi.clearAllMocks();
   });
 
-  it('returns found client when broker has matching negotiation', async () => {
+  it('does not expose client data through CPF lookup', async () => {
     vi.mocked(queryNegotiationRows)
       .mockResolvedValueOnce([{ column_name: 'updated_at' }, { column_name: 'created_at' }] as any)
       .mockResolvedValueOnce([
@@ -46,11 +46,8 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
     await lookupClientByCpf(req, res);
 
     expect(res.status).toHaveBeenCalledWith(200);
-    expect(res.json).toHaveBeenCalledWith({
-      found: true,
-      clientName: 'Cliente Teste',
-      clientPhone: '(64) 99999-0000',
-    });
+    expect(res.json).toHaveBeenCalledWith({ found: false, clientName: null, clientPhone: null });
+    expect(queryNegotiationRows).not.toHaveBeenCalled();
   });
 
   it('returns found false when role is not broker', async () => {
@@ -72,7 +69,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
     expect(queryNegotiationRows).not.toHaveBeenCalled();
   });
 
-  it('returns 400 for invalid cpf length', async () => {
+  it('keeps a neutral response for any CPF value', async () => {
     const req = {
       userId: 30003,
       userRole: 'broker',
@@ -82,9 +79,7 @@ describe('negotiationClientLookupService.lookupClientByCpf', () => {
 
     await lookupClientByCpf(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'CPF inválido. Informe um CPF válido.' })
-    );
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ found: false, clientName: null, clientPhone: null });
   });
 });

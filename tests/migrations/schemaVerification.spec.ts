@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONTRACT_DOCUMENT_TYPES } from '../../src/modules/contracts/domain/contract.types';
+import {
+  CONTRACT_DOCUMENT_TYPES,
+  CONTRACT_STATUSES,
+} from '../../src/modules/contracts/domain/contract.types';
 
 const { queryMock } = vi.hoisted(() => ({
   queryMock: vi.fn(),
@@ -45,6 +48,12 @@ describe('verifyCriticalSchemaState', () => {
           return [[{ column_type: "enum('PENDING','APPROVED','APPROVED_WITH_RES','REJECTED')" }]];
         }
 
+        if (tableName === 'contracts' && columnName === 'status') {
+          return [[{
+            column_type: `enum(${CONTRACT_STATUSES.map((value) => `'${value}'`).join(',')})`,
+          }]];
+        }
+
         if (tableName === 'negotiation_documents' && columnName === 'document_type') {
           return [[{
             column_type: `enum(${CONTRACT_DOCUMENT_TYPES.map((value) => `'${value}'`).join(',')})`,
@@ -75,8 +84,8 @@ describe('verifyCriticalSchemaState', () => {
 
     expect(result).toEqual({
       checkedTables: 10,
-      checkedColumns: 42,
-      checkedEnums: 5,
+      checkedColumns: 41,
+      checkedEnums: 6,
     });
   });
 

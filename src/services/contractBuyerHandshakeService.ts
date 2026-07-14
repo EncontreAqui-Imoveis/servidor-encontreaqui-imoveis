@@ -170,10 +170,27 @@ export async function verifyBuyerHandshakePin(
 
   if (!safeDigestEquals(digestPin(pin), pinHash)) {
     const nextAttempts = Math.min(MAX_HANDSHAKE_ATTEMPTS, attempts + 1);
-    await tx.query(
-      `UPDATE negotiations SET handshake_attempts = ? WHERE id = ?`,
-      [nextAttempts, params.contract.negotiation_id]
-    );
+    if (nextAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
+      // The fifth failure is a terminal denial. Removing the association is
+      // intentional: a sixth request cannot keep probing this contract.
+      await tx.query(
+        `
+          UPDATE negotiations
+          SET
+            legal_buyer_user_id = NULL,
+            handshake_pin = NULL,
+            handshake_status = 'REJECTED',
+            handshake_attempts = ?
+          WHERE id = ?
+        `,
+        [nextAttempts, params.contract.negotiation_id]
+      );
+    } else {
+      await tx.query(
+        `UPDATE negotiations SET handshake_attempts = ? WHERE id = ?`,
+        [nextAttempts, params.contract.negotiation_id]
+      );
+    }
     await appendHandshakeAudit(tx, params.contract, params.req, 'legal_buyer_handshake_failed', {
       attempts: nextAttempts,
     });

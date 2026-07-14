@@ -584,6 +584,19 @@ export async function cancelNegotiation(params: {
       [negotiationId]
     );
 
+    // Keep the contract for auditability, but make it terminal in the same
+    // transaction that releases the property. This prevents stale clients
+    // from treating a cancelled negotiation as an open contract.
+    await tx.query(
+      `
+        UPDATE contracts
+        SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP
+        WHERE negotiation_id = ?
+          AND status <> 'CANCELLED'
+      `,
+      [negotiationId]
+    );
+
     await tx.query(
       `
         INSERT INTO negotiation_history (

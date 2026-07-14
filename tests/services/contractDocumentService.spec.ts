@@ -56,6 +56,9 @@ describe('contractDocumentService', () => {
     capturing_agency_name: 'Encontre Aqui',
     capturing_agency_address: 'Rua Central, 100',
     responsible_user_ids: '30003,30005',
+    proposer_id: 90001,
+    advertiser_id: 80001,
+    initiator_side: 'buyer',
   } as const;
 
   beforeEach(() => {

@@ -51,8 +51,8 @@ describe('GET /negotiations/:id/documents/:documentId/download headers', () => {
       [
         {
           id: 'neg-1',
-          capturing_broker_id: 30003,
-          selling_broker_id: null,
+          proposer_id: 30003,
+          advertiser_id: 40001,
         },
       ],
       {},
@@ -85,8 +85,8 @@ describe('GET /negotiations/:id/documents/:documentId/download headers', () => {
       [
         {
           id: 'neg-1',
-          capturing_broker_id: 99901,
-          selling_broker_id: 99902,
+          proposer_id: 99901,
+          advertiser_id: 99902,
         },
       ],
       {},

@@ -44,8 +44,8 @@ describe('NegotiationController.downloadDocument', () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 55,
-        selling_broker_id: null,
+        proposer_id: 55,
+        advertiser_id: 99,
       },
     ] as any);
 
@@ -83,8 +83,8 @@ describe('NegotiationController.downloadDocument', () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 55,
-        selling_broker_id: null,
+        proposer_id: 55,
+        advertiser_id: 99,
       },
     ] as any);
 
@@ -114,8 +114,8 @@ describe('NegotiationController.downloadDocument', () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 10,
-        selling_broker_id: null,
+        proposer_id: 10,
+        advertiser_id: 99,
       },
     ] as any);
 
@@ -145,8 +145,8 @@ describe('NegotiationController.downloadLatestProposal', () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 55,
-        selling_broker_id: null,
+        proposer_id: 55,
+        advertiser_id: 99,
       },
     ] as any);
 
@@ -188,8 +188,8 @@ describe('NegotiationController.downloadLatestProposal', () => {
     vi.mocked(queryNegotiationRows).mockResolvedValueOnce([
       {
         id: 'neg-1',
-        capturing_broker_id: 55,
-        selling_broker_id: null,
+        proposer_id: 55,
+        advertiser_id: 99,
       },
     ] as any);
 

@@ -82,6 +82,7 @@ function buildDraftRow(overrides: Record<string, unknown> = {}) {
 describe('createRegistrationDraft', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    queryMock.mockResolvedValue([[]]);
   });
 
   it('aceita criação com email/nome/telefone sem endereço', async () => {

@@ -132,7 +132,8 @@ export function resolveContractAccessContext(
   const workflowFrozen =
     workflowStatus === 'IN_DRAFT' ||
     workflowStatus === 'AWAITING_SIGNATURES' ||
-    workflowStatus === 'FINALIZED';
+    workflowStatus === 'FINALIZED' ||
+    workflowStatus === 'CANCELLED';
   const requiresHandshakeVerification =
     role === 'buyer' &&
     legalBuyerUserId === userId &&

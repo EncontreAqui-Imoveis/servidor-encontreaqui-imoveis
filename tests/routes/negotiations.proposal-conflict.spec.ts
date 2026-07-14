@@ -37,7 +37,7 @@ describe('GET /negotiations/proposal/conflict', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the conflict payload for matching property and cpf', async () => {
+  it('does not disclose proposal conflicts through CPF lookup', async () => {
     queryMock.mockResolvedValueOnce([
       [
         {
@@ -57,18 +57,8 @@ describe('GET /negotiations/proposal/conflict', () => {
       .query({ propertyId: 90001, cpf: '091.694.431-06' });
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(
-      expect.objectContaining({
-        found: true,
-        conflict: expect.objectContaining({
-          id: 'neg-1',
-          propertyId: 90001,
-          propertyTitle: 'Casa Região Norte',
-          status: 'PROPOSAL_SENT',
-        }),
-      })
-    );
-    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(response.body).toEqual({ found: false, conflict: null });
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
   it('returns 400 for invalid property id', async () => {

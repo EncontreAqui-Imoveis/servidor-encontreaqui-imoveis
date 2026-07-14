@@ -1,4 +1,5 @@
 import express from 'express';
+import { createHmac } from 'crypto';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -28,6 +29,7 @@ const {
 const actors = {
   seller: { id: 10, role: 'client', cpf: '11111111111' },
   buyer: { id: 20, role: 'client', cpf: '22222222222' },
+  legalBuyer: { id: 21, role: 'client', cpf: '21212121212' },
   responsible: { id: 30, role: 'broker', cpf: '33333333333' },
   captor: { id: 40, role: 'broker', cpf: '44444444444' },
   stranger: { id: 50, role: 'client', cpf: '55555555555' },
@@ -82,6 +84,10 @@ type ContractState = {
   sellerInfo: Record<string, unknown>;
   buyerInfo: Record<string, unknown>;
   workflowMetadata: Record<string, unknown> | null;
+  legalBuyerUserId?: number | null;
+  handshakeStatus?: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
+  handshakePin?: string | null;
+  handshakeAttempts?: number;
 };
 
 function createContractRow(state: ContractState) {
@@ -122,6 +128,10 @@ function createContractRow(state: ContractState) {
     capturing_agency_name: null,
     capturing_agency_address: null,
     responsible_user_ids: '30',
+    legal_buyer_user_id: state.legalBuyerUserId ?? null,
+    handshake_status: state.handshakeStatus ?? null,
+    handshake_pin: state.handshakePin ?? null,
+    handshake_attempts: state.handshakeAttempts ?? 0,
   };
 }
 
@@ -137,6 +147,13 @@ describe('Contract access matrix HTTP integration', () => {
   app.use(contractRoutes);
 
   let state: ContractState;
+  let transaction: {
+    beginTransaction: ReturnType<typeof vi.fn>;
+    commit: ReturnType<typeof vi.fn>;
+    rollback: ReturnType<typeof vi.fn>;
+    release: ReturnType<typeof vi.fn>;
+    query: ReturnType<typeof vi.fn>;
+  };
 
   const asActor = (actor: keyof typeof actors) => ({
     'x-contract-test-actor': actor,
@@ -175,13 +192,32 @@ describe('Contract access matrix HTTP integration', () => {
       workflowMetadata: null,
     };
 
-    const tx = {
+    transaction = {
       beginTransaction: vi.fn().mockResolvedValue(undefined),
       commit: vi.fn().mockResolvedValue(undefined),
       rollback: vi.fn().mockResolvedValue(undefined),
       release: vi.fn(),
       query: vi.fn(async (sql: string, params: unknown[] = []) => {
         if (sql.includes('information_schema.tables')) return [[{ has_table: 1 }]];
+        if (sql.includes('SELECT legal_buyer_user_id, handshake_pin, handshake_status, handshake_attempts')) {
+          return [[{
+            legal_buyer_user_id: state.legalBuyerUserId ?? null,
+            handshake_pin: state.handshakePin ?? null,
+            handshake_status: state.handshakeStatus ?? null,
+            handshake_attempts: state.handshakeAttempts ?? 0,
+          }]];
+        }
+        if (sql.includes('UPDATE negotiations') && sql.includes('handshake_status = \'REJECTED\'')) {
+          state.legalBuyerUserId = null;
+          state.handshakePin = null;
+          state.handshakeStatus = 'REJECTED';
+          state.handshakeAttempts = Number(params[0] ?? 0);
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.includes('UPDATE negotiations SET handshake_attempts')) {
+          state.handshakeAttempts = Number(params[0] ?? 0);
+          return [{ affectedRows: 1 }];
+        }
         if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
           return [[createContractRow(state)]];
         }
@@ -212,7 +248,7 @@ describe('Contract access matrix HTTP integration', () => {
         return [[]];
       }),
     };
-    getConnectionMock.mockResolvedValue(tx);
+    getConnectionMock.mockResolvedValue(transaction);
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('information_schema.tables')) return [[{ has_table: 1 }]];
       if (sql.includes('FROM negotiation_documents')) {
@@ -262,11 +298,81 @@ describe('Contract access matrix HTTP integration', () => {
     expect(enqueueNegotiationDocumentDeletionMock).not.toHaveBeenCalled();
   });
 
+  it('redige PII bilateral para comprador legal enquanto o handshake está pendente', async () => {
+    state.legalBuyerUserId = actors.legalBuyer.id;
+    state.handshakeStatus = 'PENDING';
+    state.handshakePin = 'hash-do-pin-pendente';
+    state.sellerInfo = { nome: 'Vendedor Privado', cpf: '11111111111', telefone: '11999999999' };
+    state.buyerInfo = { nome: 'Comprador Privado', cpf: '22222222222', telefone: '11888888888' };
+
+    const details = await request(app)
+      .get('/contracts/contract-matrix-1')
+      .set(asActor('legalBuyer'));
+
+    expect(details.status).toBe(200);
+    expect(details.body.contract.sellerInfo).toEqual({});
+    expect(details.body.contract.buyerInfo).toEqual({});
+    expect(details.body.documents).toEqual([]);
+    expect(details.body.contract.capabilities).toMatchObject({
+      requiresHandshakeVerification: true,
+      canReadSeller: false,
+      canReadBuyer: false,
+      canEditSeller: false,
+      canEditBuyer: false,
+    });
+  });
+
+  it('bloqueia a sexta tentativa de PIN após revogar o vínculo na quinta falha', async () => {
+    const secret = 'matrix-handshake-secret';
+    process.env.CONTRACT_HANDSHAKE_PIN_SECRET = secret;
+    state.legalBuyerUserId = actors.legalBuyer.id;
+    state.handshakeStatus = 'PENDING';
+    state.handshakeAttempts = 0;
+    state.handshakePin = createHmac('sha256', secret).update('1234').digest('hex');
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const response = await request(app)
+        .post('/contracts/contract-matrix-1/verify-pin')
+        .set(asActor('legalBuyer'))
+        .send({ pin: '0000' });
+
+      expect(response.status).toBe(attempt === 5 ? 429 : 403);
+      expect(response.body.code).toBe(
+        attempt === 5 ? 'CONTRACT_HANDSHAKE_LOCKED' : 'INVALID_HANDSHAKE_PIN'
+      );
+    }
+
+    expect(state.handshakeStatus).toBe('REJECTED');
+    expect(state.legalBuyerUserId).toBeNull();
+    expect(state.handshakeAttempts).toBe(5);
+
+    const sixthAttempt = await request(app)
+      .post('/contracts/contract-matrix-1/verify-pin')
+      .set(asActor('legalBuyer'))
+      .send({ pin: '0000' });
+    expectForbidden(sixthAttempt);
+    expect(transaction.commit).toHaveBeenCalledTimes(5);
+  });
+
   it('permite vendedor apenas no próprio lado', async () => {
     expect((await updateData('seller', 'seller')).status).toBe(200);
     expect((await uploadDocument('seller', 'seller')).status).toBe(201);
     expectForbidden(await updateData('seller', 'buyer'));
     expectForbidden(await uploadDocument('seller', 'buyer'));
+  });
+
+  it('bloqueia comprador legal de alterar owner_data do vendedor', async () => {
+    state.legalBuyerUserId = actors.legalBuyer.id;
+    state.handshakeStatus = 'VERIFIED';
+    state.sellerInfo = { profissao: 'Vendedor original' };
+
+    expectForbidden(
+      await request(app)
+        .put('/contracts/contract-matrix-1/data')
+        .set(asActor('legalBuyer'))
+        .send({ side: 'seller', sellerInfo: { profissao: 'Tentativa indevida' } })
+    );
+    expect(state.sellerInfo).toEqual({ profissao: 'Vendedor original' });
   });
 
   it('permite corretor responsável nos dois lados', async () => {
@@ -302,7 +408,9 @@ describe('Contract access matrix HTTP integration', () => {
       .send({ side: 'buyer', buyerInfo: buyerQualification });
 
     expect(ownSide.status).toBe(200);
-    expect(state.buyerInfo).toEqual(buyerQualification);
+    expect(state.buyerInfo).toEqual(
+      expect.objectContaining(buyerQualification)
+    );
     expect(state.sellerInfo).toEqual({
       estado_civil: 'Casado',
       profissao: 'Vendedor',
@@ -330,7 +438,9 @@ describe('Contract access matrix HTTP integration', () => {
       });
     expect(malformedCrossSide.status).toBe(400);
     expect(malformedCrossSide.body.error).toContain('vendedor');
-    expect(state.buyerInfo).toEqual(buyerQualification);
+    expect(state.buyerInfo).toEqual(
+      expect.objectContaining(buyerQualification)
+    );
   });
 
   it('bloqueia corretor captador sem pivot e usuário sem vínculo antes do controller', async () => {

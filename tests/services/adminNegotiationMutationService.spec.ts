@@ -76,6 +76,7 @@ describe('adminNegotiationMutationService', () => {
             property_id: 101,
             property_broker_id: 30005,
             capturing_broker_id: 30003,
+            proposer_id: 30004,
             responsible_broker_id: null,
             property_title: 'Casa Centro',
             property_code: 'RV-101',
@@ -162,6 +163,7 @@ describe('adminNegotiationMutationService', () => {
             property_id: 202,
             property_broker_id: 30005,
             capturing_broker_id: 30003,
+            proposer_id: 30004,
             responsible_broker_id: null,
             property_title: 'Apartamento Vista Mar',
             property_code: 'RV-202',
@@ -172,6 +174,7 @@ describe('adminNegotiationMutationService', () => {
         ],
       ])
       .mockResolvedValueOnce([[{ cnt: 1 }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
@@ -225,6 +228,7 @@ describe('adminNegotiationMutationService', () => {
       ])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     const payload = await cancelNegotiation({
@@ -239,11 +243,12 @@ describe('adminNegotiationMutationService', () => {
       status: 'CANCELLED',
     });
     expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
-    expect(sendPushNotificationsMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        recipientIds: [30003],
-      })
-    );
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes("UPDATE contracts") && String(sql).includes("status = 'CANCELLED'")
+      )
+    ).toBe(true);
+    expect(sendPushNotificationsMock).not.toHaveBeenCalled();
   });
 
   it('bloqueia cancelamento de negociação finalizada', async () => {

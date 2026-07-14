@@ -46,6 +46,9 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
   let activeContract = {
     id: 'contract-1',
     negotiation_id: 'neg-1',
+    advertiser_id: 30003,
+    proposer_id: 30004,
+    initiator_side: 'buyer',
     property_id: 101,
     status: 'AWAITING_DOCS',
     seller_cpf: '111.111.111-11',
@@ -72,6 +75,16 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
   app.use((req, _res, next) => {
     (req as any).userId = actingUserId;
     (req as any).userRole = 'client';
+    const side = actingUserId === 30004 ? 'buyer' : 'seller';
+    (req as any).contractContext = {
+      userRole: side,
+      canReadMeta: true,
+      canReadSeller: side === 'seller',
+      canReadBuyer: side === 'buyer',
+      canEditSeller: side === 'seller',
+      canEditBuyer: side === 'buyer',
+      isReadOnly: false,
+    };
     next();
   });
   app.post(
@@ -86,6 +99,9 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     activeContract = {
       id: 'contract-1',
       negotiation_id: 'neg-1',
+      advertiser_id: 30003,
+      proposer_id: 30004,
+      initiator_side: 'buyer',
       property_id: 101,
       status: 'AWAITING_DOCS',
       seller_cpf: '111.111.111-11',

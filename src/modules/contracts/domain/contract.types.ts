@@ -3,6 +3,9 @@ export const CONTRACT_STATUSES = [
   'IN_DRAFT',
   'AWAITING_SIGNATURES',
   'FINALIZED',
+  // Historical terminal state: the record remains auditable after its
+  // negotiation is cancelled, but no participant mutation is permitted.
+  'CANCELLED',
 ] as const;
 
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];

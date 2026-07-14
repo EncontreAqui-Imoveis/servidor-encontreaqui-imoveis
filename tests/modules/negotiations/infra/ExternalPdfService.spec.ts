@@ -66,7 +66,8 @@ describe('ExternalPdfService', () => {
     expect(postMock).toHaveBeenCalledWith(
       'http://pdf-service.internal/generate-proposal',
       {
-        client_name: 'Ana Silva',
+        clientName: 'Ana Silva',
+        clientCpf: '123.456.789-00',
         deal_type: null,
         property_address: 'Rua A, 10',
         broker_name: 'Pedro',

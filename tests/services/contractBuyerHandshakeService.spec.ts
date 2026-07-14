@@ -76,6 +76,34 @@ describe('contractBuyerHandshakeService', () => {
     expect(String(tx.query.mock.calls[1]?.[0])).toContain("handshake_status = 'VERIFIED'");
   });
 
+  it('revokes the association on the fifth invalid PIN attempt', async () => {
+    const handshake = createBuyerHandshake();
+    const invalidPin = handshake.pin === '0000' ? '9999' : '0000';
+    tx.query
+      .mockResolvedValueOnce([[{
+        legal_buyer_user_id: 20,
+        handshake_pin: handshake.pinHash,
+        handshake_status: 'PENDING',
+        handshake_attempts: 4,
+      }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    await expect(
+      verifyBuyerHandshakePin(tx as any, { req: buyerRequest, contract, pin: invalidPin })
+    ).rejects.toSatisfy((error: unknown) => {
+      expect(isContractBuyerHandshakeError(error)).toBe(true);
+      expect((error as any).statusCode).toBe(429);
+      expect((error as any).code).toBe('CONTRACT_HANDSHAKE_LOCKED');
+      expect((error as any).body).toEqual({ attemptsRemaining: 0 });
+      return true;
+    });
+
+    expect(String(tx.query.mock.calls[1]?.[0])).toContain('legal_buyer_user_id = NULL');
+    expect(String(tx.query.mock.calls[1]?.[0])).toContain("handshake_status = 'REJECTED'");
+    expect(tx.query.mock.calls[1]?.[1]).toEqual([5, 'neg-1']);
+  });
+
   it('rejects the association by unlinking the legal buyer and auditing the event', async () => {
     tx.query
       .mockResolvedValueOnce([[{

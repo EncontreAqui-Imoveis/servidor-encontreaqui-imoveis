@@ -7,6 +7,7 @@ const baseContract = {
   status: 'AWAITING_DOCS',
   advertiser_id: 10,
   proposer_id: 20,
+  initiator_side: 'buyer',
   responsible_user_ids: '30',
 };
 
@@ -71,6 +72,33 @@ describe('resolveContractAccessContext', () => {
       resolveContractAccessContext({ id: 1, role: 'admin' }, duplicatedContract)
         .userRole
     ).toBe('admin');
+  });
+
+  it('concede ao comprador jurídico somente o escopo buyer', () => {
+    const context = resolveContractAccessContext(
+      { id: 40, role: 'client' },
+      { ...baseContract, legal_buyer_user_id: 40 }
+    );
+
+    expect(context).toMatchObject({
+      userRole: 'buyer',
+      canReadMeta: true,
+      canReadSeller: false,
+      canEditSeller: false,
+      canReadBuyer: true,
+      canEditBuyer: true,
+    });
+  });
+
+  it('mapeia proposta iniciada pelo vendedor para o lado seller', () => {
+    const context = resolveContractAccessContext(
+      { id: 10, role: 'client' },
+      { ...baseContract, proposer_id: 10, initiator_side: 'seller', legal_buyer_user_id: 40 }
+    );
+
+    expect(context.userRole).toBe('seller');
+    expect(context.canEditSeller).toBe(true);
+    expect(context.canEditBuyer).toBe(false);
   });
 
   it('congela edição para participantes e responsável durante assinatura, sem congelar admin', () => {

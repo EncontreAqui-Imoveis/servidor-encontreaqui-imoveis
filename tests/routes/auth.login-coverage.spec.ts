@@ -334,6 +334,7 @@ describe('POST /auth e /users login coverage', () => {
   it('aceita /auth/register com payload mínimo válido', async () => {
     queryMock
       .mockResolvedValueOnce([[]]) // select existing user by email
+      .mockResolvedValueOnce([[]]) // select existing user by normalized name
       .mockResolvedValueOnce([[]]) // getEmailVerificationStatus users check
       .mockResolvedValueOnce([[]]) // getEmailVerificationStatus latest challenge
       .mockResolvedValueOnce([{ insertId: 77 }]); // insert users
@@ -361,6 +362,31 @@ describe('POST /auth e /users login coverage', () => {
     expect(hashMock).toHaveBeenCalledWith('Senha123', 8);
   });
 
+  it('rejeita /auth/register quando o nome normalizado já está em uso', async () => {
+    queryMock
+      .mockResolvedValueOnce([[]]) // select existing user by email
+      .mockResolvedValueOnce([[{ id: 12 }]]); // select existing user by normalized name
+
+    const response = await request(app).post('/auth/register').send({
+      name: '  USUÁRIO TESTE  ',
+      email: 'nome-duplicado@dominio.com',
+      password: 'Senha123',
+      without_number: true,
+      street: 'Rua Central',
+      bairro: 'Centro',
+      city: 'Rio Verde',
+      state: 'GO',
+      cep: '12345-678',
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      code: 'DUPLICATE_ACCOUNT_NAME',
+      error: 'Este nome já está em uso.',
+    });
+    expect(hashMock).not.toHaveBeenCalled();
+  });
+
   it('rejeita /users/register com campos obrigatórios faltantes', async () => {
     const response = await request(app).post('/users/register').send({
       email: 'novo@dominio.com',
@@ -375,6 +401,7 @@ describe('POST /auth e /users login coverage', () => {
   it('aceita /users/register (rota legado ativa) com payload mínimo válido', async () => {
     queryMock
       .mockResolvedValueOnce([[]]) // select existing user by email
+      .mockResolvedValueOnce([[]]) // select existing user by normalized name
       .mockResolvedValueOnce([[]]) // getEmailVerificationStatus users check
       .mockResolvedValueOnce([[]]) // getEmailVerificationStatus latest challenge
       .mockResolvedValueOnce([{ insertId: 88 }]);

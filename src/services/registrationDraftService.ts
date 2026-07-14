@@ -36,6 +36,10 @@ import {
 } from './emailCodeChallengeService';
 import { sendEmailCodeEmail } from './emailService';
 import firebaseAdmin from '../config/firebaseAdmin';
+import {
+  assertAccountNameAvailable,
+  isDuplicateAccountNameError,
+} from './userAccountNameService';
 
 export type DraftFinalizeAction = 'send_later' | 'submit_documents';
 
@@ -80,6 +84,7 @@ const DRAFT_ERROR_APP_CODE_MAP: Record<string, ApplicationErrorCode> = {
   DRAFT_INVALID_INPUT: 'INVALID_INPUT',
   DRAFT_PASSWORD_INVALID: 'INVALID_INPUT',
   EMAIL_ALREADY_EXISTS: 'CONFLICT',
+  DUPLICATE_ACCOUNT_NAME: 'INVALID_INPUT',
   DRAFT_ALREADY_EXISTS: 'CONFLICT',
   DRAFT_CRICI_INVALID: 'INVALID_INPUT',
   CRECI_ALREADY_EXISTS: 'CONFLICT',
@@ -667,6 +672,14 @@ export async function createRegistrationDraft(input: {
   if (existingUsers.length > 0) {
     throw draftError('EMAIL_ALREADY_EXISTS', 'Este email ja esta em uso.');
   }
+  try {
+    await assertAccountNameAvailable(authDb, name);
+  } catch (error) {
+    if (isDuplicateAccountNameError(error)) {
+      throw draftError('DUPLICATE_ACCOUNT_NAME', error.message);
+    }
+    throw error;
+  }
   const existingDraft = await findOpenDraftByEmail(email);
   if (existingDraft) {
     throw draftError('DRAFT_ALREADY_EXISTS', 'Ja existe um fluxo de cadastro para este email.');
@@ -1253,6 +1266,15 @@ export async function finalizeRegistrationDraft(
     if (lockedProfile === 'client' && authProvider === 'email' && !lockedDraft.password_hash) {
       await db.rollback();
       throw draftError('DRAFT_PASSWORD_REQUIRED', 'Senha nao informada para cliente.');
+    }
+
+    try {
+      await assertAccountNameAvailable(db, lockedDraft.name);
+    } catch (error) {
+      if (isDuplicateAccountNameError(error)) {
+        throw draftError('DUPLICATE_ACCOUNT_NAME', error.message);
+      }
+      throw error;
     }
 
     const [userInsertResult] = await db.query<ResultSetHeader>(

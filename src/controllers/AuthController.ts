@@ -34,6 +34,10 @@ import {
   applicationErrorToHttpStatus,
   isApplicationError,
 } from '../errors/ApplicationError';
+import {
+  assertAccountNameAvailable,
+  isDuplicateAccountNameError,
+} from '../services/userAccountNameService';
 
 function appErrorDetails(error: unknown): Record<string, unknown> {
   if (!isApplicationError(error)) {
@@ -325,6 +329,8 @@ class AuthController {
         return res.status(409).json({ error: 'Este email ja esta em uso.' });
       }
 
+      await assertAccountNameAvailable(authDb, name);
+
       if (normalizedProfile === 'broker') {
         const [existingCreciRows] = await authDb.query<RowDataPacket[]>(
           'SELECT id FROM brokers WHERE creci = ? LIMIT 1',
@@ -435,6 +441,12 @@ class AuthController {
         requiresDocuments: normalizedProfile === 'broker',
       });
     } catch (error: any) {
+      if (isDuplicateAccountNameError(error)) {
+        return res.status(400).json({
+          code: error.code,
+          error: error.message,
+        });
+      }
       if (error?.code === 'ER_DUP_ENTRY') {
         return res.status(409).json({ error: 'Este email ja esta em uso.' });
       }

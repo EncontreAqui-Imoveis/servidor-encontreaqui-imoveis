@@ -32,29 +32,49 @@ describe('contractCreationService', () => {
     txMock.release.mockResolvedValue(undefined);
   });
 
+  function negotiationRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'neg-1',
+      property_id: 101,
+      status: 'DOCUMENTATION_PHASE',
+      capturing_broker_id: 30003,
+      selling_broker_id: 30004,
+      proposer_id: 10,
+      advertiser_id: 10,
+      initiator_side: 'seller',
+      legal_buyer_user_id: null,
+      client_name: 'Cliente Proponente',
+      buyer_legal_cpf: '12345678909',
+      buyer_legal_email: 'comprador@example.com',
+      property_title: 'Casa Centro',
+      property_owner_name: 'Owner',
+      property_owner_phone: '64999999999',
+      property_owner_cpf: '98765432100',
+      proposer_user_id: 10,
+      proposer_user_name: 'Owner',
+      proposer_user_email: 'owner@example.com',
+      proposer_user_cpf: '98765432100',
+      proposer_user_phone: '64999999999',
+      owner_user_id: 10,
+      owner_user_name: 'Owner',
+      owner_user_email: 'owner@example.com',
+      owner_user_cpf: '98765432100',
+      owner_user_phone: '64999999999',
+      legal_buyer_user_id_resolved: 20,
+      legal_buyer_user_name: 'Comprador Vinculado',
+      legal_buyer_user_email: 'comprador@example.com',
+      legal_buyer_user_cpf: '12345678909',
+      legal_buyer_user_phone: '64888888888',
+      ...overrides,
+    };
+  }
+
   it('creates a contract when negotiation is approved', async () => {
     txMock.query
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 'neg-1',
-            property_id: 101,
-            status: 'DOCUMENTATION_PHASE',
-            capturing_broker_id: 30003,
-            selling_broker_id: 30004,
-            client_name: 'Cliente Proponente',
-            property_title: 'Casa Centro',
-          },
-        ],
-      ])
-      .mockResolvedValueOnce([
-        [
-          {
-            proposal_initiator_user_id: 55555,
-          },
-        ],
-      ])
+      .mockResolvedValueOnce([[negotiationRow()]])
       .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([
         [
@@ -100,30 +120,13 @@ describe('contractCreationService', () => {
     expect(result.created).toBe(true);
     expect(result.contract.id).toBe('contract-1');
     expect(txMock.commit).toHaveBeenCalledTimes(1);
+    expect(txMock.query.mock.calls[2]?.[1]).toEqual([20, 'neg-1']);
+    expect(String(txMock.query.mock.calls[3]?.[0])).toContain('INSERT INTO contracts');
   });
 
   it('returns existing contract when already created', async () => {
     txMock.query
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 'neg-1',
-            property_id: 101,
-            status: 'DOCUMENTATION_PHASE',
-            capturing_broker_id: 30003,
-            selling_broker_id: 30004,
-            client_name: 'Cliente Proponente',
-            property_title: 'Casa Centro',
-          },
-        ],
-      ])
-      .mockResolvedValueOnce([
-        [
-          {
-            proposal_initiator_user_id: 55555,
-          },
-        ],
-      ])
+      .mockResolvedValueOnce([[negotiationRow()]])
       .mockResolvedValueOnce([
         [
           {
@@ -177,17 +180,10 @@ describe('contractCreationService', () => {
   it('rejects negotiation that is not approved enough', async () => {
     txMock.query.mockResolvedValueOnce([
       [
-        {
-          id: 'neg-1',
-          property_id: 101,
-          status: 'PENDING',
-          capturing_broker_id: 30003,
-          selling_broker_id: 30004,
-          client_name: 'Cliente Proponente',
-          property_title: 'Casa Centro',
-        },
+        negotiationRow({ status: 'PENDING' }),
       ],
     ]);
+    txMock.query.mockResolvedValueOnce([[]]);
 
     await expect(createContractFromApprovedNegotiation('neg-1', null)).rejects.toThrow(
       'A negociação precisa estar aprovada antes da criação do contrato.',

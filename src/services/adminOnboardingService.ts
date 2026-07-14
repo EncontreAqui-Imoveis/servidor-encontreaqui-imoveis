@@ -12,6 +12,10 @@ import { notifyAdmins } from './notificationService';
 import { uploadToCloudinary } from '../config/cloudinary';
 import { sanitizeAddressInput as sanitizeAddress } from '../utils/address';
 import { hasValidCreci, normalizeCreci } from './adminControllerSupport';
+import {
+  assertAccountNameAvailable,
+  isDuplicateAccountNameError,
+} from './userAccountNameService';
 
 function normalizeDigits(value: unknown): string {
   if (value === undefined || value === null) {
@@ -117,6 +121,8 @@ export async function createBrokerAccountAdmin(params: {
       throw new ConflictError('Email ja cadastrado.');
     }
 
+    await assertAccountNameAvailable(db, name);
+
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(String(password), salt);
     const requestedStatus = normalizeStatus(status);
@@ -175,6 +181,9 @@ export async function createBrokerAccountAdmin(params: {
     return { message: 'Corretor criado com sucesso.', broker_id: userId };
   } catch (error) {
     await db.rollback();
+    if (isDuplicateAccountNameError(error)) {
+      throw new InvalidInputError(error.message, { code: error.code });
+    }
     if (error instanceof ApplicationError) {
       throw error;
     }
@@ -247,6 +256,8 @@ export async function createUserAccountAdmin(params: {
       throw new ConflictError('Email ja cadastrado.');
     }
 
+    await assertAccountNameAvailable(adminDb, name);
+
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(String(password), salt);
     const [userResult] = await adminDb.query<ResultSetHeader>(
@@ -287,6 +298,9 @@ export async function createUserAccountAdmin(params: {
       role: isAuxiliaryAdministrative ? 'auxiliary_administrative' : 'client',
     };
   } catch (error) {
+    if (isDuplicateAccountNameError(error)) {
+      throw new InvalidInputError(error.message, { code: error.code });
+    }
     if (error instanceof ApplicationError) {
       throw error;
     }

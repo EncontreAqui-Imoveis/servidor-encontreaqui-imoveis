@@ -21,9 +21,19 @@ import {
 } from '../services/authSessionService';
 import { upsertFirebaseContextToDraft } from '../services/registrationDraftService';
 import { isDraftRegistrationEnabled } from '../config/featureFlags';
+import {
+  assertAccountNameAvailable,
+  isDuplicateAccountNameError,
+} from '../services/userAccountNameService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
+
+const userNameQueryExecutor = {
+  async query(sql: string, params?: unknown[]): Promise<[RowDataPacket[], unknown]> {
+    return [await runUserQuery<RowDataPacket[]>(sql, params), undefined];
+  },
+};
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -221,6 +231,8 @@ class UserController {
         return res.status(409).json({ error: 'Este email já está em uso.' });
       }
 
+      await assertAccountNameAvailable(userNameQueryExecutor, name);
+
       const passwordHash = await bcrypt.hash(password, 8);
 
       await runUserQuery(
@@ -246,6 +258,9 @@ class UserController {
 
       return res.status(201).json({ message: 'Usuário criado com sucesso!' });
     } catch (error) {
+      if (isDuplicateAccountNameError(error)) {
+        return res.status(400).json({ code: error.code, error: error.message });
+      }
       console.error('Erro no registro do usu?rio:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
@@ -745,6 +760,8 @@ class UserController {
         return res.status(409).json({ error: 'Usuário já existe.' });
       }
 
+      await assertAccountNameAvailable(userNameQueryExecutor, `User-${uid.substring(0, 8)}`);
+
       await runUserQuery(
         'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, ?)',
         [uid, email, `User-${uid.substring(0, 8)}`, stringOrNull(cpf)]
@@ -752,6 +769,9 @@ class UserController {
 
       return res.status(201).json({ message: 'Usuário sincronizado com sucesso!' });
     } catch (error) {
+      if (isDuplicateAccountNameError(error)) {
+        return res.status(400).json({ code: error.code, error: error.message });
+      }
       console.error('Erro na sincronizacao do usuário:', error);
       return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
     }
@@ -821,13 +841,15 @@ class UserController {
         }
 
         const chosenRole = requestedRole === 'broker' ? 'broker' : 'client';
+        const resolvedName = name || `User-${uid.substring(0, 8)}`;
+        await assertAccountNameAvailable(userNameQueryExecutor, resolvedName);
         const result = await runUserQuery<ResultSetHeader>(
           'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, ?)',
-          [uid, email, name || `User-${uid.substring(0, 8)}`, null]
+          [uid, email, resolvedName, null]
         );
         user = {
           id: result.insertId,
-          name: name || `User-${uid.substring(0, 8)}`,
+          name: resolvedName,
           email,
           role: chosenRole,
         };
@@ -926,6 +948,9 @@ class UserController {
         roleLocked,
       });
     } catch (error) {
+      if (isDuplicateAccountNameError(error)) {
+        return res.status(400).json({ code: error.code, error: error.message });
+      }
       console.error('Erro no login com Google:', error);
       return res.status(401).json({ error: 'Token do Google inválido.' });
     }
@@ -1029,7 +1054,10 @@ class UserController {
           updates.push(['phone', phoneOverride ?? phone]);
         }
         if (email && user.email !== email) updates.push(['email', email]);
-        if (nameOverride && user.name !== nameOverride) updates.push(['name', nameOverride]);
+        if (nameOverride && user.name !== nameOverride) {
+          await assertAccountNameAvailable(userNameQueryExecutor, nameOverride, user.id);
+          updates.push(['name', nameOverride]);
+        }
 
         if (hasAddressInput) {
           const addressResult = sanitizeAddressInput({
@@ -1091,12 +1119,14 @@ class UserController {
           addressPayload = addressResult.value;
         }
 
+        const resolvedName = nameOverride ?? displayName;
+        await assertAccountNameAvailable(userNameQueryExecutor, resolvedName);
         const result = await runUserQuery<ResultSetHeader>(
           'INSERT INTO users (firebase_uid, email, name, cpf, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             uid,
             fallbackEmail,
-            nameOverride ?? displayName,
+            resolvedName,
             null,
             phoneOverride ?? phone ?? null,
             addressPayload.street,
@@ -1110,7 +1140,7 @@ class UserController {
         );
         user = {
           id: result.insertId,
-          name: nameOverride ?? displayName,
+          name: resolvedName,
           email: fallbackEmail,
           role: 'client',
         };
@@ -1154,6 +1184,9 @@ class UserController {
         token,
       });
     } catch (error) {
+      if (isDuplicateAccountNameError(error)) {
+        return res.status(400).json({ code: error.code, error: error.message });
+      }
       console.error('Erro no login com Firebase:', error);
       return res.status(401).json({ error: 'Token do Firebase inv?lido.' });
     }

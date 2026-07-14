@@ -12,6 +12,8 @@ export interface ContractAccessRecord {
   status: string | null | undefined;
   advertiser_id: number | string | null | undefined;
   proposer_id: number | string | null | undefined;
+  initiator_side?: 'buyer' | 'seller' | string | null;
+  legal_buyer_user_id?: number | string | null;
   responsible_user_ids?: readonly number[] | string | null;
 }
 
@@ -59,8 +61,8 @@ function buildContext(
 }
 
 /**
- * Pure authorization decision for one contract. Never infer access from captor,
- * selling broker, or proposal creator.
+ * Pure authorization decision for one contract. Proposal actors are mapped to a
+ * side explicitly; never infer access from brokers, CPF, or qualification data.
  */
 export function resolveContractAccessContext(
   user: ContractAccessUser,
@@ -76,24 +78,38 @@ export function resolveContractAccessContext(
   const requestRole = String(user.role ?? '').trim().toLowerCase();
   const advertiserId = normalizePositiveId(contract.advertiser_id);
   const proposerId = normalizePositiveId(contract.proposer_id);
-  const hasDualIdentity = advertiserId != null && advertiserId === proposerId;
+  const legalBuyerUserId = normalizePositiveId(contract.legal_buyer_user_id);
+  const initiatorSide = String(contract.initiator_side ?? '').trim().toLowerCase();
 
   // Admin keeps operational access so duplicate identities can be repaired.
   if (requestRole === 'admin') {
     return buildContext(contractId, userId, 'admin', true, workflowStatus);
   }
 
-  // A duplicated participant identity must be repaired by an admin, never inferred.
-  if (hasDualIdentity) {
-    return buildContext(contractId, userId, 'none', false, workflowStatus);
+  const sellerIds = new Set<string>();
+  const buyerIds = new Set<string>();
+
+  if (advertiserId) sellerIds.add(advertiserId);
+  if (initiatorSide === 'seller') {
+    if (proposerId) sellerIds.add(proposerId);
+  } else if (initiatorSide === 'buyer') {
+    if (proposerId) buyerIds.add(proposerId);
+  } else if (proposerId) {
+    // Legacy negotiations predate initiator_side. Preserve the former mapping
+    // without using textual legal qualification as an authorization source.
+    buyerIds.add(proposerId);
   }
+  if (legalBuyerUserId) buyerIds.add(legalBuyerUserId);
 
   let role: ContractRole = 'none';
   if (responsibleIds(contract.responsible_user_ids).has(userId)) {
     role = 'responsible';
-  } else if (advertiserId === userId) {
+  } else if (sellerIds.has(userId) && buyerIds.has(userId)) {
+    // One account cannot be silently granted bilateral participant access.
+    return buildContext(contractId, userId, 'none', false, workflowStatus);
+  } else if (sellerIds.has(userId)) {
     role = 'seller';
-  } else if (proposerId === userId) {
+  } else if (buyerIds.has(userId)) {
     role = 'buyer';
   }
 

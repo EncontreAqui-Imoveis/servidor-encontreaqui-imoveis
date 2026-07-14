@@ -60,6 +60,7 @@ describe('adminOnboardingService', () => {
   it('cria usuario cliente e retorna role client', async () => {
     queryMock
       .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ insertId: 1001, affectedRows: 1 }]);
 
     const result = await createUserAccountAdmin({
@@ -86,6 +87,7 @@ describe('adminOnboardingService', () => {
 
   it('cria corretor com documentos e notifica admins', async () => {
     txMock.query
+      .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([[]])
       .mockResolvedValueOnce([{ insertId: 2002, affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }])

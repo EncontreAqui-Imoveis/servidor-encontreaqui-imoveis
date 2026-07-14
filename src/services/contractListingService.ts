@@ -142,12 +142,13 @@ export async function listMyContractsForUser(
       (
         n.advertiser_id = ?
         OR n.proposer_id = ?
+        OR n.legal_buyer_user_id = ?
         ${responsibleVisibilityClause}
       )
   `;
   const visibilityParams = includeResponsibles
-    ? [userId, userId, userId]
-    : [userId, userId];
+    ? [userId, userId, userId, userId]
+    : [userId, userId, userId];
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total

@@ -540,10 +540,7 @@ export async function generateProposalFromProperty(
       await tx.rollback();
       return res.status(401).json({ error: 'Usuario nao autenticado.' });
     }
-    if (advertiserId !== null && advertiserId === proposerId) {
-      await tx.rollback();
-      return res.status(403).json({ error: 'O anunciante não pode enviar proposta para o próprio imóvel.' });
-    }
+    const initiatorSide = advertiserId !== null && advertiserId === proposerId ? 'seller' : 'buyer';
 
     const capturingBrokerId = brokerContext.capturingBrokerId;
     const sellerBrokerId = brokerContext.sellerBrokerId;
@@ -586,6 +583,7 @@ export async function generateProposalFromProperty(
         ...payload.pagamento,
         clientName: payload.clientName,
         clientCpf: payload.clientCpf,
+        clientEmail: payload.buyerEmail,
         listingValue: Number(listingValue.toFixed(2)),
       },
     });
@@ -603,6 +601,7 @@ export async function generateProposalFromProperty(
           selling_broker_id,
           proposer_id,
           advertiser_id,
+          initiator_side,
           deal_type,
           client_name,
           status,
@@ -611,7 +610,7 @@ export async function generateProposalFromProperty(
           proposal_validity_date,
           created_at,
           version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, CURRENT_TIMESTAMP, 0)
       `,
       [
         negotiationId,
@@ -620,6 +619,7 @@ export async function generateProposalFromProperty(
         sellerBrokerId,
         proposerId,
         advertiserId,
+        initiatorSide,
         dealType,
         payload.clientName,
         DEFAULT_WIZARD_STATUS,
@@ -656,6 +656,8 @@ export async function generateProposalFromProperty(
           dealType,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
+          clientEmail: payload.buyerEmail,
+          initiatorSide,
         }),
       ]
     );

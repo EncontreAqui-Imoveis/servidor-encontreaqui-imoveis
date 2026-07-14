@@ -2,6 +2,10 @@ import { RowDataPacket } from 'mysql2';
 import type { AuthRequest } from '../middlewares/auth';
 import { getContractDbConnection } from './contractPersistenceService';
 import type { ContractRow } from '../controllers/ContractController';
+import {
+  resolveContractParties,
+  type ContractInitiatorSide,
+} from './contractPartyResolutionService';
 
 type CreatedContractResult = {
   contract: ContractRow;
@@ -54,12 +58,30 @@ export async function createContractFromApprovedNegotiation(
       selling_broker_id: number | null;
       proposer_id: number | null;
       advertiser_id: number | null;
+      initiator_side: ContractInitiatorSide;
+      legal_buyer_user_id: number | null;
       client_name: string | null;
       buyer_legal_cpf: string | null;
+      buyer_legal_email: string | null;
       property_title: string | null;
       property_owner_name: string | null;
       property_owner_phone: string | null;
       property_owner_cpf: string | null;
+      proposer_user_id: number | null;
+      proposer_user_name: string | null;
+      proposer_user_email: string | null;
+      proposer_user_cpf: string | null;
+      proposer_user_phone: string | null;
+      owner_user_id: number | null;
+      owner_user_name: string | null;
+      owner_user_email: string | null;
+      owner_user_cpf: string | null;
+      owner_user_phone: string | null;
+      legal_buyer_user_id_resolved: number | null;
+      legal_buyer_user_name: string | null;
+      legal_buyer_user_email: string | null;
+      legal_buyer_user_cpf: string | null;
+      legal_buyer_user_phone: string | null;
     }>>(
       `
         SELECT
@@ -70,15 +92,41 @@ export async function createContractFromApprovedNegotiation(
           n.selling_broker_id,
           n.proposer_id,
           n.advertiser_id,
+          n.initiator_side,
+          n.legal_buyer_user_id,
           n.client_name,
           JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_legal_cpf,
+          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientEmail')) AS buyer_legal_email,
           p.title AS property_title,
           COALESCE(owner_user.name, p.owner_name) AS property_owner_name,
           p.owner_phone AS property_owner_phone,
-          owner_user.cpf AS property_owner_cpf
+          owner_user.cpf AS property_owner_cpf,
+          proposer_user.id AS proposer_user_id,
+          proposer_user.name AS proposer_user_name,
+          proposer_user.email AS proposer_user_email,
+          proposer_user.cpf AS proposer_user_cpf,
+          proposer_user.phone AS proposer_user_phone,
+          owner_user.id AS owner_user_id,
+          owner_user.name AS owner_user_name,
+          owner_user.email AS owner_user_email,
+          owner_user.cpf AS owner_user_cpf,
+          owner_user.phone AS owner_user_phone,
+          COALESCE(linked_buyer_user.id, email_buyer_user.id) AS legal_buyer_user_id_resolved,
+          COALESCE(linked_buyer_user.name, email_buyer_user.name) AS legal_buyer_user_name,
+          COALESCE(linked_buyer_user.email, email_buyer_user.email) AS legal_buyer_user_email,
+          COALESCE(linked_buyer_user.cpf, email_buyer_user.cpf) AS legal_buyer_user_cpf,
+          COALESCE(linked_buyer_user.phone, email_buyer_user.phone) AS legal_buyer_user_phone
         FROM negotiations n
         JOIN properties p ON p.id = n.property_id
         LEFT JOIN users owner_user ON owner_user.id = p.owner_id
+        LEFT JOIN users proposer_user ON proposer_user.id = n.proposer_id
+        LEFT JOIN users linked_buyer_user
+          ON linked_buyer_user.id = n.legal_buyer_user_id
+          AND linked_buyer_user.email_verified_at IS NOT NULL
+        LEFT JOIN users email_buyer_user
+          ON n.legal_buyer_user_id IS NULL
+          AND email_buyer_user.email_verified_at IS NOT NULL
+          AND LOWER(TRIM(email_buyer_user.email)) = LOWER(TRIM(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientEmail'))))
         WHERE n.id = ?
         LIMIT 1
         FOR UPDATE
@@ -93,6 +141,55 @@ export async function createContractFromApprovedNegotiation(
     }
 
     const proposalInitiatorUserId = normalizePositiveId(negotiation.proposer_id);
+
+    const partyResolution = resolveContractParties({
+      negotiation: {
+        initiatorSide: negotiation.initiator_side,
+        proposerId: normalizePositiveId(negotiation.proposer_id),
+        advertiserId: normalizePositiveId(negotiation.advertiser_id),
+        legalBuyerUserId: normalizePositiveId(negotiation.legal_buyer_user_id_resolved),
+        buyerName: negotiation.client_name,
+        buyerCpf: negotiation.buyer_legal_cpf,
+        buyerEmail: negotiation.buyer_legal_email,
+      },
+      property: {
+        ownerId: normalizePositiveId(negotiation.owner_user_id),
+        ownerName: negotiation.property_owner_name,
+        ownerPhone: negotiation.property_owner_phone,
+      },
+      relatedUsers: {
+        proposer: negotiation.proposer_user_id
+          ? {
+              id: negotiation.proposer_user_id,
+              name: negotiation.proposer_user_name,
+              email: negotiation.proposer_user_email,
+              cpf: negotiation.proposer_user_cpf,
+              phone: negotiation.proposer_user_phone,
+            }
+          : null,
+        owner: negotiation.owner_user_id
+          ? {
+              id: negotiation.owner_user_id,
+              name: negotiation.owner_user_name,
+              email: negotiation.owner_user_email,
+              cpf: negotiation.owner_user_cpf,
+              phone: negotiation.owner_user_phone,
+            }
+          : null,
+        legalBuyer: negotiation.legal_buyer_user_id_resolved
+          ? {
+              id: negotiation.legal_buyer_user_id_resolved,
+              name: negotiation.legal_buyer_user_name,
+              email: negotiation.legal_buyer_user_email,
+              cpf: negotiation.legal_buyer_user_cpf,
+              phone: negotiation.legal_buyer_user_phone,
+            }
+          : null,
+      },
+    });
+    const shouldPersistLegalBuyerLink =
+      partyResolution.legalBuyerUserId !== null &&
+      partyResolution.legalBuyerUserId !== normalizePositiveId(negotiation.legal_buyer_user_id);
 
     const [existingRows] = await tx.query<Array<RowDataPacket & ContractRow>>(
       `
@@ -130,6 +227,8 @@ export async function createContractFromApprovedNegotiation(
           n.selling_broker_id,
           n.advertiser_id,
           n.proposer_id,
+          n.initiator_side,
+          n.legal_buyer_user_id,
           n.client_name,
           p.title AS property_title,
           p.purpose AS property_purpose,
@@ -156,6 +255,12 @@ export async function createContractFromApprovedNegotiation(
     );
 
     if (existingRows.length > 0) {
+      if (shouldPersistLegalBuyerLink) {
+        await tx.query(
+          `UPDATE negotiations SET legal_buyer_user_id = ? WHERE id = ? AND legal_buyer_user_id IS NULL`,
+          [partyResolution.legalBuyerUserId, negotiationId],
+        );
+      }
       await tx.commit();
       return { contract: existingRows[0], created: false };
     }
@@ -165,6 +270,18 @@ export async function createContractFromApprovedNegotiation(
       await tx.rollback();
       throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
     }
+
+    if (shouldPersistLegalBuyerLink) {
+      await tx.query(
+        `UPDATE negotiations SET legal_buyer_user_id = ? WHERE id = ? AND legal_buyer_user_id IS NULL`,
+        [partyResolution.legalBuyerUserId, negotiationId],
+      );
+    }
+
+    const workflowMetadata = {
+      proposalInitiatorUserId,
+      ...partyResolution.metadata,
+    };
 
     await tx.query(
       `
@@ -188,14 +305,14 @@ export async function createContractFromApprovedNegotiation(
           ?,
           ?,
           'AWAITING_DOCS',
-          CAST(JSON_OBJECT('nome', ?, 'cpf', ?, 'telefone', ?) AS JSON),
-          CAST(JSON_OBJECT('nome', ?, 'cpf', ?) AS JSON),
+          CAST(? AS JSON),
+          CAST(? AS JSON),
           NULL,
           'PENDING',
           'PENDING',
           NULL,
           NULL,
-          CAST(JSON_OBJECT('proposalInitiatorUserId', ?) AS JSON),
+          CAST(? AS JSON),
           CURRENT_TIMESTAMP,
           CURRENT_TIMESTAMP
         )
@@ -203,12 +320,9 @@ export async function createContractFromApprovedNegotiation(
       [
         negotiationId,
         negotiation.property_id,
-        negotiation.property_owner_name,
-        negotiation.property_owner_cpf,
-        negotiation.property_owner_phone,
-        negotiation.client_name,
-        negotiation.buyer_legal_cpf,
-        proposalInitiatorUserId,
+        JSON.stringify(partyResolution.sellerInfo),
+        JSON.stringify(partyResolution.buyerInfo),
+        JSON.stringify(workflowMetadata),
       ],
     );
 
@@ -257,6 +371,8 @@ export async function createContractFromApprovedNegotiation(
           n.selling_broker_id,
           n.advertiser_id,
           n.proposer_id,
+          n.initiator_side,
+          n.legal_buyer_user_id,
           n.client_name,
           p.title AS property_title,
           p.purpose AS property_purpose,

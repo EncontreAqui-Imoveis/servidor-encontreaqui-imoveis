@@ -8,6 +8,10 @@ import { optimizeCloudinaryImageUrl, uploadToCloudinary } from "../config/cloudi
 import { requireEnv } from "../config/env";
 import { sanitizeAddressInput } from "../utils/address";
 import { hasValidCreci, normalizeCreci } from "../utils/creci";
+import {
+    assertAccountNameAvailable,
+    isDuplicateAccountNameError,
+} from '../services/userAccountNameService';
 
 type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
 
@@ -157,6 +161,8 @@ class BrokerController {
                 return res.status(409).json({ error: "Este email já está em uso." });
             }
 
+            await assertAccountNameAvailable(brokerDb, name);
+
             const [existingCreciRows] = await brokerDb.query(
                 "SELECT id FROM brokers WHERE creci = ?",
                 [normalizedCreci]
@@ -210,6 +216,9 @@ class BrokerController {
 
             return res.status(201).json({ message: "Corretor registrado com sucesso!", brokerId: userId });
         } catch (error) {
+            if (isDuplicateAccountNameError(error)) {
+                return res.status(400).json({ code: error.code, error: error.message });
+            }
             if ((error as any)?.code === "ER_DUP_ENTRY") {
                 return res.status(409).json({ error: "Este CRECI já está em uso." });
             }
@@ -290,6 +299,8 @@ class BrokerController {
                 return res.status(409).json({ error: "Este email já está em uso." });
             }
 
+            await assertAccountNameAvailable(db, name);
+
             const [existingCreciRows] = await db.query(
                 "SELECT id FROM brokers WHERE creci = ?",
                 [normalizedCreci]
@@ -366,6 +377,9 @@ class BrokerController {
             });
         } catch (error) {
             await db.rollback();
+            if (isDuplicateAccountNameError(error)) {
+                return res.status(400).json({ code: error.code, error: error.message });
+            }
             if ((error as any)?.code == "ER_DUP_ENTRY") {
                 return res.status(409).json({ error: "Este CRECI já está em uso." });
             }

@@ -35,6 +35,10 @@ export interface ProposalWizardBody {
   propertyId?: unknown;
   clientName?: unknown;
   clientCpf?: unknown;
+  buyerEmail?: unknown;
+  buyer_email?: unknown;
+  clientEmail?: unknown;
+  client_email?: unknown;
   buyerUserId?: unknown;
   buyer_user_id?: unknown;
   validadeDias?: unknown;
@@ -59,6 +63,7 @@ export interface ParsedProposalWizard {
   propertyId: number;
   clientName: string;
   clientCpf: string;
+  buyerEmail: string | null;
   dealType: DealType;
   buyerUserId: number | null;
   validadeDias: number;
@@ -246,6 +251,10 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
   const propertyId = Number(body.propertyId);
   const clientName = String(body.clientName ?? '').trim();
   const clientCpfDigits = normalizeCpfDigits(String(body.clientCpf ?? ''));
+  const buyerEmailRaw = String(
+    body.buyerEmail ?? body.buyer_email ?? body.clientEmail ?? body.client_email ?? ''
+  ).trim();
+  const buyerEmail = buyerEmailRaw ? buyerEmailRaw.toLowerCase() : null;
   const dealType = normalizeDealType(body.dealType ?? body.deal_type) ?? 'sale';
   const buyerUserId = normalizeOptionalPositiveId(body.buyerUserId ?? body.buyer_user_id);
   const validadeDiasRaw = body.validadeDias ?? 10;
@@ -269,6 +278,10 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
 
   if (!isValidCpf(clientCpfDigits)) {
     throw new Error('clientCpf invalido. Informe um CPF valido.');
+  }
+
+  if (buyerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerEmail)) {
+    throw new Error('buyerEmail invalido.');
   }
 
   if (!Number.isInteger(validadeDias) || validadeDias <= 0) {
@@ -301,6 +314,7 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
     propertyId,
     clientName,
     clientCpf: clientCpfDigits,
+    buyerEmail,
     dealType,
     buyerUserId,
     validadeDias,

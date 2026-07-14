@@ -185,6 +185,8 @@ export interface ContractRow extends RowDataPacket {
   selling_broker_id: number | null;
   advertiser_id: number | null;
   proposer_id: number | null;
+  initiator_side: 'buyer' | 'seller' | null;
+  legal_buyer_user_id: number | null;
   seller_cpf: string | null;
   buyer_cpf: string | null;
   client_name: string | null;
@@ -1055,6 +1057,25 @@ function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown
   return buyerInfo;
 }
 
+function resolveIdentityCapabilities(workflowMetadata: unknown) {
+  const metadata = parseStoredJsonObject(workflowMetadata);
+  const partyResolution = parseStoredJsonObject(metadata.partyResolution);
+  const storedCapabilities = parseStoredJsonObject(partyResolution.identityCapabilities);
+  const normalizeSide = (side: 'seller' | 'buyer') => {
+    const values = parseStoredJsonObject(storedCapabilities[side]);
+    return {
+      // Old contracts remain administratively correctable until they are rebuilt.
+      canEditName: values.canEditName !== false,
+      canEditCpf: values.canEditCpf !== false,
+    };
+  };
+
+  return {
+    seller: normalizeSide('seller'),
+    buyer: normalizeSide('buyer'),
+  };
+}
+
 function shouldExposeOwnerSensitiveDocument(
   input: {
     side: ContractDocumentSide | null;
@@ -1109,6 +1130,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ),
   };
   const sellerInfo = buildOwnerInfoFromContractRow(row);
+  const workflowMetadata = parseStoredJsonObject(row.workflow_metadata);
   const canReadSeller = canReadContractSide(readContext, 'seller');
   const canReadBuyer = canReadContractSide(readContext, 'buyer');
   const canViewSensitiveData = canReadSeller && canViewOwnerSensitiveData(req, row);
@@ -1150,7 +1172,8 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ownerInfo: sellerInfoForViewer,
     buyerInfo: buyerInfoForViewer,
     commissionData: canViewSensitiveData ? parseStoredJsonObject(row.commission_data) : {},
-    workflowMetadata: parseStoredJsonObject(row.workflow_metadata),
+    workflowMetadata,
+    identityCapabilities: resolveIdentityCapabilities(workflowMetadata),
     sellerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
     ownerApprovalStatus: resolveContractApprovalStatus(row.seller_approval_status),
     buyerApprovalStatus: resolveContractApprovalStatus(row.buyer_approval_status),
@@ -1163,6 +1186,9 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
       row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
     advertiserId: row.advertiser_id !== null ? Number(row.advertiser_id) : null,
     proposerId: row.proposer_id !== null ? Number(row.proposer_id) : null,
+    initiatorSide: row.initiator_side ?? null,
+    legalBuyerUserId:
+      row.legal_buyer_user_id !== null ? Number(row.legal_buyer_user_id) : null,
     advertiserName: row.seller_client_name ?? null,
     proposerName: row.buyer_client_name ?? null,
     clientName: row.client_name ?? null,
@@ -1784,6 +1810,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.selling_broker_id,
     n.advertiser_id,
     n.proposer_id,
+    n.initiator_side,
+    n.legal_buyer_user_id,
     n.client_name,
     owner_user.cpf AS seller_cpf,
     JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_cpf,

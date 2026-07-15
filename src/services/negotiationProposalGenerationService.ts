@@ -67,6 +67,10 @@ interface BrokerRow extends RowDataPacket {
   name: string;
 }
 
+interface ActiveContractRow extends RowDataPacket {
+  active_contract_id: string | null;
+}
+
 interface UserRow extends RowDataPacket {
   id: number;
   name: string;
@@ -460,6 +464,35 @@ export async function generateProposalFromProperty(
       return res.status(409).json({
         error: 'A proposta só pode ser gerada para imóveis aprovados.',
       });
+    }
+
+    // The property row is locked above. Check the physical contract in the
+    // same transaction so a direct request cannot start a parallel proposal.
+    const activeContractQuery = await tx.execute<ActiveContractRow[]>(
+      `
+        SELECT c.id AS active_contract_id
+        FROM contracts c
+        JOIN negotiations n ON n.id = c.negotiation_id
+        WHERE n.property_id = ?
+          AND UPPER(TRIM(COALESCE(c.status, ''))) <> 'CANCELLED'
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [property.id]
+    );
+    const activeContractRows = Array.isArray(activeContractQuery[0])
+      ? activeContractQuery[0]
+      : [];
+    if (activeContractRows.some((row) => String(row.active_contract_id ?? '').trim().length > 0)) {
+      await tx.rollback();
+      return sendProposalError(
+        req,
+        res,
+        409,
+        'PROPERTY_CONTRACT_ACTIVE',
+        'Este imóvel já possui um contrato ativo e não aceita novas propostas.',
+        false,
+      );
     }
 
     const propertyOwnerId = normalizeOptionalPositiveId(property.owner_id);

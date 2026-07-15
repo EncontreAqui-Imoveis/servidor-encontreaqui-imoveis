@@ -306,6 +306,58 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
     expect(saveNegotiationDocumentMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a new proposal when the property already has an active contract', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 101,
+            broker_id: 30003,
+            owner_id: 40004,
+            status: 'approved',
+            address: 'Rua A',
+            numero: '100',
+            quadra: null,
+            lote: null,
+            bairro: 'Centro',
+            city: 'Rio Verde',
+            state: 'GO',
+            price: 500000,
+            price_sale: 500000,
+            price_rent: null,
+          },
+        ],
+      ]);
+    txMock.execute.mockImplementation(async (sql: string) => {
+      if (sql.includes('active_contract_id')) {
+        return [[{ active_contract_id: 'contract-active-1' }]];
+      }
+      return { insertId: 91001 };
+    });
+
+    const response = await request(app)
+      .post('/negotiations/proposal')
+      .set('Idempotency-Key', 'proposal-key-active-contract')
+      .send({
+        propertyId: 101,
+        clientName: 'Joao da Silva',
+        clientCpf: '529.982.247-25',
+        validadeDias: 10,
+        pagamento: {
+          dinheiro: 100000,
+          permuta: 0,
+          financiamento: 400000,
+          outros: 0,
+        },
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('PROPERTY_CONTRACT_ACTIVE');
+    expect(generateProposalMock).not.toHaveBeenCalled();
+    expect(saveNegotiationDocumentMock).not.toHaveBeenCalled();
+  });
+
   it('blocks owner self-proposal when CPF matches the logged user', async () => {
     authState.userRole = 'client';
     txMock.query

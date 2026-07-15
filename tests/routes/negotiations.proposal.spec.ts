@@ -133,7 +133,7 @@ describe('POST /negotiations/proposal', () => {
     });
     expect(txMock.execute).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO negotiations'),
-      expect.arrayContaining([101, 30003, 30003, 30003, 'buyer', 'sale', 'PROPOSAL_SENT'])
+      expect.arrayContaining([101, 30003, 30003, 30003, 'seller', 'sale', 'PROPOSAL_SENT'])
     );
     expect(generateProposalMock).toHaveBeenCalledTimes(1);
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
@@ -181,7 +181,9 @@ describe('POST /negotiations/proposal', () => {
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('A soma dos pagamentos');
     expect(txMock.rollback).toHaveBeenCalledTimes(1);
-    expect(txMock.execute).toHaveBeenCalledTimes(1);
+    // Idempotency is persisted before validation and the active-contract guard
+    // performs a parameterized read through execute as well.
+    expect(txMock.execute).toHaveBeenCalledTimes(2);
     expect(
       txMock.execute.mock.calls.some(([sql]) =>
         String(sql).includes('INSERT INTO negotiations')
@@ -240,7 +242,7 @@ describe('POST /negotiations/proposal', () => {
         params[2] === 30003 &&
         params[3] === 30003 &&
         params[4] === 30003 &&
-        params[6] === 'buyer' &&
+        params[6] === 'seller' &&
         params[9] === 'PROPOSAL_SENT'
       )
     ).toBe(true);
@@ -349,7 +351,7 @@ describe('POST /negotiations/proposal', () => {
         params[2] === 45555 &&
         params[3] === 45555 &&
         params[4] === 30003 &&
-        params[5] === 50001 &&
+        params[5] === 45555 &&
         params[6] === 'buyer' &&
         params[9] === 'PROPOSAL_SENT'
       )

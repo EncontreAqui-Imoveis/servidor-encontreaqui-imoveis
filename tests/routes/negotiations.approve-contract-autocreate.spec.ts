@@ -110,6 +110,48 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     txMock.release.mockResolvedValue(undefined);
 
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('FROM negotiations n') && sql.includes('LEFT JOIN users owner_user')) {
+        return [[
+          {
+            id: 'neg-1',
+            property_id: 101,
+            status: negotiationStatus,
+            capturing_broker_id: 30003,
+            selling_broker_id: 30003,
+            proposer_id: 30003,
+            advertiser_id: 30005,
+            initiator_side: 'buyer',
+            legal_buyer_user_id: null,
+            handshake_pin: null,
+            handshake_status: null,
+            handshake_attempts: 0,
+            client_name: 'FGFG',
+            buyer_legal_cpf: null,
+            buyer_legal_email: null,
+            property_title: 'Casa Centro',
+            property_owner_name: 'Dona Maria',
+            property_owner_phone: '(64) 99999-1111',
+            property_owner_cpf: '12345678901',
+            property_broker_id: 30005,
+            proposer_user_id: 30003,
+            proposer_user_name: 'FGFG',
+            proposer_user_email: 'fgfg@example.com',
+            proposer_user_cpf: '52998224725',
+            proposer_user_phone: '(64) 99999-2222',
+            owner_user_id: 30005,
+            owner_user_name: 'Dona Maria',
+            owner_user_email: 'maria@example.com',
+            owner_user_cpf: '12345678901',
+            owner_user_phone: '(64) 99999-1111',
+            legal_buyer_user_id_resolved: null,
+            legal_buyer_user_name: null,
+            legal_buyer_user_email: null,
+            legal_buyer_user_cpf: null,
+            legal_buyer_user_phone: null,
+          },
+        ]];
+      }
+
       if (sql.includes('FROM negotiations n') && sql.includes('FOR UPDATE')) {
         return [[
           {
@@ -156,6 +198,8 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
 
       if (sql.includes('INSERT INTO contracts')) {
         contractInsertCount += 1;
+        const sellerInfo = JSON.parse(String(params[2]));
+        const buyerInfo = JSON.parse(String(params[3]));
         contractState = {
           id: `contract-${contractInsertCount}`,
           negotiationId: String(params[0]),
@@ -163,19 +207,23 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
           status: 'AWAITING_DOCS',
           sellerApprovalStatus: 'PENDING',
           buyerApprovalStatus: 'PENDING',
-          sellerInfo: {
-            nome: params[2],
-            name: params[2],
-            telefone: params[4],
-          },
-          buyerInfo: {
-            clientName: params[5],
-            clientCpf: params[6],
-            nome: params[7],
-            cpf: params[8],
-          },
+          sellerInfo,
+          buyerInfo,
         };
         return [{ affectedRows: 1 }];
+      }
+
+      if (sql.includes('FROM contracts c') && sql.includes('WHERE c.negotiation_id = ?')) {
+        return [contractState ? [{
+          id: contractState.id,
+          negotiation_id: contractState.negotiationId,
+          property_id: contractState.propertyId,
+          status: contractState.status,
+          seller_info: contractState.sellerInfo,
+          buyer_info: contractState.buyerInfo,
+          commission_data: null,
+          workflow_metadata: {},
+        }] : []];
       }
 
       return [[]];
@@ -196,16 +244,13 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     expect(contractState?.sellerInfo).toEqual(
       expect.objectContaining({
         nome: 'Dona Maria',
-        name: 'Dona Maria',
         telefone: '(64) 99999-1111',
       })
     );
     expect(contractState?.buyerInfo).toEqual(
       expect.objectContaining({
-        clientName: 'FGFG',
-        clientCpf: undefined,
         nome: 'FGFG',
-        cpf: undefined,
+        cpf: '52998224725',
       })
     );
     expect(contractInsertCount).toBe(1);

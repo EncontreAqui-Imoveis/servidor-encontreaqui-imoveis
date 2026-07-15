@@ -243,6 +243,143 @@ export async function listMyContractsForUser(
   };
 }
 
+export type ContractHubCounters = {
+  proposals_active_count: number;
+  contracts_pending_documents_count: number;
+};
+
+/**
+ * Returns compact, actor-scoped counters for the mobile "Meus Processos" hub.
+ * The document count intentionally reuses the contract requirement matrix so a
+ * missing required upload is counted even when no document row exists yet.
+ */
+export async function getContractHubCounters(
+  req: AuthRequest,
+): Promise<ContractHubCounters> {
+  const userId = Number(req.userId);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    throw new Error('Usuário não autenticado.');
+  }
+
+  const isAdmin = String(req.userRole ?? '').trim().toLowerCase() === 'admin';
+  const proposalVisibilityClause = isAdmin
+    ? '1 = 1'
+    : '(n.proposer_id = ? OR n.advertiser_id = ? OR p.owner_id = ?)';
+  const proposalVisibilityParams = isAdmin ? [] : [userId, userId, userId];
+  const proposalCountRows = await queryContractRows<RowDataPacket>(
+    `
+      SELECT COUNT(DISTINCT n.id) AS total
+      FROM negotiations n
+      JOIN properties p ON p.id = n.property_id
+      LEFT JOIN contracts c ON c.negotiation_id = n.id
+      WHERE ${proposalVisibilityClause}
+        AND c.id IS NULL
+        AND UPPER(TRIM(COALESCE(n.status, ''))) NOT IN (
+          'CANCELLED', 'REFUSED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED', 'CONCLUDED'
+        )
+    `,
+    proposalVisibilityParams,
+  );
+  const proposalsActiveCount = Number(proposalCountRows[0]?.total ?? 0);
+
+  const includeResponsibles = await hasNegotiationResponsiblesTable();
+  const responsibleVisibilityClause = includeResponsibles
+    ? `
+        OR EXISTS (
+          SELECT 1
+          FROM negotiation_responsibles nr
+          WHERE nr.negotiation_id = c.negotiation_id
+            AND nr.user_id = ?
+        )`
+    : '';
+  const contractVisibilityClause = isAdmin
+    ? '1 = 1'
+    : `
+      (
+        n.advertiser_id = ?
+        OR p.owner_id = ?
+        OR n.proposer_id = ?
+        OR n.legal_buyer_user_id = ?
+        ${responsibleVisibilityClause}
+      )
+    `;
+  const contractVisibilityParams = isAdmin
+    ? []
+    : includeResponsibles
+      ? [userId, userId, userId, userId, userId]
+      : [userId, userId, userId, userId];
+  const contractSelectSql = await getContractSelectSql();
+  const contractRows = await queryContractRows<ContractRow>(
+    `
+      ${contractSelectSql}
+      WHERE ${contractVisibilityClause}
+        AND UPPER(TRIM(COALESCE(c.status, ''))) <> 'CANCELLED'
+      ORDER BY c.updated_at DESC, c.created_at DESC
+    `,
+    contractVisibilityParams,
+  );
+
+  const readableContracts = contractRows.filter((contract) => {
+    const access = resolveContractAccessContext(
+      { id: req.userId, role: req.userRole },
+      contract,
+    );
+    return access.canReadMeta && !access.requiresHandshakeVerification;
+  });
+  if (readableContracts.length === 0) {
+    return {
+      proposals_active_count: proposalsActiveCount,
+      contracts_pending_documents_count: 0,
+    };
+  }
+
+  const negotiationIds = readableContracts.map((contract) => contract.negotiation_id);
+  const placeholders = negotiationIds.map(() => '?').join(', ');
+  const documentRows = await queryContractRows<ContractDocumentListRow>(
+    `
+      SELECT id, negotiation_id, type, document_type, metadata_json, created_at
+      FROM negotiation_documents
+      WHERE negotiation_id IN (${placeholders})
+        AND COALESCE(document_type, '') <> 'proposal'
+        AND COALESCE(type, '') <> 'proposal'
+        AND UPPER(COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+          'APPROVED'
+        )) <> 'REJECTED'
+      ORDER BY created_at DESC, id DESC
+    `,
+    negotiationIds,
+  );
+  const documentsByNegotiation = buildDocumentsByNegotiation(documentRows);
+  const contractsPendingDocumentsCount = readableContracts.reduce((total, contract) => {
+    const access = resolveContractAccessContext(
+      { id: req.userId, role: req.userRole },
+      contract,
+    );
+    const progress = buildContractDocumentProgress(
+      (documentsByNegotiation.get(contract.negotiation_id) ?? []).map((document) => {
+        const mapped = mapDocument(document);
+        return { ...mapped, metadata: mapped.metadata as Record<string, unknown> };
+      }),
+      buildContractDocumentRuleContextFromRow(contract),
+    );
+    const hasPendingDocuments =
+      access.userRole === 'buyer'
+        ? progress.buyer.totals.pending > 0
+        : access.userRole === 'seller'
+          ? progress.seller.totals.pending > 0
+          : progress.seller.totals.pending > 0 || progress.buyer.totals.pending > 0;
+    return total + (hasPendingDocuments ? 1 : 0);
+  }, 0);
+
+  return {
+    proposals_active_count: proposalsActiveCount,
+    contracts_pending_documents_count: contractsPendingDocumentsCount,
+  };
+}
+
 let negotiationResponsiblesTableCache: boolean | null = null;
 
 async function hasNegotiationResponsiblesTable(): Promise<boolean> {

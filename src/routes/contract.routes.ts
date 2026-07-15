@@ -15,6 +15,10 @@ contractRoutes.get('/contracts/me', authMiddleware, (req, res) =>
   contractController.listMyContracts(req, res)
 );
 
+contractRoutes.get('/contracts/counters', authMiddleware, (req, res) =>
+  contractController.getHubCounters(req, res)
+);
+
 contractRoutes.get('/contracts/:id', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.getById(req, res)
 );

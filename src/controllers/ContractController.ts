@@ -23,6 +23,7 @@ import {
   processNegotiationDocumentDeletionJob,
 } from '../services/negotiationDocumentDeletionService';
 import {
+  getContractHubCounters,
   listContractsForAdmin,
   listMyContractsForUser,
 } from '../services/contractListingService';
@@ -2193,6 +2194,19 @@ class ContractController {
       return res.status(500).json({
         error: 'Falha ao revisar categoria documental.',
       });
+    }
+  }
+
+  async getHubCounters(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      return res.status(200).json(await getContractHubCounters(req));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('Usuário não autenticado')) {
+        return res.status(401).json({ error: message });
+      }
+      console.error('Erro ao calcular contadores do hub de processos:', error);
+      return res.status(500).json({ error: 'Falha ao calcular contadores do hub.' });
     }
   }
 

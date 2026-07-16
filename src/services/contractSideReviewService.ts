@@ -549,8 +549,10 @@ async function updateDocumentsMetadata(
   for (const row of rows) {
     const metadata = parseStoredJsonObject(row.metadata_json);
     const nextMetadata = appendAuditTrailEvent(metadata, auditEvent);
+    nextMetadata.status = status;
     nextMetadata.categoryStatus = status;
     nextMetadata.reviewStatus = status;
+    nextMetadata.validationStatus = status;
     nextMetadata.reviewReason = reasonText || null;
     nextMetadata.reviewReasonCode = reasonCode || null;
     nextMetadata.reviewedAt = auditEvent.at;
@@ -673,12 +675,9 @@ export async function evaluateContractSide(
       nextBuyerReason = sideReason;
     }
 
-    const normalizedCategoryStatus: ContractDocumentCategoryStatus =
-      nextSideStatus === 'REJECTED'
-        ? 'REJECTED'
-        : nextSideStatus === 'PENDING'
-          ? 'PENDING'
-          : 'APPROVED';
+    // Keep individual documents in the same state as the side review.
+    // An approval with reservations is not a plain approval.
+    const normalizedCategoryStatus: ContractDocumentCategoryStatus = nextSideStatus;
     const reviewAuditEvent = buildDocumentReviewAuditEvent({
       side: side as ContractDocumentSide,
       status: nextSideStatus,

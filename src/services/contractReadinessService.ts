@@ -47,7 +47,7 @@ function missingQualificationFields(
   ];
   const fields = side === 'seller'
     ? [...common, ['dados_bancarios', ['dados_bancarios', 'dadosBancarios']] as [string, string[]]]
-    : [...common, ['dados_bancarios', ['dados_bancarios', 'dadosBancarios']] as [string, string[]]];
+    : common;
 
   for (const [field, aliases] of fields) {
     if (!hasText(info, aliases)) missing.push(field);

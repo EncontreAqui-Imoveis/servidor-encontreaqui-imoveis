@@ -255,6 +255,48 @@ describe('Contract granular approval and signed docs endpoints', () => {
     );
   });
 
+  it('persiste APPROVED_WITH_RES nos documentos quando a avaliação do lado tem ressalvas', async () => {
+    const defaultQuery = txMock.query.getMockImplementation();
+    txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[{
+          id: 91,
+          type: 'contract_document',
+          document_type: 'doc_identidade',
+          metadata_json: {
+            owner_side: 'buyer',
+            side: 'buyer',
+            documentCategory: 'identidade',
+            categoryStatus: 'PENDING',
+          },
+          created_at: '2026-02-19 10:00:00',
+        }]];
+      }
+      return defaultQuery?.(sql, params) ?? [[]];
+    });
+
+    const response = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'buyer',
+        status: 'APPROVED_WITH_RES',
+        reason: 'Documento aceito com ressalva operacional.',
+      });
+
+    expect(response.status).toBe(200);
+    const updateCall = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes('UPDATE negotiation_documents')
+    );
+    expect(updateCall).toBeDefined();
+    const metadata = JSON.parse(String(updateCall?.[1]?.[0] ?? '{}'));
+    expect(metadata).toMatchObject({
+      status: 'APPROVED_WITH_RES',
+      categoryStatus: 'APPROVED_WITH_RES',
+      reviewStatus: 'APPROVED_WITH_RES',
+      validationStatus: 'APPROVED_WITH_RES',
+    });
+  });
+
   it('allows admin signed-doc upload and returns ready-for-finalization state', async () => {
     contractState = createInitialContractState({
       status: 'AWAITING_SIGNATURES',

@@ -1288,37 +1288,48 @@ export function buildDocumentSlots(
   requirements: ReturnType<typeof resolveDocumentRequirementMatrixForContract>,
   documents: Array<ReturnType<typeof mapDocument> & { downloadUrl: string }>
 ) {
-  const latestBySideAndCategory = new Map<string, (typeof documents)[number]>();
+  const latestBySideCategoryAndType = new Map<string, (typeof documents)[number]>();
   for (const document of documents) {
-    if (!document.side || !document.documentCategory) continue;
-    const key = `${document.side}:${document.documentCategory}`;
-    const previous = latestBySideAndCategory.get(key);
+    if (!document.side || !document.documentCategory || !document.documentType) continue;
+    const key = `${document.side}:${document.documentCategory}:${document.documentType}`;
+    const previous = latestBySideCategoryAndType.get(key);
     const previousTime = previous?.createdAt ? new Date(previous.createdAt).getTime() : 0;
     const currentTime = document.createdAt ? new Date(document.createdAt).getTime() : 0;
     if (!previous || currentTime >= previousTime) {
-      latestBySideAndCategory.set(key, document);
+      latestBySideCategoryAndType.set(key, document);
     }
   }
 
   return (['seller', 'buyer'] as const).flatMap((side) =>
     requirements[side]
-      .filter((requirement) => requirement.required && requirement.applicability !== 'not_applicable')
-      .map((requirement) => {
-        const document = latestBySideAndCategory.get(`${side}:${requirement.category}`);
-        const status = document?.categoryStatus ?? 'PENDING';
-        return {
-          id: document?.id ?? null,
-          side,
-          ownerSide: side,
-          documentCategory: requirement.category,
-          documentType: document?.documentType ?? requirement.preferredDocumentType,
-          label: CONTRACT_DOCUMENT_CATEGORY_LABELS[requirement.category],
-          required: true,
-          status,
-          categoryStatus: status,
-          originalFileName: document?.originalFileName ?? null,
-          downloadUrl: document?.downloadUrl ?? null,
-        };
+      .filter((requirement) => requirement.applicability !== 'not_applicable')
+      .flatMap((requirement) => {
+        // Property certificates share a category but are independent requirements.
+        const documentTypes =
+          requirement.category === 'docs_imovel'
+            ? requirement.acceptedDocumentTypes
+            : [requirement.preferredDocumentType];
+
+        return documentTypes.map((documentType) => {
+          const document = latestBySideCategoryAndType.get(
+            `${side}:${requirement.category}:${documentType}`
+          );
+          const status = document?.categoryStatus ?? 'PENDING';
+          return {
+            id: document?.id ?? null,
+            side,
+            ownerSide: side,
+            documentCategory: requirement.category,
+            documentType,
+            label: CONTRACT_DOCUMENT_CATEGORY_LABELS[requirement.category],
+            applicability: requirement.applicability,
+            required: requirement.required,
+            status,
+            categoryStatus: status,
+            originalFileName: document?.originalFileName ?? null,
+            downloadUrl: document?.downloadUrl ?? null,
+          };
+        });
       })
   );
 }

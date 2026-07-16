@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildDocumentSlots } from '../../../src/controllers/ContractController';
 import {
   isUploadBlockedForNotApplicableCategory,
   resolveDocumentRequirementMatrixForContract,
@@ -161,6 +162,46 @@ describe('contractDocumentRuleMatrix', () => {
     expect(sellerDocsImovel?.applicability).toBe('not_applicable');
     expect(sellerDocsImovel?.acceptedDocumentTypes).toEqual(
       expect.arrayContaining(['certidao_inteiro_teor', 'certidao_onus_acoes'])
+    );
+  });
+
+  it('expõe ônus e ações ao vendedor em venda e outro opcional para os dois lados', () => {
+    const matrix = resolveDocumentRequirementMatrixForContract({
+      propertyPurpose: 'Venda',
+      sellerInfo: { estado_civil: 'Solteiro(a)' },
+      buyerInfo: { estado_civil: 'Solteiro(a)' },
+    });
+    const slots = buildDocumentSlots(matrix, []);
+
+    expect(slots).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          side: 'seller',
+          documentCategory: 'docs_imovel',
+          documentType: 'certidao_inteiro_teor',
+          required: true,
+        }),
+        expect.objectContaining({
+          side: 'seller',
+          documentCategory: 'docs_imovel',
+          documentType: 'certidao_onus_acoes',
+          required: true,
+        }),
+        expect.objectContaining({
+          side: 'seller',
+          documentCategory: 'outro',
+          documentType: 'outro',
+          applicability: 'optional',
+          required: false,
+        }),
+        expect.objectContaining({
+          side: 'buyer',
+          documentCategory: 'outro',
+          documentType: 'outro',
+          applicability: 'optional',
+          required: false,
+        }),
+      ])
     );
   });
 });

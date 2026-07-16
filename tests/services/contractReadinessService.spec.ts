@@ -24,7 +24,6 @@ describe('calculateContractReadiness', () => {
       expect.arrayContaining([
         'email',
         'telefone',
-        'dados_bancarios',
         'garantia_locacao',
         'conjuge_nome',
         'conjuge_cpf',
@@ -32,6 +31,7 @@ describe('calculateContractReadiness', () => {
       ])
     );
     expect(readiness.eligibleForAdminApproval).toBe(false);
+    expect(readiness.buyer.missingFields).not.toContain('dados_bancarios');
   });
 
   it('exige os dados conjugais de Casado(a) apenas na readiness administrativa', () => {

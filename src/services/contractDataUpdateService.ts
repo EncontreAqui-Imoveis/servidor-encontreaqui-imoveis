@@ -87,8 +87,6 @@ export interface BuyerQualification extends ContractPartyQualificationBase {
   email?: string;
   cpf?: string;
   clientCpf?: string;
-  dados_bancarios?: string | null;
-  dadosBancarios?: string | null;
   garantia_locacao?: string;
   garantiaLocacao?: string;
 }
@@ -134,8 +132,6 @@ const BUYER_QUALIFICATION_KEYS = new Set<keyof BuyerQualification>([
   'email',
   'cpf',
   'clientCpf',
-  'dados_bancarios',
-  'dadosBancarios',
   'estado_civil',
   'estadoCivil',
   'profissao',

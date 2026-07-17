@@ -9,6 +9,7 @@ describe('contractDocumentValidation', () => {
   it('resolve categoria por tipo conhecido', () => {
     expect(resolveDocumentCategoryFromType('doc_identidade')).toBe('identidade');
     expect(resolveDocumentCategoryFromType('certidao_onus_acoes')).toBe('docs_imovel');
+    expect(resolveDocumentCategoryFromType('dados_bancarios')).toBe('dados_bancarios');
   });
 
   it('valida upload com erros estruturados', () => {

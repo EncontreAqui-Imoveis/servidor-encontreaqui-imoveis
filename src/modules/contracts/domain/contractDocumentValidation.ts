@@ -67,7 +67,9 @@ const CATEGORY_DOCUMENT_TYPES: Record<
   conjuge_documentos: new Set(['doc_identidade_conjuge', 'outro']),
   comprovante_renda: new Set(['comprovante_renda']),
   comprovante_garantia: new Set(['comprovante_garantia']),
-  dados_bancarios: new Set(['outro']),
+  // Uses its own type so the mandatory seller requirement cannot be merged
+  // with the independent optional "Outro" slot in client matrices.
+  dados_bancarios: new Set(['dados_bancarios']),
   outro: new Set(['outro', ...CLIENTE_OUTRO_SLOT_TYPES]),
   docs_imovel: new Set(['certidao_inteiro_teor', 'certidao_onus_acoes']),
 };
@@ -106,7 +108,7 @@ export function resolveFallbackDocumentTypeByCategory(
     case 'comprovante_garantia':
       return 'comprovante_garantia';
     case 'dados_bancarios':
-      return 'outro';
+      return 'dados_bancarios';
     case 'outro':
       return 'outro';
     case 'docs_imovel':

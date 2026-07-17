@@ -52,6 +52,7 @@ export const CONTRACT_DOCUMENT_TYPES = [
   'certidao_onus_acoes',
   'comprovante_renda',
   'comprovante_garantia',
+  'dados_bancarios',
   'contrato_minuta',
   'contrato_assinado',
   'comprovante_pagamento',

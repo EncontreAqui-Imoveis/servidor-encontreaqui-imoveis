@@ -54,6 +54,22 @@ describe('contractDocumentRuleMatrix', () => {
     expect(rent.find((r) => r.category === 'docs_imovel')?.applicability).toBe('not_applicable');
   });
 
+  it('dados bancários: obrigatório apenas para o vendedor', () => {
+    const base = {
+      propertyPurpose: 'Venda',
+      sellerInfo: { estado_civil: 'Solteiro' },
+      buyerInfo: { estado_civil: 'Solteiro' },
+    };
+    const seller = resolveDocumentRequirements({ ...base, side: 'seller' });
+    const buyer = resolveDocumentRequirements({ ...base, side: 'buyer' });
+
+    expect(seller.find((item) => item.category === 'dados_bancarios')).toMatchObject({
+      applicability: 'required',
+      required: true,
+    });
+    expect(buyer.find((item) => item.category === 'dados_bancarios')).toBeUndefined();
+  });
+
   it('comprovante de garantia: obrigatório no comprador em aluguel e N/A em venda', () => {
     const base = {
       side: 'buyer' as const,
@@ -153,6 +169,7 @@ describe('contractDocumentRuleMatrix', () => {
     const sellerIdentity = matrix.seller.find((item) => item.category === 'identidade');
     const buyerRent = matrix.buyer.find((item) => item.category === 'comprovante_renda');
     const sellerDocsImovel = matrix.seller.find((item) => item.category === 'docs_imovel');
+    const sellerBankDetails = matrix.seller.find((item) => item.category === 'dados_bancarios');
 
     expect(sellerIdentity?.acceptedDocumentTypes).toEqual(
       expect.arrayContaining(['doc_identidade', 'cliente_cnh', 'cliente_identidade'])
@@ -163,6 +180,10 @@ describe('contractDocumentRuleMatrix', () => {
     expect(sellerDocsImovel?.acceptedDocumentTypes).toEqual(
       expect.arrayContaining(['certidao_inteiro_teor', 'certidao_onus_acoes'])
     );
+    expect(sellerBankDetails).toMatchObject({
+      preferredDocumentType: 'dados_bancarios',
+      acceptedDocumentTypes: ['dados_bancarios'],
+    });
   });
 
   it('expõe ônus e ações ao vendedor em venda e outro opcional para os dois lados', () => {

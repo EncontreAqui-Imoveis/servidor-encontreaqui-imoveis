@@ -76,6 +76,12 @@ import {
   transitionContractStatus,
 } from '../services/contractWorkflowService';
 import {
+  buildContractDraftDocumentMetadata,
+  ensureContractDraftGenerated,
+  isCanonicalContractDraftMetadata,
+  isContractDraftGenerationError,
+} from '../services/contractDraftGenerationService';
+import {
   evaluateContractSide,
   isContractSideReviewError,
 } from '../services/contractSideReviewService';
@@ -88,6 +94,7 @@ import {
   reviewContractDocument,
 } from '../services/contractDocumentReviewService';
 import {
+  isContractDealType,
   isContractApprovalStatus,
   isContractDocumentCategoryStatus,
   isContractDocumentType,
@@ -179,6 +186,7 @@ export interface ContractRow extends RowDataPacket {
   id: string;
   negotiation_id: string;
   property_id: number;
+  deal_type: 'sale' | 'rent' | null;
   status: string;
   seller_info: unknown;
   buyer_info: unknown;
@@ -440,7 +448,7 @@ export function buildContractDocumentRuleContextFromRow(
   row: ContractRow
 ): ContractDocumentRuleContext {
   return {
-    propertyPurpose: row.property_purpose,
+    dealType: isContractDealType(row.deal_type) ? row.deal_type : null,
     sellerInfo: parseStoredJsonObject(row.seller_info),
     buyerInfo: parseStoredJsonObject(row.buyer_info),
   };
@@ -644,7 +652,9 @@ function normalizeContractDocumentCategory(
     'comprovante_renda',
     'comprovante_garantia',
     'dados_bancarios',
-    'docs_imovel',
+    'certidao_inteiro_teor_escritura',
+    'certidao_onus_acoes',
+    'outro',
   ]);
   return allowed.has(normalized as ContractDocumentCategoryCode)
     ? (normalized as ContractDocumentCategoryCode)
@@ -1176,6 +1186,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     id: row.id,
     negotiationId: row.negotiation_id,
     propertyId: Number(row.property_id),
+    dealType: isContractDealType(row.deal_type) ? row.deal_type : null,
     status,
     capabilities,
     workflow: {
@@ -1304,13 +1315,7 @@ export function buildDocumentSlots(
     requirements[side]
       .filter((requirement) => requirement.applicability !== 'not_applicable')
       .flatMap((requirement) => {
-        // Property certificates share a category but are independent requirements.
-        const documentTypes =
-          requirement.category === 'docs_imovel'
-            ? requirement.acceptedDocumentTypes
-            : [requirement.preferredDocumentType];
-
-        return documentTypes.map((documentType) => {
+        return [requirement.preferredDocumentType].map((documentType) => {
           const document = latestBySideCategoryAndType.get(
             `${side}:${requirement.category}:${documentType}`
           );
@@ -1887,6 +1892,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     c.id,
     c.negotiation_id,
     c.property_id,
+    c.deal_type,
     c.status,
     c.seller_info,
     c.buyer_info,
@@ -2165,10 +2171,25 @@ class ContractController {
         loadContractForUpdate: fetchContractForUpdate,
       });
 
+      let draftGeneration: Awaited<ReturnType<typeof ensureContractDraftGenerated>> | null = null;
+      if (result.movedToDraft && result.contract?.id) {
+        try {
+          draftGeneration = await ensureContractDraftGenerated(result.contract.id);
+        } catch (error) {
+          console.error('Contrato entrou em IN_DRAFT, mas a minuta automática falhou:', error);
+          return res.status(502).json({
+            error:
+              'Documentação aprovada, mas a geração automática da minuta falhou. Tente gerar a minuta novamente.',
+            contract: mapContract(result.contract, req),
+          });
+        }
+      }
+
       return res.status(200).json({
         message: result.message,
         contract: result.contract ? mapContract(result.contract, req) : null,
         movedToDraft: result.movedToDraft,
+        draftGeneration,
       });
     } catch (error) {
       if (isContractSideReviewError(error)) {
@@ -2193,9 +2214,24 @@ class ContractController {
         loadContractForUpdate: fetchContractForUpdate,
       });
 
+      let draftGeneration: Awaited<ReturnType<typeof ensureContractDraftGenerated>> | null = null;
+      if (resolveContractStatus(result.contract?.status) === 'IN_DRAFT' && result.contract?.id) {
+        try {
+          draftGeneration = await ensureContractDraftGenerated(result.contract.id);
+        } catch (error) {
+          console.error('Contrato entrou em IN_DRAFT, mas a minuta automática falhou:', error);
+          return res.status(502).json({
+            error:
+              'Documentação aprovada, mas a geração automática da minuta falhou. Tente gerar a minuta novamente.',
+            contract: mapContract(result.contract, req),
+          });
+        }
+      }
+
       return res.status(200).json({
         message: result.message,
         contract: result.contract ? mapContract(result.contract, req) : null,
+        draftGeneration,
       });
     } catch (error) {
       if (isContractCategoryReviewError(error)) {
@@ -2451,10 +2487,21 @@ class ContractController {
           String(document.document_type ?? '').trim().toLowerCase() === 'contrato_minuta'
       );
 
-      if (reuseCurrentDraft && existingDraftDocuments.length === 0) {
+      const dealType = String(contract.deal_type ?? '').trim().toLowerCase();
+      if (!isContractDealType(dealType)) {
+        await tx.rollback();
+        return res.status(422).json({
+          error: 'Contrato sem modalidade comercial canônica; a minuta não pode ser anexada.',
+        });
+      }
+      const activeDraftDocuments = existingDraftDocuments.filter((document) =>
+        isCanonicalContractDraftMetadata(document.metadata_json, contractId, dealType)
+      );
+
+      if (reuseCurrentDraft && activeDraftDocuments.length === 0) {
         await tx.rollback();
         return res.status(400).json({
-          error: 'Não há minuta atual para prosseguir.',
+          error: 'Não há minuta canônica compatível com a modalidade atual para prosseguir.',
         });
       }
 
@@ -2465,13 +2512,19 @@ class ContractController {
           type: 'contract',
           documentType: 'contrato_minuta',
           content: uploadedFile.buffer,
+          contentType: uploadedFile.mimetype || 'application/pdf',
           metadataJson: {
-            contractId,
+            ...buildContractDraftDocumentMetadata({
+              contractId,
+              dealType,
+              generatedVia: 'admin_upload',
+              originalFileName: uploadedFile.originalname ?? 'minuta-contrato.pdf',
+              generationRevision: activeDraftDocuments.length + 1,
+            }),
             owner_side: side,
             side,
-            originalFileName: uploadedFile.originalname ?? null,
             uploadedAt: new Date().toISOString(),
-            uploadedVia: 'admin',
+            uploadedVia: 'admin_upload',
           },
         });
 
@@ -3276,6 +3329,26 @@ class ContractController {
       message: 'Responsável operacional atualizado.',
       contract: result?.contract ? mapContract(result.contract, req) : null,
     });
+  }
+
+  async generateDraft(req: Request, res: Response): Promise<Response> {
+    try {
+      const result = await ensureContractDraftGenerated(req.params.id, {
+        forceRegenerate: readBooleanLike(req.body?.forceRegenerate),
+      });
+      const contract = await fetchContractById(result.contractId);
+      return res.status(200).json({
+        message: result.generated ? 'Minuta gerada com sucesso.' : 'Minuta canônica já estava disponível.',
+        draftGeneration: result,
+        contract: contract ? mapContract(contract, req) : null,
+      });
+    } catch (error) {
+      if (isContractDraftGenerationError(error)) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      console.error('Erro ao gerar minuta automática:', error);
+      return res.status(500).json({ error: 'Falha ao gerar minuta automática.' });
+    }
   }
 
   async setSignatureMethod(req: AuthRequest, res: Response): Promise<Response> {

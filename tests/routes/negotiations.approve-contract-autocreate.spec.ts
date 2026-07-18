@@ -115,6 +115,7 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
           {
             id: 'neg-1',
             property_id: 101,
+            deal_type: 'sale',
             status: negotiationStatus,
             capturing_broker_id: 30003,
             selling_broker_id: 30003,
@@ -155,9 +156,10 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
       if (sql.includes('FROM negotiations n') && sql.includes('FOR UPDATE')) {
         return [[
           {
-            id: 'neg-1',
-            status: negotiationStatus,
-            property_id: 101,
+          id: 'neg-1',
+          status: negotiationStatus,
+          property_id: 101,
+          deal_type: 'sale',
             property_broker_id: 30005,
             capturing_broker_id: 30003,
             client_name: 'FGFG',
@@ -198,8 +200,8 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
 
       if (sql.includes('INSERT INTO contracts')) {
         contractInsertCount += 1;
-        const sellerInfo = JSON.parse(String(params[2]));
-        const buyerInfo = JSON.parse(String(params[3]));
+        const sellerInfo = JSON.parse(String(params[3]));
+        const buyerInfo = JSON.parse(String(params[4]));
         contractState = {
           id: `contract-${contractInsertCount}`,
           negotiationId: String(params[0]),
@@ -218,6 +220,7 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
           id: contractState.id,
           negotiation_id: contractState.negotiationId,
           property_id: contractState.propertyId,
+          deal_type: 'sale',
           status: contractState.status,
           seller_info: contractState.sellerInfo,
           buyer_info: contractState.buyerInfo,

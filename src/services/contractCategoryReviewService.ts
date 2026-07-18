@@ -7,6 +7,7 @@ import { calculateContractReadiness } from './contractReadinessService';
 import type { ContractRow } from '../controllers/ContractController';
 import {
   isContractDocumentCategoryStatus,
+  isContractDealType,
   type ContractApprovalStatus,
   type ContractDocumentCategoryCode,
   type ContractDocumentCategoryStatus,
@@ -150,7 +151,9 @@ function normalizeContractDocumentCategory(
     'comprovante_renda',
     'comprovante_garantia',
     'dados_bancarios',
-    'docs_imovel',
+    'certidao_inteiro_teor_escritura',
+    'certidao_onus_acoes',
+    'outro',
   ]);
   return allowed.has(normalized as ContractDocumentCategoryCode)
     ? (normalized as ContractDocumentCategoryCode)
@@ -201,7 +204,7 @@ function buildContractDocumentRuleContextFromRow(
   row: ContractRow
 ): ContractDocumentRuleContext {
   return {
-    propertyPurpose: row.property_purpose,
+    dealType: isContractDealType(row.deal_type) ? row.deal_type : null,
     sellerInfo: parseStoredJsonObject(row.seller_info),
     buyerInfo: parseStoredJsonObject(row.buyer_info),
   };

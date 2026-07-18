@@ -39,10 +39,14 @@ import {
   isContractWorkflowError,
   transitionContractStatus,
 } from '../../src/services/contractWorkflowService';
+import {
+  buildContractDraftDocumentMetadata,
+} from '../../src/services/contractDraftGenerationService';
 
 type MutableContractState = {
   id: string;
   negotiation_id: string;
+  deal_type: 'sale' | 'rent' | null;
   status: string;
   workflow_metadata: Record<string, unknown> | null;
   seller_approval_status: string;
@@ -66,6 +70,7 @@ function createContractState(
   return {
     id: 'contract-1',
     negotiation_id: 'neg-1',
+    deal_type: 'sale',
     status: 'IN_DRAFT',
     workflow_metadata: {
       signatureMethod: 'online',
@@ -82,6 +87,7 @@ describe('contractWorkflowService', () => {
   let contractState: MutableContractState;
   let documentsState: MutableDocumentState[];
   let draftTotal: number;
+  let canonicalDraft: boolean;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,6 +95,7 @@ describe('contractWorkflowService', () => {
     contractState = createContractState();
     documentsState = [];
     draftTotal = 0;
+    canonicalDraft = true;
 
     getContractDbConnectionMock.mockResolvedValue(txMock);
     txMock.beginTransaction.mockResolvedValue(undefined);
@@ -105,6 +112,26 @@ describe('contractWorkflowService', () => {
             payment_receipt_total: 0,
             inspection_boleto_total: 0,
           },
+        ]];
+      }
+
+      if (sql.includes('SELECT metadata_json') && sql.includes("document_type = 'contrato_minuta'")) {
+        return [[
+          ...(draftTotal > 0
+            ? [{
+                metadata_json: JSON.stringify(
+                  canonicalDraft
+                    ? buildContractDraftDocumentMetadata({
+                        contractId: contractState.id,
+                        dealType: contractState.deal_type ?? 'sale',
+                        generatedVia: 'automatic',
+                        originalFileName: 'minuta.pdf',
+                        generationRevision: 1,
+                      })
+                    : { contractId: contractState.id, documentKind: 'contract_draft', dealType: 'sale' }
+                ),
+              }]
+            : []),
         ]];
       }
 
@@ -202,6 +229,20 @@ describe('contractWorkflowService', () => {
     expect(result.contract?.status).toBe('AWAITING_SIGNATURES');
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
     expect(txMock.commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a legacy or mismatched draft even when a draft row exists', async () => {
+    contractState = createContractState({ status: 'IN_DRAFT', deal_type: 'rent' });
+    draftTotal = 1;
+    canonicalDraft = false;
+
+    await expect(
+      transitionContractStatus({
+        contractIdInput: 'contract-1',
+        directionInput: 'next',
+        loadContractForUpdate: async () => contractState,
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
   });
 
   it('steps back and cleans documents when returning to IN_DRAFT', async () => {

@@ -10,6 +10,15 @@ export const CONTRACT_STATUSES = [
 
 export type ContractStatus = (typeof CONTRACT_STATUSES)[number];
 
+/** Commercial modality copied from the approved negotiation. */
+export const CONTRACT_DEAL_TYPES = ['sale', 'rent'] as const;
+
+export type ContractDealType = (typeof CONTRACT_DEAL_TYPES)[number];
+
+export function isContractDealType(value: unknown): value is ContractDealType {
+  return typeof value === 'string' && CONTRACT_DEAL_TYPES.includes(value as ContractDealType);
+}
+
 export const CONTRACT_APPROVAL_STATUSES = [
   'PENDING',
   'APPROVED',
@@ -81,14 +90,15 @@ export const CONTRACT_DOCUMENT_CATEGORY_LABELS: Record<
   (typeof CONTRACT_DOCUMENT_CATEGORY_CODES)[number],
   string
 > = {
-  identidade: 'Identidade',
+  identidade: 'Documento Pessoal',
   comprovante_endereco: 'Comprovante de Endereço',
   estado_civil: 'Estado Civil',
   conjuge_documentos: 'Documento Pessoal (Cônjuge)',
   comprovante_renda: 'Comprovante de Renda',
   comprovante_garantia: 'Comprovante de Garantia',
   dados_bancarios: 'Dados Bancários',
-  docs_imovel: 'Documentos do Imóvel',
+  certidao_inteiro_teor_escritura: 'Certidão de Inteiro Teor/Escritura',
+  certidao_onus_acoes: 'Certidão de Ônus/Ações',
   outro: 'Outro',
 };
 
@@ -100,7 +110,8 @@ export const CONTRACT_DOCUMENT_CATEGORY_CODES = [
   'comprovante_renda',
   'comprovante_garantia',
   'dados_bancarios',
-  'docs_imovel',
+  'certidao_inteiro_teor_escritura',
+  'certidao_onus_acoes',
   'outro',
 ] as const;
 

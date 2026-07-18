@@ -1,4 +1,8 @@
-import { ProposalData, type DealType } from '../modules/negotiations/domain/states/NegotiationState';
+import {
+  ProposalData,
+  type DealType,
+  type RentalProposalTerms,
+} from '../modules/negotiations/domain/states/NegotiationState';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 
 export interface ProposalBody {
@@ -57,6 +61,28 @@ export interface ProposalWizardBody {
     financiamento?: unknown;
     outros?: unknown;
   };
+  rentalTerms?: RentalTermsBody;
+  rental_terms?: RentalTermsBody;
+}
+
+interface RentalTermsBody {
+  monthlyRent?: unknown;
+  monthly_rent?: unknown;
+  guaranteeType?: unknown;
+  guarantee_type?: unknown;
+  guaranteeAmount?: unknown;
+  guarantee_amount?: unknown;
+  leaseTermMonths?: unknown;
+  lease_term_months?: unknown;
+  expectedStartDate?: unknown;
+  expected_start_date?: unknown;
+  monthlyDueDay?: unknown;
+  monthly_due_day?: unknown;
+  condominiumResponsibility?: unknown;
+  condominium_responsibility?: unknown;
+  propertyTaxResponsibility?: unknown;
+  property_tax_responsibility?: unknown;
+  observations?: unknown;
 }
 
 export interface ParsedProposalWizard {
@@ -74,6 +100,7 @@ export interface ParsedProposalWizard {
     financiamento: number;
     outros: number;
   };
+  rentalTerms: RentalProposalTerms | null;
 }
 
 interface PropertyAddressRow {
@@ -147,6 +174,101 @@ export function parsePositiveNumber(input: unknown, fieldName: string): number {
     throw new Error(`${fieldName} deve ser um numero maior ou igual a zero.`);
   }
   return parsed;
+}
+
+function parseOptionalText(input: unknown, fieldName: string, maxLength: number): string | null {
+  if (input === undefined || input === null) {
+    return null;
+  }
+
+  const value = String(input).trim();
+  if (!value) {
+    return null;
+  }
+  if (value.length > maxLength) {
+    throw new Error(`${fieldName} excede o limite de ${maxLength} caracteres.`);
+  }
+  return value;
+}
+
+function parseOptionalNonNegativeNumber(input: unknown, fieldName: string): number | null {
+  if (input === undefined || input === null || String(input).trim() === '') {
+    return null;
+  }
+  return parsePositiveNumber(input, fieldName);
+}
+
+function parseOptionalPositiveInteger(input: unknown, fieldName: string): number | null {
+  const value = parseOptionalNonNegativeNumber(input, fieldName);
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${fieldName} deve ser um inteiro maior que zero.`);
+  }
+  return value;
+}
+
+function parseOptionalDueDay(input: unknown): number | null {
+  const value = parseOptionalPositiveInteger(input, 'rentalTerms.monthlyDueDay');
+  if (value !== null && value > 31) {
+    throw new Error('rentalTerms.monthlyDueDay deve estar entre 1 e 31.');
+  }
+  return value;
+}
+
+function parseOptionalIsoDate(input: unknown): string | null {
+  const value = parseOptionalText(input, 'rentalTerms.expectedStartDate', 10);
+  if (value === null) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error('rentalTerms.expectedStartDate deve usar o formato YYYY-MM-DD.');
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    throw new Error('rentalTerms.expectedStartDate deve ser uma data válida.');
+  }
+  return value;
+}
+
+function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalProposalTerms | null {
+  if (dealType !== 'rent') {
+    return null;
+  }
+
+  const raw = body.rentalTerms ?? body.rental_terms ?? {};
+  return {
+    monthlyRent: parseOptionalNonNegativeNumber(raw.monthlyRent ?? raw.monthly_rent, 'rentalTerms.monthlyRent'),
+    guaranteeType: parseOptionalText(raw.guaranteeType ?? raw.guarantee_type, 'rentalTerms.guaranteeType', 80),
+    guaranteeAmount: parseOptionalNonNegativeNumber(
+      raw.guaranteeAmount ?? raw.guarantee_amount,
+      'rentalTerms.guaranteeAmount'
+    ),
+    leaseTermMonths: parseOptionalPositiveInteger(
+      raw.leaseTermMonths ?? raw.lease_term_months,
+      'rentalTerms.leaseTermMonths'
+    ),
+    expectedStartDate: parseOptionalIsoDate(raw.expectedStartDate ?? raw.expected_start_date),
+    monthlyDueDay: parseOptionalDueDay(raw.monthlyDueDay ?? raw.monthly_due_day),
+    condominiumResponsibility: parseOptionalText(
+      raw.condominiumResponsibility ?? raw.condominium_responsibility,
+      'rentalTerms.condominiumResponsibility',
+      80
+    ),
+    propertyTaxResponsibility: parseOptionalText(
+      raw.propertyTaxResponsibility ?? raw.property_tax_responsibility,
+      'rentalTerms.propertyTaxResponsibility',
+      80
+    ),
+    observations: parseOptionalText(raw.observations, 'rentalTerms.observations', 1000),
+  };
 }
 
 export function normalizeProposalCpfKey(raw: string): string {
@@ -267,6 +389,7 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
     'pagamento.financiamento'
   );
   const outros = parsePositiveNumber(pagamento.outros ?? 0, 'pagamento.outros');
+  const rentalTerms = parseRentalTerms(body, dealType);
 
   if (!Number.isInteger(propertyId) || propertyId <= 0) {
     throw new Error('propertyId invalido.');
@@ -325,6 +448,7 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
       financiamento,
       outros,
     },
+    rentalTerms,
   };
 }
 

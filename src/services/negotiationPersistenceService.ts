@@ -80,6 +80,20 @@ function readPaymentAmount(
   return 0;
 }
 
+function readOptionalNumber(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function readOptionalText(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text || null;
+}
+
 export async function queryNegotiationRows<T extends RowDataPacket>(
   sql: string,
   params: unknown[]
@@ -169,6 +183,29 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
     city: row.city,
     state: row.state,
   });
+  const rentalDetails = parseJsonObjectSafe(details.rentalTerms ?? details.rental_terms);
+  const rentalTerms = dealType === 'rent'
+    ? {
+        monthlyRent:
+          readOptionalNumber(rentalDetails.monthlyRent ?? rentalDetails.monthly_rent) ?? normalizedFinalValue,
+        guaranteeType: readOptionalText(rentalDetails.guaranteeType ?? rentalDetails.guarantee_type),
+        guaranteeAmount: readOptionalNumber(rentalDetails.guaranteeAmount ?? rentalDetails.guarantee_amount),
+        leaseTermMonths: readOptionalNumber(
+          rentalDetails.leaseTermMonths ?? rentalDetails.lease_term_months
+        ),
+        expectedStartDate: readOptionalText(
+          rentalDetails.expectedStartDate ?? rentalDetails.expected_start_date
+        ),
+        monthlyDueDay: readOptionalNumber(rentalDetails.monthlyDueDay ?? rentalDetails.monthly_due_day),
+        condominiumResponsibility: readOptionalText(
+          rentalDetails.condominiumResponsibility ?? rentalDetails.condominium_responsibility
+        ),
+        propertyTaxResponsibility: readOptionalText(
+          rentalDetails.propertyTaxResponsibility ?? rentalDetails.property_tax_responsibility
+        ),
+        observations: readOptionalText(rentalDetails.observations),
+      }
+    : null;
 
   return {
     clientName: String(row.client_name ?? details.clientName ?? details.client_name ?? '').trim(),
@@ -181,6 +218,7 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
     payment: resolvedPayment,
     paymentMethod: String(paymentDetails.paymentMethod ?? paymentDetails.payment_method ?? '').trim() || undefined,
     validityDays: Number.isInteger(validityDays) && validityDays > 0 ? validityDays : 10,
+    rentalTerms,
   };
 }
 

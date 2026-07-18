@@ -3,6 +3,7 @@ import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
 import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
+import { buildGeneratedProposalDocumentMetadata } from '../modules/negotiations/domain/proposalTemplateMetadata';
 import {
   generateNegotiationProposalPdf,
   getNegotiationDbConnection,
@@ -524,6 +525,13 @@ async function updateProposalFromWizardInternal(
         clientName: payload.clientName,
         clientCpf: payload.clientCpf,
         listingValue: Number(safeListingValue.toFixed(2)),
+        rentalTerms:
+          dealType === 'rent'
+            ? {
+                ...payload.rentalTerms,
+                monthlyRent: payload.rentalTerms?.monthlyRent ?? proposalValue,
+              }
+            : null,
       },
     });
     let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();
@@ -600,6 +608,13 @@ async function updateProposalFromWizardInternal(
           dealType,
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
+          rentalTerms:
+            dealType === 'rent'
+              ? {
+                  ...payload.rentalTerms,
+                  monthlyRent: payload.rentalTerms?.monthlyRent ?? proposalValue,
+                }
+              : null,
           adminId: allowAdmin && roleForAccess === 'admin' ? req.userId : null,
         }),
       ]
@@ -621,12 +636,19 @@ async function updateProposalFromWizardInternal(
         others: payload.pagamento.outros,
       },
       validityDays: payload.validadeDias,
+      rentalTerms:
+        dealType === 'rent'
+          ? {
+              ...payload.rentalTerms,
+              monthlyRent: payload.rentalTerms?.monthlyRent ?? proposalValue,
+            }
+          : null,
     };
     const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
     const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
       originalFileName: 'proposta.pdf',
       generated: true,
-      metadata: { source: 'mobile_proposal_wizard_update' },
+      metadata: buildGeneratedProposalDocumentMetadata(dealType, 'mobile_proposal_wizard_update'),
     });
     await purgeNegotiationProposalDocuments(tx, negotiationId, {
       keepDocumentId: documentId,
@@ -651,6 +673,13 @@ async function updateProposalFromWizardInternal(
         financiamento: payload.pagamento.financiamento,
         outros: payload.pagamento.outros,
       },
+      rentalTerms:
+        dealType === 'rent'
+          ? {
+              ...payload.rentalTerms,
+              monthlyRent: payload.rentalTerms?.monthlyRent ?? proposalValue,
+            }
+          : null,
       status: DEFAULT_WIZARD_STATUS,
       documentId,
     });

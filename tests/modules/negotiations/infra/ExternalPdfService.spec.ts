@@ -133,4 +133,60 @@ describe('ExternalPdfService', () => {
       })
     );
   });
+
+  it('uses the dedicated endpoint for canonical contract drafts', async () => {
+    postMock.mockResolvedValueOnce({ data: Buffer.from('%PDF-1.4 contract') });
+    const service = new ExternalPdfService({
+      baseUrl: 'https://pdf.example.com',
+      internalApiKey: 'internal-key',
+    });
+
+    await service.generateContract({
+      contractId: 'contract-1',
+      dealType: 'rent',
+      propertyTitle: 'Casa',
+      propertyAddress: 'Rua A, 10',
+      seller: { name: 'Locador' },
+      buyer: { name: 'Locatário' },
+      saleTerms: { cash: 0, tradeIn: 0, financing: 0, others: 0 },
+      rentalTerms: { monthlyRent: 1500 },
+    });
+
+    expect(postMock).toHaveBeenCalledWith(
+      'https://pdf.example.com/generate-contract',
+      expect.objectContaining({
+        contract_id: 'contract-1',
+        deal_type: 'rent',
+        rental_terms: expect.objectContaining({ monthly_rent: 1500 }),
+      }),
+      expect.objectContaining({
+        headers: { 'X-Internal-API-Key': 'internal-key' },
+      })
+    );
+  });
+
+  it('derives the contract endpoint from a legacy proposal endpoint setting', async () => {
+    postMock.mockResolvedValueOnce({ data: Buffer.from('%PDF-1.4 contract') });
+    const service = new ExternalPdfService({
+      baseUrl: 'https://pdf.example.com/generate-proposal',
+      internalApiKey: 'internal-key',
+    });
+
+    await service.generateContract({
+      contractId: 'contract-1',
+      dealType: 'sale',
+      propertyTitle: 'Casa',
+      propertyAddress: 'Rua A, 10',
+      seller: { name: 'Vendedor' },
+      buyer: { name: 'Comprador' },
+      saleTerms: { cash: 1, tradeIn: 0, financing: 0, others: 0 },
+      rentalTerms: { monthlyRent: 0 },
+    });
+
+    expect(postMock).toHaveBeenCalledWith(
+      'https://pdf.example.com/generate-contract',
+      expect.any(Object),
+      expect.any(Object)
+    );
+  });
 });

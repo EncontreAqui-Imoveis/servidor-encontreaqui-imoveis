@@ -36,6 +36,7 @@ type NegotiationClientSqlFragments = {
 interface AdminNegotiationListRow extends RowDataPacket {
   id: string;
   negotiation_status: string | null;
+  deal_type: 'sale' | 'rent' | null;
   property_id: number | string;
   created_at: string | Date | null;
   property_owner_name: string | null;
@@ -59,6 +60,7 @@ interface AdminNegotiationListRow extends RowDataPacket {
   payment_permuta: number | string | null;
   payment_financiamento: number | string | null;
   payment_outros: number | string | null;
+  payment_details_json: string | null;
   last_event_at: string | Date | null;
   approved_at: string | Date | null;
   signed_document_id: number | string | null;
@@ -380,11 +382,16 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
   const draftDocumentMetadata = parseJsonObjectSafe(row.draft_document_metadata_json);
   const draftDocumentFileName = String(draftDocumentMetadata.originalFileName ?? '').trim();
   const hasSignedProposalDocument = row.signed_document_id != null;
+  const paymentDetails = parseJsonObjectSafe(row.payment_details_json);
+  const paymentDetailValues = parseJsonObjectSafe(paymentDetails.details);
+  const rentalTerms = parseJsonObjectSafe(paymentDetailValues.rentalTerms ?? paymentDetails.rentalTerms);
+  const dealType = row.deal_type === 'rent' || row.deal_type === 'sale' ? row.deal_type : null;
 
   return {
     id: row.id,
     status: toAdminNegotiationStatus(row),
     internalStatus: String(row.negotiation_status ?? '').toUpperCase(),
+    dealType,
     propertyId: Number(row.property_id),
     propertyCode: row.property_code ?? null,
     propertyTitle: row.property_title ?? null,
@@ -410,6 +417,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
       financiamento: toNegotiationMoney(row.payment_financiamento),
       outros: toNegotiationMoney(row.payment_outros),
     },
+    rentalTerms: dealType === 'rent' ? rentalTerms : null,
     updatedAt: toNullableIsoDate(row.last_event_at),
     approvedAt: toNullableIsoDate(row.approved_at),
     signedDocumentId: row.signed_document_id != null ? Number(row.signed_document_id) : null,
@@ -450,6 +458,7 @@ export async function listNegotiations(params: {
       SELECT
         n.id,
         n.status AS negotiation_status,
+        n.deal_type,
         n.property_id,
         ${timeSql.nEventAtSelect} AS created_at,
         COALESCE(property_owner_user.name, p.owner_name) AS property_owner_name,
@@ -469,6 +478,7 @@ export async function listNegotiations(params: {
           LIMIT 1
         ) AS property_image_url,
         n.final_value,
+        n.payment_details AS payment_details_json,
         n.proposal_validity_date,
         COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
         seller_user.name AS selling_broker_name,
@@ -738,6 +748,7 @@ export async function listNegotiationRequestsByProperty(params: {
       SELECT
         n.id,
         n.status AS negotiation_status,
+        n.deal_type,
         n.property_id,
         ${timeSql.nEventAtSelect} AS created_at,
         COALESCE(property_owner_user.name, p.owner_name) AS property_owner_name,
@@ -757,6 +768,7 @@ export async function listNegotiationRequestsByProperty(params: {
           LIMIT 1
         ) AS property_image_url,
         n.final_value,
+        n.payment_details AS payment_details_json,
         n.proposal_validity_date,
         COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
         seller_user.name AS selling_broker_name,

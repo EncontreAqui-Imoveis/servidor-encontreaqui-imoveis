@@ -9,12 +9,17 @@ import { resetWorkflowMetadata } from './contractWorkflowMetadata';
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import {
   isContractStatus,
+  isContractDealType,
   type ContractStatus,
 } from '../modules/contracts/domain/contract.types';
+import {
+  isCanonicalContractDraftMetadata,
+} from './contractDraftGenerationService';
 
 export interface ContractWorkflowRow extends RowDataPacket {
   id: string;
   negotiation_id: string;
+  deal_type: string | null;
   status: string;
   workflow_metadata: unknown;
   seller_approval_status: string;
@@ -212,7 +217,7 @@ async function fetchDocumentsForStepBackCleanup(
 
 async function fetchContractDocumentGateCounts(
   tx: PoolConnection,
-  contract: Pick<ContractWorkflowRow, 'id' | 'negotiation_id'>
+  contract: Pick<ContractWorkflowRow, 'id' | 'negotiation_id' | 'deal_type'>
 ): Promise<{
   draftTotal: number;
   signedContractTotal: number;
@@ -301,6 +306,28 @@ async function fetchContractDocumentGateCounts(
     paymentReceiptTotal: toDocumentCount(row.payment_receipt_total),
     inspectionBoletoTotal: toDocumentCount(row.inspection_boleto_total),
   };
+}
+
+async function hasCanonicalActiveDraft(
+  tx: PoolConnection,
+  contract: Pick<ContractWorkflowRow, 'id' | 'negotiation_id' | 'deal_type'>
+): Promise<boolean> {
+  const dealType = String(contract.deal_type ?? '').trim().toLowerCase();
+  if (!isContractDealType(dealType)) {
+    return false;
+  }
+  const [rows] = await tx.query<Array<RowDataPacket & { metadata_json: unknown }>>(
+    `
+      SELECT metadata_json
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND document_type = 'contrato_minuta'
+    `,
+    [contract.negotiation_id]
+  );
+  return rows.some((row) =>
+    isCanonicalContractDraftMetadata(row.metadata_json, contract.id, dealType)
+  );
 }
 
 async function cleanupContractDocumentAssets(
@@ -454,11 +481,12 @@ export async function transitionContractStatus(
 
     if (nextStatus === 'AWAITING_SIGNATURES') {
       const documentCounts = await fetchContractDocumentGateCounts(tx, contract);
-      if (documentCounts.draftTotal <= 0) {
+      const hasCanonicalDraft = await hasCanonicalActiveDraft(tx, contract);
+      if (documentCounts.draftTotal <= 0 || !hasCanonicalDraft) {
         await tx.rollback();
         throw contractWorkflowError(
           400,
-          'Transição bloqueada: anexe uma minuta válida (contrato_minuta) vinculada a este contrato antes de avançar.'
+          'Transição bloqueada: gere uma minuta ativa compatível com a modalidade do contrato antes de avançar.'
         );
       }
     }

@@ -113,6 +113,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
 
   const requiredColumns = [
     ['contracts', 'workflow_metadata'],
+    ['contracts', 'deal_type'],
     ['contracts', 'seller_approval_status'],
     ['contracts', 'buyer_approval_status'],
     ['contracts', 'seller_approval_reason'],
@@ -165,6 +166,8 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     Array.from(CONTRACT_STATUSES)
   );
 
+  await assertEnumContains('contracts', 'deal_type', ['sale', 'rent']);
+
   await assertEnumContains(
     'contracts',
     'seller_approval_status',
@@ -198,7 +201,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
   return {
     checkedTables: requiredTables.length,
     checkedColumns: requiredColumns.length,
-    checkedEnums: 6,
+    checkedEnums: 7,
   };
 }
 

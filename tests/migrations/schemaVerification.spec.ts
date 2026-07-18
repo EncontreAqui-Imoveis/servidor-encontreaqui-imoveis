@@ -54,6 +54,10 @@ describe('verifyCriticalSchemaState', () => {
           }]];
         }
 
+        if (tableName === 'contracts' && columnName === 'deal_type') {
+          return [[{ column_type: "enum('sale','rent')" }]];
+        }
+
         if (tableName === 'negotiation_documents' && columnName === 'document_type') {
           return [[{
             column_type: `enum(${CONTRACT_DOCUMENT_TYPES.map((value) => `'${value}'`).join(',')})`,
@@ -84,8 +88,8 @@ describe('verifyCriticalSchemaState', () => {
 
     expect(result).toEqual({
       checkedTables: 10,
-      checkedColumns: 41,
-      checkedEnums: 6,
+      checkedColumns: 42,
+      checkedEnums: 7,
     });
   });
 

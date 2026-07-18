@@ -18,6 +18,7 @@ type NegotiationListRow = RowDataPacket & {
   created_at: Date | string | null;
   updated_at: Date | string | null;
   final_value: number | null;
+  deal_type: string | null;
   payment_details: unknown;
   proposer_id: number | null;
   advertiser_id: number | null;
@@ -77,6 +78,48 @@ function parsePaymentBreakdown(value: unknown) {
   }
 }
 
+function parseRentalTerms(value: unknown) {
+  try {
+    const source = typeof value === 'string' ? JSON.parse(value) : value;
+    const details = source && typeof source === 'object'
+      ? (source as Record<string, unknown>).details
+      : null;
+    if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+    const item = details as Record<string, unknown>;
+    const rawTerms = item.rentalTerms ?? item.rental_terms;
+    if (!rawTerms || typeof rawTerms !== 'object' || Array.isArray(rawTerms)) return null;
+    const terms = rawTerms as Record<string, unknown>;
+    return {
+      monthlyRent: toFiniteNumber(terms.monthlyRent ?? terms.monthly_rent),
+      guaranteeType: toTextOrNull(terms.guaranteeType ?? terms.guarantee_type),
+      guaranteeAmount: toFiniteNumber(terms.guaranteeAmount ?? terms.guarantee_amount),
+      leaseTermMonths: toFiniteNumber(terms.leaseTermMonths ?? terms.lease_term_months),
+      expectedStartDate: toTextOrNull(terms.expectedStartDate ?? terms.expected_start_date),
+      monthlyDueDay: toFiniteNumber(terms.monthlyDueDay ?? terms.monthly_due_day),
+      condominiumResponsibility: toTextOrNull(
+        terms.condominiumResponsibility ?? terms.condominium_responsibility
+      ),
+      propertyTaxResponsibility: toTextOrNull(
+        terms.propertyTaxResponsibility ?? terms.property_tax_responsibility
+      ),
+      observations: toTextOrNull(terms.observations),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toTextOrNull(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text || null;
+}
+
 function mapRow(row: NegotiationListRow, userId: number) {
   const status = String(row.status ?? '').trim().toUpperCase();
   const isProposer = Number(row.proposer_id) === userId;
@@ -93,6 +136,7 @@ function mapRow(row: NegotiationListRow, userId: number) {
     propertyState: row.property_state ?? null,
     propertyImage: optimizeCloudinaryImageUrl(row.property_image, { preset: 'thumb' }) ?? null,
     status,
+    dealType: row.deal_type === 'sale' || row.deal_type === 'rent' ? row.deal_type : null,
     clientName: row.client_name ?? null,
     clientCpf: null,
     proposer: row.proposer_id ? { id: Number(row.proposer_id), name: row.proposer_name ?? null } : null,
@@ -102,6 +146,7 @@ function mapRow(row: NegotiationListRow, userId: number) {
     proposalValidUntil: toIso(row.proposal_validity_date),
     proposalValue: row.final_value == null ? null : Number(row.final_value),
     paymentBreakdown: parsePaymentBreakdown(row.payment_details),
+    rentalTerms: parseRentalTerms(row.payment_details),
     hasSignedProposal: hasSignedProposalDocument,
     hasSignedProposalDocument,
     contract: contractId ? { id: contractId, status: row.contract_status ?? null } : null,
@@ -156,7 +201,7 @@ export async function listMine(req: AuthRequest, res: Response): Promise<Respons
       `
         SELECT
           n.id, n.property_id, n.status, n.client_name,
-          n.proposal_validity_date, n.created_at, n.updated_at, n.final_value,
+          n.proposal_validity_date, n.created_at, n.updated_at, n.final_value, n.deal_type,
           n.payment_details, n.proposer_id, n.advertiser_id,
           p.title AS property_title, p.city AS property_city, p.state AS property_state,
           (SELECT pi.image_url FROM property_images pi WHERE pi.property_id = p.id ORDER BY pi.id ASC LIMIT 1) AS property_image,

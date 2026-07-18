@@ -11,6 +11,10 @@ contractRoutes.post('/admin/negotiations/:id/contract', authMiddleware, isAdmin,
   contractController.createFromApprovedNegotiation(req, res)
 );
 
+contractRoutes.post('/admin/contracts/:id/generate-draft', authMiddleware, isAdmin, (req, res) =>
+  contractController.generateDraft(req, res)
+);
+
 contractRoutes.get('/contracts/me', authMiddleware, (req, res) =>
   contractController.listMyContracts(req, res)
 );

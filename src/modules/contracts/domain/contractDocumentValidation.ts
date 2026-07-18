@@ -40,7 +40,8 @@ export const SELLER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[]
   'comprovante_endereco',
   'estado_civil',
   'conjuge_documentos',
-  'docs_imovel',
+  'certidao_inteiro_teor_escritura',
+  'certidao_onus_acoes',
 ];
 
 const ALLOWED_FILE_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
@@ -64,14 +65,15 @@ const CATEGORY_DOCUMENT_TYPES: Record<
   ]),
   comprovante_endereco: new Set(['comprovante_endereco']),
   estado_civil: new Set(['certidao_casamento_nascimento']),
-  conjuge_documentos: new Set(['doc_identidade_conjuge', 'outro']),
+  conjuge_documentos: new Set(['doc_identidade_conjuge']),
   comprovante_renda: new Set(['comprovante_renda']),
   comprovante_garantia: new Set(['comprovante_garantia']),
   // Uses its own type so the mandatory seller requirement cannot be merged
   // with the independent optional "Outro" slot in client matrices.
   dados_bancarios: new Set(['dados_bancarios']),
   outro: new Set(['outro', ...CLIENTE_OUTRO_SLOT_TYPES]),
-  docs_imovel: new Set(['certidao_inteiro_teor', 'certidao_onus_acoes']),
+  certidao_inteiro_teor_escritura: new Set(['certidao_inteiro_teor']),
+  certidao_onus_acoes: new Set(['certidao_onus_acoes']),
 };
 
 export function resolveDocumentCategoryFromType(
@@ -111,8 +113,10 @@ export function resolveFallbackDocumentTypeByCategory(
       return 'dados_bancarios';
     case 'outro':
       return 'outro';
-    case 'docs_imovel':
+    case 'certidao_inteiro_teor_escritura':
       return 'certidao_inteiro_teor';
+    case 'certidao_onus_acoes':
+      return 'certidao_onus_acoes';
   }
 }
 

@@ -3,7 +3,10 @@ import {
   resolveMaritalBucket,
   type ContractDocumentRuleContext,
 } from '../modules/contracts/domain/contractDocumentRuleMatrix';
-import type { ContractDocumentCategoryCode } from '../modules/contracts/domain/contract.types';
+import type {
+  ContractDealType,
+  ContractDocumentCategoryCode,
+} from '../modules/contracts/domain/contract.types';
 
 type ContractSide = 'seller' | 'buyer';
 
@@ -36,7 +39,7 @@ function hasText(source: Record<string, unknown>, keys: readonly string[]): bool
 function missingQualificationFields(
   side: ContractSide,
   info: Record<string, unknown>,
-  propertyPurpose: string | null
+  dealType: ContractDealType | null
 ): string[] {
   const missing: string[] = [];
   const common: Array<[string, string[]]> = [
@@ -53,7 +56,7 @@ function missingQualificationFields(
     if (!hasText(info, aliases)) missing.push(field);
   }
 
-  const isRental = /alug|loca|rent/i.test(String(propertyPurpose ?? ''));
+  const isRental = dealType === 'rent';
   if (side === 'buyer' && isRental && !hasText(info, ['garantia_locacao', 'garantiaLocacao'])) {
     missing.push('garantia_locacao');
   }
@@ -95,7 +98,7 @@ function missingDocuments(
  */
 export function calculateContractReadiness(input: ContractReadinessInput): ContractReadiness {
   const buildSide = (side: ContractSide, info: Record<string, unknown>): ContractSideReadiness => {
-    const missingFields = missingQualificationFields(side, info, input.propertyPurpose);
+    const missingFields = missingQualificationFields(side, info, input.dealType);
     const missingDocumentCategories = missingDocuments(side, input);
     return {
       complete: missingFields.length === 0 && missingDocumentCategories.length === 0,

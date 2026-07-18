@@ -63,6 +63,7 @@ describe('Contract response shape contracts', () => {
             id: 'contract-1',
             negotiation_id: 'neg-1',
             property_id: 101,
+            deal_type: 'rent',
             status: 'AWAITING_SIGNATURES',
             seller_info: JSON.stringify({
               nome: 'Proprietário',
@@ -125,6 +126,7 @@ describe('Contract response shape contracts', () => {
         id: 'contract-1',
         negotiationId: 'neg-1',
         propertyId: 101,
+        dealType: 'rent',
         status: 'AWAITING_SIGNATURES',
         ownerInfo: {
           nome: 'Proprietário',

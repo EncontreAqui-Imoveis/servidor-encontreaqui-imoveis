@@ -37,6 +37,7 @@ describe('contractCreationService', () => {
     return {
       id: 'neg-1',
       property_id: 101,
+      deal_type: 'sale',
       status: 'DOCUMENTATION_PHASE',
       capturing_broker_id: 30003,
       selling_broker_id: 30004,
@@ -83,6 +84,7 @@ describe('contractCreationService', () => {
             id: 'contract-1',
             negotiation_id: 'neg-1',
             property_id: 101,
+            deal_type: 'sale',
             status: 'AWAITING_DOCS',
             seller_info: null,
             buyer_info: null,
@@ -129,6 +131,14 @@ describe('contractCreationService', () => {
       'neg-1',
     ]);
     expect(String(txMock.query.mock.calls[3]?.[0])).toContain('INSERT INTO contracts');
+    expect(txMock.query.mock.calls[3]?.[1]).toEqual([
+      'neg-1',
+      101,
+      'sale',
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+    ]);
     expect(result.handshakePin).toMatch(/^\d{4}$/);
   });
 
@@ -141,6 +151,7 @@ describe('contractCreationService', () => {
             id: 'contract-existing',
             negotiation_id: 'neg-1',
             property_id: 101,
+            deal_type: 'sale',
             status: 'AWAITING_DOCS',
             seller_info: null,
             buyer_info: null,
@@ -195,6 +206,16 @@ describe('contractCreationService', () => {
 
     await expect(createContractFromApprovedNegotiation('neg-1', null)).rejects.toThrow(
       'A negociação precisa estar aprovada antes da criação do contrato.',
+    );
+  });
+
+  it('rejects an approved negotiation without a canonical deal type', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[negotiationRow({ deal_type: null })]])
+      .mockResolvedValueOnce([[]]);
+
+    await expect(createContractFromApprovedNegotiation('neg-1', null)).rejects.toThrow(
+      'A negociação aprovada não possui uma modalidade comercial válida.',
     );
   });
 

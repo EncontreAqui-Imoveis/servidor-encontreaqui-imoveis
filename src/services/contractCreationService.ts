@@ -11,6 +11,10 @@ import {
   createBuyerHandshake,
   shouldCreateBuyerHandshake,
 } from './contractBuyerHandshakeService';
+import {
+  isContractDealType,
+  type ContractDealType,
+} from '../modules/contracts/domain/contract.types';
 
 type CreatedContractResult = {
   contract: ContractRow;
@@ -37,6 +41,11 @@ function contractCreationError(statusCode: number, message: string, code?: strin
 function normalizePositiveId(value: unknown): number | null {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function resolveApprovedNegotiationDealType(value: unknown): ContractDealType | null {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return isContractDealType(normalized) ? normalized : null;
 }
 
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
@@ -68,6 +77,7 @@ export async function createContractFromApprovedNegotiation(
     const [negotiationRows] = await tx.query<Array<RowDataPacket & {
       id: string;
       property_id: number;
+      deal_type: string | null;
       status: string;
       capturing_broker_id: number | null;
       selling_broker_id: number | null;
@@ -106,6 +116,7 @@ export async function createContractFromApprovedNegotiation(
         SELECT
           n.id,
           n.property_id,
+          n.deal_type,
           n.status,
           n.capturing_broker_id,
           n.selling_broker_id,
@@ -230,6 +241,7 @@ export async function createContractFromApprovedNegotiation(
           c.id,
           c.negotiation_id,
           c.property_id,
+          c.deal_type,
           c.status,
           c.seller_info,
           c.buyer_info,
@@ -308,6 +320,15 @@ export async function createContractFromApprovedNegotiation(
       throw contractCreationError(400, 'A negociação precisa estar aprovada antes da criação do contrato.');
     }
 
+    const dealType = resolveApprovedNegotiationDealType(negotiation.deal_type);
+    if (!dealType) {
+      throw contractCreationError(
+        422,
+        'A negociação aprovada não possui uma modalidade comercial válida.',
+        'CONTRACT_DEAL_TYPE_MISSING'
+      );
+    }
+
     const buyerHandshake = shouldCreateBuyerHandshake({
       initiatorSide: negotiation.initiator_side,
       legalBuyerUserId: partyResolution.legalBuyerUserId,
@@ -338,6 +359,7 @@ export async function createContractFromApprovedNegotiation(
 
     const workflowMetadata = {
       proposalInitiatorUserId,
+      dealType,
       ...partyResolution.metadata,
     };
 
@@ -347,6 +369,7 @@ export async function createContractFromApprovedNegotiation(
           id,
           negotiation_id,
           property_id,
+          deal_type,
           status,
           seller_info,
           buyer_info,
@@ -360,6 +383,7 @@ export async function createContractFromApprovedNegotiation(
           updated_at
         ) VALUES (
           UUID(),
+          ?,
           ?,
           ?,
           'AWAITING_DOCS',
@@ -378,6 +402,7 @@ export async function createContractFromApprovedNegotiation(
       [
         negotiationId,
         negotiation.property_id,
+        dealType,
         JSON.stringify(partyResolution.sellerInfo),
         JSON.stringify(partyResolution.buyerInfo),
         JSON.stringify(workflowMetadata),
@@ -399,6 +424,7 @@ export async function createContractFromApprovedNegotiation(
           c.id,
           c.negotiation_id,
           c.property_id,
+          c.deal_type,
           c.status,
           c.seller_info,
           c.buyer_info,

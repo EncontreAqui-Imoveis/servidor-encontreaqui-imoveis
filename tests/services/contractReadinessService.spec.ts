@@ -5,7 +5,7 @@ import { calculateContractReadiness } from '../../src/services/contractReadiness
 describe('calculateContractReadiness', () => {
   it('informa pendências sem impedir o salvamento parcial do rascunho', () => {
     const readiness = calculateContractReadiness({
-      propertyPurpose: 'Locação',
+      dealType: 'rent',
       sellerInfo: {
         profissao: 'Vendedora',
         email: 'seller@example.com',
@@ -36,7 +36,7 @@ describe('calculateContractReadiness', () => {
 
   it('exige os dados conjugais de Casado(a) apenas na readiness administrativa', () => {
     const readiness = calculateContractReadiness({
-      propertyPurpose: 'Venda',
+      dealType: 'sale',
       sellerInfo: {
         profissao: 'Vendedora',
         email: 'seller@example.com',

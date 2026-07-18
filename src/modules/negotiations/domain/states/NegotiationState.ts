@@ -15,6 +15,19 @@ export type NegotiationStatus =
 export type PaymentMethod = 'MONEY' | 'PERMUTATION' | 'FINANCING' | 'OTHER';
 export type DealType = 'sale' | 'rent';
 
+/** Commercial terms that only apply to a rental proposal. */
+export interface RentalProposalTerms {
+  monthlyRent?: number | null;
+  guaranteeType?: string | null;
+  guaranteeAmount?: number | null;
+  leaseTermMonths?: number | null;
+  expectedStartDate?: string | null;
+  monthlyDueDay?: number | null;
+  condominiumResponsibility?: string | null;
+  propertyTaxResponsibility?: string | null;
+  observations?: string | null;
+}
+
 export interface PaymentDetails {
   method: PaymentMethod;
   amount: number;
@@ -37,6 +50,7 @@ export interface ProposalData {
   };
   paymentMethod?: string;
   validityDays: number;
+  rentalTerms?: RentalProposalTerms | null;
 }
 
 export interface ProposalPdfService {

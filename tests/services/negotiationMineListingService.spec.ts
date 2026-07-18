@@ -171,6 +171,49 @@ describe('negotiationMineListingService.listMine', () => {
     }));
   });
 
+  it('returns rental terms and the immutable rent deal type for proposal editing', async () => {
+    vi.mocked(queryNegotiationRows)
+      .mockResolvedValueOnce([{ total: 1 }] as any)
+      .mockResolvedValueOnce([
+        {
+          id: 'neg-rent-1',
+          property_id: 303,
+          property_title: 'Casa para locação',
+          status: 'PROPOSAL_SENT',
+          client_name: 'Locatário',
+          deal_type: 'rent',
+          payment_details: JSON.stringify({
+            details: {
+              rentalTerms: {
+                monthlyRent: 2500,
+                guaranteeType: 'Caução',
+                leaseTermMonths: 30,
+              },
+            },
+          }),
+          proposer_id: 90002,
+          advertiser_id: 90001,
+          final_value: 2500,
+          signed_proposal_count: 0,
+        },
+      ] as any);
+
+    const res = createMockResponse();
+    await listMine({ userId: 90002 } as any, res);
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({
+        id: 'neg-rent-1',
+        dealType: 'rent',
+        rentalTerms: expect.objectContaining({
+          monthlyRent: 2500,
+          guaranteeType: 'Caução',
+          leaseTermMonths: 30,
+        }),
+      })],
+    }));
+  });
+
   it('does not expose legacy proposals without an explicit actor', async () => {
     vi.mocked(queryNegotiationRows)
       .mockResolvedValueOnce([{ total: 0 }] as any)

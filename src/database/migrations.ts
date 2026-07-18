@@ -879,6 +879,7 @@ async function ensureContractsTable(): Promise<void> {
       id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
       negotiation_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
       property_id INT NOT NULL,
+      deal_type ENUM('sale', 'rent') NULL,
       status ENUM('AWAITING_DOCS', 'IN_DRAFT', 'AWAITING_SIGNATURES', 'FINALIZED') NOT NULL DEFAULT 'AWAITING_DOCS',
       seller_info JSON NULL,
       buyer_info JSON NULL,
@@ -894,6 +895,7 @@ async function ensureContractsTable(): Promise<void> {
       UNIQUE KEY uq_contracts_negotiation (negotiation_id),
       KEY idx_contracts_property (property_id),
       KEY idx_contracts_status (status),
+      KEY idx_contracts_deal_type_status (deal_type, status),
       CONSTRAINT fk_contracts_negotiation
         FOREIGN KEY (negotiation_id) REFERENCES negotiations(id) ON DELETE CASCADE,
       CONSTRAINT fk_contracts_property
@@ -979,6 +981,38 @@ async function ensureContractWorkflowMetadataColumn(): Promise<void> {
       ADD COLUMN workflow_metadata JSON NULL
       AFTER commission_data
     `);
+  }
+}
+
+async function ensureContractDealTypeColumn(): Promise<void> {
+  if (!(await tableExists('contracts'))) {
+    return;
+  }
+
+  if (!(await columnExists('contracts', 'deal_type'))) {
+    await connection.query(`
+      ALTER TABLE contracts
+      ADD COLUMN deal_type ENUM('sale', 'rent') NULL
+      AFTER property_id
+    `);
+  }
+
+  await connection.query(`
+    UPDATE contracts c
+    JOIN negotiations n ON n.id = c.negotiation_id
+    SET c.deal_type = CASE
+      WHEN LOWER(TRIM(n.deal_type)) = 'rent' THEN 'rent'
+      WHEN LOWER(TRIM(n.deal_type)) = 'sale' THEN 'sale'
+      ELSE NULL
+    END
+    WHERE c.deal_type IS NULL
+       OR c.deal_type NOT IN ('sale', 'rent')
+  `);
+
+  if (!(await indexExists('contracts', 'idx_contracts_deal_type_status'))) {
+    await connection.query(
+      'ALTER TABLE contracts ADD INDEX idx_contracts_deal_type_status (deal_type, status)'
+    );
   }
 }
 
@@ -1480,6 +1514,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureContractsTable();
     await ensureContractApprovalColumns();
     await ensureContractWorkflowMetadataColumn();
+    await ensureContractDealTypeColumn();
     await ensureNegotiationDocumentTypeColumn();
     await ensureNegotiationDocumentMetadataColumn();
     await backfillNegotiationDocumentOwnerSide();

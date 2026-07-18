@@ -5,6 +5,7 @@ import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { AuthRequest } from '../middlewares/auth';
 import { getRequestId } from '../middlewares/requestContext';
 import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
+import { buildGeneratedProposalDocumentMetadata } from '../modules/negotiations/domain/proposalTemplateMetadata';
 import {
   findNegotiationDocumentById,
   generateNegotiationProposalPdf,
@@ -86,6 +87,18 @@ type BrokerProposalContext = {
 
 const DEFAULT_WIZARD_STATUS = 'PROPOSAL_SENT';
 const PROPOSAL_CREATION_COOLDOWN_MS = 60_000;
+
+function resolveListingValueForDealType(property: PropertyRow, dealType: 'sale' | 'rent'): number {
+  const preferredValue = dealType === 'rent' ? property.price_rent : property.price_sale;
+  const candidates = [preferredValue, property.price];
+  for (const value of candidates) {
+    const parsed = Number(value ?? 0);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return 0;
+}
 
 function resolveIdempotencyKey(req: AuthRequest): string {
   const fromHeader = String(req.get('Idempotency-Key') ?? '').trim();
@@ -506,13 +519,12 @@ export async function generateProposalFromProperty(
       }
     }
 
-    const listingValue = resolvePropertyValue(property);
+    const dealType = normalizeDealType(payload.dealType) ?? inferDealTypeFromPurpose(property.purpose);
+    const listingValue = resolveListingValueForDealType(property, dealType);
     if (listingValue <= 0) {
       await tx.rollback();
       return res.status(400).json({ error: 'Imovel sem valor valido para gerar proposta.' });
     }
-    const dealType = normalizeDealType(payload.dealType) ?? inferDealTypeFromPurpose(property.purpose);
-
     const body = req.body as ProposalWizardBody;
     const rawDeclared =
       body.proposalValue ??
@@ -528,13 +540,10 @@ export async function generateProposalFromProperty(
       proposalValue = Number(parsedDeclared.toFixed(2));
     }
 
-    const paymentTotal =
-      payload.pagamento.dinheiro +
-      payload.pagamento.permuta +
-      payload.pagamento.financiamento +
-      payload.pagamento.outros;
+    const paymentTotal = payload.pagamento.dinheiro + payload.pagamento.permuta +
+      payload.pagamento.financiamento + payload.pagamento.outros;
 
-    if (toCents(paymentTotal) !== toCents(proposalValue)) {
+    if (dealType === 'sale' && toCents(paymentTotal) !== toCents(proposalValue)) {
       await tx.rollback();
       return res.status(400).json({
         error: 'A soma dos pagamentos deve ser exatamente igual ao valor total informado na proposta.',
@@ -542,6 +551,12 @@ export async function generateProposalFromProperty(
         paymentTotal,
       });
     }
+    const rentalTerms = dealType === 'rent'
+      ? {
+          ...payload.rentalTerms,
+          monthlyRent: payload.rentalTerms?.monthlyRent ?? proposalValue,
+        }
+      : null;
 
     const propertyBrokerId = normalizeOptionalPositiveId(property.broker_id);
     const requestedCapturingBrokerId = propertyBrokerId ?? (isBrokerUser ? normalizeOptionalPositiveId(req.userId) : null);
@@ -629,6 +644,7 @@ export async function generateProposalFromProperty(
         clientCpf: payload.clientCpf,
         clientEmail: payload.buyerEmail,
         listingValue: Number(listingValue.toFixed(2)),
+        rentalTerms,
       },
     });
     const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
@@ -701,6 +717,7 @@ export async function generateProposalFromProperty(
           clientName: payload.clientName,
           clientCpf: payload.clientCpf,
           clientEmail: payload.buyerEmail,
+          rentalTerms,
           initiatorSide,
         }),
       ]
@@ -721,13 +738,14 @@ export async function generateProposalFromProperty(
         others: payload.pagamento.outros,
       },
       validityDays: payload.validadeDias,
+      rentalTerms,
     };
 
     const pdfBuffer = await generateNegotiationProposalPdf(proposalData);
     const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
       originalFileName: 'proposta.pdf',
       generated: true,
-      metadata: { source: 'mobile_proposal_wizard' },
+      metadata: buildGeneratedProposalDocumentMetadata(dealType, 'mobile_proposal_wizard'),
     });
 
     await tx.execute(
@@ -869,7 +887,10 @@ export async function generateProposalFromNegotiationDraft(
     const documentId = await saveNegotiationProposalDocument(negotiationId, pdfBuffer, tx, {
       originalFileName: 'proposta.pdf',
       generated: true,
-      metadata: { source: 'admin_negotiation_draft_generation' },
+      metadata: buildGeneratedProposalDocumentMetadata(
+        proposalData.dealType ?? 'sale',
+        'admin_negotiation_draft_generation'
+      ),
     });
     await purgeNegotiationProposalDocuments(tx, negotiationId, {
       keepDocumentId: documentId,

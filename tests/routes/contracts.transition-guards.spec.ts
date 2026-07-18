@@ -34,6 +34,7 @@ type MutableContractState = {
   id: string;
   negotiation_id: string;
   property_id: number;
+  deal_type: 'sale' | 'rent';
   status: string;
   seller_info: Record<string, unknown>;
   buyer_info: Record<string, unknown>;
@@ -69,6 +70,7 @@ function createContractState(
     id: 'contract-1',
     negotiation_id: 'neg-1',
     property_id: 101,
+    deal_type: 'sale',
     status: 'IN_DRAFT',
     seller_info: {},
     buyer_info: {},
@@ -137,6 +139,22 @@ describe('PUT /admin/contracts/:id/transition guards', () => {
             const linkedContractId = String(metadata.contractId ?? '').trim();
             return linkedContractId === contractId || (!linkedContractId && item.document_type !== 'outro');
           }),
+        ]];
+      }
+
+      if (
+        sql.includes('FROM negotiation_documents') &&
+        sql.includes('SELECT metadata_json') &&
+        sql.includes("document_type = 'contrato_minuta'")
+      ) {
+        return [[
+          ...documentsState
+            .filter(
+              (item) =>
+                item.negotiation_id === String(params[0] ?? '') &&
+                item.document_type === 'contrato_minuta'
+            )
+            .map((item) => ({ metadata_json: item.metadata_json })),
         ]];
       }
 
@@ -223,6 +241,22 @@ describe('PUT /admin/contracts/:id/transition guards', () => {
   it('allows moving to AWAITING_SIGNATURES only when draft exists for this contract', async () => {
     contractState = createContractState({ status: 'IN_DRAFT' });
     draftTotal = 1;
+    documentsState = [
+      {
+        id: 1,
+        negotiation_id: 'neg-1',
+        type: 'contract',
+        document_type: 'contrato_minuta',
+        metadata_json: JSON.stringify({
+          contractId: 'contract-1',
+          documentKind: 'contract_draft',
+          dealType: 'sale',
+          templateKey: 'sale_contract_v1',
+          templateVersion: '1',
+          isActiveContractDraft: true,
+        }),
+      },
+    ];
 
     const response = await request(app)
       .put('/admin/contracts/contract-1/transition')

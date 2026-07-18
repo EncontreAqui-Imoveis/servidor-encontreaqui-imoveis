@@ -1,4 +1,8 @@
-import type { ContractDocumentCategoryCode, ContractDocumentType } from './contract.types';
+import type {
+  ContractDealType,
+  ContractDocumentCategoryCode,
+  ContractDocumentType,
+} from './contract.types';
 import {
   resolveAcceptedDocumentTypesForCategory,
   resolveFallbackDocumentTypeByCategory,
@@ -33,27 +37,14 @@ export interface DocumentRequirementMatrixPayload {
 }
 
 export interface ContractDocumentRuleContext {
-  propertyPurpose: string | null;
+  /** Immutable modality copied from the approved negotiation. Never infer from property text. */
+  dealType: ContractDealType | null;
   sellerInfo: Record<string, unknown>;
   buyerInfo: Record<string, unknown>;
 }
 
 function stripDiacritics(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-}
-
-function normalizePurpose(value: string | null): string {
-  return stripDiacritics(String(value ?? '').trim().toLowerCase());
-}
-
-function isSalePurpose(value: string | null): boolean {
-  const purpose = normalizePurpose(value);
-  return purpose.includes('vend') || purpose.includes('sale');
-}
-
-function isRentalPurpose(value: string | null): boolean {
-  const purpose = normalizePurpose(value);
-  return purpose.includes('alug') || purpose.includes('loca') || purpose.includes('rent');
 }
 
 /**
@@ -112,19 +103,20 @@ function conjugeRequirementForMarital(marital: MaritalBucket): CategoryRequireme
 }
 
 /**
- * Matriz condicional por lado, finalidade e estado civil (por lado).
+ * Matriz condicional por lado, modalidade imutável e estado civil (por lado).
  */
 export function resolveDocumentRequirements(input: {
   side: 'seller' | 'buyer';
-  propertyPurpose: string | null;
+  dealType: ContractDealType | null;
   sellerInfo: Record<string, unknown>;
   buyerInfo: Record<string, unknown>;
 }): CategoryRequirement[] {
   const sellerMarital = resolveMaritalBucket(input.sellerInfo);
   const buyerMarital = resolveMaritalBucket(input.buyerInfo);
   const marital = input.side === 'seller' ? sellerMarital : buyerMarital;
-  const salePurpose = isSalePurpose(input.propertyPurpose);
-  const rentalPurpose = isRentalPurpose(input.propertyPurpose);
+  const isSale = input.dealType === 'sale';
+  const isRent = input.dealType === 'rent';
+  const modalityUnknown = !isSale && !isRent;
 
   const conjuge = conjugeRequirementForMarital(marital);
 
@@ -156,12 +148,24 @@ export function resolveDocumentRequirements(input: {
       },
       conjuge,
       {
-        category: 'docs_imovel',
-        applicability: rentalPurpose ? 'not_applicable' : 'required',
-        required: !rentalPurpose,
-        reasonCode: rentalPurpose
-          ? 'DOCS_IMOVEL_NA_RENTAL_ONLY'
-          : 'DOCS_IMOVEL_REQUIRED',
+        category: 'certidao_inteiro_teor_escritura',
+        applicability: modalityUnknown ? 'not_applicable' : 'required',
+        required: !modalityUnknown,
+        reasonCode: modalityUnknown
+          ? 'CERTIDAO_INTEIRO_TEOR_NA_DEAL_TYPE_UNRESOLVED'
+          : isRent
+            ? 'CERTIDAO_INTEIRO_TEOR_REQUIRED_RENTAL'
+            : 'CERTIDAO_INTEIRO_TEOR_REQUIRED_SALE',
+      },
+      {
+        category: 'certidao_onus_acoes',
+        applicability: isSale ? 'required' : 'not_applicable',
+        required: isSale,
+        reasonCode: isSale
+          ? 'CERTIDAO_ONUS_ACOES_REQUIRED_SALE'
+          : modalityUnknown
+            ? 'CERTIDAO_ONUS_ACOES_NA_DEAL_TYPE_UNRESOLVED'
+            : 'CERTIDAO_ONUS_ACOES_NA_RENTAL_ONLY',
       },
       {
         category: 'outro',
@@ -194,20 +198,24 @@ export function resolveDocumentRequirements(input: {
     conjuge,
     {
       category: 'comprovante_renda',
-      applicability: salePurpose && !rentalPurpose ? 'not_applicable' : 'required',
-      required: !salePurpose || rentalPurpose,
+      applicability: isRent ? 'required' : 'not_applicable',
+      required: isRent,
       reasonCode:
-        salePurpose && !rentalPurpose
-          ? 'COMPROVANTE_RENDA_NA_SALE_ONLY'
-          : 'COMPROVANTE_RENDA_REQUIRED',
+        isRent
+          ? 'COMPROVANTE_RENDA_REQUIRED_RENTAL'
+          : modalityUnknown
+            ? 'COMPROVANTE_RENDA_NA_DEAL_TYPE_UNRESOLVED'
+            : 'COMPROVANTE_RENDA_NA_SALE_ONLY',
     },
     {
       category: 'comprovante_garantia',
-      applicability: rentalPurpose ? 'required' : 'not_applicable',
-      required: rentalPurpose,
-      reasonCode: rentalPurpose
+      applicability: isRent ? 'required' : 'not_applicable',
+      required: isRent,
+      reasonCode: isRent
         ? 'COMPROVANTE_GARANTIA_REQUIRED_RENTAL'
-        : 'COMPROVANTE_GARANTIA_NA_SALE_ONLY',
+        : modalityUnknown
+          ? 'COMPROVANTE_GARANTIA_NA_DEAL_TYPE_UNRESOLVED'
+          : 'COMPROVANTE_GARANTIA_NA_SALE_ONLY',
     },
     {
       category: 'outro',
@@ -222,7 +230,7 @@ export function resolveDocumentRequirementsForContract(
   context: ContractDocumentRuleContext
 ): { seller: CategoryRequirement[]; buyer: CategoryRequirement[] } {
   const base = {
-    propertyPurpose: context.propertyPurpose,
+    dealType: context.dealType,
     sellerInfo: context.sellerInfo,
     buyerInfo: context.buyerInfo,
   };
@@ -255,7 +263,7 @@ export function findCategoryRequirement(
 ): CategoryRequirement | undefined {
   const list = resolveDocumentRequirements({
     side,
-    propertyPurpose: context.propertyPurpose,
+    dealType: context.dealType,
     sellerInfo: context.sellerInfo,
     buyerInfo: context.buyerInfo,
   });

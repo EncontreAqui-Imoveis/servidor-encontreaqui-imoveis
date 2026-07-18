@@ -56,7 +56,8 @@ function normalizeDocumentCategory(
     'comprovante_renda',
     'comprovante_garantia',
     'dados_bancarios',
-    'docs_imovel',
+    'certidao_inteiro_teor_escritura',
+    'certidao_onus_acoes',
     'outro',
   ]);
   return allowed.has(normalized as ContractDocumentCategoryCode)

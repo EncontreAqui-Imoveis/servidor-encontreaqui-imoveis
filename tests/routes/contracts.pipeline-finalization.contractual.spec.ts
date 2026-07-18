@@ -66,6 +66,7 @@ type MutableContractState = {
   id: string;
   negotiation_id: string;
   property_id: number;
+  deal_type: 'sale' | 'rent';
   status: string;
   seller_info: Record<string, unknown>;
   buyer_info: Record<string, unknown>;
@@ -92,6 +93,7 @@ function createContractState(
     id: 'contract-1',
     negotiation_id: 'neg-1',
     property_id: 101,
+    deal_type: 'sale',
     status: 'IN_DRAFT',
     seller_info: {},
     buyer_info: {},
@@ -281,6 +283,11 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
         document_type: 'contrato_minuta',
         metadata_json: {
           contractId: 'contract-1',
+          documentKind: 'contract_draft',
+          dealType: 'sale',
+          templateKey: 'sale_contract_v1',
+          templateVersion: '1',
+          isActiveContractDraft: true,
           originalFileName: 'minuta_atual.pdf',
         },
         storage_provider: 'R2',
@@ -316,6 +323,11 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
         document_type: 'contrato_minuta',
         metadata_json: {
           contractId: 'contract-1',
+          documentKind: 'contract_draft',
+          dealType: 'sale',
+          templateKey: 'sale_contract_v1',
+          templateVersion: '1',
+          isActiveContractDraft: true,
           originalFileName: 'minuta_antiga.pdf',
         },
         storage_provider: 'R2',

@@ -1,11 +1,16 @@
 import axios from 'axios';
 
 import type { ProposalData, ProposalPdfService } from '../domain/states/NegotiationState';
+import {
+  buildContractPdfPayload,
+  type ContractDraftPdfInput,
+} from './contractPdfPayload';
 import { buildProposalPdfPayload } from './proposalPdfPayload';
 
 export class ExternalPdfService implements ProposalPdfService {
   private readonly baseUrl: string;
   private readonly endpointUrl: string;
+  private readonly contractEndpointUrl: string;
   private readonly internalApiKey: string;
   private readonly timeoutMs: number;
 
@@ -26,6 +31,8 @@ export class ExternalPdfService implements ProposalPdfService {
     this.endpointUrl = this.baseUrl.endsWith('/generate-proposal')
       ? this.baseUrl
       : `${this.baseUrl}/generate-proposal`;
+    const serviceRootUrl = this.baseUrl.replace(/\/generate-(proposal|contract)$/i, '');
+    this.contractEndpointUrl = `${serviceRootUrl}/generate-contract`;
     this.internalApiKey =
       params?.internalApiKey ?? process.env.PDF_INTERNAL_API_KEY ?? '';
 
@@ -93,6 +100,34 @@ export class ExternalPdfService implements ProposalPdfService {
         });
       }
 
+      throw error;
+    }
+  }
+
+  async generateContract(data: ContractDraftPdfInput): Promise<Buffer> {
+    if (!this.internalApiKey) {
+      throw new Error(
+        'PDF_INTERNAL_API_KEY não está configurado para autenticação interna do serviço de PDF'
+      );
+    }
+
+    try {
+      const response = await axios.post(this.contractEndpointUrl, buildContractPdfPayload(data), {
+        responseType: 'arraybuffer',
+        timeout: this.timeoutMs,
+        headers: {
+          'X-Internal-API-Key': this.internalApiKey,
+        },
+      });
+      return Buffer.from(response.data);
+    } catch (error: unknown) {
+      console.error('ExternalPdfService.generateContract failed', {
+        endpointUrl: this.contractEndpointUrl,
+        baseUrl: this.baseUrl,
+        axiosCode: axios.isAxiosError(error) ? error.code ?? null : null,
+        responseStatus: axios.isAxiosError(error) ? error.response?.status ?? null : null,
+        message: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }

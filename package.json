@@ -19,6 +19,7 @@
     "migrate:up": "ts-node src/database/migrationRunner.ts up",
     "migrate:down": "ts-node src/database/migrationRunner.ts down",
     "migrate:status": "ts-node src/database/migrationRunner.ts status",
+    "locations:seed": "ts-node src/scripts/seedLocationCatalog.ts",
     "db:init": "ts-node src/database/init.ts",
     "db:verify": "ts-node src/database/schemaVerification.ts",
     "audit:contract-deal-types": "ts-node scripts/audit-contract-deal-types.ts",

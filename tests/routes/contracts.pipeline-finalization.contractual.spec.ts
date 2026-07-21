@@ -395,7 +395,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .post('/admin/contracts/contract-1/finalize')
       .send({
         commissionData: {
-          valorVenda: 10000,
+          valorBaseComissao: 10000,
           comissaoCaptador: 600,
           comissaoVendedor: 400,
           taxaPlataforma: 200,
@@ -405,6 +405,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(response.status).toBe(200);
     expect(response.body.contract.status).toBe('FINALIZED');
     expect(contractState.commission_data).toEqual({
+      valorBaseComissao: 10000,
       valorVenda: 10000,
       comissaoCaptador: 600,
       comissaoVendedor: 400,
@@ -418,7 +419,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     });
   });
 
-  it('rejects finalization when financial split exceeds valorVenda', async () => {
+  it('rejects finalization when financial split exceeds the commission base', async () => {
     contractState = createContractState({
       status: 'AWAITING_SIGNATURES',
       property_purpose: 'Venda',
@@ -433,7 +434,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .post('/admin/contracts/contract-1/finalize')
       .send({
         commissionData: {
-          valorVenda: 10000,
+          valorBaseComissao: 10000,
           comissaoCaptador: 7000,
           comissaoVendedor: 2500,
           taxaPlataforma: 1000,
@@ -445,7 +446,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
   });
 
-  it('rejects sale finalization when financial split is below 100% of valorVenda', async () => {
+  it('rejects sale finalization when financial split is below 100% of the commission base', async () => {
     contractState = createContractState({
       status: 'AWAITING_SIGNATURES',
       property_purpose: 'Venda',
@@ -460,7 +461,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .post('/admin/contracts/contract-1/finalize')
       .send({
         commissionData: {
-          valorVenda: 10000,
+          valorBaseComissao: 10000,
           comissaoCaptador: 4000,
           comissaoVendedor: 3000,
           taxaPlataforma: 2000,

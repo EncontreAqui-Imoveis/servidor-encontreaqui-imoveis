@@ -49,6 +49,17 @@ vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
     value && typeof value === 'object' ? value : {},
 }));
 
+vi.mock('../../src/services/contractDraftGenerationService', () => ({
+  ensureContractDraftGenerated: vi.fn().mockResolvedValue({
+    contractId: 'contract-1',
+    documentId: 90002,
+    generated: true,
+    dealType: 'sale',
+    templateKey: 'sale',
+    templateVersion: 'test',
+  }),
+}));
+
 import { contractController } from '../../src/controllers/ContractController';
 import { contractDocumentUpload } from '../../src/middlewares/uploadMiddleware';
 
@@ -253,6 +264,33 @@ describe('Contract granular approval and signed docs endpoints', () => {
         }),
       })
     );
+  });
+
+  it('moves to IN_DRAFT when both sides are explicitly approved with reservations', async () => {
+    const sellerResponse = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'seller',
+        status: 'APPROVED_WITH_RES',
+        reason: 'Pendências comerciais registradas para regularização posterior.',
+      });
+
+    expect(sellerResponse.status).toBe(200);
+    expect(sellerResponse.body.movedToDraft).toBe(false);
+
+    const buyerResponse = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'buyer',
+        status: 'APPROVED_WITH_RES',
+        reason: 'Pendências comerciais registradas para regularização posterior.',
+      });
+
+    expect(buyerResponse.status).toBe(200);
+    expect(buyerResponse.body.movedToDraft).toBe(true);
+    expect(buyerResponse.body.contract.status).toBe('IN_DRAFT');
+    expect(buyerResponse.body.contract.sellerApprovalStatus).toBe('APPROVED_WITH_RES');
+    expect(buyerResponse.body.contract.buyerApprovalStatus).toBe('APPROVED_WITH_RES');
   });
 
   it('persiste APPROVED_WITH_RES nos documentos quando a avaliação do lado tem ressalvas', async () => {

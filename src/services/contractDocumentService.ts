@@ -72,6 +72,13 @@ function canReadDocument(
   return context.userRole === 'admin' || context.userRole === 'responsible';
 }
 
+function canReadDocumentFile(
+  document: ReturnType<typeof mapDocument>,
+  context: ContractAccessContext | null
+): boolean {
+  return context?.canReadDocumentFiles !== false && canReadDocument(document, context);
+}
+
 function isProposalDocument(document: {
   document_type?: string | null;
   type?: string | null;
@@ -156,7 +163,7 @@ async function fetchVisibleContractDocumentsWithStorage(
       ...mapDocument(document),
       downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
     }))
-    .filter((document) => canReadDocument(document, context));
+    .filter((document) => canReadDocumentFile(document, context));
 }
 
 export async function buildContractDocumentPayload(
@@ -172,6 +179,15 @@ export async function buildContractDocumentPayload(
     buyer: accessContext?.canReadBuyer ? requirementMatrix.buyer : [],
   };
 
+  const documentSlots = buildDocumentSlots(visibleRequirementMatrix, documents);
+  const canReadDocumentFiles = accessContext?.canReadDocumentFiles !== false;
+  const statusOnlySlots = documentSlots.map((slot) => ({
+    ...slot,
+    id: null,
+    originalFileName: null,
+    downloadUrl: null,
+  }));
+
   return {
     contract: {
       ...mapContract(contract, req),
@@ -185,10 +201,12 @@ export async function buildContractDocumentPayload(
             matrixContext
           ),
     },
-    documents,
+    documents: canReadDocumentFiles ? documents : [],
     documentSlots: accessContext?.requiresHandshakeVerification
       ? []
-      : buildDocumentSlots(visibleRequirementMatrix, documents),
+      : canReadDocumentFiles
+        ? documentSlots
+        : statusOnlySlots,
   };
 }
 
@@ -196,6 +214,10 @@ export async function buildContractDocumentsZip(
   contract: ContractRow,
   req: AuthRequest | null = null
 ): Promise<DownloadedContractDocumentsZip | null> {
+  const accessContext = resolveDocumentAccessContext(req, contract);
+  if (accessContext?.canReadDocumentFiles === false) {
+    return null;
+  }
   const visibleDocuments = await fetchVisibleContractDocumentsWithStorage(contract, req);
   if (visibleDocuments.length === 0) {
     return null;

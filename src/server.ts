@@ -13,6 +13,7 @@ import { setupPdfWorker } from './modules/negotiations/infra/PdfWorker';
 import { setupNegotiationDocumentDeletionWorker } from './services/negotiationDocumentDeletionService';
 import { discardExpiredDrafts } from './services/registrationDraftRepository';
 import { discardExpiredPhoneOtps } from './services/phoneOtpService';
+import { ensureBrazilianCityCatalogSeeded } from './services/locationCatalogSeedService';
 
 const app = createHttpApp();
 const PORT = process.env.PORT || process.env.API_PORT || 3333;
@@ -72,6 +73,10 @@ function setupPhoneOtpCleanupWorker() {
 async function startServer() {
   await applyMigrations();
   await runSqlMigrations('up');
+  const seededCities = await ensureBrazilianCityCatalogSeeded();
+  if (seededCities > 0) {
+    console.log(`Catalogo nacional de municipios sincronizado: ${seededCities}`);
+  }
 
   // Initialize background workers
   const pdfWorker = setupPdfWorker();

@@ -31,7 +31,6 @@ export const BUYER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[] 
   'estado_civil',
   'conjuge_documentos',
   'comprovante_renda',
-  'comprovante_garantia',
 ];
 
 export const SELLER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[] = [
@@ -42,6 +41,7 @@ export const SELLER_REQUIRED_DOCUMENT_CATEGORIES: ContractDocumentCategoryCode[]
   'conjuge_documentos',
   'certidao_inteiro_teor_escritura',
   'certidao_onus_acoes',
+  'seguro_incendio',
 ];
 
 const ALLOWED_FILE_EXTENSIONS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp']);
@@ -67,7 +67,7 @@ const CATEGORY_DOCUMENT_TYPES: Record<
   estado_civil: new Set(['certidao_casamento_nascimento']),
   conjuge_documentos: new Set(['doc_identidade_conjuge']),
   comprovante_renda: new Set(['comprovante_renda']),
-  comprovante_garantia: new Set(['comprovante_garantia']),
+  seguro_incendio: new Set(['seguro_incendio']),
   // Uses its own type so the mandatory seller requirement cannot be merged
   // with the independent optional "Outro" slot in client matrices.
   dados_bancarios: new Set(['dados_bancarios']),
@@ -107,8 +107,8 @@ export function resolveFallbackDocumentTypeByCategory(
       return 'doc_identidade_conjuge';
     case 'comprovante_renda':
       return 'comprovante_renda';
-    case 'comprovante_garantia':
-      return 'comprovante_garantia';
+    case 'seguro_incendio':
+      return 'seguro_incendio';
     case 'dados_bancarios':
       return 'dados_bancarios';
     case 'outro':

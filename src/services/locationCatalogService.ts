@@ -6,6 +6,20 @@ const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 15;
 const MAX_SEARCH_LENGTH = 80;
 
+export function normalizeLocationCatalogName(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function parseLocationState(query: Record<string, unknown>): string | null {
+  const state = String(query.state ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(state) ? state : null;
+}
+
 export type LocationPage<T> = {
   data: T[];
   page: number;
@@ -44,7 +58,7 @@ export function parseLocationPagination(query: Record<string, unknown>) {
     ? Math.min(Math.max(rawLimit, 1), MAX_LIMIT)
     : DEFAULT_LIMIT;
   const page = Number.isInteger(rawPage) ? Math.max(rawPage, 1) : 1;
-  const rawSearch = String(query.search ?? '').trim().toLowerCase();
+  const rawSearch = normalizeLocationCatalogName(query.search);
 
   return {
     page,
@@ -67,15 +81,23 @@ export async function listLocationCities(
   query: Record<string, unknown>
 ): Promise<LocationPage<LocationCity>> {
   const { page, limit, offset, search } = parseLocationPagination(query);
+  const state = parseLocationState(query);
+  const conditions = ['normalized_name LIKE ?'];
+  const values: Array<string | number> = [`${search}%`];
+  if (state) {
+    conditions.push('state = ?');
+    values.push(state);
+  }
+  values.push(limit + 1, offset);
   const [rows] = await connection.query<CityRow[]>(
     `
       SELECT id, name, state
       FROM location_cities
-      WHERE normalized_name LIKE ?
+      WHERE ${conditions.join(' AND ')}
       ORDER BY normalized_name ASC, state ASC, id ASC
       LIMIT ? OFFSET ?
     `,
-    [`${search}%`, limit + 1, offset]
+    values
   );
 
   return toLocationPage(

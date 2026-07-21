@@ -7,6 +7,7 @@ const {
   readNegotiationDocumentObjectMock,
   deleteNegotiationDocumentObjectMock,
   saveNegotiationSignedProposalDocumentMock,
+  enqueueNegotiationDocumentDeletionMock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -23,6 +24,7 @@ const {
     readNegotiationDocumentObjectMock: vi.fn(),
     deleteNegotiationDocumentObjectMock: vi.fn(),
     saveNegotiationSignedProposalDocumentMock: vi.fn(),
+    enqueueNegotiationDocumentDeletionMock: vi.fn(),
   };
 });
 
@@ -40,6 +42,10 @@ vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
 
 vi.mock('../../src/services/negotiationPersistenceService', () => ({
   saveNegotiationSignedProposalDocument: saveNegotiationSignedProposalDocumentMock,
+}));
+
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
 }));
 
 import {
@@ -61,6 +67,7 @@ describe('adminNegotiationDocumentService', () => {
     readNegotiationDocumentObjectMock.mockResolvedValue(Buffer.from('%PDF-1.4'));
     deleteNegotiationDocumentObjectMock.mockResolvedValue(undefined);
     saveNegotiationSignedProposalDocumentMock.mockResolvedValue(321);
+    enqueueNegotiationDocumentDeletionMock.mockResolvedValue(1);
   });
 
   it('lista responsáveis com fallback de schema quando a tabela não existe', async () => {
@@ -73,6 +80,21 @@ describe('adminNegotiationDocumentService', () => {
       responsibles: [],
       schemaFallback: true,
     });
+  });
+
+  it('recusa a indicação de um sexto corretor responsável antes de alterar a negociação', async () => {
+    await expect(
+      updateNegotiationResponsibles({
+        negotiationId: 'neg-1',
+        responsibleIds: [1, 2, 3, 4, 5, 6],
+        actorId: 99,
+      })
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'Máximo de 5 responsáveis por negociação.',
+    });
+
+    expect(getConnectionMock).not.toHaveBeenCalled();
   });
 
   it('faz upload de proposta assinada e substitui documento anterior', async () => {
@@ -113,8 +135,13 @@ describe('adminNegotiationDocumentService', () => {
       signedDocumentFileName: 'contrato_assinado.pdf',
       hasSignedProposalDocument: true,
     });
-    expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('negotiation_document_deletion_jobs'))).toBe(
-      true
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ document_type: 'contrato_assinado' }),
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        requestedByUserId: 7,
+      })
     );
     expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
   });
@@ -179,8 +206,13 @@ describe('adminNegotiationDocumentService', () => {
     });
 
     expect(result).toEqual({ negotiationId: 'neg-1', hasSignedProposalDocument: false });
-    expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('negotiation_document_deletion_jobs'))).toBe(
-      true
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ document_type: 'contrato_assinado' }),
+      expect.objectContaining({
+        negotiationId: 'neg-1',
+        requestedByUserId: 7,
+      })
     );
     expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
     expect(

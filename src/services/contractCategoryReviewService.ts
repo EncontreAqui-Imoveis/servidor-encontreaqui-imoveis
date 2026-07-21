@@ -149,7 +149,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
-    'comprovante_garantia',
+    'seguro_incendio',
     'dados_bancarios',
     'certidao_inteiro_teor_escritura',
     'certidao_onus_acoes',
@@ -384,17 +384,20 @@ function hasRequiredCategoryGateApproval(input: {
     })),
     matrixContext
   );
-  const sideReady = (side: ContractDocumentProgressSide) =>
-    side.categories.every((item) => {
-      const status = String(item.status ?? '').trim().toUpperCase();
-      return (
-        !item.required ||
-        status === 'APPROVED' ||
-        status === 'APPROVED_WITH_RES' ||
-        status === 'NOT_APPLICABLE'
-      );
-    });
-  return sideReady(progress.seller) && sideReady(progress.buyer);
+  const requirements = resolveDocumentRequirementsForContract(matrixContext);
+  const sideReady = (
+    side: ContractDocumentProgressSide,
+    sideRequirements: ReturnType<typeof resolveDocumentRequirementsForContract>['seller']
+  ) =>
+    sideRequirements
+      .filter((requirement) => requirement.required)
+      .every((requirement) => {
+        const item = side.categories.find((category) => category.category === requirement.category);
+        const status = String(item?.status ?? '').trim().toUpperCase();
+        return status === 'APPROVED' || status === 'APPROVED_WITH_RES';
+      });
+  return sideReady(progress.seller, requirements.seller) &&
+    sideReady(progress.buyer, requirements.buyer);
 }
 
 function appendAuditTrail(

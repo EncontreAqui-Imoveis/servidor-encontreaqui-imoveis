@@ -37,9 +37,12 @@ async function findContractForAuthorization(
   const includeResponsibles = await hasNegotiationResponsiblesTable();
   const responsibleUsersSelect = includeResponsibles
     ? `(
-        SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
-        FROM negotiation_responsibles nr
-        WHERE nr.negotiation_id = c.negotiation_id
+      SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
+      FROM negotiation_responsibles nr
+      JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
+      WHERE nr.negotiation_id = c.negotiation_id
+        AND responsible_broker.status = 'approved'
+        AND COALESCE(responsible_broker.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
       ) AS responsible_user_ids`
     : 'NULL AS responsible_user_ids';
   const [rows] = await connection.query<ContractAccessRow[]>(

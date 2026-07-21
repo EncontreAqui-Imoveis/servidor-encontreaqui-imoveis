@@ -9,6 +9,9 @@ interface UpdateCommissionDataBody {
 }
 
 interface NormalizedCommissionData {
+  /** Base canônica: preço de venda ou aluguel mensal, conforme a modalidade. */
+  valorBaseComissao: number;
+  /** @deprecated Mantido em dados já gravados e consumidores legados. */
   valorVenda: number;
   comissaoCaptador: number;
   comissaoVendedor: number;
@@ -42,9 +45,12 @@ function normalizeCommissionData(value: unknown): NormalizedCommissionData {
   }
 
   const payload = value as Record<string, unknown>;
-  const valorVenda = parseNonNegativeNumber(payload.valorVenda, 'valorVenda');
-  if (valorVenda <= 0) {
-    throw new Error('valorVenda deve ser maior que zero.');
+  const valorBaseComissao = parseNonNegativeNumber(
+    payload.valorBaseComissao ?? payload.valorVenda,
+    'valorBaseComissao'
+  );
+  if (valorBaseComissao <= 0) {
+    throw new Error('valorBaseComissao deve ser maior que zero.');
   }
 
   const comissaoCaptador = parseNonNegativeNumber(
@@ -63,14 +69,16 @@ function normalizeCommissionData(value: unknown): NormalizedCommissionData {
   const totalSplits = Number(
     (comissaoCaptador + comissaoVendedor + taxaPlataforma).toFixed(2)
   );
-  if (totalSplits > valorVenda) {
+  if (totalSplits > valorBaseComissao) {
     throw new Error(
-      'Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorVenda.'
+      'Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorBaseComissao.'
     );
   }
 
   return {
-    valorVenda,
+    valorBaseComissao,
+    // Compatibilidade para relatórios e contratos finalizados antes da migração.
+    valorVenda: valorBaseComissao,
     comissaoCaptador,
     comissaoVendedor,
     taxaPlataforma,
@@ -138,7 +146,7 @@ export async function updateContractCommissionData(
         commissionData.taxaPlataforma
       ).toFixed(2)
     );
-    if (Math.abs(totalSplits - commissionData.valorVenda) > 0.01) {
+    if (Math.abs(totalSplits - commissionData.valorBaseComissao) > 0.01) {
       throw mutationError(
         400,
         'Na venda, a soma de comissões e taxa precisa fechar exatamente 100% do valor.'

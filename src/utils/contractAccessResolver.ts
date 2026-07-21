@@ -53,6 +53,15 @@ function buildContext(
   const canReadMeta = userRole !== 'none';
   const canReadSeller = userRole === 'seller' || userRole === 'responsible' || userRole === 'admin';
   const canReadBuyer = userRole === 'buyer' || userRole === 'responsible' || userRole === 'admin';
+  // A responsible broker can follow the operational progress after the
+  // documentation stage, but cannot inspect personal files outside the stage.
+  const isResponsibleStatusOnly = userRole === 'responsible' && !editable;
+  const canReadDocumentStatus = canReadMeta && !options.requiresHandshakeVerification;
+  const canReadDocumentFiles = canReadDocumentStatus && !isResponsibleStatusOnly;
+  const canMutateDocuments =
+    editable &&
+    !options.requiresHandshakeVerification &&
+    (canReadSeller || canReadBuyer);
 
   return {
     contractId,
@@ -63,6 +72,9 @@ function buildContext(
     canEditSeller: editable && canReadSeller && !options.requiresHandshakeVerification,
     canReadBuyer: options.requiresHandshakeVerification ? false : canReadBuyer,
     canEditBuyer: editable && canReadBuyer && !options.requiresHandshakeVerification,
+    canReadDocumentStatus,
+    canReadDocumentFiles,
+    canMutateDocuments,
     isReadOnly: !editable || Boolean(options.requiresHandshakeVerification),
     requiresHandshakeVerification: Boolean(options.requiresHandshakeVerification),
     handshakeStatus: options.handshakeStatus ?? null,

@@ -8,7 +8,7 @@ const baseContract = {
   advertiser_id: 10,
   proposer_id: 20,
   initiator_side: 'buyer',
-  responsible_user_ids: '30',
+  responsible_user_ids: '30,31,32,33,34',
 };
 
 describe('resolveContractAccessContext', () => {
@@ -43,19 +43,33 @@ describe('resolveContractAccessContext', () => {
     expect(context.canReadMeta).toBe(false);
   });
 
-  it('concede ambos os lados somente ao responsável vinculado à negociação', () => {
+  it('concede ambos os lados a cada um dos cinco responsáveis vinculados à negociação', () => {
+    for (const responsibleId of [30, 31, 32, 33, 34]) {
+      const context = resolveContractAccessContext(
+        { id: responsibleId, role: 'broker' },
+        baseContract
+      );
+
+      expect(context).toMatchObject({
+        userRole: 'responsible',
+        canReadSeller: true,
+        canEditSeller: true,
+        canReadBuyer: true,
+        canEditBuyer: true,
+        canReadDocumentFiles: true,
+        canMutateDocuments: true,
+      });
+    }
+  });
+
+  it('não concede acesso ao sexto corretor fora do vínculo explícito', () => {
     const context = resolveContractAccessContext(
-      { id: 30, role: 'broker' },
+      { id: 35, role: 'broker' },
       baseContract
     );
 
-    expect(context).toMatchObject({
-      userRole: 'responsible',
-      canReadSeller: true,
-      canEditSeller: true,
-      canReadBuyer: true,
-      canEditBuyer: true,
-    });
+    expect(context.userRole).toBe('none');
+    expect(context.canReadMeta).toBe(false);
   });
 
   it('concede o lado seller ao proprietário do imóvel mesmo sem advertiser vinculado', () => {
@@ -175,6 +189,9 @@ describe('resolveContractAccessContext', () => {
 
     expect(responsible.canEditSeller).toBe(false);
     expect(responsible.canEditBuyer).toBe(false);
+    expect(responsible.canReadDocumentStatus).toBe(true);
+    expect(responsible.canReadDocumentFiles).toBe(false);
+    expect(responsible.canMutateDocuments).toBe(false);
     expect(admin.canEditSeller).toBe(true);
     expect(admin.canEditBuyer).toBe(true);
   });

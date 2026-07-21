@@ -184,7 +184,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
-    'comprovante_garantia',
+    'seguro_incendio',
     'dados_bancarios',
     'certidao_inteiro_teor_escritura',
     'certidao_onus_acoes',
@@ -725,7 +725,14 @@ export async function evaluateContractSide(
         };
       }),
     });
-    const canMoveToDraft = mustMoveToDraft && readiness.eligibleForAdminApproval;
+    // A decisão administrativa APPROVED_WITH_RES é uma exceção auditada de
+    // completude para o lado revisado. Pendências continuam registradas na
+    // readiness, mas não podem impedir sozinhas o avanço daquele lado.
+    const sellerReady =
+      effectiveStatuses.sellerStatus === 'APPROVED_WITH_RES' || readiness.seller.complete;
+    const buyerReady =
+      effectiveStatuses.buyerStatus === 'APPROVED_WITH_RES' || readiness.buyer.complete;
+    const canMoveToDraft = mustMoveToDraft && sellerReady && buyerReady;
     const nextContractStatus: ContractStatus = canMoveToDraft
       ? 'IN_DRAFT'
       : 'AWAITING_DOCS';

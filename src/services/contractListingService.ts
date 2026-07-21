@@ -145,8 +145,11 @@ export async function listMyContractsForUser(
         OR EXISTS (
           SELECT 1
           FROM negotiation_responsibles nr
+          JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
           WHERE nr.negotiation_id = c.negotiation_id
             AND nr.user_id = ?
+            AND responsible_broker.status = 'approved'
+            AND COALESCE(responsible_broker.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
         )`
     : '';
   const visibilityClause = `
@@ -288,8 +291,11 @@ export async function getContractHubCounters(
         OR EXISTS (
           SELECT 1
           FROM negotiation_responsibles nr
+          JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
           WHERE nr.negotiation_id = c.negotiation_id
             AND nr.user_id = ?
+            AND responsible_broker.status = 'approved'
+            AND COALESCE(responsible_broker.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
         )`
     : '';
   const contractVisibilityClause = isAdmin
@@ -407,7 +413,10 @@ async function getContractSelectSql(): Promise<string> {
     ? `(
       SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
       FROM negotiation_responsibles nr
+      JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
       WHERE nr.negotiation_id = c.negotiation_id
+        AND responsible_broker.status = 'approved'
+        AND COALESCE(responsible_broker.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
     ) AS responsible_user_ids`
     : 'NULL AS responsible_user_ids';
 

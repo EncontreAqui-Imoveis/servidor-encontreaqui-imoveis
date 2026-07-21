@@ -332,6 +332,7 @@ interface SignatureMethodBody {
 }
 
 interface NormalizedCommissionData {
+  valorBaseComissao: number;
   valorVenda: number;
   comissaoCaptador: number;
   comissaoVendedor: number;
@@ -650,7 +651,7 @@ function normalizeContractDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
-    'comprovante_garantia',
+    'seguro_incendio',
     'dados_bancarios',
     'certidao_inteiro_teor_escritura',
     'certidao_onus_acoes',
@@ -737,9 +738,12 @@ function normalizeCommissionData(value: unknown): NormalizedCommissionData {
   }
 
   const payload = value as Record<string, unknown>;
-  const valorVenda = parseNonNegativeNumber(payload.valorVenda, 'valorVenda');
-  if (valorVenda <= 0) {
-    throw new Error('valorVenda deve ser maior que zero.');
+  const valorBaseComissao = parseNonNegativeNumber(
+    payload.valorBaseComissao ?? payload.valorVenda,
+    'valorBaseComissao'
+  );
+  if (valorBaseComissao <= 0) {
+    throw new Error('valorBaseComissao deve ser maior que zero.');
   }
 
   const comissaoCaptador = parseNonNegativeNumber(
@@ -758,14 +762,15 @@ function normalizeCommissionData(value: unknown): NormalizedCommissionData {
   const totalSplits = Number(
     (comissaoCaptador + comissaoVendedor + taxaPlataforma).toFixed(2)
   );
-  if (totalSplits > valorVenda) {
+  if (totalSplits > valorBaseComissao) {
     throw new Error(
-      'Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorVenda.'
+      'Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorBaseComissao.'
     );
   }
 
   return {
-    valorVenda,
+    valorBaseComissao,
+    valorVenda: valorBaseComissao,
     comissaoCaptador,
     comissaoVendedor,
     taxaPlataforma,
@@ -1112,6 +1117,8 @@ function shouldExposeOwnerSensitiveDocument(
 export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
   const readContext = resolveContractReadContext(req, row);
   const handshakeRestricted = Boolean(readContext?.requiresHandshakeVerification);
+  const statusOnlyResponsible =
+    readContext?.userRole === 'responsible' && readContext.canReadDocumentFiles === false;
   const matrixContext = buildContractDocumentRuleContextFromRow(row);
   const rawDocumentRequirements = resolveDocumentRequirementsForContract(matrixContext);
   const documentRequirements = {
@@ -1153,14 +1160,18 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ),
   };
   const sellerInfo = buildOwnerInfoFromContractRow(row);
-  const workflowMetadata = handshakeRestricted ? {} : parseStoredJsonObject(row.workflow_metadata);
+  const workflowMetadata = handshakeRestricted || statusOnlyResponsible
+    ? {}
+    : parseStoredJsonObject(row.workflow_metadata);
   const canReadSeller = canReadContractSide(readContext, 'seller');
   const canReadBuyer = canReadContractSide(readContext, 'buyer');
   const canViewSensitiveData = canReadSeller && canViewOwnerSensitiveData(req, row);
-  const sellerInfoForViewer = canReadSeller
+  const sellerInfoForViewer = canReadSeller && !statusOnlyResponsible
     ? redactOwnerInfoByRole(sellerInfo, canViewSensitiveData)
     : {};
-  const buyerInfoForViewer = canReadBuyer ? buildBuyerInfoFromContractRow(row) : {};
+  const buyerInfoForViewer = canReadBuyer && !statusOnlyResponsible
+    ? buildBuyerInfoFromContractRow(row)
+    : {};
   const viewerSide = resolveContractViewerSide(req, row);
   const status = resolveContractStatus(row.status);
   const capabilities = readContext
@@ -1170,6 +1181,11 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
         canEditSeller: readContext.canEditSeller,
         canReadBuyer: readContext.canReadBuyer,
         canEditBuyer: readContext.canEditBuyer,
+        canReadDocumentStatus: readContext.canReadDocumentStatus !== false,
+        canReadDocumentFiles: readContext.canReadDocumentFiles !== false,
+        canMutateDocuments:
+          readContext.canMutateDocuments ??
+          (!readContext.isReadOnly && (readContext.canEditSeller || readContext.canEditBuyer)),
         isReadOnly: readContext.isReadOnly,
         requiresHandshakeVerification: readContext.requiresHandshakeVerification,
       }
@@ -1179,6 +1195,9 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
         canEditSeller: false,
         canReadBuyer: false,
         canEditBuyer: false,
+        canReadDocumentStatus: false,
+        canReadDocumentFiles: false,
+        canMutateDocuments: false,
         isReadOnly: true,
         requiresHandshakeVerification: false,
       };
@@ -1201,9 +1220,13 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     // Compatibilidade legada: ownerInfo permanece somente como alias de sellerInfo.
     ownerInfo: sellerInfoForViewer,
     buyerInfo: buyerInfoForViewer,
-    commissionData: canViewSensitiveData ? parseStoredJsonObject(row.commission_data) : {},
+    commissionData: canViewSensitiveData && !statusOnlyResponsible
+      ? parseStoredJsonObject(row.commission_data)
+      : {},
     workflowMetadata,
-    identityCapabilities: resolveIdentityCapabilities(workflowMetadata),
+    identityCapabilities: statusOnlyResponsible
+      ? { seller: { canEditName: false, canEditCpf: false }, buyer: { canEditName: false, canEditCpf: false } }
+      : resolveIdentityCapabilities(workflowMetadata),
     sellerApprovalStatus: handshakeRestricted ? 'PENDING' : resolveContractApprovalStatus(row.seller_approval_status),
     ownerApprovalStatus: handshakeRestricted ? 'PENDING' : resolveContractApprovalStatus(row.seller_approval_status),
     buyerApprovalStatus: handshakeRestricted ? 'PENDING' : resolveContractApprovalStatus(row.buyer_approval_status),
@@ -1211,33 +1234,33 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     ownerApprovalReason: handshakeRestricted ? {} : parseStoredJsonObject(row.seller_approval_reason),
     buyerApprovalReason: handshakeRestricted ? {} : parseStoredJsonObject(row.buyer_approval_reason),
     capturingBrokerId:
-      !handshakeRestricted && row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
+      !handshakeRestricted && !statusOnlyResponsible && row.capturing_broker_id !== null ? Number(row.capturing_broker_id) : null,
     sellingBrokerId:
-      !handshakeRestricted && row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
-    advertiserId: !handshakeRestricted && row.advertiser_id !== null ? Number(row.advertiser_id) : null,
-    proposerId: !handshakeRestricted && row.proposer_id !== null ? Number(row.proposer_id) : null,
-    initiatorSide: handshakeRestricted ? null : row.initiator_side ?? null,
+      !handshakeRestricted && !statusOnlyResponsible && row.selling_broker_id !== null ? Number(row.selling_broker_id) : null,
+    advertiserId: !handshakeRestricted && !statusOnlyResponsible && row.advertiser_id !== null ? Number(row.advertiser_id) : null,
+    proposerId: !handshakeRestricted && !statusOnlyResponsible && row.proposer_id !== null ? Number(row.proposer_id) : null,
+    initiatorSide: handshakeRestricted || statusOnlyResponsible ? null : row.initiator_side ?? null,
     legalBuyerUserId:
-      !handshakeRestricted && row.legal_buyer_user_id !== null ? Number(row.legal_buyer_user_id) : null,
-    advertiserName: handshakeRestricted ? null : row.seller_client_name ?? null,
-    proposerName: handshakeRestricted ? null : row.buyer_client_name ?? null,
-    clientName: handshakeRestricted ? null : row.client_name ?? null,
-    capturingBrokerName: handshakeRestricted ? null : row.capturing_broker_name ?? null,
-    sellingBrokerName: handshakeRestricted ? null : row.selling_broker_name ?? null,
-    ownerId: !handshakeRestricted && row.property_owner_id !== null ? Number(row.property_owner_id) : null,
-    ownerName: handshakeRestricted ? null : row.property_owner_name ?? null,
-    propertyOwnerPhone: handshakeRestricted ? null : row.property_owner_phone ?? null,
+      !handshakeRestricted && !statusOnlyResponsible && row.legal_buyer_user_id !== null ? Number(row.legal_buyer_user_id) : null,
+    advertiserName: handshakeRestricted || statusOnlyResponsible ? null : row.seller_client_name ?? null,
+    proposerName: handshakeRestricted || statusOnlyResponsible ? null : row.buyer_client_name ?? null,
+    clientName: handshakeRestricted || statusOnlyResponsible ? null : row.client_name ?? null,
+    capturingBrokerName: handshakeRestricted || statusOnlyResponsible ? null : row.capturing_broker_name ?? null,
+    sellingBrokerName: handshakeRestricted || statusOnlyResponsible ? null : row.selling_broker_name ?? null,
+    ownerId: !handshakeRestricted && !statusOnlyResponsible && row.property_owner_id !== null ? Number(row.property_owner_id) : null,
+    ownerName: handshakeRestricted || statusOnlyResponsible ? null : row.property_owner_name ?? null,
+    propertyOwnerPhone: handshakeRestricted || statusOnlyResponsible ? null : row.property_owner_phone ?? null,
     proposalInitiatorUserId:
-      !handshakeRestricted && row.proposal_initiator_user_id !== null ? Number(row.proposal_initiator_user_id) : null,
+      !handshakeRestricted && !statusOnlyResponsible && row.proposal_initiator_user_id !== null ? Number(row.proposal_initiator_user_id) : null,
     propertyTitle: row.property_title ?? null,
     propertyCode: row.property_code ?? null,
     propertyImageUrl: optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'detail' }) ?? null,
     propertyPurpose: row.property_purpose ?? null,
-    agencyName: handshakeRestricted ? null : row.capturing_agency_name ?? null,
-    agencyAddress: handshakeRestricted ? null : row.capturing_agency_address ?? null,
-    sellerClientName: handshakeRestricted ? null : row.seller_client_name ?? null,
-    buyerClientName: handshakeRestricted ? null : row.buyer_client_name ?? null,
-    responsibleUserIds: handshakeRestricted ? [] : parseResponsibleUserIds(row.responsible_user_ids),
+    agencyName: handshakeRestricted || statusOnlyResponsible ? null : row.capturing_agency_name ?? null,
+    agencyAddress: handshakeRestricted || statusOnlyResponsible ? null : row.capturing_agency_address ?? null,
+    sellerClientName: handshakeRestricted || statusOnlyResponsible ? null : row.seller_client_name ?? null,
+    buyerClientName: handshakeRestricted || statusOnlyResponsible ? null : row.buyer_client_name ?? null,
+    responsibleUserIds: handshakeRestricted || statusOnlyResponsible ? [] : parseResponsibleUserIds(row.responsible_user_ids),
     viewerSide: handshakeRestricted ? null : viewerSide,
     approvalProgress: handshakeRestricted ? { seller: null, buyer: null } : summarizeContractApprovalProgress(row),
     documentRequirements,
@@ -1996,7 +2019,10 @@ async function getContractSelectSql(): Promise<string> {
     ? `(
       SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
       FROM negotiation_responsibles nr
+      JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
       WHERE nr.negotiation_id = c.negotiation_id
+        AND responsible_broker.status = 'approved'
+        AND COALESCE(responsible_broker.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
     ) AS responsible_user_ids`
     : 'NULL AS responsible_user_ids';
 
@@ -2705,7 +2731,7 @@ class ContractController {
             commissionData.taxaPlataforma
           ).toFixed(2)
         );
-        if (Math.abs(totalSplits - commissionData.valorVenda) > 0.01) {
+        if (Math.abs(totalSplits - commissionData.valorBaseComissao) > 0.01) {
           await tx.rollback();
           return res.status(400).json({
             error:
@@ -3192,7 +3218,11 @@ class ContractController {
         return res.status(404).json({ error: 'Contrato não encontrado.' });
       }
 
-      if (!canAccessContract(req, contract)) {
+      const context = resolveContractAccessContext(
+        { id: req.userId, role: req.userRole },
+        contract
+      );
+      if (!context.canReadMeta || !context.canReadDocumentFiles) {
         return res.status(403).json({ error: 'Acesso negado ao contrato.' });
       }
 

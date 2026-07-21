@@ -33,6 +33,7 @@ type CommissionSummaryResponse = {
     signedProposalDocumentId: number | null;
     signedProposalDocumentSource: 'negotiation_documents' | null;
     commissionData: {
+      valorBaseComissao: number;
       valorVenda: number;
       comissaoCaptador: number;
       comissaoVendedor: number;
@@ -135,16 +136,19 @@ export async function listCommissionSummary(
 
   const transactions = rows.flatMap((row) => {
     const commissionData = parseStoredJsonObject(row.commission_data);
-    const valorVenda = readCommissionValue(commissionData, 'valorVenda');
+    const valorBaseComissao = readCommissionValue(
+      commissionData,
+      'valorBaseComissao'
+    ) || readCommissionValue(commissionData, 'valorVenda');
     const comissaoCaptador = readCommissionValue(commissionData, 'comissaoCaptador');
     const comissaoVendedor = readCommissionValue(commissionData, 'comissaoVendedor');
     const taxaPlataforma = readCommissionValue(commissionData, 'taxaPlataforma');
 
-    if (valorVenda <= 0) {
+    if (valorBaseComissao <= 0) {
       return [];
     }
 
-    totalVGV += valorVenda;
+    totalVGV += valorBaseComissao;
     totalCaptadores += comissaoCaptador;
     totalVendedores += comissaoVendedor;
     totalPlataforma += taxaPlataforma;
@@ -165,7 +169,9 @@ export async function listCommissionSummary(
           ? ('negotiation_documents' as const)
           : null,
       commissionData: {
-        valorVenda,
+        valorBaseComissao,
+        // Mantém a resposta legível para consumidores que ainda usam este nome.
+        valorVenda: valorBaseComissao,
         comissaoCaptador,
         comissaoVendedor,
         taxaPlataforma,

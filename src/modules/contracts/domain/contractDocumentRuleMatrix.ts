@@ -168,6 +168,16 @@ export function resolveDocumentRequirements(input: {
             : 'CERTIDAO_ONUS_ACOES_NA_RENTAL_ONLY',
       },
       {
+        category: 'seguro_incendio',
+        applicability: isRent ? 'required' : 'not_applicable',
+        required: isRent,
+        reasonCode: isRent
+          ? 'SEGURO_INCENDIO_REQUIRED_RENTAL'
+          : modalityUnknown
+            ? 'SEGURO_INCENDIO_NA_DEAL_TYPE_UNRESOLVED'
+            : 'SEGURO_INCENDIO_NA_SALE_ONLY',
+      },
+      {
         category: 'outro',
         applicability: 'optional',
         required: false,
@@ -206,16 +216,6 @@ export function resolveDocumentRequirements(input: {
           : modalityUnknown
             ? 'COMPROVANTE_RENDA_NA_DEAL_TYPE_UNRESOLVED'
             : 'COMPROVANTE_RENDA_NA_SALE_ONLY',
-    },
-    {
-      category: 'comprovante_garantia',
-      applicability: isRent ? 'required' : 'not_applicable',
-      required: isRent,
-      reasonCode: isRent
-        ? 'COMPROVANTE_GARANTIA_REQUIRED_RENTAL'
-        : modalityUnknown
-          ? 'COMPROVANTE_GARANTIA_NA_DEAL_TYPE_UNRESOLVED'
-          : 'COMPROVANTE_GARANTIA_NA_SALE_ONLY',
     },
     {
       category: 'outro',

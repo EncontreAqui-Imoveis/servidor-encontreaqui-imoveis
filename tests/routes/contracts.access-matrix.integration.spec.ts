@@ -31,7 +31,11 @@ const actors = {
   propertyOwner: { id: 11, role: 'client', cpf: '10101010101' },
   buyer: { id: 20, role: 'client', cpf: '22222222222' },
   legalBuyer: { id: 21, role: 'client', cpf: '21212121212' },
-  responsible: { id: 30, role: 'broker', cpf: '33333333333' },
+  responsible1: { id: 30, role: 'broker', cpf: '33333333330' },
+  responsible2: { id: 31, role: 'broker', cpf: '33333333331' },
+  responsible3: { id: 32, role: 'broker', cpf: '33333333332' },
+  responsible4: { id: 33, role: 'broker', cpf: '33333333333' },
+  responsible5: { id: 34, role: 'broker', cpf: '33333333334' },
   captor: { id: 40, role: 'broker', cpf: '44444444444' },
   stranger: { id: 50, role: 'client', cpf: '55555555555' },
   admin: { id: 1, role: 'admin', cpf: null },
@@ -129,7 +133,7 @@ function createContractRow(state: ContractState) {
     buyer_client_name: 'Comprador',
     capturing_agency_name: null,
     capturing_agency_address: null,
-    responsible_user_ids: '30',
+    responsible_user_ids: '30,31,32,33,34',
     legal_buyer_user_id: state.legalBuyerUserId ?? null,
     handshake_status: state.handshakeStatus ?? null,
     handshake_pin: state.handshakePin ?? null,
@@ -427,11 +431,19 @@ describe('Contract access matrix HTTP integration', () => {
     expect(state.sellerInfo).toEqual({ profissao: 'Vendedor original' });
   });
 
-  it('permite corretor responsável nos dois lados', async () => {
-    expect((await updateData('responsible', 'seller')).status).toBe(200);
-    expect((await updateData('responsible', 'buyer')).status).toBe(200);
-    expect((await uploadDocument('responsible', 'seller')).status).toBe(201);
-    expect((await uploadDocument('responsible', 'buyer')).status).toBe(201);
+  it('permite cada um dos cinco responsáveis vinculados nos dois lados durante AWAITING_DOCS', async () => {
+    for (const actor of [
+      'responsible1',
+      'responsible2',
+      'responsible3',
+      'responsible4',
+      'responsible5',
+    ] as const) {
+      expect((await updateData(actor, 'seller')).status).toBe(200);
+      expect((await updateData(actor, 'buyer')).status).toBe(200);
+      expect((await uploadDocument(actor, 'seller')).status).toBe(201);
+      expect((await uploadDocument(actor, 'buyer')).status).toBe(201);
+    }
   });
 
   it('isola qualificações cadastrais e não persiste tentativa cruzada', async () => {
@@ -515,7 +527,15 @@ describe('Contract access matrix HTTP integration', () => {
     async (status) => {
       state.status = status;
 
-      for (const actor of ['seller', 'buyer', 'responsible'] as const) {
+      for (const actor of [
+        'seller',
+        'buyer',
+        'responsible1',
+        'responsible2',
+        'responsible3',
+        'responsible4',
+        'responsible5',
+      ] as const) {
         const side = actor === 'buyer' ? 'buyer' : 'seller';
         expectForbidden(await updateData(actor, side));
         expectForbidden(await uploadDocument(actor, side));
@@ -525,4 +545,41 @@ describe('Contract access matrix HTTP integration', () => {
       expect((await uploadDocument('admin', 'seller')).status).toBe(201);
     },
   );
+
+  it('mantém cada responsável em consulta de status sem PII ou arquivos após a etapa documental', async () => {
+    state.status = 'AWAITING_SIGNATURES';
+    state.sellerInfo = { nome: 'Vendedor privado', cpf: '11111111111' };
+    state.buyerInfo = { nome: 'Comprador privado', cpf: '22222222222' };
+
+    for (const actor of [
+      'responsible1',
+      'responsible2',
+      'responsible3',
+      'responsible4',
+      'responsible5',
+    ] as const) {
+      const details = await request(app)
+        .get('/contracts/contract-matrix-1')
+        .set(asActor(actor));
+
+      expect(details.status).toBe(200);
+      expect(details.body.contract.sellerInfo).toEqual({});
+      expect(details.body.contract.buyerInfo).toEqual({});
+      expect(details.body.documents).toEqual([]);
+      expect(details.body.documentSlots).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: null,
+            originalFileName: null,
+            downloadUrl: null,
+          }),
+        ]),
+      );
+      expect(details.body.contract.capabilities).toMatchObject({
+        canReadDocumentStatus: true,
+        canReadDocumentFiles: false,
+        canMutateDocuments: false,
+      });
+    }
+  });
 });

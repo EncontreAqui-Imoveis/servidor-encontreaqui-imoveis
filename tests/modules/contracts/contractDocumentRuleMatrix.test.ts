@@ -19,7 +19,7 @@ describe('contractDocumentRuleMatrix', () => {
     expect(resolveMaritalBucket({})).toBe('unknown');
   });
 
-  it('usa exclusivamente dealType para renda e garantia do locatário', () => {
+  it('usa exclusivamente dealType para a renda do locatário', () => {
     const sale = resolveDocumentRequirements({
       side: 'buyer',
       dealType: 'sale',
@@ -33,16 +33,14 @@ describe('contractDocumentRuleMatrix', () => {
       buyerInfo,
     });
 
-    for (const category of ['comprovante_renda', 'comprovante_garantia'] as const) {
-      expect(sale.find((item) => item.category === category)).toMatchObject({
-        applicability: 'not_applicable',
-        required: false,
-      });
-      expect(rent.find((item) => item.category === category)).toMatchObject({
-        applicability: 'required',
-        required: true,
-      });
-    }
+    expect(sale.find((item) => item.category === 'comprovante_renda')).toMatchObject({
+      applicability: 'not_applicable',
+      required: false,
+    });
+    expect(rent.find((item) => item.category === 'comprovante_renda')).toMatchObject({
+      applicability: 'required',
+      required: true,
+    });
   });
 
   it('separa as certidões do vendedor conforme a modalidade canônica', () => {
@@ -96,9 +94,9 @@ describe('contractDocumentRuleMatrix', () => {
       applicability: 'not_applicable',
       reasonCode: 'CERTIDAO_INTEIRO_TEOR_NA_DEAL_TYPE_UNRESOLVED',
     });
-    expect(buyer.find((item) => item.category === 'comprovante_garantia')).toMatchObject({
+    expect(buyer.find((item) => item.category === 'comprovante_renda')).toMatchObject({
       applicability: 'not_applicable',
-      reasonCode: 'COMPROVANTE_GARANTIA_NA_DEAL_TYPE_UNRESOLVED',
+      reasonCode: 'COMPROVANTE_RENDA_NA_DEAL_TYPE_UNRESOLVED',
     });
   });
 
@@ -129,18 +127,43 @@ describe('contractDocumentRuleMatrix', () => {
     expect(single.find((item) => item.category === 'conjuge_documentos')?.required).toBe(false);
   });
 
-  it('bloqueia upload da garantia em venda e do ônus em locação', () => {
-    const saleContext = { dealType: 'sale' as const, sellerInfo, buyerInfo };
+  it('bloqueia upload do ônus em locação', () => {
     const rentContext = { dealType: 'rent' as const, sellerInfo, buyerInfo };
-    expect(isUploadBlockedForNotApplicableCategory(
-      'buyer', 'comprovante_garantia', saleContext
-    )).toEqual(expect.objectContaining({ blocked: true }));
     expect(isUploadBlockedForNotApplicableCategory(
       'seller', 'certidao_onus_acoes', rentContext
     )).toEqual(expect.objectContaining({ blocked: true }));
-    expect(isUploadBlockedForNotApplicableCategory(
-      'buyer', 'comprovante_garantia', rentContext
-    )).toEqual(expect.objectContaining({ blocked: false }));
+  });
+
+  it('exige seguro incêndio apenas do vendedor em locação', () => {
+    const rentalSeller = resolveDocumentRequirements({
+      side: 'seller',
+      dealType: 'rent',
+      sellerInfo,
+      buyerInfo,
+    });
+    const saleSeller = resolveDocumentRequirements({
+      side: 'seller',
+      dealType: 'sale',
+      sellerInfo,
+      buyerInfo,
+    });
+    const rentalBuyer = resolveDocumentRequirements({
+      side: 'buyer',
+      dealType: 'rent',
+      sellerInfo,
+      buyerInfo,
+    });
+
+    expect(rentalSeller.find((item) => item.category === 'seguro_incendio')).toMatchObject({
+      applicability: 'required',
+      required: true,
+      reasonCode: 'SEGURO_INCENDIO_REQUIRED_RENTAL',
+    });
+    expect(saleSeller.find((item) => item.category === 'seguro_incendio')).toMatchObject({
+      applicability: 'not_applicable',
+      required: false,
+    });
+    expect(rentalBuyer.find((item) => item.category === 'seguro_incendio')).toBeUndefined();
   });
 
   it('expõe slots independentes e normaliza o rótulo de inteiro teor', () => {

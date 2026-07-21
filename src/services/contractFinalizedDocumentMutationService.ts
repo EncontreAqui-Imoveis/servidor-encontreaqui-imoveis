@@ -54,7 +54,7 @@ function normalizeDocumentCategory(
     'estado_civil',
     'conjuge_documentos',
     'comprovante_renda',
-    'comprovante_garantia',
+    'seguro_incendio',
     'dados_bancarios',
     'certidao_inteiro_teor_escritura',
     'certidao_onus_acoes',

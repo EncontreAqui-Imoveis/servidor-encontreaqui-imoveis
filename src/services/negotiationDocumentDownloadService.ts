@@ -7,6 +7,7 @@ import {
   queryNegotiationRows,
 } from './negotiationPersistenceService';
 import { isNegotiationActor, isNegotiationAdmin } from '../utils/negotiationActorAccess';
+import { resolveContractAccessContext } from '../utils/contractAccessResolver';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
@@ -15,6 +16,10 @@ interface NegotiationAccessRow extends RowDataPacket {
   legal_buyer_user_id: number | null;
   handshake_pin: string | null;
   handshake_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
+  contract_id: string | null;
+  contract_status: string | null;
+  property_owner_id: number | null;
+  responsible_user_ids: string | null;
 }
 
 interface NegotiationDocumentRow {
@@ -84,10 +89,28 @@ export async function downloadDocument(
   try {
     const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
       `
-        SELECT id, proposer_id, advertiser_id,
-          legal_buyer_user_id, handshake_pin, handshake_status
-        FROM negotiations
-        WHERE id = ?
+        SELECT
+          n.id,
+          n.proposer_id,
+          n.advertiser_id,
+          n.legal_buyer_user_id,
+          n.handshake_pin,
+          n.handshake_status,
+          c.id AS contract_id,
+          c.status AS contract_status,
+          p.owner_id AS property_owner_id,
+          (
+            SELECT GROUP_CONCAT(nr.user_id ORDER BY nr.created_at ASC, nr.id ASC SEPARATOR ',')
+            FROM negotiation_responsibles nr
+            JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
+            WHERE nr.negotiation_id = n.id
+              AND responsible_broker.status = 'approved'
+              AND COALESCE(responsible_broker.profile_type, 'BROKER') IN ('BROKER', 'AUXILIARY_ADMINISTRATIVE')
+          ) AS responsible_user_ids
+        FROM negotiations n
+        JOIN properties p ON p.id = n.property_id
+        LEFT JOIN contracts c ON c.negotiation_id = n.id
+        WHERE n.id = ?
         LIMIT 1
       `,
       [negotiationId]
@@ -101,12 +124,32 @@ export async function downloadDocument(
       Number(negotiation.legal_buyer_user_id) === userId &&
       String(negotiation.handshake_pin ?? '').trim().length > 0 &&
       String(negotiation.handshake_status ?? '').trim().toUpperCase() === 'VERIFIED';
+    const contractAccess = negotiation.contract_id
+      ? resolveContractAccessContext(
+          { id: userId, role },
+          {
+            id: negotiation.contract_id,
+            status: negotiation.contract_status,
+            advertiser_id: negotiation.advertiser_id,
+            property_owner_id: negotiation.property_owner_id,
+            proposer_id: negotiation.proposer_id,
+            legal_buyer_user_id: negotiation.legal_buyer_user_id,
+            handshake_pin: negotiation.handshake_pin,
+            handshake_status: negotiation.handshake_status,
+            responsible_user_ids: negotiation.responsible_user_ids,
+          }
+        )
+      : null;
     if (
       !isNegotiationAdmin(role) &&
       !isNegotiationActor(userId, negotiation) &&
-      !isVerifiedLegalBuyer
+      !isVerifiedLegalBuyer &&
+      contractAccess?.userRole === 'none'
     ) {
       return res.status(403).json({ error: 'Acesso negado ao documento.' });
+    }
+    if (contractAccess && !contractAccess.canReadDocumentFiles) {
+      return res.status(403).json({ error: 'Documentos disponíveis apenas para consulta de status nesta etapa.' });
     }
 
     const document = (await findNegotiationDocumentById(documentId)) as

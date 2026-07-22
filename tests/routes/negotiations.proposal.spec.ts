@@ -116,6 +116,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -169,6 +170,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -223,6 +225,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       sellerBrokerId: 30004,
       pagamento: {
@@ -259,6 +262,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -286,6 +290,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       proposal_validity_date: retroDate,
       pagamento: {
@@ -333,6 +338,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Comprador Externo',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'comprador.externo@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 150000,
@@ -406,6 +412,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Cliente Proprietario',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'cliente.proprietario@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -458,6 +465,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Cliente',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'cliente@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -504,6 +512,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Cliente',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'cliente@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -551,6 +560,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Cliente Comprador',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'cliente.comprador@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -608,6 +618,7 @@ describe('POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,

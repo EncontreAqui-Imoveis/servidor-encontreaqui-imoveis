@@ -158,6 +158,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
         propertyId: 101,
         clientName: 'Joao da Silva',
         clientCpf: '529.982.247-25',
+        buyerEmail: 'joao.silva@example.test',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -199,6 +200,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
         propertyId: 101,
         clientName: 'Joao da Silva',
         clientCpf: '529.982.247-25',
+        buyerEmail: 'joao.silva@example.test',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -227,6 +229,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
         propertyId: 101,
         clientName: 'Joao da Silva',
         clientCpf: '529.982.247-25',
+        buyerEmail: 'joao.silva@example.test',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -246,6 +249,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
       propertyId: 101,
       clientName: 'Joao da Silva',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 100000,
@@ -291,6 +295,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
         propertyId: 101,
         clientName: 'Joao da Silva',
         clientCpf: '529.982.247-25',
+        buyerEmail: 'joao.silva@example.test',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -343,6 +348,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
         propertyId: 101,
         clientName: 'Joao da Silva',
         clientCpf: '529.982.247-25',
+        buyerEmail: 'joao.silva@example.test',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,
@@ -398,6 +404,7 @@ describe('negotiationProposalGenerationService.generateProposalFromProperty', ()
         propertyId: 101,
         clientName: 'Joao da Silva',
         clientCpf: '529.982.247-25',
+        buyerEmail: 'joao.silva@example.test',
         validadeDias: 10,
         pagamento: {
           dinheiro: 100000,

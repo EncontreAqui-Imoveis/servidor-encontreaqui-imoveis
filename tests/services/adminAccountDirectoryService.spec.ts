@@ -12,6 +12,8 @@ vi.mock('../../src/database/connection', () => ({
 }));
 
 import {
+  getAdminBrokerProperties,
+  getAdminClientProperties,
   listAdminBrokers,
   listAdminUsers,
   listPendingAdminBrokers,
@@ -135,5 +137,19 @@ describe('adminAccountDirectoryService', () => {
     expect(countSql).toContain('COUNT(DISTINCT b.id) AS total');
     expect(sql).toContain('b.status = ?');
     expect(sql).toContain('ORDER BY u.name ASC');
+  });
+
+  it('expõe código e data de criação nos imóveis administrativos, sem depender do ID visual', async () => {
+    queryMock
+      .mockResolvedValueOnce([[{ id: 91, code: 'RV-2026', title: 'Casa teste', created_at: '2026-07-22T12:30:00.000Z' }]])
+      .mockResolvedValueOnce([[{ id: 92, code: 'AP-2026', title: 'Apartamento teste', created_at: '2026-07-22T13:30:00.000Z' }]]);
+
+    const brokerProperties = await getAdminBrokerProperties(3);
+    const clientProperties = await getAdminClientProperties(7);
+
+    expect(brokerProperties.data[0]).toMatchObject({ code: 'RV-2026', created_at: '2026-07-22T12:30:00.000Z' });
+    expect(clientProperties.data[0]).toMatchObject({ code: 'AP-2026', created_at: '2026-07-22T13:30:00.000Z' });
+    expect(queryMock.mock.calls[0][0]).toContain('p.code');
+    expect(queryMock.mock.calls[1][0]).toContain('p.created_at');
   });
 });

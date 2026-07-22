@@ -12,6 +12,7 @@ import {
     assertAccountNameAvailable,
     isDuplicateAccountNameError,
 } from '../services/userAccountNameService';
+import { buildPropertyOwnerListingFilters } from '../services/propertyOwnerListingFilterService';
 
 const jwtSecret = requireEnv("JWT_SECRET");
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -469,24 +470,12 @@ class BrokerController {
             const requestedLimit = parseInt(req.query.limit as string, 10) || 10;
             const limit = Math.min(Math.max(1, requestedLimit), 100);
             const offset = (page - 1) * limit;
-            const search = String(req.query.search ?? '').trim();
-            const purpose = String(req.query.purpose ?? '').trim().toLowerCase();
-            const whereClauses = ['p.broker_id = ?'];
-            const whereParams: Array<string | number> = [brokerId];
-
-            if (search) {
-                const like = `%${search}%`;
-                whereClauses.push('(p.title LIKE ? OR p.code LIKE ?)');
-                whereParams.push(like, like);
-            }
-            if (purpose === 'sale') {
-                whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
-                whereParams.push('%vend%');
-            } else if (purpose === 'rent') {
-                whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
-                whereParams.push('%alug%');
-            }
-            const whereSql = whereClauses.join(' AND ');
+            const { whereSql, params: whereParams } = buildPropertyOwnerListingFilters({
+                ownerColumn: 'p.broker_id',
+                ownerId: brokerId,
+                search: req.query.search,
+                purpose: req.query.purpose,
+            });
 
             const countQuery = `SELECT COUNT(*) as total FROM properties p WHERE ${whereSql}`;
             const [totalResult] = await brokerDb.query(countQuery, whereParams);

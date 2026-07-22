@@ -119,6 +119,7 @@ describe('Contractual compliance: POST /negotiations/proposal', () => {
       propertyId: 101,
       clientName: 'Cliente Contratual',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'cliente.contratual@example.test',
       validadeDias: 10,
       value: 1,
       price: 1,

@@ -17,6 +17,7 @@ describe('negotiationProposalSupportService', () => {
       propertyId: 12,
       clientName: 'Pedro Matheus',
       clientCpf: '091.694.431-06',
+      buyerEmail: 'pedro.matheus@example.test',
       validadeDias: 10,
       pagamento: {
         dinheiro: 'R$ 1.000,50',
@@ -36,6 +37,7 @@ describe('negotiationProposalSupportService', () => {
       propertyId: 12,
       clientName: 'Pedro Matheus',
       clientCpf: '091.694.431-06',
+      buyerEmail: 'pedro.matheus@example.test',
       dealType: 'rent',
       validadeDias: 10,
       pagamento: {

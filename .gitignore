@@ -29,4 +29,5 @@ scratch/
 scripts/*
 !scripts/migrations/
 !scripts/migrations/*.sql
+!scripts/audit-contract-buyer-legal-names.ts
 scripts/smoke/

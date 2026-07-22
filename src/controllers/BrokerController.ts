@@ -13,64 +13,8 @@ import {
     isDuplicateAccountNameError,
 } from '../services/userAccountNameService';
 
-type RecurrenceInterval = "none" | "weekly" | "monthly" | "yearly";
-
 const jwtSecret = requireEnv("JWT_SECRET");
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
-
-function toDate(value: unknown): Date | null {
-    if (!value) return null;
-    const date = value instanceof Date ? value : new Date(value as any);
-    return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function diffInWeeks(start: Date, end: Date): number {
-    const diffMs = end.getTime() - start.getTime();
-    return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000));
-}
-
-function diffInMonths(start: Date, end: Date): number {
-    let months = (end.getFullYear() - start.getFullYear()) * 12;
-    months += end.getMonth() - start.getMonth();
-    if (end.getDate() < start.getDate()) {
-        months -= 1;
-    }
-    return Math.max(months, 0);
-}
-
-function diffInYears(start: Date, end: Date): number {
-    let years = end.getFullYear() - start.getFullYear();
-    if (
-        end.getMonth() < start.getMonth() ||
-        (end.getMonth() === start.getMonth() && end.getDate() < start.getDate())
-    ) {
-        years -= 1;
-    }
-    return Math.max(years, 0);
-}
-
-function calculateAutoCycles(intervalValue: unknown, saleDateValue: unknown): number {
-    const interval = typeof intervalValue === "string"
-        ? intervalValue.trim().toLowerCase()
-        : "none";
-    if (interval !== "weekly" && interval !== "monthly" && interval !== "yearly") {
-        return 0;
-    }
-    const saleDate = toDate(saleDateValue);
-    if (!saleDate) return 0;
-    const now = new Date();
-    if (now <= saleDate) return 0;
-    switch (interval as RecurrenceInterval) {
-        case "weekly":
-            return diffInWeeks(saleDate, now);
-        case "monthly":
-            return diffInMonths(saleDate, now);
-        case "yearly":
-            return diffInYears(saleDate, now);
-        default:
-            return 0;
-    }
-}
 
 class BrokerController {
     async listApproved(req: AuthRequest, res: Response) {
@@ -703,39 +647,37 @@ class BrokerController {
         try {
             const query = `
                 SELECT
-                    s.id,
+                    cca.id,
+                    cca.contract_id,
+                    cca.role,
                     p.title,
-                    s.deal_type,
-                    s.sale_price,
-                    s.commission_rate,
-                    s.commission_amount,
-                    s.iptu_value,
-                    s.condominio_value,
-                    s.is_recurring,
-                    s.commission_cycles,
-                    s.recurrence_interval,
-                    s.sale_date
-                FROM sales s
-                JOIN properties p ON s.property_id = p.id
-                WHERE s.broker_id = ?
-                ORDER BY s.sale_date DESC
+                    cca.deal_type,
+                    cca.base_amount AS sale_price,
+                    cca.amount AS commission_amount,
+                    0 AS iptu_value,
+                    0 AS condominio_value,
+                    FALSE AS is_recurring,
+                    1 AS commission_cycles,
+                    'none' AS recurrence_interval,
+                    cca.finalized_at AS sale_date
+                FROM contract_commission_allocations cca
+                JOIN contracts c ON c.id = cca.contract_id
+                JOIN properties p ON p.id = c.property_id
+                WHERE cca.broker_id = ?
+                  AND cca.status = 'RECORDED'
+                  AND c.status = 'FINALIZED'
+                ORDER BY cca.finalized_at DESC, cca.id DESC
             `;
             const [commissions] = await brokerDb.query(query, [brokerId]);
 
             return res.json({
                 success: true,
                 data: (commissions as any[]).map((row) => {
-                    const baseCycles = Math.max(Number(row.commission_cycles) || 0, 0);
-                    const autoCycles = calculateAutoCycles(
-                        row.recurrence_interval,
-                        row.sale_date
-                    );
-                    const totalCycles = baseCycles + autoCycles;
                     const commissionAmount = Number(row.commission_amount) || 0;
                     return {
                         ...row,
-                        commission_cycles_total: totalCycles,
-                        commission_amount_total: Number((commissionAmount * totalCycles).toFixed(2)),
+                        commission_cycles_total: 1,
+                        commission_amount_total: Number(commissionAmount.toFixed(2)),
                     };
                 })
             });
@@ -751,17 +693,17 @@ class BrokerController {
     async getMyPerformanceReport(req: AuthRequest, res: Response) {
         const brokerId = req.userId;
         try {
-            const [salesRows] = await brokerDb.query<any[]>(
+            const [commissionRows] = await brokerDb.query<any[]>(
                 `
                 SELECT
-                    deal_type,
-                    commission_amount,
-                    commission_cycles,
-                    recurrence_interval,
-                    sale_date,
-                    iptu_value
-                FROM sales
-                WHERE broker_id = ?
+                    cca.contract_id,
+                    cca.deal_type,
+                    cca.amount AS commission_amount
+                FROM contract_commission_allocations cca
+                JOIN contracts c ON c.id = cca.contract_id
+                WHERE cca.broker_id = ?
+                  AND cca.status = 'RECORDED'
+                  AND c.status = 'FINALIZED'
                 `,
                 [brokerId]
             );
@@ -771,27 +713,24 @@ class BrokerController {
             let totalRents = 0;
             let totalCommission = 0;
             let totalIptu = 0;
+            const countedContracts = new Set<string>();
 
-            for (const row of salesRows) {
-                totalDeals += 1;
+            for (const row of commissionRows) {
+                const contractId = String(row.contract_id ?? '');
+                const isFirstAllocationForContract = !countedContracts.has(contractId);
+                if (isFirstAllocationForContract) {
+                    countedContracts.add(contractId);
+                    totalDeals += 1;
+                }
                 const dealType = String(row.deal_type ?? "").toLowerCase();
-                if (dealType === "sale") {
+                if (isFirstAllocationForContract && dealType === "sale") {
                     totalSales += 1;
-                } else if (dealType === "rent") {
+                } else if (isFirstAllocationForContract && dealType === "rent") {
                     totalRents += 1;
                 }
 
-                const baseCycles = Math.max(Number(row.commission_cycles) || 0, 0);
-                const autoCycles = calculateAutoCycles(
-                    row.recurrence_interval,
-                    row.sale_date
-                );
-                const totalCycles = baseCycles + autoCycles;
                 const commissionAmount = Number(row.commission_amount) || 0;
-                totalCommission += commissionAmount * totalCycles;
-
-                const iptuValue = Number(row.iptu_value) || 0;
-                totalIptu += iptuValue;
+                totalCommission += commissionAmount;
             }
 
             const propertiesQuery = `SELECT COUNT(*) as total_properties FROM properties WHERE broker_id = ?`;

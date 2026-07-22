@@ -396,9 +396,9 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .send({
         commissionData: {
           valorBaseComissao: 10000,
-          comissaoCaptador: 600,
-          comissaoVendedor: 400,
-          taxaPlataforma: 200,
+          comissaoCaptador: 1000,
+          comissaoVendedor: 5000,
+          taxaPlataforma: 4000,
         },
       });
 
@@ -407,9 +407,9 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(contractState.commission_data).toEqual({
       valorBaseComissao: 10000,
       valorVenda: 10000,
-      comissaoCaptador: 600,
-      comissaoVendedor: 400,
-      taxaPlataforma: 200,
+      comissaoCaptador: 1000,
+      comissaoVendedor: 5000,
+      taxaPlataforma: 4000,
     });
     expect(negotiationStatusUpdate).toBe('RENTED');
     expect(propertyStatusUpdate).toEqual({

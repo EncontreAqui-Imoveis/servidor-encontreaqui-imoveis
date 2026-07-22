@@ -3,10 +3,10 @@ import { userController } from '../controllers/UserController';
 import { authController } from '../controllers/AuthController';
 import { authMiddleware } from '../middlewares/auth';
 import uploadController from '../controllers/UploadController';
-import { createAuthSensitiveLimiter } from '../config/rateLimiters';
+import { createAuthLoginLimiter } from '../config/rateLimiters';
 
 const userRoutes = Router();
-const legacyAuthLimiter = createAuthSensitiveLimiter();
+const legacyAuthLimiter = createAuthLoginLimiter();
 
 userRoutes.post('/register', legacyAuthLimiter, (req, res) =>
   authController.register(req, res)

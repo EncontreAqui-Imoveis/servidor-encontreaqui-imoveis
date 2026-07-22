@@ -6,7 +6,7 @@ interface CommissionContractRow extends RowDataPacket {
   negotiation_id: string;
   property_id: number;
   commission_data: unknown;
-  updated_at: Date | string | null;
+  finalized_at: Date | string | null;
   property_title: string | null;
   property_code: string | null;
   property_purpose: string | null;
@@ -106,7 +106,7 @@ export async function listCommissionSummary(
         c.negotiation_id,
         c.property_id,
         c.commission_data,
-        c.updated_at,
+        COALESCE(c.finalized_at, c.updated_at) AS finalized_at,
         p.title AS property_title,
         p.code AS property_code,
         p.purpose AS property_purpose,
@@ -122,9 +122,9 @@ export async function listCommissionSummary(
       FROM contracts c
       JOIN properties p ON p.id = c.property_id
       WHERE c.status = 'FINALIZED'
-        AND YEAR(c.updated_at) = ?
-        AND MONTH(c.updated_at) = ?
-      ORDER BY c.updated_at DESC, c.id DESC
+        AND YEAR(COALESCE(c.finalized_at, c.updated_at)) = ?
+        AND MONTH(COALESCE(c.finalized_at, c.updated_at)) = ?
+      ORDER BY COALESCE(c.finalized_at, c.updated_at) DESC, c.id DESC
     `,
     [year, month],
   );
@@ -161,7 +161,7 @@ export async function listCommissionSummary(
       propertyTitle: row.property_title ?? null,
       propertyCode: row.property_code ?? null,
       propertyPurpose: row.property_purpose ?? null,
-      finalizedAt: toIsoString(row.updated_at),
+      finalizedAt: toIsoString(row.finalized_at),
       signedProposalDocumentId:
         signedId != null && Number.isFinite(Number(signedId)) ? Number(signedId) : null,
       signedProposalDocumentSource:

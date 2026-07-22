@@ -144,7 +144,7 @@ export async function downloadDocument(
       !isNegotiationAdmin(role) &&
       !isNegotiationActor(userId, negotiation) &&
       !isVerifiedLegalBuyer &&
-      contractAccess?.userRole === 'none'
+      (!contractAccess || contractAccess.userRole === 'none')
     ) {
       return res.status(403).json({ error: 'Acesso negado ao documento.' });
     }

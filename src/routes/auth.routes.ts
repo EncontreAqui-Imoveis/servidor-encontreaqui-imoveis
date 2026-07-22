@@ -3,11 +3,12 @@ import { authController } from '../controllers/AuthController';
 import { registrationDraftController } from '../controllers/RegistrationDraftController';
 import { authMiddleware } from '../middlewares/auth';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
-import { createAuthLightLimiter, createAuthSensitiveLimiter } from '../config/rateLimiters';
+import { createAuthLightLimiter, createAuthLoginLimiter, createAuthSensitiveLimiter } from '../config/rateLimiters';
 
 const authRoutes = Router();
 const authSensitiveLimiter = createAuthSensitiveLimiter();
 const authLightLimiter = createAuthLightLimiter();
+const authLoginLimiter = createAuthLoginLimiter();
 
 function handleDraftUploadError(
   error: unknown,
@@ -78,7 +79,7 @@ authRoutes.post('/register/draft/:draftId/finalize', authSensitiveLimiter, (req,
 authRoutes.post('/register/draft/:draftId/discard', authLightLimiter, (req, res) =>
   registrationDraftController.discard(req, res),
 );
-authRoutes.post('/login', authSensitiveLimiter, (req, res) =>
+authRoutes.post('/login', authLoginLimiter, (req, res) =>
   authController.login(req, res)
 );
 authRoutes.post('/google', authSensitiveLimiter, (req, res) =>

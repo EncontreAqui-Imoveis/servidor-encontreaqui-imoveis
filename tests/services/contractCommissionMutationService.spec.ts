@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { resolveContractStatusMock, txMock } = vi.hoisted(() => {
+const {
+  resolveContractStatusMock,
+  syncContractCommissionAllocationsMock,
+  cancelContractCommissionAllocationsMock,
+  assertRentalCommissionPolicyMock,
+  txMock,
+} = vi.hoisted(() => {
   const tx = {
     query: vi.fn(),
   };
 
   return {
     resolveContractStatusMock: vi.fn(),
+    syncContractCommissionAllocationsMock: vi.fn(),
+    cancelContractCommissionAllocationsMock: vi.fn(),
+    assertRentalCommissionPolicyMock: vi.fn(),
     txMock: tx,
   };
 });
@@ -14,6 +23,13 @@ const { resolveContractStatusMock, txMock } = vi.hoisted(() => {
 vi.mock('../../src/controllers/ContractController', () => ({
   __esModule: true,
   resolveContractStatus: resolveContractStatusMock,
+}));
+
+vi.mock('../../src/services/contractCommissionAllocationService', () => ({
+  __esModule: true,
+  syncContractCommissionAllocations: syncContractCommissionAllocationsMock,
+  cancelContractCommissionAllocations: cancelContractCommissionAllocationsMock,
+  assertRentalCommissionPolicy: assertRentalCommissionPolicyMock,
 }));
 
 import {
@@ -56,8 +72,9 @@ describe('contractCommissionMutationService', () => {
     });
 
     expect(result.contract?.id).toBe('contract-1');
-    expect(result.commissionData).toEqual({
+    expect(result.commissionData).toMatchObject({
       valorVenda: 10000,
+      valorBaseComissao: 10000,
       comissaoCaptador: 4000,
       comissaoVendedor: 3000,
       taxaPlataforma: 3000,
@@ -111,7 +128,7 @@ describe('contractCommissionMutationService', () => {
       })
     ).rejects.toMatchObject({
       statusCode: 400,
-      message: 'Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorVenda.',
+      message: 'Dados financeiros inconsistentes: soma de comissões e taxa não pode exceder valorBaseComissao.',
     });
   });
 

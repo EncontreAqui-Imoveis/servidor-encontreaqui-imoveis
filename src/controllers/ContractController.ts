@@ -37,6 +37,11 @@ import {
   updateContractCommissionData,
 } from '../services/contractCommissionMutationService';
 import {
+  assertRentalCommissionPolicy,
+  cancelContractCommissionAllocations,
+  syncContractCommissionAllocations,
+} from '../services/contractCommissionAllocationService';
+import {
   deleteFinalizedContractDocument,
   isContractFinalizedDocumentMutationError,
   uploadFinalizedContractDocument,
@@ -2740,6 +2745,18 @@ class ContractController {
         }
       }
 
+      try {
+        assertRentalCommissionPolicy(contract, commissionData);
+      } catch (error) {
+        await tx.rollback();
+        return res.status(400).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Dados de comissão de locação inválidos.',
+        });
+      }
+
       const finalStatuses = resolveFinalDealStatuses(contract.property_purpose);
 
       await tx.query(
@@ -2748,11 +2765,14 @@ class ContractController {
           SET
             commission_data = CAST(? AS JSON),
             status = 'FINALIZED',
+            finalized_at = COALESCE(finalized_at, CURRENT_TIMESTAMP),
             updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `,
         [JSON.stringify(commissionData), contractId]
       );
+
+      await syncContractCommissionAllocations(tx, contract, commissionData);
 
       await tx.query(
         `
@@ -2829,6 +2849,8 @@ class ContractController {
         );
       }
 
+      await cancelContractCommissionAllocations(tx, contractId);
+
       const nextWorkflowMetadata = resetWorkflowMetadata(contract.workflow_metadata);
 
       if (nextWorkflowMetadata) {
@@ -2841,6 +2863,7 @@ class ContractController {
               buyer_approval_status = 'PENDING',
               seller_approval_reason = NULL,
               buyer_approval_reason = NULL,
+              finalized_at = NULL,
               workflow_metadata = CAST(? AS JSON),
               updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
@@ -2857,6 +2880,7 @@ class ContractController {
               buyer_approval_status = 'PENDING',
               seller_approval_reason = NULL,
               buyer_approval_reason = NULL,
+              finalized_at = NULL,
               workflow_metadata = NULL,
               updated_at = CURRENT_TIMESTAMP
             WHERE id = ?

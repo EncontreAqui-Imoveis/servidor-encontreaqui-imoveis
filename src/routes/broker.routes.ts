@@ -3,10 +3,10 @@ import { brokerController } from '../controllers/BrokerController';
 import { authController } from '../controllers/AuthController';
 import { authMiddleware, isBroker } from '../middlewares/auth';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware'
-import { createAuthSensitiveLimiter } from '../config/rateLimiters';
+import { createAuthLoginLimiter } from '../config/rateLimiters';
 
 const router = Router();
-const legacyAuthLimiter = createAuthSensitiveLimiter();
+const legacyAuthLimiter = createAuthLoginLimiter();
 
 router.post('/register', brokerController.register);
 router.post('/login', legacyAuthLimiter, (req, res) => authController.login(req, res));

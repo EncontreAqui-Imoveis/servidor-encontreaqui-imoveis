@@ -27,10 +27,10 @@ import {
   relistProperty as relistCatalogProperty,
   updateFeaturedProperties as updateCatalogFeaturedProperties,
 } from '../services/adminPropertyCatalogService';
-import { createAdminAuthLimiter } from '../config/rateLimiters';
+import { createAdminLoginLimiter } from '../config/rateLimiters';
 
 const adminRoutes = Router();
-const adminAuthLimiter = createAdminAuthLimiter();
+const adminAuthLimiter = createAdminLoginLimiter();
 
 adminRoutes.post('/login', adminAuthLimiter, adminController.login);
 

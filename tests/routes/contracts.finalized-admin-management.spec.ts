@@ -373,6 +373,7 @@ describe('Admin management for finalized contracts', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.contract.commissionData).toEqual({
+      valorBaseComissao: 10000,
       valorVenda: 10000,
       comissaoCaptador: 4000,
       comissaoVendedor: 3000,

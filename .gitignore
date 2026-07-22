@@ -26,5 +26,7 @@ cassino.code-workspace
 docs/rental-contract-flow-plan.txt
 docs/contract-ecosystem-plan-status-and-viability.txt
 scratch/
-scripts/
+scripts/*
+!scripts/migrations/
+!scripts/migrations/*.sql
 scripts/smoke/

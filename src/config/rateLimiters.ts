@@ -1,14 +1,16 @@
 import rateLimit, { type Store, type ClientRateLimitInfo } from 'express-rate-limit';
-import type { Request } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
+import { createHash } from 'crypto';
 import Redis, { type RedisOptions } from 'ioredis';
 import { getRequestId } from '../middlewares/requestContext';
 import { resolveRedisConfig } from './redis';
 
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
-const DEFAULT_LIMIT = 300;
-const DEFAULT_AUTH_LIMIT = 20;
-const DEFAULT_AUTH_LIGHT_LIMIT = 120;
-const DEFAULT_ADMIN_AUTH_LIMIT = 10;
+const DEFAULT_LIMIT = 600;
+const DEFAULT_AUTH_LIMIT = 60;
+const DEFAULT_AUTH_LIGHT_LIMIT = 180;
+const DEFAULT_ADMIN_AUTH_LIMIT = 30;
+const DEFAULT_AUTH_ACCOUNT_LIMIT = 5;
 
 function resolveNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -199,6 +201,8 @@ function createLimiter(options: {
   message: string;
   prefix: string;
   skip?: (req: Request) => boolean;
+  keyGenerator?: (req: Request) => string;
+  skipSuccessfulRequests?: boolean;
 }) {
   const store = createSharedStore(options.prefix);
   const rateLimitOptions: Parameters<typeof rateLimit>[0] = {
@@ -208,6 +212,8 @@ function createLimiter(options: {
     legacyHeaders: false,
     message: { error: options.message },
     skip: options.skip,
+    keyGenerator: options.keyGenerator,
+    skipSuccessfulRequests: options.skipSuccessfulRequests,
     passOnStoreError: true,
     handler: (req, res) => {
       return res.status(429).json({
@@ -222,6 +228,41 @@ function createLimiter(options: {
   }
 
   return rateLimit(rateLimitOptions);
+}
+
+function normalizeAccountIdentifier(req: Request): string | null {
+  const body = req.body as Record<string, unknown> | undefined;
+  const candidate = body?.email ?? body?.login ?? body?.identifier;
+  if (typeof candidate !== 'string') {
+    return null;
+  }
+
+  const normalized = candidate.trim().toLowerCase();
+  return normalized || null;
+}
+
+function accountRateLimitKey(req: Request): string {
+  const account = normalizeAccountIdentifier(req);
+  if (!account) {
+    return `ip:${req.ip}`;
+  }
+
+  // Redis never receives the raw e-mail. The hash is scoped to rate limiting.
+  return `account:${createHash('sha256').update(`auth:${account}`).digest('hex')}`;
+}
+
+function chainLimiters(...limiters: RequestHandler[]): RequestHandler {
+  return (req: Request, res: Response, next: NextFunction) => {
+    let index = 0;
+    const runNext = (error?: unknown) => {
+      if (error) {
+        return next(error);
+      }
+      const limiter = limiters[index++];
+      return limiter ? limiter(req, res, runNext) : next();
+    };
+    return runNext();
+  };
 }
 
 export function createGlobalRateLimiter() {
@@ -243,6 +284,37 @@ export function createAuthSensitiveLimiter() {
   });
 }
 
+/**
+ * Login has an IP ceiling for volumetric abuse and a stricter account ceiling
+ * that only retains failed attempts. This keeps shared networks usable.
+ */
+export function createAuthLoginLimiter(): RequestHandler {
+  const windowMs = resolveNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
+  const ipLimit = resolveNumber(process.env.AUTH_RATE_LIMIT_MAX, DEFAULT_AUTH_LIMIT);
+  const accountLimit = resolveNumber(
+    process.env.AUTH_ACCOUNT_RATE_LIMIT_MAX,
+    DEFAULT_AUTH_ACCOUNT_LIMIT,
+  );
+  const message = 'Muitas tentativas em rotas de autenticacao. Tente novamente em instantes.';
+
+  return chainLimiters(
+    createLimiter({
+      windowMs,
+      limit: ipLimit,
+      message,
+      prefix: 'rl:auth:login:ip:',
+    }),
+    createLimiter({
+      windowMs,
+      limit: accountLimit,
+      message,
+      prefix: 'rl:auth:login:account:',
+      keyGenerator: accountRateLimitKey,
+      skipSuccessfulRequests: true,
+    }),
+  );
+}
+
 export function createAuthLightLimiter() {
   return createLimiter({
     windowMs: resolveNumber(process.env.AUTH_LIGHT_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS),
@@ -259,4 +331,31 @@ export function createAdminAuthLimiter() {
     message: 'Muitas tentativas de login administrativo. Tente novamente em instantes.',
     prefix: 'rl:admin:auth:',
   });
+}
+
+export function createAdminLoginLimiter(): RequestHandler {
+  const windowMs = resolveNumber(process.env.ADMIN_AUTH_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
+  const ipLimit = resolveNumber(process.env.ADMIN_AUTH_RATE_LIMIT_MAX, DEFAULT_ADMIN_AUTH_LIMIT);
+  const accountLimit = resolveNumber(
+    process.env.ADMIN_ACCOUNT_RATE_LIMIT_MAX,
+    DEFAULT_AUTH_ACCOUNT_LIMIT,
+  );
+  const message = 'Muitas tentativas de login administrativo. Tente novamente em instantes.';
+
+  return chainLimiters(
+    createLimiter({
+      windowMs,
+      limit: ipLimit,
+      message,
+      prefix: 'rl:admin:login:ip:',
+    }),
+    createLimiter({
+      windowMs,
+      limit: accountLimit,
+      message,
+      prefix: 'rl:admin:login:account:',
+      keyGenerator: accountRateLimitKey,
+      skipSuccessfulRequests: true,
+    }),
+  );
 }

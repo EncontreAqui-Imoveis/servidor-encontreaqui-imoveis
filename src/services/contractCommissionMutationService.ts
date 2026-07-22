@@ -2,6 +2,11 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
 import { resolveContractStatus, type ContractRow } from '../controllers/ContractController';
+import {
+  assertRentalCommissionPolicy,
+  cancelContractCommissionAllocations,
+  syncContractCommissionAllocations,
+} from './contractCommissionAllocationService';
 
 interface UpdateCommissionDataBody {
   commission_data?: unknown;
@@ -91,9 +96,15 @@ async function fetchContractForUpdate(
 ): Promise<ContractRow | null> {
   const [rows] = await tx.query<ContractRow[]>(
     `
-      SELECT *
-      FROM contracts
-      WHERE id = ?
+      SELECT
+        c.*,
+        n.capturing_broker_id,
+        n.selling_broker_id,
+        p.purpose AS property_purpose
+      FROM contracts c
+      JOIN negotiations n ON n.id = c.negotiation_id
+      JOIN properties p ON p.id = c.property_id
+      WHERE c.id = ?
       LIMIT 1
       FOR UPDATE
     `,
@@ -154,6 +165,15 @@ export async function updateContractCommissionData(
     }
   }
 
+  try {
+    assertRentalCommissionPolicy(contract, commissionData);
+  } catch (error) {
+    throw mutationError(
+      400,
+      error instanceof Error ? error.message : 'Dados de comissão de locação inválidos.',
+    );
+  }
+
   await tx.query(
     `
       UPDATE contracts
@@ -162,6 +182,8 @@ export async function updateContractCommissionData(
     `,
     [JSON.stringify(commissionData), params.contractId]
   );
+
+  await syncContractCommissionAllocations(tx, contract, commissionData);
 
   return {
     contract: await fetchContractForUpdate(tx, params.contractId),
@@ -190,6 +212,8 @@ export async function deleteContractCommissionData(
     `,
     [params.contractId]
   );
+
+  await cancelContractCommissionAllocations(tx, params.contractId);
 
   return {
     contract: await fetchContractForUpdate(tx, params.contractId),

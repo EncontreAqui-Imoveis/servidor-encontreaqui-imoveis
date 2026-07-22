@@ -82,9 +82,14 @@ export function resolveContractParties(
 
   if (!sellerInitiated) {
     const buyerFromProfile = profileInfo(input.relatedUsers.proposer);
+    const buyerName = text(input.negotiation.buyerName) ?? buyerFromProfile.nome;
     return {
       sellerInfo,
-      buyerInfo: buyerFromProfile,
+      buyerInfo: {
+        ...buyerFromProfile,
+        // The proposal defines the legal buyer; the profile only identifies access.
+        nome: buyerName,
+      },
       legalBuyerUserId: input.negotiation.legalBuyerUserId,
       metadata: {
         partyResolution: {
@@ -95,13 +100,22 @@ export function resolveContractParties(
             cpfSource: sellerFromProfile.cpf ? 'property_owner_profile' : 'missing',
           },
           buyer: {
-            nameSource: buyerFromProfile.nome ? 'proposer_profile' : 'missing',
+            nameSource: text(input.negotiation.buyerName)
+              ? 'proposal_legal_data'
+              : buyerFromProfile.nome
+                ? 'proposer_profile'
+                : 'missing',
             cpfSource: buyerFromProfile.cpf ? 'proposer_profile' : 'missing',
             profileLinkedBy: null,
           },
           identityCapabilities: {
             seller: { canEditName: !sellerFromProfile.nome, canEditCpf: !sellerFromProfile.cpf },
-            buyer: { canEditName: !buyerFromProfile.nome, canEditCpf: !buyerFromProfile.cpf },
+            buyer: {
+              canEditName: text(input.negotiation.buyerName)
+                ? true
+                : !buyerFromProfile.nome,
+              canEditCpf: !buyerFromProfile.cpf,
+            },
           },
         },
       },
@@ -111,7 +125,8 @@ export function resolveContractParties(
   const buyerFromProfile = profileInfo(input.relatedUsers.legalBuyer);
   const linked = input.relatedUsers.legalBuyer != null;
   const buyerInfo = {
-    nome: buyerFromProfile.nome ?? text(input.negotiation.buyerName),
+    // The e-mail lookup links an account but cannot replace the legal name.
+    nome: text(input.negotiation.buyerName) ?? buyerFromProfile.nome,
     cpf: buyerFromProfile.cpf ?? text(input.negotiation.buyerCpf),
     email: buyerFromProfile.email ?? text(input.negotiation.buyerEmail),
     telefone: buyerFromProfile.telefone,
@@ -130,13 +145,22 @@ export function resolveContractParties(
           cpfSource: sellerFromProfile.cpf ? 'proposer_profile' : 'missing',
         },
         buyer: {
-          nameSource: buyerFromProfile.nome ? 'verified_email_profile' : 'proposal_legal_data',
+            nameSource: text(input.negotiation.buyerName)
+              ? 'proposal_legal_data'
+              : buyerFromProfile.nome
+                ? 'verified_email_profile'
+                : 'missing',
           cpfSource: buyerFromProfile.cpf ? 'verified_email_profile' : 'proposal_legal_data',
           profileLinkedBy: linked ? 'verified_email' : null,
         },
         identityCapabilities: {
           seller: { canEditName: !sellerFromProfile.nome, canEditCpf: !sellerFromProfile.cpf },
-          buyer: { canEditName: !buyerFromProfile.nome, canEditCpf: !buyerFromProfile.cpf },
+          buyer: {
+            canEditName: text(input.negotiation.buyerName)
+              ? true
+              : !buyerFromProfile.nome,
+            canEditCpf: !buyerFromProfile.cpf,
+          },
         },
       },
     },

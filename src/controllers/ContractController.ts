@@ -1079,8 +1079,18 @@ function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown
   const buyerInfo = parseStoredJsonObject(row.buyer_info);
   const buyerName = String(row.client_name ?? '').trim();
   const buyerCpf = String(row.buyer_cpf ?? '').trim();
+  const workflowMetadata = parseStoredJsonObject(row.workflow_metadata);
+  const partyResolution = parseStoredJsonObject(workflowMetadata.partyResolution);
+  const buyerResolution = parseStoredJsonObject(partyResolution.buyer);
+  const nameSource = String(buyerResolution.nameSource ?? '').trim();
+  const nameWasInheritedFromProfile =
+    nameSource === 'proposer_profile' || nameSource === 'verified_email_profile';
 
-  if (buyerName && !String(buyerInfo.nome ?? buyerInfo.clientName ?? buyerInfo.name ?? '').trim()) {
+  if (
+    buyerName &&
+    (nameWasInheritedFromProfile ||
+      !String(buyerInfo.nome ?? buyerInfo.clientName ?? buyerInfo.name ?? '').trim())
+  ) {
     buyerInfo.nome = buyerName;
   }
   if (buyerCpf && !String(buyerInfo.cpf ?? buyerInfo.clientCpf ?? '').trim()) {

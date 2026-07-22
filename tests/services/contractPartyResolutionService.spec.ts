@@ -33,13 +33,25 @@ const sellerInitiatedInput = {
 };
 
 describe('contractPartyResolutionService', () => {
-  it('herda comprador apenas de uma conta já vinculada por e-mail verificado', () => {
+  it('vincula a conta do comprador por e-mail sem substituir o nome jurídico informado na proposta', () => {
     const result = resolveContractParties(sellerInitiatedInput);
 
     expect(result.legalBuyerUserId).toBe(20);
     expect(result.sellerInfo).toMatchObject({ nome: 'Vendedor', email: 'vendedor@example.com' });
-    expect(result.buyerInfo).toMatchObject({ nome: 'Comprador vinculado', telefone: '64888888888' });
-    expect(result.metadata.partyResolution.identityCapabilities.buyer.canEditName).toBe(false);
+    expect(result.buyerInfo).toMatchObject({ nome: 'Comprador informado', telefone: '64888888888' });
+    expect(result.metadata.partyResolution.buyer.nameSource).toBe('proposal_legal_data');
+    expect(result.metadata.partyResolution.identityCapabilities.buyer.canEditName).toBe(true);
+  });
+
+  it('prioriza o nome jurídico da proposta também quando o comprador é o proponente', () => {
+    const result = resolveContractParties({
+      ...sellerInitiatedInput,
+      negotiation: { ...sellerInitiatedInput.negotiation, initiatorSide: 'buyer' },
+      relatedUsers: { ...sellerInitiatedInput.relatedUsers, owner: sellerInitiatedInput.relatedUsers.proposer },
+    });
+
+    expect(result.buyerInfo.nome).toBe('Comprador informado');
+    expect(result.metadata.partyResolution.buyer.nameSource).toBe('proposal_legal_data');
   });
 
   it('mantém somente dados textuais quando o e-mail não resolve uma conta verificada', () => {

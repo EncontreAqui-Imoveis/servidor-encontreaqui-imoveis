@@ -11,6 +11,11 @@ interface CommissionContractRow extends RowDataPacket {
   property_code: string | null;
   property_purpose: string | null;
   signed_proposal_document_id: number | null;
+  capturing_allocation_base_amount: number | string | null;
+  capturing_allocation_amount: number | string | null;
+  selling_allocation_amount: number | string | null;
+  capturing_broker_name: string | null;
+  selling_broker_name: string | null;
 }
 
 type CommissionSummaryResponse = {
@@ -29,6 +34,8 @@ type CommissionSummaryResponse = {
     propertyTitle: string | null;
     propertyCode: string | null;
     propertyPurpose: string | null;
+    capturingBrokerName: string | null;
+    sellingBrokerName: string | null;
     finalizedAt: string | null;
     signedProposalDocumentId: number | null;
     signedProposalDocumentSource: 'negotiation_documents' | null;
@@ -75,6 +82,14 @@ function readCommissionValue(
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function readAllocationValue(value: unknown): number | null {
+  if (value == null || value === '') {
+    return null;
+  }
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function toIsoString(value: Date | string | null): string | null {
   if (!value) {
     return null;
@@ -110,6 +125,11 @@ export async function listCommissionSummary(
         p.title AS property_title,
         p.code AS property_code,
         p.purpose AS property_purpose,
+        capturing_allocation.base_amount AS capturing_allocation_base_amount,
+        capturing_allocation.amount AS capturing_allocation_amount,
+        selling_allocation.amount AS selling_allocation_amount,
+        capturing_broker_user.name AS capturing_broker_name,
+        selling_broker_user.name AS selling_broker_name,
         (
           SELECT nd.id
           FROM negotiation_documents nd
@@ -121,6 +141,18 @@ export async function listCommissionSummary(
         ) AS signed_proposal_document_id
       FROM contracts c
       JOIN properties p ON p.id = c.property_id
+      LEFT JOIN contract_commission_allocations capturing_allocation
+        ON capturing_allocation.contract_id = c.id
+        AND capturing_allocation.role = 'CAPTURING'
+        AND capturing_allocation.status = 'RECORDED'
+      LEFT JOIN users capturing_broker_user
+        ON capturing_broker_user.id = capturing_allocation.broker_id
+      LEFT JOIN contract_commission_allocations selling_allocation
+        ON selling_allocation.contract_id = c.id
+        AND selling_allocation.role = 'SELLING'
+        AND selling_allocation.status = 'RECORDED'
+      LEFT JOIN users selling_broker_user
+        ON selling_broker_user.id = selling_allocation.broker_id
       WHERE c.status = 'FINALIZED'
         AND YEAR(COALESCE(c.finalized_at, c.updated_at)) = ?
         AND MONTH(COALESCE(c.finalized_at, c.updated_at)) = ?
@@ -136,12 +168,25 @@ export async function listCommissionSummary(
 
   const transactions = rows.flatMap((row) => {
     const commissionData = parseStoredJsonObject(row.commission_data);
-    const valorBaseComissao = readCommissionValue(
+    // The allocation projection is the financial source of truth after a
+    // contract is finalized. JSON remains only as a read fallback for records
+    // finalized before the projection migration existed.
+    const legacyBase = readCommissionValue(
       commissionData,
       'valorBaseComissao'
     ) || readCommissionValue(commissionData, 'valorVenda');
-    const comissaoCaptador = readCommissionValue(commissionData, 'comissaoCaptador');
-    const comissaoVendedor = readCommissionValue(commissionData, 'comissaoVendedor');
+    const allocationBase = readAllocationValue(row.capturing_allocation_base_amount);
+    const valorBaseComissao = allocationBase != null && allocationBase > 0
+      ? allocationBase
+      : legacyBase;
+    const allocationCapturing = readAllocationValue(row.capturing_allocation_amount);
+    const allocationSelling = readAllocationValue(row.selling_allocation_amount);
+    const comissaoCaptador = allocationCapturing != null
+      ? allocationCapturing
+      : readCommissionValue(commissionData, 'comissaoCaptador');
+    const comissaoVendedor = allocationSelling != null
+      ? allocationSelling
+      : readCommissionValue(commissionData, 'comissaoVendedor');
     const taxaPlataforma = readCommissionValue(commissionData, 'taxaPlataforma');
 
     if (valorBaseComissao <= 0) {
@@ -161,6 +206,8 @@ export async function listCommissionSummary(
       propertyTitle: row.property_title ?? null,
       propertyCode: row.property_code ?? null,
       propertyPurpose: row.property_purpose ?? null,
+      capturingBrokerName: row.capturing_broker_name ?? null,
+      sellingBrokerName: row.selling_broker_name ?? null,
       finalizedAt: toIsoString(row.finalized_at),
       signedProposalDocumentId:
         signedId != null && Number.isFinite(Number(signedId)) ? Number(signedId) : null,

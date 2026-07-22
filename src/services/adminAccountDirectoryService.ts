@@ -312,6 +312,7 @@ export async function getAdminBrokerProperties(brokerId: number) {
     `
       SELECT
         p.id,
+        p.code,
         p.title,
         p.status,
         p.type,
@@ -341,6 +342,7 @@ export async function getAdminClientProperties(clientId: number) {
     `
       SELECT
         p.id,
+        p.code,
         p.title,
         p.status,
         p.type,

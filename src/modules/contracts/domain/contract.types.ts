@@ -92,7 +92,7 @@ export const CONTRACT_DOCUMENT_CATEGORY_LABELS: Record<
 > = {
   identidade: 'Documento Pessoal',
   comprovante_endereco: 'Comprovante de Endereço',
-  estado_civil: 'Certidão de Casamento/Nascimento',
+  estado_civil: 'Certidão de Estado Civil',
   conjuge_documentos: 'Documento Pessoal (Cônjuge)',
   comprovante_renda: 'Comprovante de Renda',
   seguro_incendio: 'Apólice/Comprovante de Seguro Incêndio',

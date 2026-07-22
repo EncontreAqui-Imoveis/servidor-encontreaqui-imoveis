@@ -1314,12 +1314,31 @@ class UserController {
     }
 
     try {
-      const page = parseInt(req.query.page as string, 10) || 1;
-      const limit = parseInt(req.query.limit as string, 10) || 10;
+      const page = Math.max(1, parseInt(req.query.page as string, 10) || 1);
+      const requestedLimit = parseInt(req.query.limit as string, 10) || 10;
+      const limit = Math.min(Math.max(1, requestedLimit), 100);
       const offset = (page - 1) * limit;
+      const search = String(req.query.search ?? '').trim();
+      const purpose = String(req.query.purpose ?? '').trim().toLowerCase();
+      const whereClauses = ['p.owner_id = ?'];
+      const whereParams: Array<string | number> = [userId];
 
-      const countQuery = 'SELECT COUNT(*) as total FROM properties WHERE owner_id = ?';
-      const totalResult = await runUserQuery<RowDataPacket[]>(countQuery, [userId]);
+      if (search) {
+        const like = `%${search}%`;
+        whereClauses.push('(p.title LIKE ? OR p.code LIKE ?)');
+        whereParams.push(like, like);
+      }
+      if (purpose === 'sale') {
+        whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
+        whereParams.push('%vend%');
+      } else if (purpose === 'rent') {
+        whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
+        whereParams.push('%alug%');
+      }
+      const whereSql = whereClauses.join(' AND ');
+
+      const countQuery = `SELECT COUNT(*) as total FROM properties p WHERE ${whereSql}`;
+      const totalResult = await runUserQuery<RowDataPacket[]>(countQuery, whereParams);
       const total = totalResult[0]?.total ?? 0;
 
       const dataQuery = `
@@ -1395,7 +1414,7 @@ class UserController {
         ) n ON n.property_id = p.id
         LEFT JOIN users nbu ON nbu.id = n.proposer_id
         LEFT JOIN property_images pi ON p.id = pi.property_id
-        WHERE p.owner_id = ?
+        WHERE ${whereSql}
         GROUP BY
           p.id, p.owner_id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose,
           p.price, p.price_sale, p.price_rent, p.code, p.address, p.quadra, p.lote, p.numero,
@@ -1409,7 +1428,7 @@ class UserController {
       `;
       const dataRows = await runUserQuery<RowDataPacket[]>(dataQuery, [
         ...NEGOTIATION_TERMINAL_STATUSES,
-        userId,
+        ...whereParams,
         limit,
         offset,
       ]);

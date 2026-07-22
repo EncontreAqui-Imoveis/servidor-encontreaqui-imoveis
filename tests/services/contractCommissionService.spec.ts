@@ -32,6 +32,11 @@ describe('contractCommissionService', () => {
         property_code: 'ABC123',
         property_purpose: 'Venda',
         signed_proposal_document_id: 77,
+        capturing_allocation_base_amount: 100000,
+        capturing_allocation_amount: 5000,
+        selling_allocation_amount: 2500,
+        capturing_broker_name: 'Corretor Captador',
+        selling_broker_name: 'Corretor Vendedor',
       },
       {
         id: 'contract-2',
@@ -43,12 +48,20 @@ describe('contractCommissionService', () => {
         property_code: 'DEF456',
         property_purpose: 'Aluguel',
         signed_proposal_document_id: null,
+        capturing_allocation_base_amount: null,
+        capturing_allocation_amount: null,
+        selling_allocation_amount: null,
+        capturing_broker_name: null,
+        selling_broker_name: null,
       },
     ]);
 
     const result = await listCommissionSummary(6, 2026);
 
     expect(queryContractRowsMock).toHaveBeenCalledTimes(1);
+    expect(String(queryContractRowsMock.mock.calls[0][0])).toContain(
+      'contract_commission_allocations capturing_allocation'
+    );
     expect(result.month).toBe(6);
     expect(result.year).toBe(2026);
     expect(result.summary).toMatchObject({
@@ -67,6 +80,8 @@ describe('contractCommissionService', () => {
         comissaoVendedor: 2500,
         taxaPlataforma: 1000,
       },
+      capturingBrokerName: 'Corretor Captador',
+      sellingBrokerName: 'Corretor Vendedor',
     });
   });
 

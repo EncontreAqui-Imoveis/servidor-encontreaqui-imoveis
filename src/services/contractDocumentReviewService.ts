@@ -8,6 +8,7 @@ import {
 } from '../modules/contracts/domain/contract.types';
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
+import { createUserNotification } from './notificationService';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
@@ -277,6 +278,36 @@ export async function reviewContractDocument(
     `,
     [contractId]
   );
+
+  if (status === 'APPROVED' || status === 'APPROVED_WITH_RES') {
+    const docName = String(metadata.label ?? metadata.originalFileName ?? documentType ?? 'Documento').trim();
+    const recipientIds = new Set<number>();
+    if (uploadedByUserId && uploadedByUserId > 0) {
+      recipientIds.add(uploadedByUserId);
+    } else {
+      if (contract.buyer_client_id) recipientIds.add(Number(contract.buyer_client_id));
+      if (contract.owner_id) recipientIds.add(Number(contract.owner_id));
+    }
+
+    for (const recipientId of recipientIds) {
+      void createUserNotification({
+        type: 'negotiation',
+        title: 'Documento Aprovado',
+        message: `O seu documento "${docName}" do contrato #${contractId} foi analisado e aprovado com sucesso.`,
+        recipientId,
+        relatedEntityId: Number(contract.negotiation_id) || null,
+        target: 'contract_details',
+        metadata: {
+          contractId,
+          negotiationId: contract.negotiation_id,
+          documentId,
+          documentType,
+        },
+      }).catch((err) => {
+        console.error('Falha ao enviar notificacao de documento aprovado:', err);
+      });
+    }
+  }
 
   return {
     message:

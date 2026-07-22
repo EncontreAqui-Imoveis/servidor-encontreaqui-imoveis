@@ -92,6 +92,16 @@ export async function contractAuthMiddleware(
       return;
     }
 
+    // Cancelled contracts remain available to the administrative backoffice for
+    // audit, but must not be reachable by a participant through a stale URL or
+    // notification deep link.
+    const isCancelled = String(contract.status ?? '').trim().toUpperCase() === 'CANCELLED';
+    const isAdmin = String(req.userRole ?? '').trim().toLowerCase() === 'admin';
+    if (isCancelled && !isAdmin) {
+      res.status(404).json({ error: 'Contrato não encontrado.' });
+      return;
+    }
+
     const context = resolveContractAccessContext(
       { id: req.userId, role: req.userRole },
       contract

@@ -47,6 +47,7 @@ describe('negotiationMineListingService.listMine', () => {
             details: {
               clientName: 'Cliente 1',
               clientCpf: '52998224725',
+              clientEmail: 'cliente1@example.com',
               dinheiro: 100000,
               permuta: 0,
               financiamento: 400000,
@@ -81,6 +82,7 @@ describe('negotiationMineListingService.listMine', () => {
           propertyTitle: 'Casa Central',
           clientName: 'Cliente 1',
           clientCpf: null,
+          buyerEmail: 'cliente1@example.com',
           hasSignedProposal: true,
           proposalValue: 500000,
           paymentBreakdown: {

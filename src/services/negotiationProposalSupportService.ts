@@ -403,8 +403,8 @@ export function parseProposalWizardBody(body: ProposalWizardBody): ParsedProposa
     throw new Error('clientCpf invalido. Informe um CPF valido.');
   }
 
-  if (buyerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerEmail)) {
-    throw new Error('buyerEmail invalido.');
+  if (!buyerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerEmail)) {
+    throw new Error('buyerEmail e obrigatorio e deve ser valido.');
   }
 
   if (!Number.isInteger(validadeDias) || validadeDias <= 0) {

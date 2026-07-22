@@ -52,6 +52,7 @@ describe('negotiationProposalSupportService', () => {
       propertyId: '101',
       clientName: 'Maria',
       clientCpf: '529.982.247-25',
+      buyerEmail: 'maria@example.com',
       validadeDias: '10',
       pagamento: {
         dinheiro: '100000',
@@ -83,7 +84,8 @@ describe('negotiationProposalSupportService', () => {
       parseProposalWizardBody({
         propertyId: 101,
         clientName: 'Maria',
-      clientCpf: '529.982.247-25',
+        clientCpf: '529.982.247-25',
+        buyerEmail: 'maria@example.com',
         validadeDias: 10,
         proposal_validity_date: iso,
         pagamento: {

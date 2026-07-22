@@ -8,6 +8,7 @@ describe('negotiationProposalSupportService', () => {
       propertyId: 123,
       clientName: 'Ana Silva',
       clientCpf: '52998224725',
+      buyerEmail: 'ana@example.com',
       dealType: 'rent',
       buyerUserId: 99,
       validadeDias: 10,
@@ -30,6 +31,7 @@ describe('negotiationProposalSupportService', () => {
       propertyId: 123,
       clientName: 'Ana Silva',
       clientCpf: '52998224725',
+      buyerEmail: 'ana@example.com',
       validadeDias: 10,
       pagamento: {
         dinheiro: 1000,
@@ -40,5 +42,22 @@ describe('negotiationProposalSupportService', () => {
     });
 
     expect(parsed.dealType).toBe('sale');
+  });
+
+  it('requires a valid buyer email for the explicit buyer association flow', () => {
+    expect(() =>
+      parseProposalWizardBody({
+        propertyId: 123,
+        clientName: 'Ana Silva',
+        clientCpf: '52998224725',
+        validadeDias: 10,
+        pagamento: {
+          dinheiro: 1000,
+          permuta: 0,
+          financiamento: 0,
+          outros: 0,
+        },
+      })
+    ).toThrow('buyerEmail e obrigatorio e deve ser valido.');
   });
 });

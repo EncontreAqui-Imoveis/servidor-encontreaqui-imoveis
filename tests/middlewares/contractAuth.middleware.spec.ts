@@ -15,7 +15,7 @@ describe('contractAuthMiddleware', () => {
   const app = express();
   app.use((req, _res, next) => {
     (req as any).userId = Number(req.header('x-contract-test-user-id') ?? 99);
-    (req as any).userRole = 'client';
+    (req as any).userRole = req.header('x-contract-test-user-role') ?? 'client';
     next();
   });
   app.get('/contracts/:id', contractAuthMiddleware, (req, res) =>
@@ -98,5 +98,47 @@ describe('contractAuthMiddleware', () => {
     });
     expect(queryMock.mock.calls.some(([sql]) => String(sql).includes('p.owner_id AS property_owner_id')))
       .toBe(true);
+  });
+
+  it('oculta contrato cancelado de participantes mesmo com identificador direto', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return [[{ present: 1 }]];
+      }
+      return [[{
+        id: 'contract-1',
+        status: 'CANCELLED',
+        advertiser_id: 10,
+        proposer_id: 99,
+        responsible_user_ids: null,
+      }]];
+    });
+
+    const response = await request(app).get('/contracts/contract-1');
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('Contrato não encontrado.');
+  });
+
+  it('mantém contrato cancelado acessível para auditoria administrativa', async () => {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('information_schema.tables')) {
+        return [[{ present: 1 }]];
+      }
+      return [[{
+        id: 'contract-1',
+        status: 'CANCELLED',
+        advertiser_id: 10,
+        proposer_id: 99,
+        responsible_user_ids: null,
+      }]];
+    });
+
+    const response = await request(app)
+      .get('/contracts/contract-1')
+      .set('x-contract-test-user-role', 'admin');
+
+    expect(response.status).toBe(200);
+    expect(response.body.context.userRole).toBe('admin');
   });
 });

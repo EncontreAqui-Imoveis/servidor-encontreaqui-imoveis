@@ -78,6 +78,21 @@ function parsePaymentBreakdown(value: unknown) {
   }
 }
 
+function parseBuyerEmail(value: unknown): string | null {
+  try {
+    const source = typeof value === 'string' ? JSON.parse(value) : value;
+    const details = source && typeof source === 'object'
+      ? (source as Record<string, unknown>).details
+      : null;
+    if (!details || typeof details !== 'object' || Array.isArray(details)) return null;
+
+    const item = details as Record<string, unknown>;
+    return toTextOrNull(item.clientEmail ?? item.buyerEmail ?? item.buyer_email);
+  } catch {
+    return null;
+  }
+}
+
 function parseRentalTerms(value: unknown) {
   try {
     const source = typeof value === 'string' ? JSON.parse(value) : value;
@@ -139,6 +154,7 @@ function mapRow(row: NegotiationListRow, userId: number) {
     dealType: row.deal_type === 'sale' || row.deal_type === 'rent' ? row.deal_type : null,
     clientName: row.client_name ?? null,
     clientCpf: null,
+    buyerEmail: parseBuyerEmail(row.payment_details),
     proposer: row.proposer_id ? { id: Number(row.proposer_id), name: row.proposer_name ?? null } : null,
     advertiser: row.advertiser_id ? { id: Number(row.advertiser_id), name: row.advertiser_name ?? null } : null,
     createdAt: toIso(row.created_at),

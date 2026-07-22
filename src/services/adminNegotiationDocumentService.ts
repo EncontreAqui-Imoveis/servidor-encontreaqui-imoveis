@@ -133,7 +133,7 @@ export async function listNegotiationResponsibles(negotiationId: string): Promis
         COALESCE(b.profile_type, 'BROKER') AS profile_type
       FROM negotiation_responsibles nr
       JOIN users u ON u.id = nr.user_id
-      LEFT JOIN brokers b ON b.id = nr.user_id
+      LEFT JOIN brokers b ON (b.user_id = nr.user_id OR b.id = nr.user_id)
       WHERE nr.negotiation_id = ?
       ORDER BY nr.created_at ASC, nr.id ASC
     `,

@@ -145,7 +145,7 @@ export async function listMyContractsForUser(
         OR EXISTS (
           SELECT 1
           FROM negotiation_responsibles nr
-          JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
+          JOIN brokers responsible_broker ON (responsible_broker.user_id = nr.user_id OR responsible_broker.id = nr.user_id)
           WHERE nr.negotiation_id = c.negotiation_id
             AND nr.user_id = ?
             AND responsible_broker.status = 'approved'
@@ -158,12 +158,13 @@ export async function listMyContractsForUser(
         OR p.owner_id = ?
         OR n.proposer_id = ?
         OR n.legal_buyer_user_id = ?
+        OR c.buyer_client_id = ?
         ${responsibleVisibilityClause}
       )
   `;
   const visibilityParams = includeResponsibles
-    ? [userId, userId, userId, userId, userId]
-    : [userId, userId, userId, userId];
+    ? [userId, userId, userId, userId, userId, userId]
+    : [userId, userId, userId, userId, userId];
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total
@@ -291,7 +292,7 @@ export async function getContractHubCounters(
         OR EXISTS (
           SELECT 1
           FROM negotiation_responsibles nr
-          JOIN brokers responsible_broker ON responsible_broker.id = nr.user_id
+          JOIN brokers responsible_broker ON (responsible_broker.user_id = nr.user_id OR responsible_broker.id = nr.user_id)
           WHERE nr.negotiation_id = c.negotiation_id
             AND nr.user_id = ?
             AND responsible_broker.status = 'approved'

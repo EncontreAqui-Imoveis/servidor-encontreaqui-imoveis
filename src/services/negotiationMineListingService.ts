@@ -200,14 +200,17 @@ export async function listMine(req: AuthRequest, res: Response): Promise<Respons
   const limit = parseLimit(query.limit);
   const offset = (page - 1) * limit;
   const propertyClause = propertyId === null ? '' : 'AND n.property_id = ?';
-  const params = propertyId === null ? [userId, userId] : [userId, userId, propertyId];
+  const userParams = [userId, userId, userId, userId, userId];
+  const params = propertyId === null ? userParams : [...userParams, propertyId];
 
   try {
     const countRows = await queryNegotiationRows<RowDataPacket>(
       `
         SELECT COUNT(*) AS total
         FROM negotiations n
-        WHERE (n.proposer_id = ? OR n.advertiser_id = ?)
+        JOIN properties p ON p.id = n.property_id
+        LEFT JOIN contracts c ON c.negotiation_id = n.id
+        WHERE (n.proposer_id = ? OR n.advertiser_id = ? OR n.legal_buyer_user_id = ? OR c.buyer_client_id = ? OR p.owner_id = ?)
         ${propertyClause}
       `,
       params,
@@ -230,7 +233,7 @@ export async function listMine(req: AuthRequest, res: Response): Promise<Respons
         LEFT JOIN users proposer_user ON proposer_user.id = n.proposer_id
         LEFT JOIN users advertiser_user ON advertiser_user.id = n.advertiser_id
         LEFT JOIN contracts c ON c.negotiation_id = n.id
-        WHERE (n.proposer_id = ? OR n.advertiser_id = ?)
+        WHERE (n.proposer_id = ? OR n.advertiser_id = ? OR n.legal_buyer_user_id = ? OR c.buyer_client_id = ? OR p.owner_id = ?)
         ${propertyClause}
         ORDER BY n.updated_at DESC, n.created_at DESC, n.id DESC
         LIMIT ? OFFSET ?

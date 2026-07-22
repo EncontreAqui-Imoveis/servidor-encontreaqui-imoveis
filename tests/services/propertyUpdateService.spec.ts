@@ -198,6 +198,67 @@ describe('propertyUpdateService', () => {
     expect(updateValues).toEqual(expect.arrayContaining(['Jardim Central', 10]));
   });
 
+  it('aceita preço nulo para aluguel inativo em imóvel apenas para venda', async () => {
+    runPropertyQueryMock
+      .mockResolvedValueOnce([createPropertyRow()])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const req = {
+      params: { id: '10' },
+      userId: 30003,
+      userRole: 'broker',
+      body: {
+        bairro: 'Jardim Central',
+        price: 500000,
+        price_sale: 500000,
+        price_rent: null,
+      },
+    } as any;
+    const res = createMockResponse();
+
+    await updateProperty(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const [updateQuery, updateValues] = runPropertyQueryMock.mock.calls[1] as [string, unknown[]];
+    expect(updateQuery).toContain('`price_rent` = ?');
+    expect(updateValues).toEqual(expect.arrayContaining([null, 10]));
+  });
+
+  it('aceita preço nulo para venda inativa em imóvel apenas para aluguel', async () => {
+    runPropertyQueryMock
+      .mockResolvedValueOnce(
+        [
+          createPropertyRow({
+            purpose: 'Aluguel',
+            price: 2500,
+            price_sale: null,
+            price_rent: 2500,
+          }),
+        ]
+      )
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const req = {
+      params: { id: '10' },
+      userId: 30003,
+      userRole: 'broker',
+      body: {
+        bairro: 'Jardim Central',
+        price: 2500,
+        price_sale: null,
+        price_rent: 2500,
+      },
+    } as any;
+    const res = createMockResponse();
+
+    await updateProperty(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const [updateQuery, updateValues] = runPropertyQueryMock.mock.calls[1] as [string, unknown[]];
+    expect(updateQuery).toContain('`price_sale` = ?');
+    expect(updateValues).toEqual(expect.arrayContaining([null, 10]));
+  });
+
   it('retorna 400 quando não há dados para atualizar', async () => {
     runPropertyQueryMock.mockResolvedValueOnce([createPropertyRow()]);
 

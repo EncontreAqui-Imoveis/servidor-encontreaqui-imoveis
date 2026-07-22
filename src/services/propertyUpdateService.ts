@@ -418,13 +418,25 @@ export async function updateProperty(req: AuthRequest, res: Response) {
         case 'price_sale':
         case 'price_rent': {
           try {
-            const parsed = parsePrice(normalizedUpdateBody[key]);
+            const parsed = parseOptionalPrice(normalizedUpdateBody[key]);
+            const isPriceRequiredForPurpose =
+              (key === 'price_sale' && supportsSale) ||
+              (key === 'price_rent' && supportsRent);
+
+            if (parsed === null && isPriceRequiredForPurpose) {
+              return sendPropertyError(req, res, 400, {
+                error: 'Preço inválido.',
+                code: PROPERTY_ERROR_CODES.PRICE_INVALID,
+                field: key,
+              });
+            }
+
             fields.push(`\`${key}\` = ?`);
             values.push(parsed);
-            if (key === 'price_sale') {
+            if (key === 'price_sale' && parsed !== null) {
               nextSalePrice = parsed;
               saleTouched = true;
-            } else {
+            } else if (key === 'price_rent' && parsed !== null) {
               nextRentPrice = parsed;
               rentTouched = true;
             }

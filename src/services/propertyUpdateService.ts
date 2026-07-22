@@ -189,7 +189,9 @@ export async function updateProperty(req: AuthRequest, res: Response) {
         field: 'userId',
       });
     }
-    if (property.status === 'pending_approval') {
+    // An administrator may correct a pending listing without advancing its review status.
+    // Brokers and owners must still wait for the review to finish.
+    if (property.status === 'pending_approval' && !isAdminRequest) {
       return sendPropertyError(req, res, 409, {
         error: 'Imóveis pendentes não podem ser editados até o fim da análise.',
         code: PROPERTY_ERROR_CODES.PENDING_EDIT_BLOCKED,

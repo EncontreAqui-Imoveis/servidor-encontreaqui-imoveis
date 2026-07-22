@@ -6,8 +6,9 @@ dotenv.config({ path: '.env' });
 
 const sourceDatabase = process.env.DB_DATABASE || process.env.DATABASE_NAME;
 const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
+const allowedSmokeDatabases = new Set(['imobiliaria_smoke_v2', 'imobiliaria_contract_e2e']);
 
-if (!sourceDatabase || sourceDatabase === smokeDatabase) {
+if (!sourceDatabase || sourceDatabase === smokeDatabase || !allowedSmokeDatabases.has(smokeDatabase)) {
   throw new Error('O schema de origem do smoke deve ser o banco local de desenvolvimento.');
 }
 
@@ -39,6 +40,10 @@ async function tableExists(connection, tableName) {
 
 async function main() {
   const source = await mysql.createConnection(connectionOptions(sourceDatabase));
+  // The target is an allowlisted, disposable schema. Never create or alter the source schema.
+  const targetServer = await mysql.createConnection(connectionOptions(undefined));
+  await targetServer.query(`CREATE DATABASE IF NOT EXISTS \`${smokeDatabase}\``);
+  await targetServer.end();
   const target = await mysql.createConnection(connectionOptions(smokeDatabase));
 
   try {

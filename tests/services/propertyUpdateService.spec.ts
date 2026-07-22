@@ -176,6 +176,28 @@ describe('propertyUpdateService', () => {
     expect(runPropertyQueryMock).toHaveBeenCalledTimes(1);
   });
 
+  it('permite que administrador corrija bairro de imóvel pendente sem mudar seu status', async () => {
+    runPropertyQueryMock
+      .mockResolvedValueOnce([createPropertyRow({ status: 'pending_approval', bairro: 'jardim central' })])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const req = {
+      params: { id: '10' },
+      userRole: 'admin',
+      body: { bairro: 'Jardim Central' },
+    } as any;
+    const res = createMockResponse();
+
+    await updateProperty(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(runPropertyQueryMock).toHaveBeenCalledTimes(2);
+    const [updateQuery, updateValues] = runPropertyQueryMock.mock.calls[1] as [string, unknown[]];
+    expect(updateQuery).toContain('`bairro` = ?');
+    expect(updateQuery).not.toContain('status = ?');
+    expect(updateValues).toEqual(expect.arrayContaining(['Jardim Central', 10]));
+  });
+
   it('retorna 400 quando não há dados para atualizar', async () => {
     runPropertyQueryMock.mockResolvedValueOnce([createPropertyRow()]);
 

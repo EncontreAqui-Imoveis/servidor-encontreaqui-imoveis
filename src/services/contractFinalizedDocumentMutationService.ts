@@ -157,10 +157,12 @@ export async function uploadFinalizedContractDocument(
     throw mutationError(400, 'Tipo de documento inválido.');
   }
 
+  const isSharedAdminArtifact = !documentTypeRequiresSide(normalizedDocumentType);
   const requestedSide = parseDocumentSide(params.body.side);
-  if (documentTypeRequiresSide(normalizedDocumentType) && requestedSide == null) {
+  if (!isSharedAdminArtifact && requestedSide == null) {
     throw mutationError(400, 'Informe o lado do documento (seller ou buyer) para este tipo.');
   }
+  const ownerSide = isSharedAdminArtifact ? null : requestedSide;
 
   if (!params.uploadedFile?.buffer || params.uploadedFile.buffer.length === 0) {
     throw mutationError(400, 'Arquivo obrigatório para upload.');
@@ -178,7 +180,9 @@ export async function uploadFinalizedContractDocument(
     content: params.uploadedFile.buffer,
     metadataJson: {
       contractId: params.contractId,
-      side: requestedSide,
+      ...(ownerSide
+        ? { owner_side: ownerSide, side: ownerSide, visibility: 'SIDE_PRIVATE' }
+        : { visibility: 'CONTRACT_SHARED' }),
       originalFileName: params.uploadedFile.originalname ?? null,
       uploadedBy: Number(params.req.userId ?? 0) || null,
       uploadedAt: new Date().toISOString(),
@@ -200,7 +204,7 @@ export async function uploadFinalizedContractDocument(
       id: documentId,
       contractId: params.contractId,
       documentType: normalizedDocumentType,
-      side: requestedSide,
+      side: ownerSide,
       originalFileName: params.uploadedFile.originalname ?? null,
       downloadUrl: `/negotiations/${params.contract.negotiation_id}/documents/${documentId}/download`,
     },

@@ -172,7 +172,9 @@ export async function downloadDocument(
 
       const metadata = parseJsonObjectSafe(document.metadataJson);
       const documentType = String(document.documentType ?? '').trim().toLowerCase();
-      const isSharedArtifact = isContractSharedDocumentType(documentType);
+      const isSharedArtifact =
+        isContractSharedDocumentType(documentType) ||
+        String(metadata.visibility ?? '').trim().toUpperCase() === 'CONTRACT_SHARED';
       const ownerSide = readDocumentOwnerSide(metadata);
 
       // A direct download URL must enforce the same bilateral boundary as the

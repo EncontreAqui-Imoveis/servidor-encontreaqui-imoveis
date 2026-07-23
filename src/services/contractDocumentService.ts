@@ -65,6 +65,7 @@ function canReadDocument(
   context: ContractAccessContext | null
 ): boolean {
   if (!context?.canReadMeta) return false;
+  if (document.isSharedArtifact) return true;
   if (document.side === 'seller') return context.canReadSeller;
   if (document.side === 'buyer') return context.canReadBuyer;
 

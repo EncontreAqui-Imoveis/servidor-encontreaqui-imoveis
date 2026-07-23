@@ -1283,7 +1283,9 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
 export function mapDocument(row: ContractDocumentRow) {
   const metadata = parseStoredJsonObject(row.metadata_json);
   const normalizedRowDocumentType = String(row.document_type ?? '').trim().toLowerCase();
-  const isSharedArtifact = isContractSharedDocumentType(normalizedRowDocumentType);
+  const isSharedArtifact =
+    isContractSharedDocumentType(normalizedRowDocumentType) ||
+    String(metadata.visibility ?? '').trim().toUpperCase() === 'CONTRACT_SHARED';
   const sideValue = isSharedArtifact
     ? ''
     : String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
@@ -2381,7 +2383,6 @@ class ContractController {
     const documentTypeRaw = String(
       body.documentType ?? body.document_type ?? ''
     ).trim();
-    const side = parseDocumentSide(body.side);
     const isAdminSupplementalDocumentType = documentTypeRaw.toLowerCase() === 'outro';
     if (
       !isContractDocumentType(documentTypeRaw) ||
@@ -2392,12 +2393,6 @@ class ContractController {
           "documentType inválido. Use contrato_assinado, comprovante_pagamento, boleto_vistoria ou outro.",
       });
     }
-    if (!side) {
-      return res.status(400).json({
-        error: 'Informe o dono do documento (side: seller|buyer).',
-      });
-    }
-
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
     if (!uploadedFile?.buffer || uploadedFile.buffer.length === 0) {
       return res.status(400).json({ error: 'Arquivo obrigatório para upload.' });
@@ -2429,8 +2424,9 @@ class ContractController {
         content: uploadedFile.buffer,
         metadataJson: {
           contractId,
-          owner_side: side,
-          side,
+          // Physical documents are uploaded by the administrator for the
+          // contractual process, not for either qualification dossier.
+          visibility: 'CONTRACT_SHARED',
           originalFileName: uploadedFile.originalname ?? null,
           uploadedAt: new Date().toISOString(),
           uploadedVia: 'admin',
@@ -2473,8 +2469,9 @@ class ContractController {
           id: documentId,
           contractId,
           documentType: documentTypeRaw,
-          side,
-          owner_side: side,
+          side: null,
+          owner_side: null,
+          visibility: 'CONTRACT_SHARED',
           originalFileName: uploadedFile.originalname ?? null,
         },
       });

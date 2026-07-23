@@ -37,4 +37,17 @@ describe('propertyOwnerListingFilterService', () => {
     expect(normalizePropertyListingPurpose(' RENT ')).toBe('rent');
     expect(normalizePropertyListingPurpose('venda')).toBeNull();
   });
+
+  it('mantém no escopo do corretor imóveis vinculados por broker ou proprietário', () => {
+    const result = buildPropertyOwnerListingFilters({
+      ownerColumns: ['p.broker_id', 'p.owner_id'],
+      ownerId: 7,
+      purpose: 'rent',
+    });
+
+    expect(result.whereSql).toBe(
+      "(p.broker_id = ? OR p.owner_id = ?) AND LOWER(COALESCE(p.purpose, '')) LIKE ?",
+    );
+    expect(result.params).toEqual([7, 7, '%alug%']);
+  });
 });

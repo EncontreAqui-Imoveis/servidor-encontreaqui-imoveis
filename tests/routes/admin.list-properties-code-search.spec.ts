@@ -60,12 +60,12 @@ describe('GET /admin/properties-with-brokers código numérico', () => {
       .mockResolvedValueOnce([[]]);
   });
 
-  it('inclui igualdade numérica no código quando o termo é só dígitos', async () => {
+  it('inclui igualdade numérica no código público quando o termo é só dígitos', async () => {
     await request(app).get('/admin/properties-with-brokers').query({ search: '0000007', page: 1, limit: 10 });
 
     const countCall = queryMock.mock.calls[0];
     const [sql, params] = countCall as [string, unknown[]];
-    expect(String(sql)).toContain('CAST(p.code AS UNSIGNED)');
+    expect(String(sql)).toContain('CAST(COALESCE(p.public_code, p.code) AS UNSIGNED)');
     expect(String(sql)).toContain('REGEXP');
     expect(params).toContain(7);
   });

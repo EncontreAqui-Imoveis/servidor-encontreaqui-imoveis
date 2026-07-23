@@ -121,6 +121,27 @@ describe('adminNegotiationListingService', () => {
     expect(sqlCalls.some((sql) => sql.includes("NOT EXISTS (SELECT 1 FROM negotiation_documents"))).toBe(true);
   });
 
+  it('mantem negociações ativas mesmo quando o imóvel já avançou para contrato', async () => {
+    queryMock
+      .mockResolvedValueOnce([[{ column_name: 'client_name' }, { column_name: 'payment_details' }]])
+      .mockResolvedValueOnce([[{ column_name: 'created_at' }]])
+      .mockResolvedValueOnce([[{ total: 1 }]])
+      .mockResolvedValueOnce([[]]);
+
+    await listNegotiations({
+      statusFilter: 'IN_NEGOTIATION',
+      page: 1,
+      limit: 20,
+    });
+
+    const sqlCalls = queryMock.mock.calls.map(([sql]) => String(sql));
+    const listingSql = sqlCalls.find((sql) => sql.includes('ORDER BY COALESCE')) ?? '';
+
+    expect(listingSql).toContain("'CONTRACT_DRAFTING'");
+    expect(listingSql).toContain("'AWAITING_SIGNATURES'");
+    expect(listingSql).not.toContain("COALESCE(p.status, '') = 'negociacao'");
+  });
+
   it('mantem listagem funcional quando a descoberta de schema falha', async () => {
     queryMock
       .mockImplementationOnce(async () => {

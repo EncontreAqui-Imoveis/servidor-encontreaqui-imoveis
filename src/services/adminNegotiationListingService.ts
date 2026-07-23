@@ -192,7 +192,7 @@ function buildNegotiationStatusClause(
   if (statusFilter === 'APPROVED' || statusFilter === 'IN_NEGOTIATION') {
     return {
       clause:
-        " AND n.status IN ('IN_NEGOTIATION', 'DOCUMENTATION_PHASE') AND COALESCE(p.status, '') = 'negociacao'",
+        " AND n.status IN ('IN_NEGOTIATION', 'DOCUMENTATION_PHASE', 'CONTRACT_DRAFTING', 'AWAITING_SIGNATURES')",
       params: [],
     };
   }
@@ -357,7 +357,10 @@ function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
     return 'UNDER_REVIEW';
   }
 
-  if (negotiationStatus === 'DOCUMENTATION_PHASE' && propertyStatus === 'negociacao') {
+  if (
+    negotiationStatus === 'DOCUMENTATION_PHASE' &&
+    propertyStatus === 'negociacao'
+  ) {
     return 'APPROVED';
   }
 
@@ -365,11 +368,11 @@ function toAdminNegotiationStatus(row: AdminNegotiationListRow): string {
     return 'UNDER_REVIEW';
   }
 
-  if (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus !== 'negociacao') {
-    return 'UNDER_REVIEW';
-  }
-
-  if (negotiationStatus === 'IN_NEGOTIATION' && propertyStatus === 'negociacao') {
+  if (
+    negotiationStatus === 'IN_NEGOTIATION' ||
+    negotiationStatus === 'CONTRACT_DRAFTING' ||
+    negotiationStatus === 'AWAITING_SIGNATURES'
+  ) {
     return 'APPROVED';
   }
 

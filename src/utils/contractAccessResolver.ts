@@ -15,7 +15,6 @@ export interface ContractAccessRecord {
   proposer_id: number | string | null | undefined;
   initiator_side?: 'buyer' | 'seller' | string | null;
   legal_buyer_user_id?: number | string | null;
-  buyer_client_id?: number | string | null;
   handshake_pin?: string | null;
   handshake_status?: 'PENDING' | 'VERIFIED' | 'REJECTED' | string | null;
   handshake_attempts?: number | string | null;
@@ -103,7 +102,6 @@ export function resolveContractAccessContext(
   const propertyOwnerId = normalizePositiveId(contract.property_owner_id);
   const proposerId = normalizePositiveId(contract.proposer_id);
   const legalBuyerUserId = normalizePositiveId(contract.legal_buyer_user_id);
-  const buyerClientId = normalizePositiveId(contract.buyer_client_id);
   const initiatorSide = String(contract.initiator_side ?? '').trim().toLowerCase();
   const handshakeStatusRaw = String(contract.handshake_status ?? '').trim().toUpperCase();
   const handshakeStatus =
@@ -135,7 +133,6 @@ export function resolveContractAccessContext(
     buyerIds.add(proposerId);
   }
   if (legalBuyerUserId) buyerIds.add(legalBuyerUserId);
-  if (buyerClientId) buyerIds.add(buyerClientId);
 
   let role: ContractRole = 'none';
   if (responsibleIds(contract.responsible_user_ids).has(userId)) {

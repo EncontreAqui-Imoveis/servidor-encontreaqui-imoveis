@@ -22,6 +22,7 @@ type PropertyRow = RowDataPacket & {
 type PropertyEditRequestRow = RowDataPacket & {
   id: number;
   status: string;
+  requester_user_id: number;
 };
 
 const PROPERTY_ERROR_CODES = {
@@ -110,7 +111,7 @@ export async function submitPropertyEditRequest(req: AuthRequest, res: import('e
 
     const [pendingRows] = await db.query<PropertyEditRequestRow[]>(
       `
-          SELECT id, status
+          SELECT id, status, requester_user_id
           FROM property_edit_requests
           WHERE property_id = ? AND status = 'PENDING'
           LIMIT 1
@@ -118,14 +119,6 @@ export async function submitPropertyEditRequest(req: AuthRequest, res: import('e
         `,
       [propertyId]
     );
-
-    if (pendingRows.length > 0) {
-      await db.rollback();
-      return sendPropertyError(res, 409, {
-        error: 'Este imóvel já possui uma solicitação de edição pendente.',
-        code: PROPERTY_ERROR_CODES.PENDING_EDIT_BLOCKED,
-      });
-    }
 
     const currentState = buildEditablePropertyState(property as Record<string, unknown>);
     const preparedPatch = preparePropertyEditPatch(payload, currentState);
@@ -139,9 +132,47 @@ export async function submitPropertyEditRequest(req: AuthRequest, res: import('e
     }
 
     const requesterRole = resolveEditRequesterRole(req);
+    const pendingRequest = pendingRows[0];
+    const isUpdatingOwnPendingRequest =
+      pendingRequest != null && Number(pendingRequest.requester_user_id) === userId;
 
-    const [insertResult] = await db.query<ResultSetHeader>(
-      `
+    if (pendingRequest != null && !isUpdatingOwnPendingRequest) {
+      await db.rollback();
+      return sendPropertyError(res, 409, {
+        error: 'Este imóvel possui uma solicitação de edição pendente de outro usuário.',
+        code: PROPERTY_ERROR_CODES.PENDING_EDIT_BLOCKED,
+      });
+    }
+
+    let requestId: number;
+    if (isUpdatingOwnPendingRequest) {
+      await db.query(
+        `
+          UPDATE property_edit_requests
+          SET
+            requester_role = ?,
+            before_json = CAST(? AS JSON),
+            after_json = CAST(? AS JSON),
+            diff_json = CAST(? AS JSON),
+            field_reviews_json = NULL,
+            review_reason = NULL,
+            reviewed_by = NULL,
+            reviewed_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'PENDING'
+        `,
+        [
+          requesterRole,
+          JSON.stringify(preparedPatch.before),
+          JSON.stringify(preparedPatch.after),
+          JSON.stringify(preparedPatch.diff),
+          pendingRequest.id,
+        ],
+      );
+      requestId = Number(pendingRequest.id);
+    } else {
+      const [insertResult] = await db.query<ResultSetHeader>(
+        `
           INSERT INTO property_edit_requests (
             property_id,
             requester_user_id,
@@ -166,15 +197,17 @@ export async function submitPropertyEditRequest(req: AuthRequest, res: import('e
             NULL
           )
         `,
-      [
-        propertyId,
-        userId,
-        requesterRole,
-        JSON.stringify(preparedPatch.before),
-        JSON.stringify(preparedPatch.after),
-        JSON.stringify(preparedPatch.diff),
-      ]
-    );
+        [
+          propertyId,
+          userId,
+          requesterRole,
+          JSON.stringify(preparedPatch.before),
+          JSON.stringify(preparedPatch.after),
+          JSON.stringify(preparedPatch.diff),
+        ],
+      );
+      requestId = insertResult.insertId;
+    }
 
     if (property.status === 'rejected') {
       await db.query(
@@ -190,19 +223,23 @@ export async function submitPropertyEditRequest(req: AuthRequest, res: import('e
 
     await db.commit();
 
-    try {
-      await notifyAdmins(
-        `Nova solicitacao de edicao do imovel '${property.title}'.`,
-        'property',
-        propertyId
-      );
-    } catch (notifyError) {
-      console.error('Erro ao notificar admins sobre solicitacao de edicao:', notifyError);
+    if (!isUpdatingOwnPendingRequest) {
+      try {
+        await notifyAdmins(
+          `Nova solicitacao de edicao do imovel '${property.title}'.`,
+          'property',
+          propertyId
+        );
+      } catch (notifyError) {
+        console.error('Erro ao notificar admins sobre solicitacao de edicao:', notifyError);
+      }
     }
 
     return res.status(202).json({
-      message: 'Solicitação de edição enviada para aprovação.',
-      requestId: insertResult.insertId,
+      message: isUpdatingOwnPendingRequest
+        ? 'Solicitação de edição atualizada para aprovação.'
+        : 'Solicitação de edição enviada para aprovação.',
+      requestId,
       ...(property.status === 'rejected' ? { status: 'pending_approval' as const } : {}),
     });
   } catch (error) {

@@ -8,6 +8,7 @@ import {
 } from './negotiationPersistenceService';
 import { isNegotiationActor, isNegotiationAdmin } from '../utils/negotiationActorAccess';
 import { resolveContractAccessContext } from '../utils/contractAccessResolver';
+import { isContractSharedDocumentType } from '../modules/contracts/domain/contract.types';
 
 interface NegotiationAccessRow extends RowDataPacket {
   id: string;
@@ -64,6 +65,11 @@ function sanitizeDownloadFilename(value: string): string {
 function buildAttachmentDisposition(filename: string): string {
   const safe = sanitizeDownloadFilename(filename);
   return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
+function readDocumentOwnerSide(metadata: Record<string, unknown>): 'seller' | 'buyer' | null {
+  const side = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
+  return side === 'seller' || side === 'buyer' ? side : null;
 }
 
 export async function downloadDocument(
@@ -148,10 +154,6 @@ export async function downloadDocument(
     ) {
       return res.status(403).json({ error: 'Acesso negado ao documento.' });
     }
-    if (contractAccess && !contractAccess.canReadDocumentFiles) {
-      return res.status(403).json({ error: 'Documentos disponíveis apenas para consulta de status nesta etapa.' });
-    }
-
     const document = (await findNegotiationDocumentById(documentId)) as
       | NegotiationDocumentRow
       | null;
@@ -161,6 +163,32 @@ export async function downloadDocument(
 
     if (String(document.negotiationId) !== negotiationId) {
       return res.status(404).json({ error: 'Documento nao encontrado.' });
+    }
+
+    if (contractAccess) {
+      if (!contractAccess.canReadDocumentFiles) {
+        return res.status(403).json({ error: 'Documentos disponíveis apenas para consulta de status nesta etapa.' });
+      }
+
+      const metadata = parseJsonObjectSafe(document.metadataJson);
+      const documentType = String(document.documentType ?? '').trim().toLowerCase();
+      const isSharedArtifact = isContractSharedDocumentType(documentType);
+      const ownerSide = readDocumentOwnerSide(metadata);
+
+      // A direct download URL must enforce the same bilateral boundary as the
+      // contract detail response. Shared contractual artifacts are the only
+      // exception and remain readable by both authorized parties.
+      if (!isSharedArtifact) {
+        if (ownerSide === 'seller' && !contractAccess.canReadSeller) {
+          return res.status(403).json({ error: 'Acesso negado ao documento do vendedor.' });
+        }
+        if (ownerSide === 'buyer' && !contractAccess.canReadBuyer) {
+          return res.status(403).json({ error: 'Acesso negado ao documento do comprador.' });
+        }
+        if (ownerSide == null && documentType !== 'proposal') {
+          return res.status(403).json({ error: 'Documento sem proprietário verificável.' });
+        }
+      }
     }
 
     const contentType =

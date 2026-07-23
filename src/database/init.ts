@@ -90,6 +90,7 @@ const DDL_STATEMENTS: DDLStatement[] = [
         description TEXT NOT NULL,
         type VARCHAR(100) NOT NULL,
         purpose ENUM('Venda', 'Aluguel', 'Venda e Aluguel') NOT NULL,
+        market_stage ENUM('STANDARD', 'LAUNCH') NOT NULL DEFAULT 'STANDARD',
         status ENUM('pending_approval', 'approved', 'rejected', 'rented', 'sold') NOT NULL DEFAULT 'pending_approval',
         is_promoted TINYINT(1) NOT NULL DEFAULT 0,
         promotion_percentage DECIMAL(5, 2) NULL,

@@ -165,8 +165,9 @@ export function buildContractDraftDocumentMetadata(input: {
   const template = resolveContractDraftTemplate(input.dealType);
   return {
     contractId: input.contractId,
-    owner_side: 'seller',
-    side: 'seller',
+    // A draft is a contractual artifact. It is intentionally not assigned to
+    // either qualification side, so both parties can read it once available.
+    visibility: 'CONTRACT_SHARED',
     originalFileName: input.originalFileName,
     documentKind: 'contract_draft',
     dealType: input.dealType,

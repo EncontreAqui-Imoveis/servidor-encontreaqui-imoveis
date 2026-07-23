@@ -1,4 +1,5 @@
 import type { AreaConstruidaUnidade } from "../utils/propertyAreaUnits";
+import type { PropertyMarketStage } from "../utils/propertyMarketStage";
 
 function normalizeCepForPersistence(value: unknown, semCepFlag: boolean | 0 | 1): string | null {
   if (semCepFlag === true || semCepFlag === 1) {
@@ -16,6 +17,7 @@ export function buildPropertyCreationInsertValues(payload: {
   normalizedDescription: string;
   normalizedType: string;
   normalizedPurpose: string;
+  marketStage: PropertyMarketStage;
   promotionFlag: 0 | 1;
   promotionPercentage: number | null;
   promotionStart: string | null;
@@ -68,6 +70,7 @@ export function buildPropertyCreationInsertValues(payload: {
     payload.normalizedDescription,
     payload.normalizedType,
     payload.normalizedPurpose,
+    payload.marketStage,
     'pending_approval',
     payload.promotionFlag,
     payload.promotionPercentage,

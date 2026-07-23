@@ -107,7 +107,6 @@ describe('Contract response shape contracts', () => {
             type: 'other',
             document_type: 'contrato_minuta',
             metadata_json: JSON.stringify({
-              side: 'seller',
               originalFileName: 'minuta.pdf',
             }),
             created_at: '2026-03-02 08:01:00',
@@ -167,7 +166,9 @@ describe('Contract response shape contracts', () => {
           id: 2,
           type: 'other',
           documentType: 'contrato_minuta',
-          side: 'seller',
+          side: null,
+          visibility: 'CONTRACT_SHARED',
+          isSharedArtifact: true,
           originalFileName: 'minuta.pdf',
         },
       ],

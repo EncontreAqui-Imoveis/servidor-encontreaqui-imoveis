@@ -10,6 +10,10 @@ import { type AreaConstruidaUnidade } from "../utils/propertyAreaUnits";
 import { normalizePropertyAmenities } from "../utils/propertyAmenities";
 import { normalizePropertyType } from "../utils/propertyTypes";
 import {
+  canUsePropertyMarketStage,
+  normalizePropertyMarketStage,
+} from "../utils/propertyMarketStage";
+import {
   allocateNextPropertyCode,
   allocatePublicPropertyIdentifiers,
   PUBLIC_PROPERTY_CODE_REGEX,
@@ -71,6 +75,7 @@ const PROPERTY_ERROR_CODES = {
   DESCRIPTION_LENGTH_INVALID: "PROPERTY_DESCRIPTION_INVALID",
   INVALID_TYPE: "PROPERTY_TYPE_INVALID",
   INVALID_PURPOSE: "PROPERTY_PURPOSE_INVALID",
+  INVALID_MARKET_STAGE: "PROPERTY_MARKET_STAGE_INVALID",
   REQUIRED_BAIRRO: "PROPERTY_BAIRRO_REQUIRED",
   TEXT_VALIDATION_FAILED: "PROPERTY_FIELD_VALIDATION_FAILED",
   INVALID_OWNER_PHONE: "PROPERTY_OWNER_PHONE_INVALID",
@@ -212,6 +217,8 @@ async function createPropertyInternal(
     description,
     type,
     purpose,
+    market_stage,
+    marketStage,
     is_promoted,
     promo_percentage,
     promo_start_date,
@@ -358,6 +365,20 @@ async function createPropertyInternal(
       error: "Finalidade do imóvel invalida.",
       code: PROPERTY_ERROR_CODES.INVALID_PURPOSE,
       field: "purpose",
+    });
+  }
+
+  const normalizedMarketStage = normalizePropertyMarketStage(
+    market_stage ?? marketStage,
+  );
+  if (
+    !normalizedMarketStage ||
+    !canUsePropertyMarketStage(normalizedMarketStage, normalizedPurpose)
+  ) {
+    return sendPropertyError(res, req, 400, {
+      error: "Lançamento está disponível apenas para imóveis com finalidade de venda.",
+      code: PROPERTY_ERROR_CODES.INVALID_MARKET_STAGE,
+      field: "market_stage",
     });
   }
 
@@ -731,6 +752,7 @@ async function createPropertyInternal(
       normalizedDescription,
       normalizedType,
       normalizedPurpose,
+      marketStage: normalizedMarketStage,
       promotionFlag,
       promotionPercentage,
       promotionStart,
@@ -787,6 +809,7 @@ async function createPropertyInternal(
           description,
           type,
           purpose,
+          market_stage,
           status,
           is_promoted,
           promotion_percentage,

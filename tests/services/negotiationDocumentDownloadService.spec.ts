@@ -78,4 +78,37 @@ describe('negotiationDocumentDownloadService legal buyer handshake', () => {
     expect(response.status).toHaveBeenCalledWith(403);
     expect(findNegotiationDocumentByIdMock).not.toHaveBeenCalled();
   });
+
+  it('does not allow a verified buyer to bypass seller-document isolation by URL', async () => {
+    queryNegotiationRowsMock.mockResolvedValueOnce([{
+      id: 'neg-1',
+      proposer_id: 10,
+      advertiser_id: 11,
+      legal_buyer_user_id: 20,
+      handshake_pin: 'a'.repeat(64),
+      handshake_status: 'VERIFIED',
+      contract_id: 'contract-1',
+      contract_status: 'IN_DRAFT',
+      property_owner_id: 11,
+      responsible_user_ids: null,
+    }]);
+    findNegotiationDocumentByIdMock.mockResolvedValueOnce({
+      id: 5,
+      negotiationId: 'neg-1',
+      fileContent: Buffer.from('seller-private-file'),
+      type: 'other',
+      documentType: 'doc_identidade',
+      metadataJson: { owner_side: 'seller' },
+    });
+    const response = createResponse();
+
+    await downloadDocument({
+      params: { id: 'neg-1', documentId: '5' },
+      userId: 20,
+      userRole: 'client',
+    } as any, response as any);
+
+    expect(response.status).toHaveBeenCalledWith(403);
+    expect(response.end).not.toHaveBeenCalled();
+  });
 });

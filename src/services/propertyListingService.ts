@@ -223,6 +223,7 @@ function parseAreaFilterValue(
 function buildPublicListingWhereClauses(params: {
   type?: unknown;
   purpose?: unknown;
+  marketStage?: unknown;
   city?: unknown;
   bairro?: unknown;
   minPriceParam?: unknown;
@@ -297,6 +298,15 @@ function buildPublicListingWhereClauses(params: {
       queryParams.push('Venda e Aluguel');
       priceColumn = 'COALESCE(p.price_sale, p.price)';
     }
+  }
+
+  if (params.marketStage != null && String(params.marketStage).trim() !== '') {
+    const normalizedMarketStage = String(params.marketStage).trim().toUpperCase();
+    if (normalizedMarketStage !== 'STANDARD' && normalizedMarketStage !== 'LAUNCH') {
+      throw new PropertyListingError(400, 'Classificação comercial inválida.');
+    }
+    whereClauses.push('p.market_stage = ?');
+    queryParams.push(normalizedMarketStage);
   }
 
   if (params.city) {
@@ -585,6 +595,7 @@ export async function listPublicProperties(query: Record<string, unknown>) {
   const limit = typeof query.limit === 'string' ? query.limit : '20';
   const type = query.type;
   const purpose = query.purpose;
+  const marketStage = query.market_stage ?? query.marketStage;
   const city = query.city;
   const bairro = query.bairro;
   const minPrice = query.minPrice;
@@ -632,6 +643,7 @@ export async function listPublicProperties(query: Record<string, unknown>) {
     ({ whereClauses, queryParams } = buildPublicListingWhereClauses({
       type,
       purpose,
+      marketStage,
       city,
       bairro,
       minPriceParam: minPrice ?? query.min_price,

@@ -106,6 +106,7 @@ interface PropertyRow extends RowDataPacket {
   description: string;
   type: string;
   purpose: string;
+  market_stage?: 'STANDARD' | 'LAUNCH' | string | null;
   status: string;
   rejection_reason?: string | null;
   visibility?: string | null;
@@ -374,6 +375,8 @@ function mapProperty(
     description: row.description,
     type: row.type,
     purpose: row.purpose,
+    market_stage: row.market_stage ?? 'STANDARD',
+    marketStage: row.market_stage ?? 'STANDARD',
     status: row.status,
     visibility: row.visibility ?? 'PUBLIC',
     lifecycle_status: row.lifecycle_status ?? 'AVAILABLE',

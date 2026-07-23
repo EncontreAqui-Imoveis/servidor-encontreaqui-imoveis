@@ -102,6 +102,7 @@ import {
   isContractDealType,
   isContractApprovalStatus,
   isContractDocumentCategoryStatus,
+  isContractSharedDocumentType,
   isContractDocumentType,
   isContractStatus,
   type ContractApprovalStatus,
@@ -1281,13 +1282,16 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
 
 export function mapDocument(row: ContractDocumentRow) {
   const metadata = parseStoredJsonObject(row.metadata_json);
-  const sideValue = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
+  const normalizedRowDocumentType = String(row.document_type ?? '').trim().toLowerCase();
+  const isSharedArtifact = isContractSharedDocumentType(normalizedRowDocumentType);
+  const sideValue = isSharedArtifact
+    ? ''
+    : String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
   const side: ContractDocumentSide | null =
     sideValue === 'seller' || sideValue === 'buyer'
       ? sideValue
       : null;
   const originalFileNameRaw = String(metadata.originalFileName ?? '').trim();
-  const normalizedRowDocumentType = String(row.document_type ?? '').trim().toLowerCase();
   const rowCategory =
     isContractDocumentType(normalizedRowDocumentType)
       ? resolveDocumentCategoryFromType(normalizedRowDocumentType)
@@ -1317,6 +1321,9 @@ export function mapDocument(row: ContractDocumentRow) {
     side,
     owner_side: side,
     ownerSide: side,
+    visibility: isSharedArtifact ? 'CONTRACT_SHARED' : 'SIDE_PRIVATE',
+    isSharedArtifact,
+    locked: isSharedArtifact || categoryStatus === 'APPROVED' || categoryStatus === 'APPROVED_WITH_RES',
     documentCategory,
     categoryStatus,
     reviewReason: reviewReason || null,

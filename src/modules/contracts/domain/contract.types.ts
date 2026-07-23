@@ -75,14 +75,37 @@ export const CONTRACT_DOCUMENT_TYPES = [
 
 export type ContractDocumentType = (typeof CONTRACT_DOCUMENT_TYPES)[number];
 
+/**
+ * These documents belong to the contractual process, never to one party's
+ * qualification dossier. They remain readable by both parties after a stage
+ * is frozen, while personal documents keep their side isolation.
+ */
+export const CONTRACT_SHARED_DOCUMENT_TYPES = [
+  'contrato_minuta',
+  'contrato_assinado',
+  'comprovante_pagamento',
+  'boleto_vistoria',
+] as const;
+
+export type ContractSharedDocumentType = (typeof CONTRACT_SHARED_DOCUMENT_TYPES)[number];
+
+export function isContractSharedDocumentType(value: unknown): value is ContractSharedDocumentType {
+  return (
+    typeof value === 'string' &&
+    CONTRACT_SHARED_DOCUMENT_TYPES.includes(value as ContractSharedDocumentType)
+  );
+}
+
 export type ContractPartyInfo = Record<string, unknown>;
 
 export type ContractDocumentOwnerSide = 'seller' | 'buyer';
 
 export interface ContractDocumentMetadata {
-  owner_side: ContractDocumentOwnerSide;
+  /** Present only for a personal document owned by one party. */
+  owner_side?: ContractDocumentOwnerSide;
   /** @deprecated Read-only compatibility for records created before owner_side. */
   side?: ContractDocumentOwnerSide;
+  visibility?: 'SIDE_PRIVATE' | 'CONTRACT_SHARED';
   [key: string]: unknown;
 }
 

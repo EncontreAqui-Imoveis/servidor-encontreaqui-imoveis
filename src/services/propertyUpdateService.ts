@@ -13,6 +13,10 @@ import {
 } from '../utils/propertyAreaUnits';
 import { normalizePropertyType } from '../utils/propertyTypes';
 import {
+  canUsePropertyMarketStage,
+  normalizePropertyMarketStage,
+} from '../utils/propertyMarketStage';
+import {
   normalizeCepForPersistence,
   normalizeNumericCountField,
   normalizePurpose,
@@ -55,6 +59,7 @@ const PROPERTY_ERROR_CODES = {
   TEXT_VALIDATION_FAILED: 'PROPERTY_TEXT_VALIDATION_FAILED',
   INVALID_STATUS: 'PROPERTY_INVALID_STATUS',
   INVALID_PURPOSE: 'PROPERTY_INVALID_PURPOSE',
+  INVALID_MARKET_STAGE: 'PROPERTY_MARKET_STAGE_INVALID',
   INVALID_TYPE: 'PROPERTY_INVALID_TYPE',
   PRICE_INVALID: 'PROPERTY_PRICE_INVALID',
   NUMERIC_PARSE_ERROR: 'PROPERTY_NUMERIC_PARSE_ERROR',
@@ -69,6 +74,7 @@ const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'description',
   'type',
   'purpose',
+  'market_stage',
   'status',
   'price',
   'price_sale',
@@ -208,6 +214,10 @@ export async function updateProperty(req: AuthRequest, res: Response) {
     const normalizedUpdateBody: Record<string, unknown> = {
       ...body,
     } as Record<string, unknown>;
+    if (normalizedUpdateBody.market_stage === undefined && body.marketStage !== undefined) {
+      normalizedUpdateBody.market_stage = body.marketStage;
+      delete normalizedUpdateBody.marketStage;
+    }
     const rawAmenitiesForUpdate =
       body.amenities ??
       body.amenityIds ??
@@ -286,6 +296,16 @@ export async function updateProperty(req: AuthRequest, res: Response) {
     }
 
     const nextPurpose = normalizePurpose(normalizedUpdateBody.purpose) ?? property.purpose;
+    const nextMarketStage = normalizePropertyMarketStage(
+      normalizedUpdateBody.market_stage ?? property.market_stage,
+    );
+    if (!nextMarketStage || !canUsePropertyMarketStage(nextMarketStage, nextPurpose)) {
+      return sendPropertyError(req, res, 400, {
+        error: 'Lançamento está disponível apenas para imóveis com finalidade de venda.',
+        code: PROPERTY_ERROR_CODES.INVALID_MARKET_STAGE,
+        field: 'market_stage',
+      });
+    }
     const purposeLower = String(nextPurpose ?? '').toLowerCase();
     const supportsSale = purposeLower.includes('vend');
     const supportsRent = purposeLower.includes('alug');
@@ -351,6 +371,11 @@ export async function updateProperty(req: AuthRequest, res: Response) {
       }
 
       switch (key) {
+        case 'market_stage': {
+          fields.push('market_stage = ?');
+          values.push(nextMarketStage);
+          break;
+        }
         case 'status': {
           const normalized = normalizeStatus(normalizedUpdateBody.status);
           if (!normalized) {

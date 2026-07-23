@@ -12,15 +12,20 @@ export function normalizePropertyListingPurpose(value: unknown): PropertyListing
   return null;
 }
 
-/** Builds only parameterized, owner-scoped filters for the private property listing. */
 export function buildPropertyOwnerListingFilters(input: {
-  ownerColumn: 'p.owner_id' | 'p.broker_id';
+  ownerColumn?: 'p.owner_id' | 'p.broker_id';
+  ownerColumns?: Array<'p.owner_id' | 'p.broker_id'>;
   ownerId: number;
   search?: unknown;
   purpose?: unknown;
 }): PropertyOwnerListingFilters {
-  const whereClauses = [`${input.ownerColumn} = ?`];
-  const params: Array<string | number> = [input.ownerId];
+  const columns = input.ownerColumns ?? (input.ownerColumn ? [input.ownerColumn] : ['p.owner_id']);
+  const ownerClause =
+    columns.length > 1
+      ? `(${columns.map((col) => `${col} = ?`).join(' OR ')})`
+      : `${columns[0]} = ?`;
+  const whereClauses = [ownerClause];
+  const params: Array<string | number> = columns.map(() => input.ownerId);
   const search = String(input.search ?? '').trim();
   const purpose = normalizePropertyListingPurpose(input.purpose);
 

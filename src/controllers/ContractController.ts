@@ -226,6 +226,7 @@ export interface ContractRow extends RowDataPacket {
   capturing_broker_name: string | null;
   selling_broker_name: string | null;
   seller_client_name: string | null;
+  proposer_name: string | null;
   buyer_client_name: string | null;
   capturing_agency_name: string | null;
   capturing_agency_address: string | null;
@@ -1079,18 +1080,11 @@ function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown
   const buyerInfo = parseStoredJsonObject(row.buyer_info);
   const buyerName = String(row.client_name ?? '').trim();
   const buyerCpf = String(row.buyer_cpf ?? '').trim();
-  const workflowMetadata = parseStoredJsonObject(row.workflow_metadata);
-  const partyResolution = parseStoredJsonObject(workflowMetadata.partyResolution);
-  const buyerResolution = parseStoredJsonObject(partyResolution.buyer);
-  const nameSource = String(buyerResolution.nameSource ?? '').trim();
-  const nameWasInheritedFromProfile =
-    nameSource === 'proposer_profile' || nameSource === 'verified_email_profile';
+  const currentName = String(
+    buyerInfo.nome ?? buyerInfo.clientName ?? buyerInfo.name ?? buyerInfo.fullName ?? ''
+  ).trim();
 
-  if (
-    buyerName &&
-    (nameWasInheritedFromProfile ||
-      !String(buyerInfo.nome ?? buyerInfo.clientName ?? buyerInfo.name ?? '').trim())
-  ) {
+  if (!currentName && buyerName) {
     buyerInfo.nome = buyerName;
   }
   if (buyerCpf && !String(buyerInfo.cpf ?? buyerInfo.clientCpf ?? '').trim()) {
@@ -1258,7 +1252,7 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     legalBuyerUserId:
       !handshakeRestricted && !statusOnlyResponsible && row.legal_buyer_user_id !== null ? Number(row.legal_buyer_user_id) : null,
     advertiserName: handshakeRestricted || statusOnlyResponsible ? null : row.seller_client_name ?? null,
-    proposerName: handshakeRestricted || statusOnlyResponsible ? null : row.buyer_client_name ?? null,
+    proposerName: handshakeRestricted || statusOnlyResponsible ? null : row.proposer_name ?? row.client_name ?? null,
     clientName: handshakeRestricted || statusOnlyResponsible ? null : row.client_name ?? null,
     capturingBrokerName: handshakeRestricted || statusOnlyResponsible ? null : row.capturing_broker_name ?? null,
     sellingBrokerName: handshakeRestricted || statusOnlyResponsible ? null : row.selling_broker_name ?? null,
@@ -1956,7 +1950,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
-    p.code AS property_code,
+    COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS property_code,
     (
       SELECT pi.image_url
       FROM property_images pi
@@ -1985,7 +1979,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     COALESCE(property_capture_user.name, capture_user.name) AS capturing_broker_name,
     seller_user.name AS selling_broker_name,
     advertiser_user.name AS seller_client_name,
-    proposer_user.name AS buyer_client_name,
+    proposer_user.name AS proposer_name,
+    COALESCE(legal_buyer_user.name, NULLIF(TRIM(JSON_UNQUOTE(JSON_EXTRACT(c.buyer_info, '$.nome'))), ''), proposer_user.name) AS buyer_client_name,
     capture_agency.name AS capturing_agency_name,
     NULLIF(TRIM(CONCAT_WS(', ', capture_agency.address, capture_agency.city, capture_agency.state)), '') AS capturing_agency_address,
     __RESPONSIBLE_USERS_SELECT__
@@ -1997,6 +1992,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN agencies capture_agency ON capture_agency.id = capture_broker.agency_id
   LEFT JOIN users capture_user ON capture_user.id = n.capturing_broker_id
   LEFT JOIN users proposer_user ON proposer_user.id = n.proposer_id
+  LEFT JOIN users legal_buyer_user ON legal_buyer_user.id = n.legal_buyer_user_id
   LEFT JOIN users advertiser_user ON advertiser_user.id = n.advertiser_id
   LEFT JOIN users owner_user ON owner_user.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id

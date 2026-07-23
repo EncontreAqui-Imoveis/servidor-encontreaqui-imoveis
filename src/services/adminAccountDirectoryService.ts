@@ -312,7 +312,9 @@ export async function getAdminBrokerProperties(brokerId: number) {
     `
       SELECT
         p.id,
-        p.code,
+        COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS code,
+        p.public_code,
+        p.public_id,
         p.title,
         p.status,
         p.type,
@@ -342,7 +344,9 @@ export async function getAdminClientProperties(clientId: number) {
     `
       SELECT
         p.id,
-        p.code,
+        COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS code,
+        p.public_code,
+        p.public_id,
         p.title,
         p.status,
         p.type,

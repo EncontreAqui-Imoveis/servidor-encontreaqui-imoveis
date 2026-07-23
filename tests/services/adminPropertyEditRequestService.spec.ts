@@ -114,6 +114,62 @@ describe('adminPropertyEditRequestService', () => {
     });
   });
 
+  it('oculta campos auxiliares artificiais de solicitacoes legadas', async () => {
+    queryMock
+      .mockResolvedValueOnce([[{ total: 1 }]])
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 904,
+            property_id: 558,
+            requester_user_id: 30019,
+            requester_role: 'client',
+            status: 'PENDING',
+            before_json: JSON.stringify({
+              marketStage: 'STANDARD',
+              code: 'PUB-1',
+              semLote: true,
+              semQuadra: true,
+              valorCondominio: null,
+            }),
+            after_json: JSON.stringify({
+              marketStage: 'LAUNCH',
+              code: 'PUB-2',
+              semLote: false,
+              semQuadra: false,
+              valorCondominio: 0,
+            }),
+            diff_json: JSON.stringify({
+              marketStage: { before: 'STANDARD', after: 'LAUNCH' },
+              code: { before: 'PUB-1', after: 'PUB-2' },
+              semLote: { before: true, after: false },
+              semQuadra: { before: true, after: false },
+              valorCondominio: { before: null, after: 0 },
+            }),
+            field_reviews_json: null,
+            review_reason: null,
+            reviewed_by: null,
+            reviewed_at: null,
+            created_at: new Date('2026-06-01T10:00:00Z'),
+            updated_at: new Date('2026-06-01T10:00:00Z'),
+            property_title: 'Casa',
+            property_code: 'PUB-1',
+            requester_name: 'Maria',
+          },
+        ],
+      ]);
+
+    const result = await listPropertyEditRequests({
+      page: 1,
+      limit: 10,
+      status: 'PENDING',
+    });
+
+    expect(result.data[0].diff).toEqual({
+      marketStage: { before: 'STANDARD', after: 'LAUNCH' },
+    });
+  });
+
   it('busca solicitacao por id com 404 quando ausente', async () => {
     queryMock.mockResolvedValueOnce([[]]);
 

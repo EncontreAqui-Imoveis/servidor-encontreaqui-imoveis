@@ -14,6 +14,11 @@ import {
   parsePromotionPercentage,
   stringOrNull,
 } from './propertyUpdateValidationService';
+import {
+  canUsePropertyMarketStage,
+  normalizePropertyMarketStage,
+  type PropertyMarketStage,
+} from '../utils/propertyMarketStage';
 
 export type PropertyEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PropertyEditRequestRequesterRole = 'broker' | 'client';
@@ -55,7 +60,7 @@ const EDIT_FIELD_ALIASES = {
   description: ['description'],
   type: ['type'],
   purpose: ['purpose'],
-  code: ['code'],
+  marketStage: ['marketStage', 'market_stage'],
   ownerName: ['ownerName', 'owner_name'],
   ownerPhone: ['ownerPhone', 'owner_phone'],
   address: ['address'],
@@ -145,6 +150,7 @@ export type EditablePropertyState = {
   description: string;
   type: string;
   purpose: PurposeValue;
+  marketStage: PropertyMarketStage;
   code: string | null;
   ownerName: string | null;
   ownerPhone: string | null;
@@ -523,7 +529,10 @@ export function buildEditablePropertyState(
     description: String(property.description ?? '').trim(),
     type: String(property.type ?? '').trim(),
     purpose,
-    code: stringOrNull(property.code),
+    marketStage: normalizePropertyMarketStage(property.market_stage) ?? 'STANDARD',
+    // The public code identifies the property externally and must never be
+    // overwritten by a client edit request.
+    code: stringOrNull(property.public_code ?? property.code),
     ownerName: stringOrNull(property.owner_name),
     ownerPhone: stringOrNull(property.owner_phone),
     address: String(property.address ?? '').trim(),
@@ -594,6 +603,9 @@ function validateCurrentState(state: EditablePropertyState): void {
   }
   if (!state.bairro && !isOptionalBairroPropertyType(state.type)) {
     throw new Error('Bairro e obrigatorio.');
+  }
+  if (!canUsePropertyMarketStage(state.marketStage, state.purpose)) {
+    throw new Error('Lancamento esta disponivel apenas para imoveis de venda.');
   }
 
   validateTextLength('title', state.title);
@@ -688,8 +700,14 @@ function buildRequestedPatch(
     patch.purpose = normalizedPurpose;
   }
 
-  const code = readAlias(payload, EDIT_FIELD_ALIASES.code);
-  if (code.found) patch.code = stringOrNull(code.value);
+  const marketStage = readAlias(payload, EDIT_FIELD_ALIASES.marketStage);
+  if (marketStage.found) {
+    const normalizedMarketStage = normalizePropertyMarketStage(marketStage.value);
+    if (!normalizedMarketStage) {
+      throw new Error('Etapa de mercado invalida.');
+    }
+    patch.marketStage = normalizedMarketStage;
+  }
 
   const ownerName = readAlias(payload, EDIT_FIELD_ALIASES.ownerName);
   if (ownerName.found) patch.ownerName = stringOrNull(ownerName.value);
@@ -834,7 +852,10 @@ function buildRequestedPatch(
 
   const valorCondominio = readAlias(payload, EDIT_FIELD_ALIASES.valorCondominio);
   if (valorCondominio.found) {
-    patch.valorCondominio = parseDecimal(valorCondominio.value, 'Valor de condominio');
+    const value = parseDecimal(valorCondominio.value, 'Valor de condominio');
+    // A taxa e opcional. Serializadores de formulario representam campo vazio
+    // como zero; persista isso como ausencia para nao criar um diff artificial.
+    patch.valorCondominio = value === 0 ? null : value;
   }
 
   const purposeForPrices = patch.purpose ?? current.purpose;
@@ -914,31 +935,53 @@ function finalizePatch(
   current: EditablePropertyState,
   rawPatch: EditablePropertyPatch
 ): EditablePropertyPatch {
-  const merged: EditablePropertyState = { ...current, ...rawPatch };
+  const normalizedPatch: EditablePropertyPatch = { ...rawPatch };
 
-  if (rawPatch.semQuadra === true) {
+  // O formulario envia esses toggles mesmo quando o usuario nao os tocou.
+  // Desmarcar exige o respectivo valor para evitar alterar campos auxiliares
+  // em uma solicitacao que, por exemplo, muda apenas o lancamento.
+  if (
+    normalizedPatch.semQuadra === false &&
+    current.semQuadra &&
+    current.quadra == null &&
+    !stringOrNull(normalizedPatch.quadra)
+  ) {
+    delete normalizedPatch.semQuadra;
+  }
+  if (
+    normalizedPatch.semLote === false &&
+    current.semLote &&
+    current.lote == null &&
+    !stringOrNull(normalizedPatch.lote)
+  ) {
+    delete normalizedPatch.semLote;
+  }
+
+  const merged: EditablePropertyState = { ...current, ...normalizedPatch };
+
+  if (normalizedPatch.semQuadra === true) {
     merged.quadra = null;
   }
-  if (rawPatch.semLote === true) {
+  if (normalizedPatch.semLote === true) {
     merged.lote = null;
   }
-  if (rawPatch.semCep === true) {
+  if (normalizedPatch.semCep === true) {
     merged.cep = null;
-  } else if (rawPatch.cep !== undefined || rawPatch.semCep !== undefined) {
+  } else if (normalizedPatch.cep !== undefined || normalizedPatch.semCep !== undefined) {
     merged.cep = normalizeCepForPersistence(merged.cep, merged.semCep ? 1 : 0);
   }
 
   const shouldEnablePromotion =
-    rawPatch.isPromoted === true ||
+    normalizedPatch.isPromoted === true ||
     merged.isPromoted === true ||
-    rawPatch.promotionPercentage != null ||
-    rawPatch.promotionPrice != null ||
-    rawPatch.promotionalRentPrice != null ||
-    rawPatch.promotionalRentPercentage != null ||
-    rawPatch.promotionStart != null ||
-    rawPatch.promotionEnd != null;
+    normalizedPatch.promotionPercentage != null ||
+    normalizedPatch.promotionPrice != null ||
+    normalizedPatch.promotionalRentPrice != null ||
+    normalizedPatch.promotionalRentPercentage != null ||
+    normalizedPatch.promotionStart != null ||
+    normalizedPatch.promotionEnd != null;
 
-  if (rawPatch.isPromoted === false) {
+  if (normalizedPatch.isPromoted === false) {
     merged.isPromoted = false;
     merged.promotionPercentage = null;
     merged.promotionPrice = null;
@@ -948,27 +991,27 @@ function finalizePatch(
     merged.promotionEnd = null;
   } else if (shouldEnablePromotion) {
     merged.isPromoted = true;
-    if (rawPatch.promotionPercentage != null) {
+    if (normalizedPatch.promotionPercentage != null) {
       merged.promotionPrice =
-        rawPatch.promotionPrice ??
-        calculateDiscountedValue(merged.priceSale, merged.promotionPercentage);
+        normalizedPatch.promotionPrice ??
+        calculateDiscountedValue(merged.priceSale, normalizedPatch.promotionPercentage);
       merged.promotionalRentPrice =
-        rawPatch.promotionalRentPrice ??
-        calculateDiscountedValue(merged.priceRent, merged.promotionPercentage);
+        normalizedPatch.promotionalRentPrice ??
+        calculateDiscountedValue(merged.priceRent, normalizedPatch.promotionPercentage);
     }
   }
 
   validateCurrentState(merged);
 
-  const finalPatch: EditablePropertyPatch = { ...rawPatch };
+  const finalPatch: EditablePropertyPatch = { ...normalizedPatch };
   if (
-    rawPatch.isPromoted !== undefined ||
-    rawPatch.promotionPercentage !== undefined ||
-    rawPatch.promotionPrice !== undefined ||
-    rawPatch.promotionalRentPrice !== undefined ||
-    rawPatch.promotionalRentPercentage !== undefined ||
-    rawPatch.promotionStart !== undefined ||
-    rawPatch.promotionEnd !== undefined
+    normalizedPatch.isPromoted !== undefined ||
+    normalizedPatch.promotionPercentage !== undefined ||
+    normalizedPatch.promotionPrice !== undefined ||
+    normalizedPatch.promotionalRentPrice !== undefined ||
+    normalizedPatch.promotionalRentPercentage !== undefined ||
+    normalizedPatch.promotionStart !== undefined ||
+    normalizedPatch.promotionEnd !== undefined
   ) {
     finalPatch.isPromoted = merged.isPromoted;
     finalPatch.promotionPercentage = merged.promotionPercentage;
@@ -1028,7 +1071,6 @@ export function buildPropertyEditDbPatch(
       case 'title':
       case 'description':
       case 'type':
-      case 'code':
       case 'address':
       case 'quadra':
       case 'lote':
@@ -1038,6 +1080,9 @@ export function buildPropertyEditDbPatch(
       case 'state':
       case 'cep':
         dbPatch[key] = finalState[key as keyof EditablePropertyState];
+        break;
+      case 'marketStage':
+        dbPatch.market_stage = finalState.marketStage;
         break;
       case 'ownerName':
         dbPatch.owner_name = finalState.ownerName;

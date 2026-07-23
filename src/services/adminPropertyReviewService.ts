@@ -97,23 +97,27 @@ function parseBoolean(value: unknown): number {
 }
 
 function mapAdminProperty(row: PropertyDetailRow) {
-  const images = Array.isArray(row.images)
+  const imagePairs = Array.isArray(row.images)
     ? row.images
     : row.images
       ? String(row.images)
           .split(';')
           .map((item) => item.trim())
           .filter(Boolean)
-          .map((pair) => {
-            const [id, url] = pair.split('|');
-            const numId = Number(id);
-            return {
-              id: Number.isFinite(numId) ? numId : null,
-              url: optimizeCloudinaryImageUrl(url, { preset: 'thumb' }) ?? url,
-            };
-          })
-          .filter((item) => item.id !== null && item.url)
       : [];
+  const images = imagePairs
+    .map((pair) => {
+      const [id, url] = pair.includes('|') ? pair.split('|') : [null, pair];
+      const imageId = Number(id);
+      const normalizedUrl = String(url ?? '').trim();
+      if (!normalizedUrl) return null;
+      return {
+        id: Number.isFinite(imageId) ? imageId : null,
+        url: optimizeCloudinaryImageUrl(normalizedUrl, { preset: 'thumb' }) ?? normalizedUrl,
+      };
+    })
+    .filter((image): image is { id: number | null; url: string } => image !== null);
+  const propertyImageUrl = images[0]?.url ?? null;
 
   return {
     id: row.id,
@@ -124,6 +128,8 @@ function mapAdminProperty(row: PropertyDetailRow) {
     owner_name: row.owner_name ?? null,
     owner_phone: row.owner_phone ?? null,
     code: row.code ?? null,
+    // The administrative UI needs a stable cover without parsing the legacy images field.
+    propertyImageUrl,
     title: row.title,
     description: row.description ?? null,
     type: row.type ?? '',

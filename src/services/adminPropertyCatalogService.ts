@@ -1,5 +1,6 @@
 import { RowDataPacket } from 'mysql2';
 import { adminDb } from './adminPersistenceService';
+import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import { runFeaturedPropertiesScopeMigration } from '../database/migrations';
 
 type Nullable<T> = T | null;
@@ -45,6 +46,7 @@ export type ArchivedPropertiesPayload = {
     status: string | null;
     brokerName: string | null;
     transactionDate: string | null;
+    propertyImageUrl: string | null;
   }>;
   total: number;
   page: number;
@@ -386,11 +388,18 @@ export async function listArchivedProperties(
     `
       SELECT
         p.id,
-        p.code,
+        COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS code,
         p.title,
         p.status,
         COALESCE(u.name, u_owner.name) AS broker_name,
-        sl.last_sale_date AS transaction_date
+        sl.last_sale_date AS transaction_date,
+        (
+          SELECT pi.image_url
+          FROM property_images pi
+          WHERE pi.property_id = p.id
+          ORDER BY pi.id ASC
+          LIMIT 1
+        ) AS property_image_url
       FROM properties p
       LEFT JOIN brokers b ON b.id = p.broker_id
       LEFT JOIN users u ON u.id = b.id
@@ -415,6 +424,8 @@ export async function listArchivedProperties(
       status: row.status ?? null,
       brokerName: row.broker_name ?? null,
       transactionDate: row.transaction_date ? String(row.transaction_date) : null,
+      propertyImageUrl:
+        optimizeCloudinaryImageUrl(row.property_image_url, { preset: 'thumb' }) ?? null,
     })),
     total,
     page,

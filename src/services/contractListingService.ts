@@ -26,6 +26,49 @@ function buildDocumentsByNegotiation(documentRows: ContractDocumentListRow[]) {
   return documentsByNegotiation;
 }
 
+function parseAdminSearchTerm(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().replace(/\s+/g, ' ').slice(0, 120);
+  return normalized.length > 0 ? normalized.toLocaleLowerCase('pt-BR') : null;
+}
+
+function buildAdminContractWhere(
+  statusFilter: string | null,
+  searchTerm: string | null,
+): { clause: string; params: Array<string> } {
+  const clauses: string[] = [];
+  const params: string[] = [];
+
+  if (statusFilter) {
+    clauses.push('c.status = ?');
+    params.push(statusFilter);
+  }
+
+  if (searchTerm) {
+    // Keep the public property code and legally resolved party names searchable
+    // without exposing an internal contract id in the panel UI.
+    clauses.push(`
+      LOWER(CONCAT_WS(' ',
+        COALESCE(p.public_code, ''),
+        COALESCE(p.code, ''),
+        COALESCE(p.title, ''),
+        COALESCE(owner_user.name, ''),
+        COALESCE(advertiser_user.name, ''),
+        COALESCE(proposer_user.name, ''),
+        COALESCE(legal_buyer_user.name, ''),
+        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.seller_info, '$.nome')), ''),
+        COALESCE(JSON_UNQUOTE(JSON_EXTRACT(c.buyer_info, '$.nome')), '')
+      )) LIKE ?
+    `);
+    params.push(`%${searchTerm}%`);
+  }
+
+  return {
+    clause: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
+    params,
+  };
+}
+
 export async function listContractsForAdmin(
   req: Request,
 ): Promise<{
@@ -43,14 +86,23 @@ export async function listContractsForAdmin(
   const limit = Math.min(Math.max(Number(req.query.limit ?? 20) || 20, 1), 100);
   const offset = (page - 1) * limit;
 
-  const whereClause = statusFilter ? 'WHERE c.status = ?' : '';
-  const whereParams = statusFilter ? [statusFilter] : [];
+  const searchTerm = parseAdminSearchTerm(req.query.search);
+  const { clause: whereClause, params: whereParams } = buildAdminContractWhere(
+    statusFilter,
+    searchTerm,
+  );
 
   const contractSelectSql = await getContractSelectSql();
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total
       FROM contracts c
+      JOIN negotiations n ON n.id = c.negotiation_id
+      JOIN properties p ON p.id = c.property_id
+      LEFT JOIN users proposer_user ON proposer_user.id = n.proposer_id
+      LEFT JOIN users legal_buyer_user ON legal_buyer_user.id = n.legal_buyer_user_id
+      LEFT JOIN users advertiser_user ON advertiser_user.id = n.advertiser_id
+      LEFT JOIN users owner_user ON owner_user.id = p.owner_id
       ${whereClause}
     `,
     whereParams,

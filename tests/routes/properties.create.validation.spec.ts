@@ -280,7 +280,8 @@ describe('POST /properties description length contract', () => {
       String(sql).includes('INSERT INTO properties')
     );
     const insertParams = insertCall?.[1] as unknown[];
-    expect(insertParams?.[35]).toBe(0);
+    // market_stage precedes status in the canonical INSERT column order.
+    expect(insertParams?.[36]).toBe(0);
   });
 
   it('accepts bathrooms and garage_spots as 0', async () => {

@@ -1324,6 +1324,7 @@ class UserController {
         ownerId: userId,
         search: req.query.search,
         purpose: req.query.purpose,
+        marketStage: req.query.market_stage ?? req.query.marketStage,
       });
 
       const countQuery = `SELECT COUNT(*) as total FROM properties p WHERE ${whereSql}`;
@@ -1343,7 +1344,9 @@ class UserController {
           p.price,
           p.price_sale,
           p.price_rent,
-          p.code,
+          COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS code,
+          p.public_code,
+          p.market_stage,
           p.address,
           p.quadra,
           p.lote,
@@ -1406,7 +1409,7 @@ class UserController {
         WHERE ${whereSql}
         GROUP BY
           p.id, p.owner_id, p.broker_id, p.title, p.description, p.type, p.status, p.purpose,
-          p.price, p.price_sale, p.price_rent, p.code, p.address, p.quadra, p.lote, p.numero,
+          p.price, p.price_sale, p.price_rent, p.code, p.public_code, p.market_stage, p.address, p.quadra, p.lote, p.numero,
           p.bairro, p.complemento, p.city, p.state, p.sem_cep, p.bedrooms, p.bathrooms,
           p.area_construida, p.area_terreno, p.garage_spots, p.has_wifi, p.tem_piscina,
           p.tem_energia_solar, p.tem_automacao, p.tem_ar_condicionado, p.eh_mobiliada,

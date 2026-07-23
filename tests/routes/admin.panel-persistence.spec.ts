@@ -431,8 +431,8 @@ describe('Rotas admin de persistencia', () => {
             purpose: 'Venda',
             code: 'SM-001',
             title: 'Casa do cliente',
-            public_id: String(capturedInsertParams?.[56] ?? 'ID-0000'),
-            public_code: String(capturedInsertParams?.[57] ?? 'SCODE00'),
+            public_id: String(capturedInsertParams?.[57] ?? 'ID-0000'),
+            public_code: String(capturedInsertParams?.[58] ?? 'SCODE00'),
             owner_name: 'Cliente Smoke',
             owner_phone: '64999990000',
             address: 'Rua Teste',
@@ -449,21 +449,21 @@ describe('Rotas admin de persistencia', () => {
             numero: '10',
             bedrooms: 3,
             bathrooms: 2,
-            area_construida: capturedInsertParams?.[37] ?? 0,
-            area_terreno: capturedInsertParams?.[39] ?? 2500,
-            area_construida_valor: capturedInsertParams?.[40] ?? 0,
-            area_construida_unidade: String(capturedInsertParams?.[38] ?? 'm2'),
-            area_terreno_valor: capturedInsertParams?.[42] ?? 2500,
-            area_terreno_unidade: String(capturedInsertParams?.[43] ?? 'm2'),
-            area_terreno_m2: capturedInsertParams?.[44],
+            area_construida: capturedInsertParams?.[38] ?? 0,
+            area_terreno: capturedInsertParams?.[40] ?? 2500,
+            area_construida_valor: capturedInsertParams?.[41] ?? 0,
+            area_construida_unidade: String(capturedInsertParams?.[39] ?? 'm2'),
+            area_terreno_valor: capturedInsertParams?.[43] ?? 2500,
+            area_terreno_unidade: String(capturedInsertParams?.[44] ?? 'm2'),
+            area_terreno_m2: capturedInsertParams?.[45],
             garage_spots: 1,
-            has_wifi: capturedInsertParams?.[47] ?? 0,
-            tem_piscina: capturedInsertParams?.[48] ?? 0,
-            tem_energia_solar: capturedInsertParams?.[49] ?? 0,
-            tem_automacao: capturedInsertParams?.[50] ?? 0,
-            tem_ar_condicionado: capturedInsertParams?.[51] ?? 0,
-            eh_mobiliada: capturedInsertParams?.[52] ?? 0,
-            amenities: capturedInsertParams?.[46] ?? '[]',
+            has_wifi: capturedInsertParams?.[48] ?? 0,
+            tem_piscina: capturedInsertParams?.[49] ?? 0,
+            tem_energia_solar: capturedInsertParams?.[50] ?? 0,
+            tem_automacao: capturedInsertParams?.[51] ?? 0,
+            tem_ar_condicionado: capturedInsertParams?.[52] ?? 0,
+            eh_mobiliada: capturedInsertParams?.[53] ?? 0,
+            amenities: capturedInsertParams?.[47] ?? '[]',
             created_at: '2026-03-01 10:00:00',
             updated_at: '2026-03-02 10:00:00',
           },
@@ -533,11 +533,12 @@ describe('Rotas admin de persistencia', () => {
     const insertParams = insertCall?.[1] as unknown[];
 
     expect(insertParams).toBeDefined();
-    expect(insertParams?.[40]).toBe(0);
-    expect(insertParams?.[42]).toBe(2500);
+    // market_stage precedes status in the canonical INSERT column order.
+    expect(insertParams?.[41]).toBe(0);
+    expect(insertParams?.[43]).toBe(2500);
     expect(insertParams?.[57]).toBeDefined();
 
-    const amenitiesPayload = typeof insertParams?.[46] === 'string' ? insertParams[46] : JSON.stringify(insertParams?.[46] ?? []);
+    const amenitiesPayload = typeof insertParams?.[47] === 'string' ? insertParams[47] : JSON.stringify(insertParams?.[47] ?? []);
     allCanonicalAmenities.forEach((amenity) => {
       expect(amenitiesPayload).toContain(amenity);
     });
@@ -649,4 +650,3 @@ describe('Rotas admin de persistencia', () => {
     expect(brokerParams).toContain('12345-A');
   });
 });
-

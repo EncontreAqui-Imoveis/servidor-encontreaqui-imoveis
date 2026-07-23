@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildPropertyOwnerListingFilters,
+  normalizePropertyListingMarketStage,
   normalizePropertyListingPurpose,
 } from '../../src/services/propertyOwnerListingFilterService';
 
@@ -15,9 +16,24 @@ describe('propertyOwnerListingFilterService', () => {
     });
 
     expect(result.whereSql).toBe(
-      "p.owner_id = ? AND (p.title LIKE ? OR p.code LIKE ?) AND LOWER(COALESCE(p.purpose, '')) LIKE ?",
+      "p.owner_id = ? AND (p.title LIKE ? OR COALESCE(p.public_code, '') LIKE ? OR COALESCE(p.code, '') LIKE ?) AND LOWER(COALESCE(p.purpose, '')) LIKE ?",
     );
-    expect(result.params).toEqual([42, '%Casa QA%', '%Casa QA%', '%vend%']);
+    expect(result.params).toEqual([42, '%Casa QA%', '%Casa QA%', '%Casa QA%', '%vend%']);
+  });
+
+  it('filtra lançamentos sem alterar a ordem dos parâmetros da query', () => {
+    const result = buildPropertyOwnerListingFilters({
+      ownerColumn: 'p.owner_id',
+      ownerId: 42,
+      marketStage: 'launch',
+    });
+
+    expect(result).toEqual({
+      whereSql: "p.owner_id = ? AND COALESCE(p.market_stage, 'STANDARD') = 'LAUNCH'",
+      params: [42],
+    });
+    expect(normalizePropertyListingMarketStage(' LAUNCH ')).toBe('LAUNCH');
+    expect(normalizePropertyListingMarketStage('standard')).toBeNull();
   });
 
   it('mantém o escopo do corretor e aceita apenas finalidades canônicas', () => {

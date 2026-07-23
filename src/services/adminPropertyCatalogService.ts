@@ -12,6 +12,8 @@ export interface PropertiesWithBrokersQuery {
   status?: unknown;
   city?: unknown;
   purpose?: unknown;
+  marketStage?: unknown;
+  market_stage?: unknown;
   paginate?: unknown;
   sortBy?: unknown;
   sortOrder?: unknown;
@@ -150,11 +152,12 @@ export async function listPropertiesWithBrokers(
   const status = normalizeStatus(query.status);
   const city = String(query.city ?? '').trim();
   const purpose = String(query.purpose ?? '').trim().toLowerCase();
+  const marketStage = String(query.market_stage ?? query.marketStage ?? '').trim().toUpperCase();
   const paginate = String(query.paginate ?? 'true').trim().toLowerCase() !== 'false';
   const sortBy = String(query.sortBy ?? 'p.created_at');
   const sortOrder = String(query.sortOrder ?? 'desc').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
-  const allowedSearchColumns = new Set(['p.id', 'p.title', 'p.type', 'p.city', 'p.code', 'u.name', 'u_owner.name']);
+  const allowedSearchColumns = new Set(['p.id', 'p.title', 'p.type', 'p.city', 'p.code', 'p.public_code', 'u.name', 'u_owner.name']);
   const allowedSortColumns = new Set([
     'p.id',
     'p.title',
@@ -198,7 +201,7 @@ export async function listPropertiesWithBrokers(
         'p.title LIKE ?',
         'p.city LIKE ?',
         'CAST(p.id AS CHAR) LIKE ?',
-        "COALESCE(p.code,'') LIKE ?",
+        "COALESCE(p.public_code, p.code, '') LIKE ?",
         'p.type LIKE ?',
         "COALESCE(u.name,'') LIKE ?",
         "COALESCE(u_owner.name,'') LIKE ?",
@@ -209,7 +212,7 @@ export async function listPropertiesWithBrokers(
         if (Number.isFinite(idNum)) {
           parts.push('p.id = ?');
           searchParams.push(idNum);
-          parts.push("(COALESCE(p.code,'') REGEXP '^[0-9]+$' AND CAST(p.code AS UNSIGNED) = ?)");
+          parts.push("(COALESCE(p.public_code, p.code, '') REGEXP '^[0-9]+$' AND CAST(COALESCE(p.public_code, p.code) AS UNSIGNED) = ?)");
           searchParams.push(idNum);
         }
       }
@@ -238,6 +241,10 @@ export async function listPropertiesWithBrokers(
     }
   }
 
+  if (marketStage === 'LAUNCH') {
+    whereClauses.push("COALESCE(p.market_stage, 'STANDARD') = 'LAUNCH'");
+  }
+
   const where = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
   const [totalRows] = await adminDb.query<RowDataPacket[]>(
@@ -256,7 +263,9 @@ export async function listPropertiesWithBrokers(
   const dataQuery = `
       SELECT
         p.id,
-        p.code,
+        COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS code,
+        p.public_code,
+        p.market_stage,
         p.title,
         p.type,
         p.status,

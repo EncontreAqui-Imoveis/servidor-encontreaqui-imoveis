@@ -1,4 +1,5 @@
 export type PropertyListingPurpose = 'sale' | 'rent' | null;
+export type PropertyListingMarketStage = 'LAUNCH' | null;
 
 export type PropertyOwnerListingFilters = {
   whereSql: string;
@@ -12,12 +13,17 @@ export function normalizePropertyListingPurpose(value: unknown): PropertyListing
   return null;
 }
 
+export function normalizePropertyListingMarketStage(value: unknown): PropertyListingMarketStage {
+  return String(value ?? '').trim().toUpperCase() === 'LAUNCH' ? 'LAUNCH' : null;
+}
+
 export function buildPropertyOwnerListingFilters(input: {
   ownerColumn?: 'p.owner_id' | 'p.broker_id';
   ownerColumns?: Array<'p.owner_id' | 'p.broker_id'>;
   ownerId: number;
   search?: unknown;
   purpose?: unknown;
+  marketStage?: unknown;
 }): PropertyOwnerListingFilters {
   const columns = input.ownerColumns ?? (input.ownerColumn ? [input.ownerColumn] : ['p.owner_id']);
   const ownerClause =
@@ -28,11 +34,12 @@ export function buildPropertyOwnerListingFilters(input: {
   const params: Array<string | number> = columns.map(() => input.ownerId);
   const search = String(input.search ?? '').trim();
   const purpose = normalizePropertyListingPurpose(input.purpose);
+  const marketStage = normalizePropertyListingMarketStage(input.marketStage);
 
   if (search) {
     const like = `%${search}%`;
-    whereClauses.push('(p.title LIKE ? OR p.code LIKE ?)');
-    params.push(like, like);
+    whereClauses.push("(p.title LIKE ? OR COALESCE(p.public_code, '') LIKE ? OR COALESCE(p.code, '') LIKE ?)");
+    params.push(like, like, like);
   }
   if (purpose === 'sale') {
     whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
@@ -40,6 +47,9 @@ export function buildPropertyOwnerListingFilters(input: {
   } else if (purpose === 'rent') {
     whereClauses.push("LOWER(COALESCE(p.purpose, '')) LIKE ?");
     params.push('%alug%');
+  }
+  if (marketStage === 'LAUNCH') {
+    whereClauses.push("COALESCE(p.market_stage, 'STANDARD') = 'LAUNCH'");
   }
 
   return { whereSql: whereClauses.join(' AND '), params };

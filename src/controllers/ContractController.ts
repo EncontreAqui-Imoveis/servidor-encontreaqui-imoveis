@@ -37,7 +37,7 @@ import {
   updateContractCommissionData,
 } from '../services/contractCommissionMutationService';
 import {
-  assertRentalCommissionPolicy,
+  assertCommissionAllocationPolicy,
   cancelContractCommissionAllocations,
   syncContractCommissionAllocations,
 } from '../services/contractCommissionAllocationService';
@@ -2735,38 +2735,15 @@ class ContractController {
         });
       }
 
-      const normalizedPurpose = String(contract.property_purpose ?? '')
-        .trim()
-        .toLowerCase();
-      const isRentalOnly =
-        normalizedPurpose.includes('alug') &&
-        !normalizedPurpose.includes('venda');
-      if (!isRentalOnly) {
-        const totalSplits = Number(
-          (
-            commissionData.comissaoCaptador +
-            commissionData.comissaoVendedor +
-            commissionData.taxaPlataforma
-          ).toFixed(2)
-        );
-        if (Math.abs(totalSplits - commissionData.valorBaseComissao) > 0.01) {
-          await tx.rollback();
-          return res.status(400).json({
-            error:
-              'Na venda, a soma de comissões e taxa precisa fechar exatamente 100% do valor.',
-          });
-        }
-      }
-
       try {
-        assertRentalCommissionPolicy(contract, commissionData);
+        assertCommissionAllocationPolicy(contract, commissionData);
       } catch (error) {
         await tx.rollback();
         return res.status(400).json({
           error:
             error instanceof Error
               ? error.message
-              : 'Dados de comissão de locação inválidos.',
+              : 'Dados de comissão inválidos.',
         });
       }
 

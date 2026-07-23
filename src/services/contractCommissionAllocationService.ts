@@ -11,10 +11,6 @@ export interface ContractCommissionData {
 
 type AllocationRole = 'CAPTURING' | 'SELLING';
 
-function roundCurrency(value: number): number {
-  return Number(value.toFixed(2));
-}
-
 export function isRentalContract(contract: Pick<ContractRow, 'deal_type' | 'property_purpose'>): boolean {
   if (contract.deal_type === 'rent') {
     return true;
@@ -24,26 +20,23 @@ export function isRentalContract(contract: Pick<ContractRow, 'deal_type' | 'prop
   return purpose.includes('alug') && !purpose.includes('venda');
 }
 
-/** Locação gera uma única comissão sobre o primeiro aluguel mensal. */
-export function assertRentalCommissionPolicy(
-  contract: Pick<ContractRow, 'deal_type' | 'property_purpose'>,
+/**
+ * Toda distribuição precisa fechar exatamente a base da comissão. A modalidade
+ * define a base (venda ou primeiro aluguel), não percentuais obrigatórios.
+ */
+export function assertCommissionAllocationPolicy(
+  _contract: Pick<ContractRow, 'deal_type' | 'property_purpose'>,
   commission: ContractCommissionData,
 ): void {
-  if (!isRentalContract(contract)) {
-    return;
-  }
+  const baseCents = Math.round(commission.valorBaseComissao * 100);
+  const allocationCents =
+    Math.round(commission.comissaoCaptador * 100) +
+    Math.round(commission.comissaoVendedor * 100) +
+    Math.round(commission.taxaPlataforma * 100);
 
-  const expectedCapturing = roundCurrency(commission.valorBaseComissao * 0.1);
-  const expectedSelling = roundCurrency(commission.valorBaseComissao * 0.5);
-  const expectedPlatform = roundCurrency(commission.valorBaseComissao * 0.4);
-  const matchesPolicy =
-    Math.abs(commission.comissaoCaptador - expectedCapturing) <= 0.01 &&
-    Math.abs(commission.comissaoVendedor - expectedSelling) <= 0.01 &&
-    Math.abs(commission.taxaPlataforma - expectedPlatform) <= 0.01;
-
-  if (!matchesPolicy) {
+  if (allocationCents !== baseCents) {
     throw new Error(
-      'Na locação, a comissão única do primeiro aluguel deve ser dividida em 10% para o captador, 50% para o vendedor e 40% para a plataforma.',
+      'A soma da comissão do captador, vendedor e taxa Encontre Aqui deve fechar exatamente o valor base da comissão.',
     );
   }
 }
@@ -87,7 +80,7 @@ export async function syncContractCommissionAllocations(
   >,
   commission: ContractCommissionData,
 ): Promise<void> {
-  assertRentalCommissionPolicy(contract, commission);
+  assertCommissionAllocationPolicy(contract, commission);
 
   await tx.query(
     `

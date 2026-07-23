@@ -3,7 +3,7 @@ import type { PoolConnection } from 'mysql2/promise';
 import type { AuthRequest } from '../middlewares/auth';
 import { resolveContractStatus, type ContractRow } from '../controllers/ContractController';
 import {
-  assertRentalCommissionPolicy,
+  assertCommissionAllocationPolicy,
   cancelContractCommissionAllocations,
   syncContractCommissionAllocations,
 } from './contractCommissionAllocationService';
@@ -144,33 +144,12 @@ export async function updateContractCommissionData(
 
   validateFinalizedContract(contract);
 
-  const normalizedPurpose = String(contract.property_purpose ?? '')
-    .trim()
-    .toLowerCase();
-  const isRentalOnly =
-    normalizedPurpose.includes('alug') && !normalizedPurpose.includes('venda');
-  if (!isRentalOnly) {
-    const totalSplits = Number(
-      (
-        commissionData.comissaoCaptador +
-        commissionData.comissaoVendedor +
-        commissionData.taxaPlataforma
-      ).toFixed(2)
-    );
-    if (Math.abs(totalSplits - commissionData.valorBaseComissao) > 0.01) {
-      throw mutationError(
-        400,
-        'Na venda, a soma de comissões e taxa precisa fechar exatamente 100% do valor.'
-      );
-    }
-  }
-
   try {
-    assertRentalCommissionPolicy(contract, commissionData);
+    assertCommissionAllocationPolicy(contract, commissionData);
   } catch (error) {
     throw mutationError(
       400,
-      error instanceof Error ? error.message : 'Dados de comissão de locação inválidos.',
+      error instanceof Error ? error.message : 'Dados de comissão inválidos.',
     );
   }
 

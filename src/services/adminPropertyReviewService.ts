@@ -374,7 +374,7 @@ export async function rejectProperty(propertyId: number, reason: string) {
       if (ownerId) {
         const role = await resolveUserNotificationRole(ownerId);
         await notifyUsers({
-          message: `Seu anuncio "${propertyLabel}" foi rejeitado. Resumo: ${reasonPreview} — edite e reenvie para analise em Meus imoveis.`,
+          message: `Seu anuncio "${propertyLabel}" foi rejeitado. Motivo: ${reasonPreview} — edite e reenvie para analise em Meus imoveis.`,
           recipientIds: [ownerId],
           recipientRole: role,
           relatedEntityType: 'property',

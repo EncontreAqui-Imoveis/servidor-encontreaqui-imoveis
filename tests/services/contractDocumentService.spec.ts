@@ -125,6 +125,9 @@ describe('contractDocumentService', () => {
       originalFileName: 'id.pdf',
       downloadUrl: '/negotiations/neg-1/documents/3/download',
     });
+    // The buyer cannot read the seller file, but still receives its aggregate
+    // progress so both parties see the current documentation stage.
+    expect(payload.contract.documentProgress.seller.totals.submitted).toBe(1);
   });
 
   it('gera ZIP com arquivos visíveis e nomes originais', async () => {

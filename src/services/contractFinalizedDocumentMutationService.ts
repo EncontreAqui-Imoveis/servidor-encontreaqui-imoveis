@@ -17,6 +17,8 @@ interface UploadFinalizedDocumentBody {
   documentCategory?: unknown;
   document_category?: unknown;
   side?: unknown;
+  replaceDocumentId?: unknown;
+  replace_document_id?: unknown;
 }
 
 interface FinalizedDocumentAssetRow extends RowDataPacket {
@@ -163,6 +165,11 @@ export async function uploadFinalizedContractDocument(
     throw mutationError(400, 'Informe o lado do documento (seller ou buyer) para este tipo.');
   }
   const ownerSide = isSharedAdminArtifact ? null : requestedSide;
+  const replaceDocumentIdRaw = params.body.replaceDocumentId ?? params.body.replace_document_id;
+  const replaceDocumentId = Number(replaceDocumentIdRaw);
+  if (replaceDocumentIdRaw != null && (!Number.isInteger(replaceDocumentId) || replaceDocumentId <= 0)) {
+    throw mutationError(400, 'ID do documento a substituir inválido.');
+  }
 
   if (!params.uploadedFile?.buffer || params.uploadedFile.buffer.length === 0) {
     throw mutationError(400, 'Arquivo obrigatório para upload.');
@@ -189,6 +196,14 @@ export async function uploadFinalizedContractDocument(
       uploadedVia: 'admin-finalized',
     },
   });
+
+  if (Number.isInteger(replaceDocumentId) && replaceDocumentId > 0) {
+    await deleteFinalizedContractDocument(tx, {
+      contract: params.contract,
+      contractId: params.contractId,
+      documentId: replaceDocumentId,
+    });
+  }
 
   await tx.query(
     `

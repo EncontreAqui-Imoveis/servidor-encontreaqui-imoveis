@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { adminController } from '../controllers/AdminController';
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
+import { requireAdminCapability } from '../middlewares/adminCapabilities';
 import { requireAdminReauth } from '../middlewares/adminReauth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
@@ -47,9 +48,9 @@ adminRoutes.post('/notifications/send', async (req, res) => {
     return res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 });
-adminRoutes.delete('/notifications/announcements', adminController.clearAnnouncementNotifications);
-adminRoutes.delete('/notifications/:id', adminController.deleteNotification);
-adminRoutes.delete('/notifications', adminController.clearNotifications);
+adminRoutes.delete('/notifications/announcements', requireAdminCapability('delete'), adminController.clearAnnouncementNotifications);
+adminRoutes.delete('/notifications/:id', requireAdminCapability('delete'), adminController.deleteNotification);
+adminRoutes.delete('/notifications', requireAdminCapability('delete'), adminController.clearNotifications);
 adminRoutes.post('/uploads/sign', adminController.signCloudinaryUpload);
 adminRoutes.get('/negotiations', adminController.listNegotiations);
 adminRoutes.get('/negotiations/requests/summary', adminController.listNegotiationRequestSummary);
@@ -66,7 +67,7 @@ adminRoutes.post('/negotiations/proposal', (req, res) =>
 adminRoutes.post('/negotiations/:id/minuta', (req, res) =>
   (adminController as any).generateProposalDraft(req, res)
 );
-adminRoutes.delete('/negotiations/:id/minuta', (req, res) =>
+adminRoutes.delete('/negotiations/:id/minuta', requireAdminCapability('delete'), (req, res) =>
   (adminController as any).deleteProposalDraft(req, res)
 );
 adminRoutes.put('/negotiations/:id/draft', (req, res) =>
@@ -85,7 +86,7 @@ adminRoutes.post(
   signedProposalUpload.single('file'),
   adminController.uploadSignedProposal
 );
-adminRoutes.delete('/negotiations/:id/signed-proposal', adminController.deleteSignedProposal);
+adminRoutes.delete('/negotiations/:id/signed-proposal', requireAdminCapability('delete'), adminController.deleteSignedProposal);
 adminRoutes.get('/contracts', (req, res) => contractController.listForAdmin(req, res));
 adminRoutes.get('/contracts/:id/documents.zip', (req, res) =>
   contractController.downloadDocumentsZip(req, res)
@@ -102,8 +103,11 @@ adminRoutes.put('/contracts/:id/evaluate-side', (req, res) =>
 adminRoutes.put('/contracts/:id/evaluate-category', (req, res) =>
   contractController.evaluateCategory(req, res)
 );
-adminRoutes.put('/contracts/:id/documents/:documentId/review', (req, res) =>
+adminRoutes.put('/contracts/:id/documents/:documentId/review', requireAdminCapability('review_documents'), (req, res) =>
   contractController.reviewDocument(req, res)
+);
+adminRoutes.get('/contracts/:id/document-rejections', (req, res) =>
+  contractController.listDocumentRejections(req, res)
 );
 adminRoutes.put('/contracts/:id/data', (req, res) => contractController.updateData(req, res));
 adminRoutes.post(
@@ -113,6 +117,7 @@ adminRoutes.post(
 );
 adminRoutes.post(
   '/contracts/:id/signed-docs',
+  requireAdminCapability('replace_documents'),
   contractDocumentUpload.single('file'),
   (req, res) => contractController.uploadSignedDocs(req, res)
 );
@@ -122,21 +127,22 @@ adminRoutes.post('/contracts/:id/finalize', (req, res) =>
 adminRoutes.put('/contracts/:id/reopen', (req, res) =>
   contractController.reopenFinalized(req, res)
 );
-adminRoutes.delete('/contracts/:id', (req, res) =>
+adminRoutes.delete('/contracts/:id', requireAdminCapability('delete'), (req, res) =>
   contractController.deleteFinalized(req, res)
 );
 adminRoutes.put('/contracts/:id/commission-data', (req, res) =>
   contractController.updateCommissionData(req, res)
 );
-adminRoutes.delete('/contracts/:id/commission-data', (req, res) =>
+adminRoutes.delete('/contracts/:id/commission-data', requireAdminCapability('delete'), (req, res) =>
   contractController.deleteCommissionData(req, res)
 );
 adminRoutes.post(
   '/contracts/:id/finalized-docs',
+  requireAdminCapability('replace_documents'),
   contractDocumentUpload.single('file'),
   (req, res) => contractController.uploadFinalizedDocument(req, res)
 );
-adminRoutes.delete('/contracts/:id/finalized-docs/:documentId', (req, res) =>
+adminRoutes.delete('/contracts/:id/finalized-docs/:documentId', requireAdminCapability('delete'), (req, res) =>
   contractController.deleteFinalizedDocument(req, res)
 );
 
@@ -158,7 +164,7 @@ adminRoutes.get('/users', async (req, res) => {
   }
 });
 adminRoutes.post('/users', adminController.createUser);
-adminRoutes.delete('/users/:id', requireAdminReauth, adminController.deleteUser);
+adminRoutes.delete('/users/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteUser);
 
 adminRoutes.get('/clients', async (_req, res) => {
   try {
@@ -188,7 +194,7 @@ adminRoutes.get('/clients/:id', async (req, res) => {
 adminRoutes.post('/clients/:id/promote-broker', adminController.promoteClientToBroker);
 adminRoutes.post('/clients/:id/demote-broker', adminController.demoteClientBroker);
 adminRoutes.put('/clients/:id', adminController.updateClient);
-adminRoutes.delete('/clients/:id', requireAdminReauth, adminController.deleteClient);
+adminRoutes.delete('/clients/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteClient);
 adminRoutes.get('/clients/:id/properties', async (req, res) => {
   const clientId = Number(req.params.id);
   if (Number.isNaN(clientId)) {
@@ -253,7 +259,7 @@ adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
 adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
 adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);
 adminRoutes.put('/brokers/:id', adminController.updateBroker);
-adminRoutes.delete('/brokers/:id', requireAdminReauth, adminController.deleteBroker);
+adminRoutes.delete('/brokers/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteBroker);
 
 adminRoutes.post(
   '/brokers/:id/documents',
@@ -264,7 +270,7 @@ adminRoutes.post(
   ]),
   adminController.uploadBrokerDocuments
 );
-adminRoutes.delete('/brokers/:id/documents/:docType', adminController.deleteBrokerDocument);
+adminRoutes.delete('/brokers/:id/documents/:docType', requireAdminCapability('delete'), adminController.deleteBrokerDocument);
 adminRoutes.get('/brokers/:id/properties', async (req, res) => {
   const brokerId = Number(req.params.id);
   if (Number.isNaN(brokerId)) {
@@ -319,7 +325,7 @@ adminRoutes.put('/properties/:id/relist', async (req, res) => {
 });
 adminRoutes.get('/properties/:id', adminController.getPropertyDetails);
 adminRoutes.put('/properties/:id', adminController.updateProperty);
-adminRoutes.delete('/properties/:id', requireAdminReauth, adminController.deleteProperty);
+adminRoutes.delete('/properties/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteProperty);
 adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
 adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
 adminRoutes.patch('/properties/:id/status', adminController.updatePropertyStatus);
@@ -360,8 +366,8 @@ adminRoutes.post(
   mediaUpload.single('video'),
   adminController.addPropertyVideo
 );
-adminRoutes.delete('/properties/:id/video', adminController.deletePropertyVideo);
-adminRoutes.delete('/properties/:id/images/:imageId', adminController.deletePropertyImage);
+adminRoutes.delete('/properties/:id/video', requireAdminCapability('delete'), adminController.deletePropertyVideo);
+adminRoutes.delete('/properties/:id/images/:imageId', requireAdminCapability('delete'), adminController.deletePropertyImage);
 
 adminRoutes.get('/notifications', adminController.getNotifications);
 adminRoutes.post('/brokers/:id/cleanup', adminController.cleanupBroker);

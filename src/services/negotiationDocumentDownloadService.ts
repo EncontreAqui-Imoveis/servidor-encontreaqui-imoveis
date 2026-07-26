@@ -29,6 +29,7 @@ interface NegotiationDocumentRow {
   fileContent: Buffer;
   type?: string | null;
   documentType?: string | null;
+  storageContentType?: string | null;
   metadataJson?: unknown;
 }
 
@@ -65,6 +66,27 @@ function sanitizeDownloadFilename(value: string): string {
 function buildAttachmentDisposition(filename: string): string {
   const safe = sanitizeDownloadFilename(filename);
   return `attachment; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
+}
+
+function resolveDownloadContentType(document: NegotiationDocumentRow): string {
+  const storedContentType = String(document.storageContentType ?? '')
+    .split(';')[0]
+    .trim()
+    .toLowerCase();
+  const allowedContentTypes = new Set([
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+  ]);
+
+  if (allowedContentTypes.has(storedContentType)) {
+    return storedContentType;
+  }
+
+  return document.type === 'proposal' || document.type === 'contract'
+    ? 'application/pdf'
+    : 'application/octet-stream';
 }
 
 function readDocumentOwnerSide(metadata: Record<string, unknown>): 'seller' | 'buyer' | null {
@@ -193,10 +215,9 @@ export async function downloadDocument(
       }
     }
 
-    const contentType =
-      document.type === 'proposal' || document.type === 'contract'
-        ? 'application/pdf'
-        : 'application/octet-stream';
+    // Keep the MIME persisted with the R2 object. The custom viewer needs the
+    // actual type to distinguish PDF from image documents safely.
+    const contentType = resolveDownloadContentType(document);
 
     const metadata = parseJsonObjectSafe(document.metadataJson);
     const originalFileName = String(metadata.originalFileName ?? '').trim();

@@ -4,6 +4,7 @@ import { RowDataPacket } from 'mysql2';
 import jwt from 'jsonwebtoken';
 import { requireEnv } from '../config/env';
 import type { ContractAccessContext } from '../types/contractAuth';
+import { normalizeAdminPanelRole, type AdminPanelRole } from './adminCapabilities';
 
 interface UserFromDB extends RowDataPacket {
   id: number;
@@ -20,6 +21,7 @@ interface BrokerRoleRow extends RowDataPacket {
 
 interface AdminFromDB extends RowDataPacket {
   id: number;
+  role?: string | null;
   is_active?: number | boolean | null;
   token_version?: number | string | null;
 }
@@ -30,6 +32,7 @@ export interface AuthRequest extends Request {
   userCpf?: string | null;
   firebase_uid?: string;
   adminValidated?: boolean;
+  adminRole?: AdminPanelRole;
   contractContext?: ContractAccessContext;
 }
 
@@ -74,15 +77,15 @@ function isAdminRoute(req: Request): boolean {
 
 async function validateAdminAccount(
   adminId: number
-): Promise<{ exists: boolean; isActive: boolean; tokenVersion: number }> {
+): Promise<{ exists: boolean; isActive: boolean; tokenVersion: number; role: AdminPanelRole }> {
   try {
     const [adminRows] = await connection.query<AdminFromDB[]>(
-      'SELECT id, is_active, token_version FROM admins WHERE id = ? LIMIT 1',
+      'SELECT id, role, is_active, token_version FROM admins WHERE id = ? LIMIT 1',
       [adminId]
     );
 
     if (adminRows.length === 0) {
-      return { exists: false, isActive: false, tokenVersion: 0 };
+      return { exists: false, isActive: false, tokenVersion: 0, role: 'admin' };
     }
 
     const admin = adminRows[0];
@@ -98,7 +101,7 @@ async function validateAdminAccount(
         ? Math.trunc(tokenVersionCandidate)
         : 1;
 
-    return { exists: true, isActive, tokenVersion };
+    return { exists: true, isActive, tokenVersion, role: normalizeAdminPanelRole(admin.role) };
   } catch (error: any) {
     if (error?.code !== 'ER_BAD_FIELD_ERROR') {
       throw error;
@@ -107,18 +110,19 @@ async function validateAdminAccount(
     // Backward compatibility with legacy schema where admins.is_active does not exist.
     try {
       const [adminRows] = await connection.query<AdminFromDB[]>(
-        'SELECT id, token_version FROM admins WHERE id = ? LIMIT 1',
+        'SELECT id, role, token_version FROM admins WHERE id = ? LIMIT 1',
         [adminId],
       );
 
       if (adminRows.length === 0) {
-        return { exists: false, isActive: false, tokenVersion: 0 };
+        return { exists: false, isActive: false, tokenVersion: 0, role: 'admin' };
       }
 
       return {
         exists: true,
         isActive: true,
         tokenVersion: normalizeTokenVersion(adminRows[0].token_version),
+        role: normalizeAdminPanelRole(adminRows[0].role),
       };
     } catch (fallbackError: any) {
       if (fallbackError?.code !== 'ER_BAD_FIELD_ERROR') {
@@ -131,10 +135,10 @@ async function validateAdminAccount(
       );
 
       if (adminRows.length === 0) {
-        return { exists: false, isActive: false, tokenVersion: 0 };
+        return { exists: false, isActive: false, tokenVersion: 0, role: 'admin' };
       }
 
-      return { exists: true, isActive: true, tokenVersion: 1 };
+      return { exists: true, isActive: true, tokenVersion: 1, role: 'admin' };
     }
   }
 }
@@ -240,6 +244,7 @@ export async function authMiddleware(
       }
 
       req.adminValidated = true;
+      req.adminRole = adminAccount.role;
       return next();
     }
 

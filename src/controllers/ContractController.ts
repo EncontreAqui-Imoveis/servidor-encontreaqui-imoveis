@@ -251,7 +251,7 @@ interface ContractDocumentDownloadRow extends ContractDocumentRow {
   storage_etag: string | null;
 }
 
-interface ContractDocumentAssetRow {
+interface ContractDocumentAssetRow extends RowDataPacket {
   id: number;
   document_type: string | null;
   metadata_json: unknown;
@@ -304,6 +304,8 @@ interface UploadContractDocumentBody {
   documentCategory?: unknown;
   document_category?: unknown;
   side?: unknown;
+  replaceDocumentId?: unknown;
+  replace_document_id?: unknown;
 }
 
 interface TransitionBody {
@@ -367,7 +369,9 @@ export interface ContractDocumentProgressSide {
   categories: ContractDocumentCategoryProgressItem[];
   totals: {
     pending: number;
+    submitted: number;
     approved: number;
+    /** Kept as a zero-valued compatibility field. Rejected files return to pending upload. */
     rejected: number;
   };
 }
@@ -1451,14 +1455,19 @@ function summarizeCategorySide(
     categories,
     totals: {
       pending: categories.filter(
-        (item) => item.required && item.status === 'PENDING'
+        (item) => item.required && item.status === 'PENDING' && item.uploadedCount === 0
+      ).length,
+      submitted: categories.filter(
+        (item) => item.required && item.status === 'PENDING' && item.uploadedCount > 0
       ).length,
       approved: categories.filter(
-        (item) => item.required && item.status === 'APPROVED'
+        (item) =>
+          item.required &&
+          (item.status === 'APPROVED' || item.status === 'APPROVED_WITH_RES')
       ).length,
-      rejected: categories.filter(
-        (item) => item.required && item.status === 'REJECTED'
-      ).length,
+      // A rejection deletes the file and reopens its requirement. Do not expose
+      // a historical rejection counter as an active documentation state.
+      rejected: 0,
     },
   };
 }
@@ -1486,7 +1495,10 @@ function mapContractWithDocumentProgress(
 } {
   const canViewSensitiveData = canViewOwnerSensitiveData(req, row);
   const readContext = resolveContractReadContext(req, row);
-  const documents = documentRows
+  // Progress is intentionally calculated from every non-rejected document
+  // before the bilateral visibility filter below. It exposes only aggregate
+  // counts to the counterpart, never document names, files or private data.
+  const allDocuments = documentRows
     .filter((document) => !isProposalDocument(document))
     // Rejections delete the current document. This also keeps legacy rows marked
     // as rejected out of every contract-detail representation.
@@ -1494,7 +1506,9 @@ function mapContractWithDocumentProgress(
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${row.negotiation_id}/documents/${document.id}/download`,
-    }))
+    }));
+
+  const documents = allDocuments
     .filter((document) =>
       document.side == null || canReadContractSide(readContext, document.side)
     )
@@ -1515,7 +1529,7 @@ function mapContractWithDocumentProgress(
     buyer: restrictDocumentRequirementSide(rawRequirementMatrix.buyer, readContext, 'buyer'),
   };
   const progress = buildContractDocumentProgress(
-    documents.map((document) => ({
+    allDocuments.map((document) => ({
       ...document,
       metadata: parseStoredJsonObject(document.metadata),
     })),
@@ -1864,7 +1878,7 @@ export function buildEmptyContractDocumentProgress(): ContractDocumentProgressSu
   const emptySide = (side: ContractDocumentSide): ContractDocumentProgressSide => ({
     side,
     categories: [],
-    totals: { pending: 0, approved: 0, rejected: 0 },
+    totals: { pending: 0, submitted: 0, approved: 0, rejected: 0 },
   });
   return { seller: emptySide('seller'), buyer: emptySide('buyer') };
 }
@@ -2338,7 +2352,7 @@ class ContractController {
           await createUserNotification({
             type: 'negotiation',
             title: 'Documento rejeitado',
-            message: `O documento ${documentName} foi rejeitado. Por favor, envie novamente.`,
+            message: `O documento ${documentName} foi rejeitado. Motivo: ${String(req.body?.description ?? req.body?.reason ?? '').trim()}. Por favor, envie novamente.`,
             recipientId: result.rejectedDocument.uploadedByUserId,
             relatedEntityId: Number(result.contract?.property_id ?? 0) || null,
             metadata: {
@@ -2370,7 +2384,54 @@ class ContractController {
     }
   }
 
-  async uploadSignedDocs(req: Request, res: Response): Promise<Response> {
+  async listDocumentRejections(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    if (!contractId) {
+      return res.status(400).json({ error: 'ID do contrato inválido.' });
+    }
+
+    try {
+      const rows = await queryContractRows<RowDataPacket>(
+        `
+          SELECT
+            id,
+            source_document_id,
+            document_type,
+            document_label,
+            original_file_name,
+            owner_side,
+            reason,
+            uploaded_by_user_id,
+            rejected_by_admin_id,
+            rejected_at
+          FROM contract_document_rejections
+          WHERE contract_id = ?
+          ORDER BY rejected_at DESC, id DESC
+        `,
+        [contractId]
+      );
+
+      return res.status(200).json({
+        rejections: rows.map((row) => ({
+          id: Number(row.id),
+          sourceDocumentId: Number(row.source_document_id) || null,
+          documentType: row.document_type ?? null,
+          documentLabel: row.document_label ?? null,
+          originalFileName: row.original_file_name ?? null,
+          ownerSide: row.owner_side ?? null,
+          reason: row.reason,
+          uploadedByUserId: Number(row.uploaded_by_user_id) || null,
+          rejectedByAdminId: Number(row.rejected_by_admin_id) || null,
+          rejectedAt: row.rejected_at,
+        })),
+      });
+    } catch (error) {
+      console.error('Erro ao carregar histórico de rejeições do contrato:', error);
+      return res.status(500).json({ error: 'Falha ao carregar histórico de rejeições.' });
+    }
+  }
+
+  async uploadSignedDocs(req: AuthRequest, res: Response): Promise<Response> {
     const contractId = String(req.params.id ?? '').trim();
     if (!contractId) {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
@@ -2416,6 +2477,39 @@ class ContractController {
         });
       }
 
+      const replaceDocumentIdRaw = body.replaceDocumentId ?? body.replace_document_id;
+      const replaceDocumentId = Number(replaceDocumentIdRaw);
+      if (replaceDocumentIdRaw != null && (!Number.isInteger(replaceDocumentId) || replaceDocumentId <= 0)) {
+        await tx.rollback();
+        return res.status(400).json({ error: 'ID do documento a substituir inválido.' });
+      }
+
+      let documentToReplace: ContractDocumentAssetRow | null = null;
+      if (Number.isInteger(replaceDocumentId) && replaceDocumentId > 0) {
+        const [replacementRows] = await tx.query<ContractDocumentAssetRow[]>(
+          `
+            SELECT id, document_type, metadata_json, storage_provider, storage_bucket,
+                   storage_key, storage_content_type, storage_size_bytes, storage_etag
+            FROM negotiation_documents
+            WHERE id = ?
+              AND negotiation_id = ?
+              AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+            LIMIT 1
+            FOR UPDATE
+          `,
+          [replaceDocumentId, contract.negotiation_id, contractId]
+        );
+        documentToReplace = replacementRows[0] ?? null;
+        if (!documentToReplace) {
+          await tx.rollback();
+          return res.status(404).json({ error: 'Documento a substituir não encontrado neste contrato.' });
+        }
+        if (String(documentToReplace.document_type ?? '').trim().toLowerCase() !== documentTypeRaw.toLowerCase()) {
+          await tx.rollback();
+          return res.status(400).json({ error: 'A substituição deve manter o mesmo tipo de documento.' });
+        }
+      }
+
       const documentId = await storeNegotiationDocumentToR2({
         executor: tx,
         negotiationId: contract.negotiation_id,
@@ -2432,6 +2526,13 @@ class ContractController {
           uploadedVia: 'admin',
         },
       });
+
+      if (documentToReplace) {
+        await tx.query(
+          'DELETE FROM negotiation_documents WHERE id = ? AND negotiation_id = ? LIMIT 1',
+          [documentToReplace.id, contract.negotiation_id]
+        );
+      }
 
       if (documentTypeRaw.toLowerCase() === 'contrato_assinado') {
         const nextWorkflowMetadata = mergeWorkflowMetadata(contract.workflow_metadata, {
@@ -2462,8 +2563,18 @@ class ContractController {
 
       await tx.commit();
 
+      if (documentToReplace) {
+        await cleanupContractDocumentAssets([documentToReplace], {
+          action: 'replace_signed_contract_document',
+          contractId,
+          negotiationId: contract.negotiation_id,
+        });
+      }
+
       return res.status(201).json({
-        message: 'Documento assinado/comprovante enviado com sucesso.',
+        message: documentToReplace
+          ? 'Documento substituído com sucesso.'
+          : 'Documento assinado/comprovante enviado com sucesso.',
         readyForFinalization: true,
         document: {
           id: documentId,

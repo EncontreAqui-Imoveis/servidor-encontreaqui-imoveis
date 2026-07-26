@@ -148,8 +148,8 @@ describe('adminPropertyReviewService', () => {
     });
     expect(Array.isArray(result.images)).toBe(true);
     expect(result.images).toEqual([
-      '1|https://img.test/1.jpg',
-      '2|https://img.test/2.jpg',
+      { id: 1, url: 'https://img.test/1.jpg' },
+      { id: 2, url: 'https://img.test/2.jpg' },
     ]);
     expect(Array.isArray(result.amenities)).toBe(true);
   });
@@ -228,7 +228,7 @@ describe('adminPropertyReviewService', () => {
     expect(notifyUsersMock).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          'Seu anuncio "Casa rejeitada" foi rejeitado. Resumo: Documentacao incompleta — edite e reenvie para analise em Meus imoveis.',
+          'Seu anuncio "Casa rejeitada" foi rejeitado. Motivo: Documentacao incompleta — edite e reenvie para analise em Meus imoveis.',
         recipientIds: [30004],
         recipientRole: 'broker',
         relatedEntityType: 'property',

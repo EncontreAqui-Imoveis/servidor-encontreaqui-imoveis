@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildDocumentSlots, mapDocument } from '../../../src/controllers/ContractController';
+import {
+  buildContractDocumentProgress,
+  buildDocumentSlots,
+  mapDocument,
+} from '../../../src/controllers/ContractController';
 import {
   isUploadBlockedForNotApplicableCategory,
   resolveDocumentRequirementMatrixForContract,
@@ -191,6 +195,34 @@ describe('contractDocumentRuleMatrix', () => {
       expect.objectContaining({ side: 'seller', documentCategory: 'outro', required: false }),
       expect.objectContaining({ side: 'buyer', documentCategory: 'outro', required: false }),
     ]));
+  });
+
+  it('separa pendências de envio de documentos enviados em análise', () => {
+    const matrix = resolveDocumentRequirementMatrixForContract({
+      dealType: 'sale',
+      sellerInfo,
+      buyerInfo,
+    });
+    const submittedIdentity = mapDocument({
+      id: 43,
+      type: 'other',
+      document_type: 'doc_identidade',
+      metadata_json: JSON.stringify({
+        owner_side: 'seller',
+        documentCategory: 'identidade',
+        originalFileName: 'identidade.pdf',
+        status: 'PENDING',
+      }),
+      created_at: '2026-07-24T10:00:00.000Z',
+    } as never);
+
+    const progress = buildContractDocumentProgress(
+      [{ ...submittedIdentity, metadata: { documentCategory: 'identidade' } }],
+      { dealType: 'sale', sellerInfo, buyerInfo }
+    );
+
+    expect(progress.seller.totals.submitted).toBe(1);
+    expect(progress.seller.totals.rejected).toBe(0);
   });
 
   it('normaliza o metadado legado docs_imovel sem perder o documento armazenado', () => {

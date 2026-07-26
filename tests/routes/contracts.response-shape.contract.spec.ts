@@ -367,7 +367,7 @@ describe('Contract response shape contracts', () => {
     expect(response.body).toMatchObject({ data: [], total: 0 });
   });
 
-  it('keeps rejected documents visible in the contract payload', async () => {
+  it('hides rejected documents from the contract payload and reopens their requirement', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
         return [[
@@ -424,13 +424,8 @@ describe('Contract response shape contracts', () => {
     const response = await request(app).get('/contracts/contract-rejected-doc');
 
     expect(response.status).toBe(200);
-    expect(response.body.documents).toHaveLength(1);
-    expect(response.body.documents[0]).toMatchObject({
-      id: 77,
-      documentType: 'doc_identidade',
-      side: 'seller',
-      originalFileName: 'identidade_rejeitada.pdf',
-    });
+    expect(response.body.documents).toEqual([]);
+    expect(response.body.contract.documentProgress.seller.totals.rejected).toBe(0);
   });
 
   it('redacts owner sensitive fields for client viewers', async () => {

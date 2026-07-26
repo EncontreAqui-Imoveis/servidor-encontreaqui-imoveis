@@ -62,6 +62,7 @@ export class NegotiationDocumentsRepository
     fileContent: Buffer;
     type: string;
     documentType: string | null;
+    storageContentType: string | null;
     metadataJson: Record<string, unknown>;
   } | null> {
     const executor = trx ?? this.executor;
@@ -95,6 +96,7 @@ export class NegotiationDocumentsRepository
       fileContent: await readNegotiationDocumentObject(row),
       type: row.type,
       documentType: row.document_type ?? null,
+      storageContentType: row.storage_content_type ?? null,
       metadataJson: parseNegotiationDocumentMetadata(row.metadata_json),
     };
   }

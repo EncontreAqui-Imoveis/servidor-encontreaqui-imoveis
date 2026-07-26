@@ -24,6 +24,8 @@
     "db:verify": "ts-node src/database/schemaVerification.ts",
     "audit:contract-deal-types": "ts-node scripts/audit-contract-deal-types.ts",
     "audit:contract-buyer-names": "ts-node scripts/audit-contract-buyer-legal-names.ts",
+    "audit:contract-document-rejections": "ts-node scripts/backfill-contract-document-rejections.ts",
+    "admin:create-document-operator": "ts-node src/scripts/createPanelDocumentOperator.ts",
     "sentry:test": "ts-node scripts/sentry-test.ts"
   },
   "keywords": [],

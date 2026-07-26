@@ -94,9 +94,12 @@ function isProposalDocument(document: {
   return normalizedDocumentType === 'proposal' || normalizedType === 'proposal';
 }
 
-async function fetchVisibleContractDocuments(
-  contract: Pick<ContractRow, 'negotiation_id' | 'id'>,
-  req: AuthRequest | null
+function isRejectedDocument(document: ReturnType<typeof mapDocument>): boolean {
+  return document.categoryStatus === 'REJECTED';
+}
+
+async function fetchContractDocuments(
+  contract: Pick<ContractRow, 'negotiation_id' | 'id'>
 ): Promise<ContractDocumentListItem[]> {
   const documents = await queryContractRows<ContractDocumentRow>(
     `
@@ -110,14 +113,24 @@ async function fetchVisibleContractDocuments(
     [contract.negotiation_id]
   );
 
-  const context = resolveDocumentAccessContext(req, contract as ContractRow);
   return documents
     .filter((document) => !isProposalDocument(document))
     .map((document) => ({
       ...mapDocument(document),
       downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
     }))
-    .filter((document) => canReadDocument(document, context));
+    // Rejection removes the current file and reopens its slot. Hide any legacy
+    // rejected rows too, so no historical rejected state leaks back to clients.
+    .filter((document) => !isRejectedDocument(document));
+}
+
+async function fetchVisibleContractDocuments(
+  contract: Pick<ContractRow, 'negotiation_id' | 'id'>,
+  req: AuthRequest | null
+): Promise<ContractDocumentListItem[]> {
+  const context = resolveDocumentAccessContext(req, contract as ContractRow);
+  const documents = await fetchContractDocuments(contract);
+  return documents.filter((document) => canReadDocument(document, context));
 }
 
 async function fetchVisibleContractDocumentsWithStorage(
@@ -164,6 +177,7 @@ async function fetchVisibleContractDocumentsWithStorage(
       ...mapDocument(document),
       downloadUrl: `/negotiations/${contract.negotiation_id}/documents/${document.id}/download`,
     }))
+    .filter((document) => !isRejectedDocument(document))
     .filter((document) => canReadDocumentFile(document, context));
 }
 
@@ -171,9 +185,10 @@ export async function buildContractDocumentPayload(
   contract: ContractRow,
   req: AuthRequest | null = null
 ): Promise<ContractDocumentPayload> {
-  const documents = await fetchVisibleContractDocuments(contract, req);
+  const allDocuments = await fetchContractDocuments(contract);
   const matrixContext = buildContractDocumentRuleContextFromRow(contract);
   const accessContext = resolveDocumentAccessContext(req, contract);
+  const documents = allDocuments.filter((document) => canReadDocument(document, accessContext));
   const requirementMatrix = resolveDocumentRequirementMatrixForContract(matrixContext);
   const visibleRequirementMatrix = {
     seller: accessContext?.canReadSeller ? requirementMatrix.seller : [],
@@ -195,7 +210,7 @@ export async function buildContractDocumentPayload(
       documentProgress: accessContext?.requiresHandshakeVerification
         ? buildEmptyContractDocumentProgress()
         : buildContractDocumentProgress(
-            documents.map((document) => ({
+            allDocuments.map((document) => ({
               ...document,
               metadata: document.metadata as Record<string, unknown>,
             })),

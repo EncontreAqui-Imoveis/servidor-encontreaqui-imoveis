@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware, isAdmin } from '../middlewares/auth';
+import { requireAdminCapability, restrictAdminManualDeletion } from '../middlewares/adminCapabilities';
 import { contractAuthMiddleware } from '../middlewares/contractAuth.middleware';
 import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 
@@ -69,10 +70,11 @@ contractRoutes.patch(
   '/contracts/:id/documents/:documentId/status',
   authMiddleware,
   isAdmin,
+  requireAdminCapability('review_documents'),
   (req, res) => contractController.reviewDocument(req, res)
 );
 
-contractRoutes.delete('/contracts/:id/documents/:documentId', authMiddleware, contractAuthMiddleware, (req, res) =>
+contractRoutes.delete('/contracts/:id/documents/:documentId', authMiddleware, restrictAdminManualDeletion, contractAuthMiddleware, (req, res) =>
   contractController.deleteDocument(req, res)
 );
 

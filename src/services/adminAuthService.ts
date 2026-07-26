@@ -18,6 +18,7 @@ type AdminRow = RowDataPacket & {
   email?: string | null;
   password_hash?: string | null;
   token_version?: number | null;
+  role?: string | null;
 };
 
 type AdminPublicRow = Omit<AdminRow, 'password_hash'>;
@@ -49,7 +50,7 @@ export async function login(params: {
 
   try {
     const [rows] = await adminDb.query<AdminRow[]>(
-      'SELECT id, name, email, password_hash, token_version FROM admins WHERE email = ?',
+      'SELECT id, name, email, role, password_hash, token_version FROM admins WHERE email = ?',
       [email]
     );
 

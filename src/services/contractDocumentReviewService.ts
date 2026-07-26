@@ -186,6 +186,9 @@ export async function reviewContractDocument(
   const documentType = String(document.document_type ?? '').trim().toLowerCase() || null;
   const originalFileName = String(metadata.originalFileName ?? '').trim() || null;
   const uploadedByUserId = readPositiveUserId(metadata.uploadedBy);
+  const ownerSideValue = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
+  const ownerSide = ownerSideValue === 'seller' || ownerSideValue === 'buyer' ? ownerSideValue : null;
+  const documentLabel = String(metadata.label ?? metadata.documentLabel ?? '').trim() || null;
 
   if (status === 'REJECTED') {
     const workflowMetadata = appendWorkflowAuditEvent(contract.workflow_metadata, {
@@ -201,6 +204,37 @@ export async function reviewContractDocument(
         uploadedByUserId,
       },
     });
+
+    await tx.query(
+      `
+        INSERT INTO contract_document_rejections (
+          contract_id,
+          negotiation_id,
+          source_document_id,
+          document_type,
+          document_label,
+          original_file_name,
+          owner_side,
+          reason,
+          uploaded_by_user_id,
+          rejected_by_admin_id,
+          rejected_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        contractId,
+        contract.negotiation_id,
+        documentId,
+        documentType,
+        documentLabel,
+        originalFileName,
+        ownerSide,
+        normalizedReason ?? 'Documento rejeitado sem justificativa registrada.',
+        uploadedByUserId,
+        actorId,
+        now,
+      ]
+    );
 
     await tx.query(
       `

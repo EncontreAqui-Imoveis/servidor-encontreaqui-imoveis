@@ -128,7 +128,10 @@ describe('reviewContractDocument', () => {
       loadContractForUpdate: vi.fn().mockResolvedValue(contract),
     });
 
-    expect(String(tx.query.mock.calls[1][0])).toContain('DELETE FROM negotiation_documents');
+    expect(String(tx.query.mock.calls[1][0])).toContain('INSERT INTO contract_document_rejections');
+    expect(
+      tx.query.mock.calls.some(([sql]) => String(sql).includes('DELETE FROM negotiation_documents')),
+    ).toBe(true);
     expect(enqueueDeletionMock).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({ id: 11, storage_key: 'contracts/identidade.pdf' }),

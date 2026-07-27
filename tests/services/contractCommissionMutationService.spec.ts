@@ -4,7 +4,7 @@ const {
   resolveContractStatusMock,
   syncContractCommissionAllocationsMock,
   cancelContractCommissionAllocationsMock,
-  assertRentalCommissionPolicyMock,
+  assertCommissionAllocationPolicyMock,
   txMock,
 } = vi.hoisted(() => {
   const tx = {
@@ -15,7 +15,7 @@ const {
     resolveContractStatusMock: vi.fn(),
     syncContractCommissionAllocationsMock: vi.fn(),
     cancelContractCommissionAllocationsMock: vi.fn(),
-    assertRentalCommissionPolicyMock: vi.fn(),
+    assertCommissionAllocationPolicyMock: vi.fn(),
     txMock: tx,
   };
 });
@@ -29,7 +29,7 @@ vi.mock('../../src/services/contractCommissionAllocationService', () => ({
   __esModule: true,
   syncContractCommissionAllocations: syncContractCommissionAllocationsMock,
   cancelContractCommissionAllocations: cancelContractCommissionAllocationsMock,
-  assertRentalCommissionPolicy: assertRentalCommissionPolicyMock,
+  assertCommissionAllocationPolicy: assertCommissionAllocationPolicyMock,
 }));
 
 import {

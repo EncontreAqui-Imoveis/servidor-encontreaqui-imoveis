@@ -469,7 +469,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       });
 
     expect(response.status).toBe(400);
-    expect(String(response.body.error ?? '')).toContain('exatamente 100%');
+    expect(String(response.body.error ?? '')).toContain('fechar exatamente o valor base da comissão');
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
   });
 

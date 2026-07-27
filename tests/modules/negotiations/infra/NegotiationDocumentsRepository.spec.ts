@@ -54,6 +54,7 @@ describe('NegotiationDocumentsRepository.findById', () => {
       type: 'proposal',
       documentType: null,
       metadataJson: {},
+      storageContentType: 'application/pdf',
     });
     expect(Buffer.isBuffer(result?.fileContent)).toBe(true);
   });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   resolveContractStatusMock,
   storeNegotiationDocumentToR2Mock,
+  enqueueNegotiationDocumentDeletionMock,
   txMock,
 } = vi.hoisted(() => {
   const tx = {
@@ -12,6 +13,7 @@ const {
   return {
     resolveContractStatusMock: vi.fn(),
     storeNegotiationDocumentToR2Mock: vi.fn(),
+    enqueueNegotiationDocumentDeletionMock: vi.fn(),
     txMock: tx,
   };
 });
@@ -24,6 +26,11 @@ vi.mock('../../src/controllers/ContractController', () => ({
 vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   __esModule: true,
   storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+}));
+
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  __esModule: true,
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
 }));
 
 import {
@@ -44,6 +51,7 @@ describe('contractFinalizedDocumentMutationService', () => {
     vi.clearAllMocks();
     resolveContractStatusMock.mockImplementation((status: string) => status);
     storeNegotiationDocumentToR2Mock.mockResolvedValue(9999);
+    enqueueNegotiationDocumentDeletionMock.mockResolvedValue(1);
   });
 
   it('uploads a finalized document and returns the final payload', async () => {

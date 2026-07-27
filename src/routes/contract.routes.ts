@@ -2,17 +2,21 @@ import { Router } from 'express';
 
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware, isAdmin } from '../middlewares/auth';
-import { requireAdminCapability, restrictAdminManualDeletion } from '../middlewares/adminCapabilities';
+import {
+  forbidRestrictedAdminDocumentCreate,
+  requireAdminCapability,
+  restrictAdminManualDeletion,
+} from '../middlewares/adminCapabilities';
 import { contractAuthMiddleware } from '../middlewares/contractAuth.middleware';
 import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 
 const contractRoutes = Router();
 
-contractRoutes.post('/admin/negotiations/:id/contract', authMiddleware, isAdmin, (req, res) =>
+contractRoutes.post('/admin/negotiations/:id/contract', authMiddleware, isAdmin, requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.createFromApprovedNegotiation(req, res)
 );
 
-contractRoutes.post('/admin/contracts/:id/generate-draft', authMiddleware, isAdmin, (req, res) =>
+contractRoutes.post('/admin/contracts/:id/generate-draft', authMiddleware, isAdmin, requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.generateDraft(req, res)
 );
 
@@ -46,7 +50,7 @@ contractRoutes.put('/contracts/:id/data', authMiddleware, contractAuthMiddleware
   contractController.updateData(req, res)
 );
 
-contractRoutes.post('/contracts/:id/signature-method', authMiddleware, isAdmin, (req, res) =>
+contractRoutes.post('/contracts/:id/signature-method', authMiddleware, isAdmin, requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.setSignatureMethod(req, res)
 );
 
@@ -63,6 +67,7 @@ contractRoutes.post(
   authMiddleware,
   contractAuthMiddleware,
   contractDocumentUpload.single('file'),
+  forbidRestrictedAdminDocumentCreate,
   (req, res) => contractController.uploadDocument(req, res)
 );
 

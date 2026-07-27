@@ -11,6 +11,11 @@ import {
 } from '../errors/ApplicationError';
 import { adminDb } from './adminPersistenceService';
 import { signAdminReauthToken, signAdminToken } from './adminControllerSupport';
+import {
+  getAdminCapabilities,
+  normalizeAdminPanelRole,
+  type AdminPanelRole,
+} from '../middlewares/adminCapabilities';
 
 type AdminRow = RowDataPacket & {
   id: number;
@@ -24,7 +29,10 @@ type AdminRow = RowDataPacket & {
 type AdminPublicRow = Omit<AdminRow, 'password_hash'>;
 
 export type AdminLoginResult = {
-  admin: AdminPublicRow;
+  admin: AdminPublicRow & {
+    role: AdminPanelRole;
+    capabilities: ReturnType<typeof getAdminCapabilities>;
+  };
   token: string;
 };
 
@@ -36,6 +44,25 @@ export type AdminReauthResult = {
   reauthToken: string;
   expiresInSeconds: number;
 };
+
+async function findAdminByEmail(email: unknown): Promise<AdminRow[]> {
+  try {
+    const [rows] = await adminDb.query<AdminRow[]>(
+      'SELECT id, name, email, role, password_hash, token_version FROM admins WHERE email = ?',
+      [email]
+    );
+    return rows;
+  } catch (error: any) {
+    if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error;
+
+    // Migration incompleta não pode impedir o login do administrador titular.
+    const [legacyRows] = await adminDb.query<AdminRow[]>(
+      'SELECT id, name, email, password_hash, token_version FROM admins WHERE email = ?',
+      [email]
+    );
+    return legacyRows.map((row) => ({ ...row, role: 'admin' }));
+  }
+}
 
 export async function login(params: {
   email?: unknown;
@@ -49,10 +76,7 @@ export async function login(params: {
   }
 
   try {
-    const [rows] = await adminDb.query<AdminRow[]>(
-      'SELECT id, name, email, role, password_hash, token_version FROM admins WHERE email = ?',
-      [email]
-    );
+    const rows = await findAdminByEmail(email);
 
     if (rows.length === 0) {
       throw new UnauthorizedError('Credenciais invalidas.');
@@ -69,7 +93,11 @@ export async function login(params: {
     const { password_hash: _passwordHash, ...publicAdmin } = admin as AdminPublicRow & {
       password_hash?: unknown;
     };
-    return { admin: publicAdmin, token };
+    const role = normalizeAdminPanelRole(admin.role);
+    return {
+      admin: { ...publicAdmin, role, capabilities: getAdminCapabilities(role) },
+      token,
+    };
   } catch (error) {
     if (error instanceof ApplicationError) {
       throw error;

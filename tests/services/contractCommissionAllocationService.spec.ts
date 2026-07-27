@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  assertRentalCommissionPolicy,
+  assertCommissionAllocationPolicy,
   cancelContractCommissionAllocations,
   syncContractCommissionAllocations,
 } from '../../src/services/contractCommissionAllocationService';
@@ -24,17 +24,17 @@ describe('contractCommissionAllocationService', () => {
   };
 
   it('accepts the one-time rental allocation split of 10/50/40', () => {
-    expect(() => assertRentalCommissionPolicy(rentalContract, rentalCommission)).not.toThrow();
+    expect(() => assertCommissionAllocationPolicy(rentalContract, rentalCommission)).not.toThrow();
   });
 
   it('rejects a rental allocation that would create an invalid split', () => {
     expect(() =>
-      assertRentalCommissionPolicy(rentalContract, {
+      assertCommissionAllocationPolicy(rentalContract, {
         ...rentalCommission,
         comissaoCaptador: 500,
-        taxaPlataforma: 750,
+        taxaPlataforma: 600,
       }),
-    ).toThrow('10% para o captador, 50% para o vendedor e 40% para a plataforma');
+    ).toThrow('fechar exatamente o valor base da comissão');
   });
 
   it('records one allocation per brokerage role and never a recurring cycle', async () => {

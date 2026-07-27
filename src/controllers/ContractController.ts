@@ -2390,26 +2390,43 @@ class ContractController {
       return res.status(400).json({ error: 'ID do contrato inválido.' });
     }
 
+    const requestedPage = Number(req.query.page ?? 1);
+    const requestedLimit = Number(req.query.limit ?? 25);
+    const page = Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 100)
+      : 25;
+    const offset = (page - 1) * limit;
+
     try {
       const rows = await queryContractRows<RowDataPacket>(
         `
           SELECT
-            id,
-            source_document_id,
-            document_type,
-            document_label,
-            original_file_name,
-            owner_side,
-            reason,
-            uploaded_by_user_id,
-            rejected_by_admin_id,
-            rejected_at
-          FROM contract_document_rejections
-          WHERE contract_id = ?
-          ORDER BY rejected_at DESC, id DESC
+            rejection.id,
+            rejection.source_document_id,
+            rejection.document_type,
+            rejection.document_label,
+            rejection.original_file_name,
+            rejection.owner_side,
+            rejection.reason,
+            rejection.uploaded_by_user_id,
+            rejection.rejected_by_admin_id,
+            rejection.rejected_at,
+            reviewer.name AS rejected_by_admin_name
+          FROM contract_document_rejections AS rejection
+          LEFT JOIN admins AS reviewer ON reviewer.id = rejection.rejected_by_admin_id
+          WHERE rejection.contract_id = ?
+          ORDER BY rejection.rejected_at DESC, rejection.id DESC
+          LIMIT ? OFFSET ?
         `,
+        [contractId, limit, offset]
+      );
+
+      const countRows = await queryContractRows<RowDataPacket>(
+        'SELECT COUNT(*) AS total FROM contract_document_rejections WHERE contract_id = ?',
         [contractId]
       );
+      const total = Number(countRows[0]?.total ?? 0);
 
       return res.status(200).json({
         rejections: rows.map((row) => ({
@@ -2422,8 +2439,10 @@ class ContractController {
           reason: row.reason,
           uploadedByUserId: Number(row.uploaded_by_user_id) || null,
           rejectedByAdminId: Number(row.rejected_by_admin_id) || null,
+          rejectedByAdminName: row.rejected_by_admin_name ?? null,
           rejectedAt: row.rejected_at,
         })),
+        pagination: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       });
     } catch (error) {
       console.error('Erro ao carregar histórico de rejeições do contrato:', error);

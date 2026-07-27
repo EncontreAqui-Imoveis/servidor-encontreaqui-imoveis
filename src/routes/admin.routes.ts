@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { adminController } from '../controllers/AdminController';
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware as authMiddlewareAdmin, isAdmin as isAdminAdmin } from '../middlewares/auth';
-import { requireAdminCapability } from '../middlewares/adminCapabilities';
+import {
+  requireAdminCapability,
+  requireRestrictedAdminDocumentReplacement,
+} from '../middlewares/adminCapabilities';
 import { requireAdminReauth } from '../middlewares/adminReauth';
 import { mediaUpload } from '../middlewares/uploadMiddleware';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
@@ -94,13 +97,13 @@ adminRoutes.get('/contracts/:id/documents.zip', (req, res) =>
 adminRoutes.get('/commissions', (req, res) =>
   contractController.listCommissions(req, res)
 );
-adminRoutes.put('/contracts/:id/transition', (req, res) =>
+adminRoutes.put('/contracts/:id/transition', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.transitionStatus(req, res)
 );
-adminRoutes.put('/contracts/:id/evaluate-side', (req, res) =>
+adminRoutes.put('/contracts/:id/evaluate-side', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.evaluateSide(req, res)
 );
-adminRoutes.put('/contracts/:id/evaluate-category', (req, res) =>
+adminRoutes.put('/contracts/:id/evaluate-category', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.evaluateCategory(req, res)
 );
 adminRoutes.put('/contracts/:id/documents/:documentId/review', requireAdminCapability('review_documents'), (req, res) =>
@@ -109,9 +112,10 @@ adminRoutes.put('/contracts/:id/documents/:documentId/review', requireAdminCapab
 adminRoutes.get('/contracts/:id/document-rejections', (req, res) =>
   contractController.listDocumentRejections(req, res)
 );
-adminRoutes.put('/contracts/:id/data', (req, res) => contractController.updateData(req, res));
+adminRoutes.put('/contracts/:id/data', requireAdminCapability('manage_contract_workflow'), (req, res) => contractController.updateData(req, res));
 adminRoutes.post(
   '/contracts/:id/draft',
+  requireAdminCapability('manage_contract_workflow'),
   contractDraftUpload.single('file'),
   (req, res) => contractController.uploadDraft(req, res)
 );
@@ -119,18 +123,19 @@ adminRoutes.post(
   '/contracts/:id/signed-docs',
   requireAdminCapability('replace_documents'),
   contractDocumentUpload.single('file'),
+  requireRestrictedAdminDocumentReplacement,
   (req, res) => contractController.uploadSignedDocs(req, res)
 );
-adminRoutes.post('/contracts/:id/finalize', (req, res) =>
+adminRoutes.post('/contracts/:id/finalize', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.finalize(req, res)
 );
-adminRoutes.put('/contracts/:id/reopen', (req, res) =>
+adminRoutes.put('/contracts/:id/reopen', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.reopenFinalized(req, res)
 );
 adminRoutes.delete('/contracts/:id', requireAdminCapability('delete'), (req, res) =>
   contractController.deleteFinalized(req, res)
 );
-adminRoutes.put('/contracts/:id/commission-data', (req, res) =>
+adminRoutes.put('/contracts/:id/commission-data', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.updateCommissionData(req, res)
 );
 adminRoutes.delete('/contracts/:id/commission-data', requireAdminCapability('delete'), (req, res) =>
@@ -140,6 +145,7 @@ adminRoutes.post(
   '/contracts/:id/finalized-docs',
   requireAdminCapability('replace_documents'),
   contractDocumentUpload.single('file'),
+  requireRestrictedAdminDocumentReplacement,
   (req, res) => contractController.uploadFinalizedDocument(req, res)
 );
 adminRoutes.delete('/contracts/:id/finalized-docs/:documentId', requireAdminCapability('delete'), (req, res) =>

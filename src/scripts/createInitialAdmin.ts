@@ -1,5 +1,10 @@
 import bcrypt from 'bcryptjs';
+import { RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
+
+type AdminIdRow = RowDataPacket & {
+  id: number;
+};
 
 function requiredEnvironment(name: string): string {
   const value = String(process.env[name] ?? '').trim();
@@ -18,7 +23,7 @@ async function main(): Promise<void> {
     throw new Error('BOOTSTRAP_ADMIN_PASSWORD deve ter ao menos 12 caracteres.');
   }
 
-  const [existing] = await connection.query<{ id: number }[]>(
+  const [existing] = await connection.query<AdminIdRow[]>(
     'SELECT id FROM admins WHERE LOWER(email) = ? LIMIT 1',
     [email],
   );

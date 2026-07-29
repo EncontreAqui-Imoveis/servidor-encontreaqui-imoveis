@@ -7,6 +7,7 @@ initSentry();
 import { createHttpApp } from './httpApp';
 import { applyMigrations } from './database/migrations';
 import { runSqlMigrations } from './database/migrationRunner';
+import { verifyCriticalSchemaState } from './database/schemaVerification';
 import { setupProcessHandlers } from './serverLifecycle';
 import { redactValue } from './utils/logSanitizer';
 import { setupPdfWorker } from './modules/negotiations/infra/PdfWorker';
@@ -14,12 +15,15 @@ import { setupNegotiationDocumentDeletionWorker } from './services/negotiationDo
 import { discardExpiredDrafts } from './services/registrationDraftRepository';
 import { discardExpiredPhoneOtps } from './services/phoneOtpService';
 import { ensureBrazilianCityCatalogSeeded } from './services/locationCatalogSeedService';
+import { startSreStatsService, stopSreStatsService } from './services/sreStatsService';
 
 const app = createHttpApp();
 const PORT = process.env.PORT || process.env.API_PORT || 3333;
 const HOST = process.env.HOST || '0.0.0.0';
 const DRAFT_CLEANUP_INTERVAL_MS = 60 * 1000;
 const PHONE_OTP_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+const shouldRunMigrationsOnStart = process.env.NODE_ENV !== 'production'
+  || ['1', 'true', 'yes'].includes(String(process.env.RUN_MIGRATIONS_ON_START ?? '').toLowerCase());
 
 function setupRegistrationDraftCleanupWorker() {
   let running = false;
@@ -71,8 +75,11 @@ function setupPhoneOtpCleanupWorker() {
 }
 
 async function startServer() {
-  await applyMigrations();
-  await runSqlMigrations('up');
+  if (shouldRunMigrationsOnStart) {
+    await applyMigrations();
+    await runSqlMigrations('up');
+  }
+  await verifyCriticalSchemaState();
   const seededCities = await ensureBrazilianCityCatalogSeeded();
   if (seededCities > 0) {
     console.log(`Catalogo nacional de municipios sincronizado: ${seededCities}`);
@@ -99,11 +106,13 @@ async function startServer() {
   const server = app.listen(Number(PORT), HOST, () => {
     console.log(`Servidor rodando em ${HOST}:${PORT} com suporte a UTF-8`);
   });
+  startSreStatsService();
 
   setupProcessHandlers(server);
   server.on('close', () => {
     clearInterval(draftCleanupTimer);
     clearInterval(phoneOtpCleanupTimer);
+    stopSreStatsService();
   });
 }
 

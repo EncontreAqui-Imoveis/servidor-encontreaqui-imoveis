@@ -81,14 +81,30 @@ function generateHistory(baseline: number, count: number, variance: number = 0.2
 
 export class SreStatsService {
     private railwayStatus: string = 'UP';
+    private metricsTimer?: NodeJS.Timeout;
+    private healthTimer?: NodeJS.Timeout;
 
-    constructor() {
-        // Iniciar os workers
-        this.takeMetricsSnapshot();
-        setInterval(() => this.takeMetricsSnapshot(), 5 * 60 * 1000);
+    start(): void {
+        if (this.metricsTimer || this.healthTimer) {
+            return;
+        }
 
-        this.checkExternalHealth();
-        setInterval(() => this.checkExternalHealth(), 10 * 60 * 1000);
+        void this.takeMetricsSnapshot();
+        this.metricsTimer = setInterval(() => void this.takeMetricsSnapshot(), 5 * 60 * 1000);
+
+        void this.checkExternalHealth();
+        this.healthTimer = setInterval(() => void this.checkExternalHealth(), 10 * 60 * 1000);
+    }
+
+    stop(): void {
+        if (this.metricsTimer) {
+            clearInterval(this.metricsTimer);
+            this.metricsTimer = undefined;
+        }
+        if (this.healthTimer) {
+            clearInterval(this.healthTimer);
+            this.healthTimer = undefined;
+        }
     }
 
     private async takeMetricsSnapshot() {
@@ -480,6 +496,14 @@ export class SreStatsService {
 }
 
 const sreStatsService = new SreStatsService();
+export function startSreStatsService() {
+    sreStatsService.start();
+}
+
+export function stopSreStatsService() {
+    sreStatsService.stop();
+}
+
 export async function loadSreStats() {
     return sreStatsService.getSreStats();
 }

@@ -1617,5 +1617,6 @@ export async function applyMigrations(): Promise<void> {
     console.log('Migrations aplicadas com sucesso.');
   } catch (error) {
     console.error('Falha ao aplicar migrations:', error);
+    throw error;
   }
 }

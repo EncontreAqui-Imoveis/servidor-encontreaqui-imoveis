@@ -135,7 +135,7 @@ function loadMigrationFiles(): MigrationFile[] {
   });
 }
 
-async function ensureMigrationsTable(): Promise<void> {
+export async function ensureMigrationsTable(): Promise<void> {
   await connection.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       id INT PRIMARY KEY AUTO_INCREMENT,
@@ -145,11 +145,40 @@ async function ensureMigrationsTable(): Promise<void> {
   `);
 }
 
-async function getAppliedMigrations(): Promise<AppliedMigrationRow[]> {
+export async function getAppliedMigrations(): Promise<AppliedMigrationRow[]> {
   const [rows] = await connection.query<AppliedMigrationRow[]>(
     'SELECT id, name, applied_at FROM schema_migrations ORDER BY id ASC'
   );
   return rows;
+}
+
+export function getMigrationNamesThrough(cutoffMigrationName: string): string[] {
+  return loadMigrationFiles()
+    .map((migration) => migration.name)
+    .filter((name) => name.localeCompare(cutoffMigrationName) <= 0);
+}
+
+/**
+ * A schema baseline already contains the historical migrations up to its
+ * cutoff. Registering them prevents an empty database from replaying DDL
+ * against tables that were created at their current shape.
+ */
+export async function markMigrationsAppliedThrough(cutoffMigrationName: string): Promise<number> {
+  await ensureMigrationsTable();
+
+  const existingNames = new Set((await getAppliedMigrations()).map((migration) => migration.name));
+  const baselineMigrations = getMigrationNamesThrough(cutoffMigrationName);
+
+  let inserted = 0;
+  for (const name of baselineMigrations) {
+    if (existingNames.has(name)) {
+      continue;
+    }
+    await connection.query('INSERT INTO schema_migrations (name) VALUES (?)', [name]);
+    inserted += 1;
+  }
+
+  return inserted;
 }
 
 async function executeSqlBlock(sqlBlock: string, context?: Omit<StatementContext, 'statement' | 'statementIndex' | 'statementCount'>): Promise<void> {

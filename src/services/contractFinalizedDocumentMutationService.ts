@@ -2,7 +2,10 @@ import type { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
-import { storeNegotiationDocumentToR2 } from './negotiationDocumentStorageService';
+import {
+  isInvalidNegotiationDocumentContentError,
+  storeNegotiationDocumentToR2,
+} from './negotiationDocumentStorageService';
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import {
   isContractDocumentType,
@@ -179,23 +182,32 @@ export async function uploadFinalizedContractDocument(
     throw mutationError(400, 'Somente contratos finalizados podem receber documentos nesta área.');
   }
 
-  const documentId = await storeNegotiationDocumentToR2({
-    executor: tx,
-    negotiationId: params.contract.negotiation_id,
-    type: resolveDocumentStorageType(normalizedDocumentType),
-    documentType: normalizedDocumentType,
-    content: params.uploadedFile.buffer,
-    metadataJson: {
-      contractId: params.contractId,
-      ...(ownerSide
-        ? { owner_side: ownerSide, side: ownerSide, visibility: 'SIDE_PRIVATE' }
-        : { visibility: 'CONTRACT_SHARED' }),
-      originalFileName: params.uploadedFile.originalname ?? null,
-      uploadedBy: Number(params.req.userId ?? 0) || null,
-      uploadedAt: new Date().toISOString(),
-      uploadedVia: 'admin-finalized',
-    },
-  });
+  let documentId: number;
+  try {
+    documentId = await storeNegotiationDocumentToR2({
+      executor: tx,
+      negotiationId: params.contract.negotiation_id,
+      type: resolveDocumentStorageType(normalizedDocumentType),
+      documentType: normalizedDocumentType,
+      content: params.uploadedFile.buffer,
+      contentType: params.uploadedFile.mimetype,
+      metadataJson: {
+        contractId: params.contractId,
+        ...(ownerSide
+          ? { owner_side: ownerSide, side: ownerSide, visibility: 'SIDE_PRIVATE' }
+          : { visibility: 'CONTRACT_SHARED' }),
+        originalFileName: params.uploadedFile.originalname ?? null,
+        uploadedBy: Number(params.req.userId ?? 0) || null,
+        uploadedAt: new Date().toISOString(),
+        uploadedVia: 'admin-finalized',
+      },
+    });
+  } catch (error) {
+    if (isInvalidNegotiationDocumentContentError(error)) {
+      throw mutationError(error.statusCode, error.message);
+    }
+    throw error;
+  }
 
   if (Number.isInteger(replaceDocumentId) && replaceDocumentId > 0) {
     await deleteFinalizedContractDocument(tx, {

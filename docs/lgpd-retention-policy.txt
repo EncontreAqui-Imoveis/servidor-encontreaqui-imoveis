@@ -1,0 +1,48 @@
+POLITICA OPERACIONAL DE RETENCAO - ENCONTRE AQUI
+Status: decisao inicial; revisar com juridico antes de declarar conformidade final.
+Data: 2026-07-31
+
+OBJETIVO
+Minimizar dados sem apagar evidencias contratuais de forma automatica ou insegura.
+
+REGRAS APROVADAS
+
+1. Documento rejeitado
+- Revogar acesso e remover a referencia do banco imediatamente.
+- Solicitar exclusao fisica do R2 imediatamente.
+- Se o R2 falhar temporariamente, manter o objeto inacessivel e retentar pela
+  fila persistente ate concluir.
+- Reter somente evento minimo: categoria, data/hora, operador, motivo e acao.
+- Nao reter arquivo, URL, CPF, conteudo, hash ou nome original do arquivo.
+
+2. Documento substituido
+- Confirmar o novo upload antes de remover a versao anterior.
+- Depois da confirmacao, revogar o acesso e excluir a versao anterior
+  imediatamente no banco e no R2.
+- Se a exclusao fisica falhar, manter a versao anterior inacessivel e retentar.
+- Reter somente evento minimo de substituicao.
+
+3. Contrato finalizado e documentos aprovados
+- Nao executar exclusao automatica por prazo tecnico neste momento.
+- Manter acesso estritamente por autorizacao e finalidade contratual.
+- Pedido de eliminacao deve ser analisado individualmente pelo responsavel de
+  privacidade/juridico antes de qualquer acao irreversivel.
+- A analise pode eliminar ou anonimizar dados nao necessarios, mas deve avaliar
+  obrigacoes legais, execucao contratual e defesa de direitos antes de descartar
+  o contrato ou seus documentos aprovados.
+
+4. Dados temporarios
+- OTP, PIN e sessoes temporarias: expirar pelo TTL tecnico ja existente.
+- Rascunhos abandonados: descartar pelo fluxo de expiracao existente.
+- Notificacoes e logs: prazo operacional sera configurado em etapa posterior,
+  com job, evidencia de execucao e revisao juridica.
+
+LIMITES DE IMPLEMENTACAO ATUAL
+- Esta politica nao cria job de exclusao para contratos finalizados.
+- Esta politica nao altera registros existentes.
+- Esta politica nao substitui parecer juridico sobre prazo de guarda.
+
+EVIDENCIA MINIMA EXIGIDA
+- Logs sanitizados de exclusao/retry sem PII.
+- Status da fila de exclusao e reconciliacao banco/R2.
+- Registro da decisao em pedidos de eliminacao de contrato finalizado.

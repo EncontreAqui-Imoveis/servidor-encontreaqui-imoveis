@@ -42,7 +42,7 @@ adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
 adminRoutes.post('/logout', adminController.logout);
 adminRoutes.post('/reauth', adminController.reauth);
 
-adminRoutes.post('/notifications/send', async (req, res) => {
+adminRoutes.post('/notifications/send', requireAdminCapability('manage_administration'), async (req, res) => {
   try {
     const result = await sendAdminNotification(req.body as Record<string, unknown>);
     return res.status(result.statusCode).json(result.body);
@@ -54,38 +54,39 @@ adminRoutes.post('/notifications/send', async (req, res) => {
 adminRoutes.delete('/notifications/announcements', requireAdminCapability('delete'), adminController.clearAnnouncementNotifications);
 adminRoutes.delete('/notifications/:id', requireAdminCapability('delete'), adminController.deleteNotification);
 adminRoutes.delete('/notifications', requireAdminCapability('delete'), adminController.clearNotifications);
-adminRoutes.post('/uploads/sign', adminController.signCloudinaryUpload);
+adminRoutes.post('/uploads/sign', requireAdminCapability('manage_administration'), adminController.signCloudinaryUpload);
 adminRoutes.get('/negotiations', adminController.listNegotiations);
 adminRoutes.get('/negotiations/requests/summary', adminController.listNegotiationRequestSummary);
 adminRoutes.get('/negotiations/requests/property/:propertyId', adminController.listNegotiationRequestsByProperty);
-adminRoutes.put('/negotiations/:id/approve', adminController.approveNegotiation);
-adminRoutes.put('/negotiations/:id/reject', adminController.rejectNegotiation);
-adminRoutes.put('/negotiations/:id/cancel', adminController.cancelNegotiation);
-adminRoutes.put('/negotiations/:id/selling-broker', (req, res) =>
+adminRoutes.put('/negotiations/:id/approve', requireAdminCapability('manage_contract_workflow'), adminController.approveNegotiation);
+adminRoutes.put('/negotiations/:id/reject', requireAdminCapability('manage_contract_workflow'), adminController.rejectNegotiation);
+adminRoutes.put('/negotiations/:id/cancel', requireAdminCapability('manage_contract_workflow'), adminController.cancelNegotiation);
+adminRoutes.put('/negotiations/:id/selling-broker', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   (adminController as any).updateNegotiationSellingBroker(req, res)
 );
-adminRoutes.post('/negotiations/proposal', (req, res) =>
+adminRoutes.post('/negotiations/proposal', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   (adminController as any).generateProposalFromProperty(req, res)
 );
-adminRoutes.post('/negotiations/:id/minuta', (req, res) =>
+adminRoutes.post('/negotiations/:id/minuta', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   (adminController as any).generateProposalDraft(req, res)
 );
 adminRoutes.delete('/negotiations/:id/minuta', requireAdminCapability('delete'), (req, res) =>
   (adminController as any).deleteProposalDraft(req, res)
 );
-adminRoutes.put('/negotiations/:id/draft', (req, res) =>
+adminRoutes.put('/negotiations/:id/draft', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   (adminController as any).updateProposalFromWizard(req, res)
 );
 adminRoutes.get('/negotiations/:id/responsibles', (req, res) =>
   (adminController as any).listNegotiationResponsibles(req, res)
 );
-adminRoutes.put('/negotiations/:id/responsibles', (req, res) =>
+adminRoutes.put('/negotiations/:id/responsibles', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   (adminController as any).updateNegotiationResponsibles(req, res)
 );
 adminRoutes.get('/negotiations/:id/signed-proposal/download', adminController.downloadSignedProposal);
 adminRoutes.get('/negotiations/:id/minuta/download', adminController.downloadProposalDraft);
 adminRoutes.post(
   '/negotiations/:id/signed-proposal',
+  requireAdminCapability('manage_contract_workflow'),
   signedProposalUpload.single('file'),
   adminController.uploadSignedProposal
 );
@@ -154,6 +155,7 @@ adminRoutes.delete('/contracts/:id/finalized-docs/:documentId', requireAdminCapa
 
 adminRoutes.post(
   '/properties',
+  requireAdminCapability('manage_administration'),
   mediaUpload.fields([
     { name: 'images', maxCount: 20 },
     { name: 'video', maxCount: 1 },
@@ -169,7 +171,7 @@ adminRoutes.get('/users', async (req, res) => {
     return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
   }
 });
-adminRoutes.post('/users', adminController.createUser);
+adminRoutes.post('/users', requireAdminCapability('manage_administration'), adminController.createUser);
 adminRoutes.delete('/users/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteUser);
 
 adminRoutes.get('/clients', async (_req, res) => {
@@ -197,9 +199,9 @@ adminRoutes.get('/clients/:id', async (req, res) => {
     return res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 });
-adminRoutes.post('/clients/:id/promote-broker', adminController.promoteClientToBroker);
-adminRoutes.post('/clients/:id/demote-broker', adminController.demoteClientBroker);
-adminRoutes.put('/clients/:id', adminController.updateClient);
+adminRoutes.post('/clients/:id/promote-broker', requireAdminCapability('manage_administration'), adminController.promoteClientToBroker);
+adminRoutes.post('/clients/:id/demote-broker', requireAdminCapability('manage_administration'), adminController.demoteClientBroker);
+adminRoutes.put('/clients/:id', requireAdminCapability('manage_administration'), adminController.updateClient);
 adminRoutes.delete('/clients/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteClient);
 adminRoutes.get('/clients/:id/properties', async (req, res) => {
   const clientId = Number(req.params.id);
@@ -217,6 +219,7 @@ adminRoutes.get('/clients/:id/properties', async (req, res) => {
 
 adminRoutes.post(
   '/brokers',
+  requireAdminCapability('manage_administration'),
   brokerDocsUpload.fields([
     { name: 'creciFront', maxCount: 1 },
     { name: 'creciBack', maxCount: 1 },
@@ -261,14 +264,15 @@ adminRoutes.get('/brokers/:id', async (req, res) => {
     return res.status(500).json({ error: 'Erro interno do servidor.' });
   }
 });
-adminRoutes.patch('/brokers/:id/approve', adminController.approveBroker);
-adminRoutes.patch('/brokers/:id/reject', adminController.rejectBroker);
-adminRoutes.patch('/brokers/:id/status', adminController.updateBrokerStatus);
-adminRoutes.put('/brokers/:id', adminController.updateBroker);
+adminRoutes.patch('/brokers/:id/approve', requireAdminCapability('manage_administration'), adminController.approveBroker);
+adminRoutes.patch('/brokers/:id/reject', requireAdminCapability('manage_administration'), adminController.rejectBroker);
+adminRoutes.patch('/brokers/:id/status', requireAdminCapability('manage_administration'), adminController.updateBrokerStatus);
+adminRoutes.put('/brokers/:id', requireAdminCapability('manage_administration'), adminController.updateBroker);
 adminRoutes.delete('/brokers/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteBroker);
 
 adminRoutes.post(
   '/brokers/:id/documents',
+  requireAdminCapability('manage_administration'),
   brokerDocsUpload.fields([
     { name: 'creciFront', maxCount: 1 },
     { name: 'creciBack', maxCount: 1 },
@@ -302,9 +306,9 @@ adminRoutes.get('/properties-with-brokers', async (req, res) => {
 });
 adminRoutes.get('/property-edit-requests', adminController.listPropertyEditRequests);
 adminRoutes.get('/property-edit-requests/:id', adminController.getPropertyEditRequestById);
-adminRoutes.post('/property-edit-requests/:id/review', adminController.reviewPropertyEditRequest);
-adminRoutes.post('/property-edit-requests/:id/approve', adminController.approvePropertyEditRequest);
-adminRoutes.post('/property-edit-requests/:id/reject', adminController.rejectPropertyEditRequest);
+adminRoutes.post('/property-edit-requests/:id/review', requireAdminCapability('manage_administration'), adminController.reviewPropertyEditRequest);
+adminRoutes.post('/property-edit-requests/:id/approve', requireAdminCapability('manage_administration'), adminController.approvePropertyEditRequest);
+adminRoutes.post('/property-edit-requests/:id/reject', requireAdminCapability('manage_administration'), adminController.rejectPropertyEditRequest);
 adminRoutes.get('/properties/archive', async (req, res) => {
   try {
     const payload = await loadArchivedProperties(req.query);
@@ -314,7 +318,7 @@ adminRoutes.get('/properties/archive', async (req, res) => {
     return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
   }
 });
-adminRoutes.put('/properties/:id/relist', async (req, res) => {
+adminRoutes.put('/properties/:id/relist', requireAdminCapability('manage_administration'), async (req, res) => {
   const propertyId = Number(req.params.id);
   if (Number.isNaN(propertyId)) {
     return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
@@ -330,11 +334,11 @@ adminRoutes.put('/properties/:id/relist', async (req, res) => {
   }
 });
 adminRoutes.get('/properties/:id', adminController.getPropertyDetails);
-adminRoutes.put('/properties/:id', adminController.updateProperty);
+adminRoutes.put('/properties/:id', requireAdminCapability('manage_administration'), adminController.updateProperty);
 adminRoutes.delete('/properties/:id', requireAdminCapability('delete'), requireAdminReauth, adminController.deleteProperty);
-adminRoutes.patch('/properties/:id/approve', adminController.approveProperty);
-adminRoutes.patch('/properties/:id/reject', adminController.rejectProperty);
-adminRoutes.patch('/properties/:id/status', adminController.updatePropertyStatus);
+adminRoutes.patch('/properties/:id/approve', requireAdminCapability('manage_administration'), adminController.approveProperty);
+adminRoutes.patch('/properties/:id/reject', requireAdminCapability('manage_administration'), adminController.rejectProperty);
+adminRoutes.patch('/properties/:id/status', requireAdminCapability('manage_administration'), adminController.updatePropertyStatus);
 adminRoutes.get('/featured-properties', async (_req, res) => {
   try {
     const payload = await loadFeaturedProperties();
@@ -344,7 +348,7 @@ adminRoutes.get('/featured-properties', async (_req, res) => {
     return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });
   }
 });
-adminRoutes.put('/featured-properties', async (req, res) => {
+adminRoutes.put('/featured-properties', requireAdminCapability('manage_administration'), async (req, res) => {
   try {
     const payload = await updateCatalogFeaturedProperties(req.body as Record<string, unknown>);
     return res.status(200).json(payload);
@@ -364,11 +368,13 @@ adminRoutes.put('/featured-properties', async (req, res) => {
 });
 adminRoutes.post(
   '/properties/:id/images',
+  requireAdminCapability('manage_administration'),
   mediaUpload.array('images', 20),
   adminController.addPropertyImage
 );
 adminRoutes.post(
   '/properties/:id/video',
+  requireAdminCapability('manage_administration'),
   mediaUpload.single('video'),
   adminController.addPropertyVideo
 );
@@ -376,7 +382,7 @@ adminRoutes.delete('/properties/:id/video', requireAdminCapability('delete'), ad
 adminRoutes.delete('/properties/:id/images/:imageId', requireAdminCapability('delete'), adminController.deletePropertyImage);
 
 adminRoutes.get('/notifications', adminController.getNotifications);
-adminRoutes.post('/brokers/:id/cleanup', adminController.cleanupBroker);
+adminRoutes.post('/brokers/:id/cleanup', requireAdminCapability('manage_administration'), adminController.cleanupBroker);
 
 adminRoutes.get('/dashboard/stats', async (_req, res) => {
   try {

@@ -257,7 +257,7 @@ describe('POST /auth e /users login coverage', () => {
   it('autentica em /auth/login e retorna token/payload esperados', async () => {
     const response = await request(app).post('/auth/login').send({
       email: 'teste@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
     });
 
     expect(response.status).toBe(200);
@@ -273,7 +273,7 @@ describe('POST /auth e /users login coverage', () => {
   it('autentica cliente com endereço completo sem cep e precisaCompleto=false em /auth/login', async () => {
     const response = await request(app).post('/auth/login').send({
       email: 'semcep@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
     });
 
     expect(response.status).toBe(200);
@@ -283,7 +283,7 @@ describe('POST /auth e /users login coverage', () => {
   it('deriva status do broker para pending_documents no login quando nao ha documentos reais', async () => {
     const response = await request(app).post('/auth/login').send({
       email: 'broker@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
     });
 
     expect(response.status).toBe(200);
@@ -298,7 +298,7 @@ describe('POST /auth e /users login coverage', () => {
   it('rejeita /users/login com usuario inexistente', async () => {
     const response = await request(app).post('/users/login').send({
       email: 'inexistente@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
     });
 
     expect(response.status).toBe(401);
@@ -317,7 +317,7 @@ describe('POST /auth e /users login coverage', () => {
     const response = await request(app).post('/auth/register').send({
       name: 'Usuário Teste',
       email: 'duplicado@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
       without_number: true,
       street: 'Rua Central',
       bairro: 'Centro',
@@ -342,7 +342,7 @@ describe('POST /auth e /users login coverage', () => {
     const response = await request(app).post('/auth/register').send({
       name: 'Usuário Teste',
       email: 'novo@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
       without_number: true,
       street: 'Rua Central',
       bairro: 'Centro',
@@ -359,7 +359,7 @@ describe('POST /auth e /users login coverage', () => {
       id: 77,
     });
     expect(signUserTokenMock).toHaveBeenCalledWith(77, 'client', 1);
-    expect(hashMock).toHaveBeenCalledWith('Senha123', 8);
+    expect(hashMock).toHaveBeenCalledWith('SenhaMuitoSegura123', 4);
   });
 
   it('rejeita /auth/register quando o nome normalizado já está em uso', async () => {
@@ -370,7 +370,7 @@ describe('POST /auth e /users login coverage', () => {
     const response = await request(app).post('/auth/register').send({
       name: '  USUÁRIO TESTE  ',
       email: 'nome-duplicado@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
       without_number: true,
       street: 'Rua Central',
       bairro: 'Centro',
@@ -390,7 +390,7 @@ describe('POST /auth e /users login coverage', () => {
   it('rejeita /users/register com campos obrigatórios faltantes', async () => {
     const response = await request(app).post('/users/register').send({
       email: 'novo@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
     });
 
     expect(response.status).toBe(400);
@@ -409,7 +409,7 @@ describe('POST /auth e /users login coverage', () => {
     const response = await request(app).post('/users/register').send({
       name: 'Usuário Teste',
       email: 'ativo@dominio.com',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
       without_number: true,
       street: 'Rua Central',
       bairro: 'Centro',

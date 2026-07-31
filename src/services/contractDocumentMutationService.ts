@@ -2,7 +2,10 @@ import type { RowDataPacket } from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
 
 import type { AuthRequest } from '../middlewares/auth';
-import { storeNegotiationDocumentToR2 } from './negotiationDocumentStorageService';
+import {
+  isInvalidNegotiationDocumentContentError,
+  storeNegotiationDocumentToR2,
+} from './negotiationDocumentStorageService';
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import {
   buildContractDocumentRuleContextFromRow,
@@ -375,15 +378,23 @@ export async function uploadContractDocument(
   metadataWithAudit.uploadedBy = Number(params.req.userId ?? 0) || null;
   metadataWithAudit.uploadedAt = uploadEvent.at;
 
-  const documentId = await storeNegotiationDocumentToR2({
-    executor: tx,
-    negotiationId: params.contract.negotiation_id,
-    type: resolveDocumentStorageType(normalizedDocumentType),
-    documentType: normalizedDocumentType,
-    content: params.uploadedFile.buffer,
-    contentType: params.uploadedFile.mimetype,
-    metadataJson: metadataWithAudit,
-  });
+  let documentId: number;
+  try {
+    documentId = await storeNegotiationDocumentToR2({
+      executor: tx,
+      negotiationId: params.contract.negotiation_id,
+      type: resolveDocumentStorageType(normalizedDocumentType),
+      documentType: normalizedDocumentType,
+      content: params.uploadedFile.buffer,
+      contentType: params.uploadedFile.mimetype,
+      metadataJson: metadataWithAudit,
+    });
+  } catch (error) {
+    if (isInvalidNegotiationDocumentContentError(error)) {
+      throw mutationError(error.statusCode, error.message, { code: error.code });
+    }
+    throw error;
+  }
 
   const shouldMarkOnlineSignatureMethod =
     role !== 'admin' && normalizedDocumentType === 'contrato_assinado';

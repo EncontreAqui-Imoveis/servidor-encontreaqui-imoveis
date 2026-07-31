@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import admin from '../config/firebaseAdmin';
 import { authDb } from '../services/authPersistenceService';
@@ -38,6 +37,7 @@ import {
   assertAccountNameAvailable,
   isDuplicateAccountNameError,
 } from '../services/userAccountNameService';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 function appErrorDetails(error: unknown): Record<string, unknown> {
   if (!isApplicationError(error)) {
@@ -282,6 +282,15 @@ class AuthController {
         error: 'Senha obrigatoria para cadastro por email.',
       });
     }
+    const passwordError = isGoogleRegistration ? null : validateNewPassword(password);
+    if (passwordError) {
+      return res.status(400).json({
+        code: passwordError.code,
+        error: passwordError.message,
+        min_length: passwordError.minLength,
+        max_length: passwordError.maxLength,
+      });
+    }
 
     let firebaseUid: string | null = null;
 
@@ -360,7 +369,7 @@ class AuthController {
 
       const passwordHash = isGoogleRegistration
         ? null
-        : await bcrypt.hash(password, 8);
+        : await hashNewPassword(password);
       let emailVerifiedAt: Date | null = isGoogleRegistration ? new Date() : null;
       if (!isGoogleRegistration) {
         const verificationStatus = await getEmailVerificationStatus({ email });

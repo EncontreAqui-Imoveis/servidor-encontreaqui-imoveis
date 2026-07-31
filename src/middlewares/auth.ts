@@ -196,7 +196,7 @@ export async function authMiddleware(
   }
 
   try {
-    const decoded = jwt.verify(token, jwtSecret) as {
+    const decoded = jwt.verify(token, jwtSecret, { algorithms: ['HS256'] }) as {
       id: number;
       role: string;
       token_version?: number;

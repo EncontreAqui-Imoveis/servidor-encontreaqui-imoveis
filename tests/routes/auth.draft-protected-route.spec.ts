@@ -1,4 +1,5 @@
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -45,6 +46,27 @@ describe('Rotas protegidas não aceitam rascunho não consolidado', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.error).toBe('Token inválido.');
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('rejeita token JWT assinado com algoritmo diferente de HS256', async () => {
+    const token = jwt.sign(
+      { id: 1, role: 'client', token_version: 1 },
+      process.env.JWT_SECRET!,
+      { algorithm: 'HS384', expiresIn: '1h' },
+    );
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const response = await request(app)
+        .get('/users/me')
+        .set('authorization', `Bearer ${token}`);
+
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('Token inválido.');
+      expect(queryMock).not.toHaveBeenCalled();
     } finally {
       consoleErrorSpy.mockRestore();
     }

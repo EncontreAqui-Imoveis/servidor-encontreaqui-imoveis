@@ -15,6 +15,7 @@ import {
 } from '../services/contractPersistenceService';
 import { listCommissionSummary } from '../services/contractCommissionService';
 import {
+  isInvalidNegotiationDocumentContentError,
   readNegotiationDocumentObject,
   storeNegotiationDocumentToR2,
 } from '../services/negotiationDocumentStorageService';
@@ -786,6 +787,26 @@ function normalizeCommissionData(value: unknown): NormalizedCommissionData {
     comissaoVendedor,
     taxaPlataforma,
   };
+}
+
+function hasSameCommissionData(
+  storedValue: unknown,
+  expected: NormalizedCommissionData
+): boolean {
+  const stored = parseStoredJsonObject(storedValue);
+  const keys: Array<keyof NormalizedCommissionData> = [
+    'valorBaseComissao',
+    'valorVenda',
+    'comissaoCaptador',
+    'comissaoVendedor',
+    'taxaPlataforma',
+  ];
+
+  return keys.every((key) => {
+    const rawValue = Number(stored[key]);
+    return Number.isFinite(rawValue) &&
+      Number(rawValue.toFixed(2)) === Number(expected[key].toFixed(2));
+  });
 }
 
 function resolveFinalDealStatuses(propertyPurpose: string | null): {
@@ -1788,7 +1809,6 @@ async function cleanupContractDocumentAssets(
             negotiationId: context.negotiationId,
             documentId: Number(document.id ?? 0),
             documentType: document.document_type ?? null,
-            storageKey: String(document.storage_key ?? ''),
             error,
           });
         }
@@ -2535,6 +2555,7 @@ class ContractController {
         type: 'contract',
         documentType: documentTypeRaw,
         content: uploadedFile.buffer,
+        contentType: uploadedFile.mimetype,
         metadataJson: {
           contractId,
           // Physical documents are uploaded by the administrator for the
@@ -2607,6 +2628,9 @@ class ContractController {
       });
     } catch (error) {
       await tx.rollback();
+      if (isInvalidNegotiationDocumentContentError(error)) {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+      }
       console.error('Erro ao enviar documentos assinados pelo admin:', error);
       return res.status(500).json({ error: 'Falha ao enviar documento assinado.' });
     } finally {
@@ -2801,6 +2825,9 @@ class ContractController {
       });
     } catch (error) {
       await tx.rollback();
+      if (isInvalidNegotiationDocumentContentError(error)) {
+        return res.status(error.statusCode).json({ error: error.message, code: error.code });
+      }
       console.error('Erro ao anexar minuta do contrato:', error);
       return res.status(500).json({ error: 'Falha ao anexar minuta do contrato.' });
     } finally {
@@ -2836,6 +2863,23 @@ class ContractController {
       }
 
       const currentStatus = resolveContractStatus(contract.status);
+      if (currentStatus === 'FINALIZED') {
+        if (!hasSameCommissionData(contract.commission_data, commissionData)) {
+          await tx.rollback();
+          return res.status(409).json({
+            error: 'O contrato já foi finalizado com dados de comissão diferentes.',
+            code: 'CONTRACT_ALREADY_FINALIZED_WITH_DIFFERENT_COMMISSION',
+          });
+        }
+
+        await tx.rollback();
+        return res.status(200).json({
+          message: 'Contrato já estava finalizado.',
+          contract: mapContract(contract, req),
+          idempotent: true,
+        });
+      }
+
       if (currentStatus !== 'AWAITING_SIGNATURES') {
         await tx.rollback();
         return res.status(400).json({

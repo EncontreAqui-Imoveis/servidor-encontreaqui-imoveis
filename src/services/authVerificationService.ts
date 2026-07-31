@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import { RowDataPacket } from 'mysql2';
 import {
   ConflictError,
@@ -23,6 +22,7 @@ import { authDb } from './authPersistenceService';
 import { buildUserPayload, hasCompleteProfile, type ProfileType } from './authSessionService';
 import { phoneOtpService } from './phoneOtpService';
 import { hasValidCreci, normalizeCreci } from '../utils/creci';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 type AuthVerificationRow = RowDataPacket & {
   id: number;
@@ -176,10 +176,6 @@ function normalizeEmailCodeInput(value: unknown): string {
   return String(value ?? '').replace(/\D/g, '');
 }
 
-function isPasswordValid(password: string): boolean {
-  return password.trim().length >= 6;
-}
-
 function toInvalidInput(message: string): never {
   throw new InvalidInputError(message);
 }
@@ -242,19 +238,8 @@ export async function checkEmail(input: CheckEmailInput): Promise<CheckEmailResu
     throw new InvalidInputError('Email e obrigatorio.', { code: 'EMAIL_REQUIRED' });
   }
 
-  try {
-    const [rows] = await authDb.query<RowDataPacket[]>(
-      'SELECT id, firebase_uid, password_hash FROM users WHERE email = ? LIMIT 1',
-      [email],
-    );
-    const exists = rows.length > 0;
-    const hasFirebaseUid = exists && rows[0].firebase_uid != null;
-    const hasPassword = exists && !!rows[0].password_hash;
-    return { exists, hasFirebaseUid, hasPassword };
-  } catch (error) {
-    console.error('Erro ao verificar email:', error);
-    throw new InternalError('Erro interno do servidor.');
-  }
+  // Public availability checks must not reveal whether an account or login method exists.
+  return { exists: false, hasFirebaseUid: false, hasPassword: false };
 }
 
 export async function requestPasswordReset(
@@ -346,16 +331,10 @@ export async function checkCreci(input: CheckCreciInput): Promise<CheckCreciResu
     });
   }
 
-  try {
-    const [rows] = await authDb.query<RowDataPacket[]>(
-      'SELECT id FROM brokers WHERE creci = ? LIMIT 1',
-      [creci],
-    );
-    return { exists: rows.length > 0 };
-  } catch (error) {
-    console.error('Erro ao verificar CRECI:', error);
-    throw new InternalError('Erro interno do servidor.');
-  }
+  // Public pre-flight validation must not disclose whether a broker account
+  // exists. The transactional registration/finalization flow enforces the
+  // actual uniqueness rule and returns its conflict only to that request.
+  return { exists: false };
 }
 
 export async function sendEmailVerification(
@@ -590,15 +569,20 @@ export async function confirmPasswordReset(
   const resetSessionToken = String(input.reset_session_token ?? '').trim();
   const newPassword = String(input.new_password ?? '');
 
-  if (!email || !resetSessionToken || !isPasswordValid(newPassword)) {
+  const passwordError = validateNewPassword(newPassword);
+  if (!email || !resetSessionToken || passwordError) {
     throw new InvalidInputError(
-      'Email, sessao de redefinicao e nova senha valida sao obrigatorios.',
-      { code: 'PASSWORD_RESET_CONFIRM_INVALID' },
+      passwordError?.message ?? 'Email e sessao de redefinicao sao obrigatorios.',
+      {
+        code: passwordError?.code ?? 'PASSWORD_RESET_CONFIRM_INVALID',
+        min_length: passwordError?.minLength,
+        max_length: passwordError?.maxLength,
+      },
     );
   }
 
   try {
-    const passwordHash = await bcrypt.hash(newPassword, 8);
+    const passwordHash = await hashNewPassword(newPassword);
     const result = await confirmPasswordResetChallenge({
       email,
       resetSessionToken,

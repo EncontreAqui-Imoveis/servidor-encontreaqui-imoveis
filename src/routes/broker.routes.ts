@@ -3,17 +3,25 @@ import { brokerController } from '../controllers/BrokerController';
 import { authController } from '../controllers/AuthController';
 import { authMiddleware, isBroker } from '../middlewares/auth';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware'
-import { createAuthLoginLimiter } from '../config/rateLimiters';
+import {
+  createAuthLoginLimiter,
+  createAuthRegistrationLimiter,
+  createPreAuthUploadLimiter,
+} from '../config/rateLimiters';
 
 const router = Router();
 const legacyAuthLimiter = createAuthLoginLimiter();
+const registrationLimiter = createAuthRegistrationLimiter();
+const preAuthUploadLimiter = createPreAuthUploadLimiter();
 
-router.post('/register', brokerController.register);
+router.post('/register', registrationLimiter, brokerController.register);
 router.post('/login', legacyAuthLimiter, (req, res) => authController.login(req, res));
 
 
 router.post(
   '/register-with-docs',
+  registrationLimiter,
+  preAuthUploadLimiter,
   brokerDocsUpload.fields([
     { name: 'creciFront', maxCount: 1 },
     { name: 'creciBack', maxCount: 1 },

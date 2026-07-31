@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import { timingSafeEqual } from 'crypto';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import AuthRequest from '../middlewares/auth';
 import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
@@ -25,6 +26,7 @@ import {
   assertAccountNameAvailable,
   isDuplicateAccountNameError,
 } from '../services/userAccountNameService';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 import { buildPropertyOwnerListingFilters } from '../services/propertyOwnerListingFilterService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -35,6 +37,17 @@ const userNameQueryExecutor = {
     return [await runUserQuery<RowDataPacket[]>(sql, params), undefined];
   },
 };
+
+function hasValidSyncSecret(headerValue: string | string[] | undefined): boolean {
+  const configuredSecret = process.env.SYNC_SECRET_KEY?.trim();
+  if (!configuredSecret || typeof headerValue !== 'string') {
+    return false;
+  }
+
+  const expected = Buffer.from(configuredSecret, 'utf8');
+  const received = Buffer.from(headerValue, 'utf8');
+  return expected.length === received.length && timingSafeEqual(expected, received);
+}
 
 interface FavoriteRow extends RowDataPacket {
   id: number;
@@ -205,6 +218,15 @@ class UserController {
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Nome, email e senha s?o obrigat?rios.' });
     }
+    const passwordError = validateNewPassword(password);
+    if (passwordError) {
+      return res.status(400).json({
+        code: passwordError.code,
+        error: passwordError.message,
+        min_length: passwordError.minLength,
+        max_length: passwordError.maxLength,
+      });
+    }
 
     const addressResult = sanitizeAddressInput({
       street,
@@ -234,7 +256,7 @@ class UserController {
 
       await assertAccountNameAvailable(userNameQueryExecutor, name);
 
-      const passwordHash = await bcrypt.hash(password, 8);
+      const passwordHash = await hashNewPassword(String(password));
 
       await runUserQuery(
         `
@@ -405,11 +427,8 @@ class UserController {
       return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
-    const query = String(req.query.q ?? req.query.search ?? '').trim();
-    const digits = query.replace(/\D/g, '');
-    const limit = Math.min(Math.max(Number(req.query.limit ?? 10) || 10, 1), 20);
-
-    if (query.length < 2 && digits.length < 2) {
+    const email = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
+    if (!EMAIL_REGEX.test(email)) {
       return res.status(200).json({ data: [] });
     }
 
@@ -419,25 +438,13 @@ class UserController {
           SELECT
             u.id,
             u.name,
-            u.email,
-            u.cpf,
-            u.phone,
-            CASE
-              WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') THEN 'broker'
-              ELSE 'client'
-            END AS role
+            u.email
           FROM users u
-          LEFT JOIN brokers b ON u.id = b.id
           WHERE u.id <> ?
-            AND (
-              u.name LIKE ?
-              OR u.email LIKE ?
-              OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(u.cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') LIKE ?
-            )
-          ORDER BY u.name ASC
-          LIMIT ?
+            AND LOWER(TRIM(u.email)) = ?
+          LIMIT 1
         `,
-        [userId, `%${query}%`, `%${query}%`, `%${digits || query}%`, limit],
+        [userId, email],
       );
 
       return res.status(200).json({
@@ -445,9 +452,6 @@ class UserController {
           id: Number(row.id),
           name: String(row.name ?? '').trim(),
           email: row.email ?? null,
-          cpf: row.cpf ?? null,
-          phone: row.phone ?? null,
-          role: row.role ?? 'client',
         })),
       });
     } catch (error) {
@@ -742,7 +746,12 @@ class UserController {
   async syncUser(req: Request, res: Response) {
     try {
       const secret = req.headers['x-sync-secret'];
-      if (secret !== process.env.SYNC_SECRET_KEY) {
+      if (!process.env.SYNC_SECRET_KEY?.trim()) {
+        console.error('SYNC_SECRET_KEY não configurada; sincronização bloqueada.');
+        return res.status(503).json({ error: 'Integração de sincronização indisponível.' });
+      }
+
+      if (!hasValidSyncSecret(secret)) {
         return res.status(401).json({ error: 'Acesso não autorizado.' });
       }
 

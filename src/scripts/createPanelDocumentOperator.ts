@@ -1,7 +1,7 @@
-import bcrypt from 'bcryptjs';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 import connection from '../database/connection';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 type AdminRow = RowDataPacket & { id: number };
 
@@ -20,8 +20,9 @@ async function main(): Promise<void> {
   if (role !== 'document_operator' && role !== 'admin') {
     throw new Error('PANEL_ADMIN_ROLE deve ser document_operator ou admin.');
   }
-  if (password.length < 12) {
-    throw new Error('PANEL_ADMIN_PASSWORD deve ter ao menos 12 caracteres.');
+  const passwordError = validateNewPassword(password, 'admin');
+  if (passwordError) {
+    throw new Error(`PANEL_ADMIN_PASSWORD: ${passwordError.message}`);
   }
 
   const [existing] = await connection.query<AdminRow[]>(
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
     throw new Error('Já existe uma conta administrativa com este e-mail.');
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await hashNewPassword(password);
   const [result] = await connection.query<ResultSetHeader>(
     `INSERT INTO admins (name, email, password_hash, role, token_version)
      VALUES (?, ?, ?, ?, 1)`,

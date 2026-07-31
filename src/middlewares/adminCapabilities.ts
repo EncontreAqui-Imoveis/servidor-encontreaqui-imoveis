@@ -7,10 +7,17 @@ export type AdminCapability =
   | 'review_documents'
   | 'replace_documents'
   | 'manage_contract_workflow'
+  | 'manage_administration'
   | 'delete';
 
 const ROLE_CAPABILITIES: Record<AdminPanelRole, ReadonlySet<AdminCapability>> = {
-  admin: new Set(['review_documents', 'replace_documents', 'manage_contract_workflow', 'delete']),
+  admin: new Set([
+    'review_documents',
+    'replace_documents',
+    'manage_contract_workflow',
+    'manage_administration',
+    'delete',
+  ]),
   // Operador documental pode revisar e substituir; exclusoes manuais continuam
   // reservadas ao administrador titular.
   document_operator: new Set(['review_documents', 'replace_documents']),
@@ -35,6 +42,7 @@ export function getAdminCapabilities(role: AdminPanelRole | undefined) {
     canReplaceDocuments: hasAdminCapability(role, 'replace_documents'),
     canCreateDocuments: hasAdminCapability(role, 'manage_contract_workflow'),
     canManageContractWorkflow: hasAdminCapability(role, 'manage_contract_workflow'),
+    canManageAdministration: hasAdminCapability(role, 'manage_administration'),
     canDeleteDocuments: hasAdminCapability(role, 'delete'),
     canDeleteEntities: hasAdminCapability(role, 'delete'),
     canClearNotifications: hasAdminCapability(role, 'delete'),
@@ -53,6 +61,8 @@ export function requireAdminCapability(capability: AdminCapability) {
           ? 'Sua conta administrativa não possui permissão para excluir dados.'
           : capability === 'manage_contract_workflow'
             ? 'Sua conta administrativa não possui permissão para alterar o fluxo do contrato.'
+            : capability === 'manage_administration'
+              ? 'Sua conta administrativa não possui permissão para esta operação administrativa.'
             : 'Sua conta administrativa não possui permissão para esta ação documental.',
         code: 'ADMIN_CAPABILITY_DENIED',
       });

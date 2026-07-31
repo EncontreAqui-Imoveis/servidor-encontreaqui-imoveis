@@ -1,6 +1,6 @@
-import bcrypt from 'bcryptjs';
 import { RowDataPacket } from 'mysql2';
 import connection from '../database/connection';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 type AdminIdRow = RowDataPacket & {
   id: number;
@@ -19,8 +19,9 @@ async function main(): Promise<void> {
   const email = requiredEnvironment('BOOTSTRAP_ADMIN_EMAIL').toLowerCase();
   const password = requiredEnvironment('BOOTSTRAP_ADMIN_PASSWORD');
 
-  if (password.length < 12) {
-    throw new Error('BOOTSTRAP_ADMIN_PASSWORD deve ter ao menos 12 caracteres.');
+  const passwordError = validateNewPassword(password, 'admin');
+  if (passwordError) {
+    throw new Error(`BOOTSTRAP_ADMIN_PASSWORD: ${passwordError.message}`);
   }
 
   const [existing] = await connection.query<AdminIdRow[]>(
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
     throw new Error('Ja existe um administrador com este e-mail.');
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await hashNewPassword(password);
   await connection.query(
     `
       INSERT INTO admins (name, email, password_hash, role, token_version)

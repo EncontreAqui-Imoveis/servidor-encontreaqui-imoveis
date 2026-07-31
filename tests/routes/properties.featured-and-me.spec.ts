@@ -202,8 +202,10 @@ describe('GET /properties/featured e /properties/me', () => {
       id: 9001,
       title: 'Casa Destaque',
       code: 'RV-9001',
-      broker_name: 'Corretor Público',
     });
+    expect(response.body.properties[0]).not.toHaveProperty('broker_name');
+    expect(response.body.properties[0]).not.toHaveProperty('broker_phone');
+    expect(response.body.properties[0]).not.toHaveProperty('broker_email');
     expect(queryMock).toHaveBeenCalledTimes(3);
   });
 

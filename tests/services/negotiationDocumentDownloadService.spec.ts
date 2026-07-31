@@ -79,6 +79,58 @@ describe('negotiationDocumentDownloadService legal buyer handshake', () => {
     expect(findNegotiationDocumentByIdMock).not.toHaveBeenCalled();
   });
 
+  it('denies an unrelated account before looking up a guessed document ID', async () => {
+    queryNegotiationRowsMock.mockResolvedValueOnce([{
+      id: 'neg-1',
+      proposer_id: 10,
+      advertiser_id: 11,
+      legal_buyer_user_id: 20,
+      handshake_pin: 'a'.repeat(64),
+      handshake_status: 'VERIFIED',
+    }]);
+    const response = createResponse();
+
+    await downloadDocument({
+      params: { id: 'neg-1', documentId: '999' },
+      userId: 99,
+      userRole: 'client',
+    } as any, response as any);
+
+    expect(response.status).toHaveBeenCalledWith(403);
+    expect(findNegotiationDocumentByIdMock).not.toHaveBeenCalled();
+    expect(response.end).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a document from another negotiation when its ID is guessed', async () => {
+    queryNegotiationRowsMock.mockResolvedValueOnce([{
+      id: 'neg-1',
+      proposer_id: 10,
+      advertiser_id: 11,
+      legal_buyer_user_id: null,
+      handshake_pin: null,
+      handshake_status: null,
+    }]);
+    findNegotiationDocumentByIdMock.mockResolvedValueOnce({
+      id: 999,
+      negotiationId: 'neg-other',
+      fileContent: Buffer.from('private-document'),
+      type: 'other',
+      documentType: 'doc_identidade',
+      metadataJson: { owner_side: 'seller' },
+    });
+    const response = createResponse();
+
+    await downloadDocument({
+      params: { id: 'neg-1', documentId: '999' },
+      userId: 10,
+      userRole: 'client',
+    } as any, response as any);
+
+    expect(response.status).toHaveBeenCalledWith(404);
+    expect(response.json).toHaveBeenCalledWith({ error: 'Documento nao encontrado.' });
+    expect(response.end).not.toHaveBeenCalled();
+  });
+
   it('does not allow a verified buyer to bypass seller-document isolation by URL', async () => {
     queryNegotiationRowsMock.mockResolvedValueOnce([{
       id: 'neg-1',

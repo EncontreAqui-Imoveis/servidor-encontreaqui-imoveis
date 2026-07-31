@@ -16,6 +16,7 @@ import { discardExpiredDrafts } from './services/registrationDraftRepository';
 import { discardExpiredPhoneOtps } from './services/phoneOtpService';
 import { ensureBrazilianCityCatalogSeeded } from './services/locationCatalogSeedService';
 import { startSreStatsService, stopSreStatsService } from './services/sreStatsService';
+import { setupPrivacyRetentionWorker } from './services/privacyRetentionService';
 
 const app = createHttpApp();
 const PORT = process.env.PORT || process.env.API_PORT || 3333;
@@ -102,6 +103,7 @@ async function startServer() {
 
   const draftCleanupTimer = setupRegistrationDraftCleanupWorker();
   const phoneOtpCleanupTimer = setupPhoneOtpCleanupWorker();
+  const stopPrivacyRetentionWorker = setupPrivacyRetentionWorker();
 
   const server = app.listen(Number(PORT), HOST, () => {
     console.log(`Servidor rodando em ${HOST}:${PORT} com suporte a UTF-8`);
@@ -112,6 +114,7 @@ async function startServer() {
   server.on('close', () => {
     clearInterval(draftCleanupTimer);
     clearInterval(phoneOtpCleanupTimer);
+    stopPrivacyRetentionWorker?.();
     stopSreStatsService();
   });
 }

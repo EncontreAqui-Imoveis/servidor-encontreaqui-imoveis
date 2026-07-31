@@ -25,7 +25,7 @@ export function signAdminToken(id: number, tokenVersion: unknown) {
   return jwt.sign(
     { id, role: 'admin', token_version: normalizeTokenVersion(tokenVersion) },
     jwtSecret,
-    { expiresIn: '1d' },
+    { expiresIn: '1d', algorithm: 'HS256' },
   );
 }
 
@@ -45,12 +45,12 @@ export function signAdminReauthToken(id: number, tokenVersion: unknown) {
       purpose: ADMIN_REAUTH_PURPOSE,
     },
     jwtSecret,
-    { expiresIn: '10m' },
+    { expiresIn: '10m', algorithm: 'HS256' },
   );
 }
 
 export function verifyAdminReauthToken(token: string): AdminReauthTokenPayload {
-  return jwt.verify(token, jwtSecret) as AdminReauthTokenPayload;
+  return jwt.verify(token, jwtSecret, { algorithms: ['HS256'] }) as AdminReauthTokenPayload;
 }
 
 export function sanitizeAddressInput(input: Parameters<typeof sanitizeAddress>[0]) {

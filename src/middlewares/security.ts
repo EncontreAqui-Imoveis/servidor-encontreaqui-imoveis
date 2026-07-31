@@ -2,12 +2,6 @@ import type { NextFunction, Request, Response } from 'express';
 import type { CorsOptions } from 'cors';
 
 const ONE_YEAR_IN_SECONDS = 31536000;
-const PRODUCTION_FALLBACK_ORIGINS = [
-  'https://painel-adm-encontreaquiimoveis.vercel.app',
-  'https://site-imobiliario-encoreaqui-7b52iuxz7-ctrshift-pms-projects.vercel.app',
-  'https://encontreaquiimoveis.com.br',
-  'https://www.encontreaquiimoveis.com.br',
-];
 const SUPPLEMENTAL_CORS_ENV_KEYS = [
   'PAINELWEB_URL',
   'PANEL_APP_URL',
@@ -132,7 +126,9 @@ export function buildCorsOptions(): CorsOptions {
     'http://localhost:8080',
     'http://127.0.0.1:8080',
   ];
-  const envLocalOrigins = (process.env.CORS_LOCAL_ORIGINS ?? '')
+  const envLocalOrigins = nodeEnv === 'production'
+    ? []
+    : (process.env.CORS_LOCAL_ORIGINS ?? '')
     .split(',')
     .map((origin) => normalizeOrigin(origin))
     .filter((origin) => origin.length > 0);
@@ -141,17 +137,13 @@ export function buildCorsOptions(): CorsOptions {
       ...configuredOrigins,
       ...supplementalOrigins,
       ...envLocalOrigins,
-      // Sempre incluir domínios de produção do site/painel (evita CORS se NODE_ENV ou CORS_ORIGINS no Railway estiverem incompletos).
-      ...PRODUCTION_FALLBACK_ORIGINS,
-      ...defaultLocalOrigins,
+      ...(nodeEnv === 'production' ? [] : defaultLocalOrigins),
     ]),
   );
   const allowedOrigins =
     mergedConfiguredOrigins.length > 0
       ? mergedConfiguredOrigins
-      : nodeEnv === 'production'
-        ? PRODUCTION_FALLBACK_ORIGINS
-        : defaultLocalOrigins;
+      : nodeEnv === 'production' ? [] : defaultLocalOrigins;
   const allowedOriginSet = new Set(allowedOrigins.map((origin) => normalizeOrigin(origin)));
 
   if (allowedOrigins.length === 0) {
@@ -179,10 +171,7 @@ export function buildCorsOptions(): CorsOptions {
       }
 
       const normalizedRequestOrigin = normalizeOrigin(origin);
-      if (
-        allowedOriginSet.has(normalizedRequestOrigin) ||
-        normalizedRequestOrigin.endsWith('.vercel.app')
-      ) {
+      if (allowedOriginSet.has(normalizedRequestOrigin)) {
         callback(null, true);
         return;
       }

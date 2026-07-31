@@ -177,6 +177,32 @@ describe('negotiationSignedProposalService', () => {
     expect(res.end).toHaveBeenCalledWith(Buffer.from('%PDF-proposal%'));
   });
 
+  it('denies an unrelated account before looking up the proposal document', async () => {
+    queryMock.mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        capturing_broker_id: 30003,
+        selling_broker_id: null,
+        proposer_id: 30003,
+        advertiser_id: 40004,
+      },
+    ]);
+
+    const req = {
+      userId: 99999,
+      userRole: 'client',
+      params: { id: 'neg-1' },
+    } as any;
+    const res = createMockResponse();
+
+    await downloadLatestProposal(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Acesso negado à proposta.' });
+    expect(findLatestNegotiationDocumentByTypeMock).not.toHaveBeenCalled();
+    expect(res.end).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when uploaded file is not a PDF', async () => {
     queryMock.mockResolvedValueOnce([
       [

@@ -78,6 +78,10 @@ describe('GET /negotiations/:id/documents/:documentId/download headers', () => {
     expect(response.headers['content-disposition']).toContain(
       'filename="contrato_final_assinado.pdf"'
     );
+    expect(response.headers['cache-control']).toBe('private, no-store, max-age=0');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
+    expect(response.headers['content-security-policy']).toBe('sandbox');
   });
 
   it('returns 403 when authenticated user does not own the negotiation (BOLA/IDOR guard)', async () => {

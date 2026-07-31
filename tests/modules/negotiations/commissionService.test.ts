@@ -74,9 +74,10 @@ describe('CommissionService', () => {
     });
 
     eventBus.emitDealClosed('neg-err');
-    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(errorSpy).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalled();
+    });
     errorSpy.mockRestore();
   });
 });

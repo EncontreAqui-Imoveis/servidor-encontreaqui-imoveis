@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import {
   ApplicationError,
@@ -16,6 +15,7 @@ import {
   assertAccountNameAvailable,
   isDuplicateAccountNameError,
 } from './userAccountNameService';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 function normalizeDigits(value: unknown): string {
   if (value === undefined || value === null) {
@@ -78,6 +78,14 @@ export async function createBrokerAccountAdmin(params: {
   if (!name || !email || !creci || !password || !phone) {
     throw new InvalidInputError('Nome, email, telefone, senha e CRECI são obrigatórios.');
   }
+  const passwordError = validateNewPassword(password);
+  if (passwordError) {
+    throw new InvalidInputError(passwordError.message, {
+      code: passwordError.code,
+      min_length: passwordError.minLength,
+      max_length: passwordError.maxLength,
+    });
+  }
   if (!isValidEmail(email)) {
     throw new InvalidInputError('Email inválido.');
   }
@@ -123,8 +131,7 @@ export async function createBrokerAccountAdmin(params: {
 
     await assertAccountNameAvailable(db, name);
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(String(password), salt);
+    const passwordHash = await hashNewPassword(String(password));
     const requestedStatus = normalizeStatus(status);
     const brokerStatus = requestedStatus === 'approved' ? 'approved' : 'pending_verification';
     const documentStatus = brokerStatus === 'approved' ? 'approved' : 'pending';
@@ -219,6 +226,14 @@ export async function createUserAccountAdmin(params: {
   if (!name || !email || !phone || !password) {
     throw new InvalidInputError('Nome, email, telefone e senha são obrigatórios.');
   }
+  const passwordError = validateNewPassword(password);
+  if (passwordError) {
+    throw new InvalidInputError(passwordError.message, {
+      code: passwordError.code,
+      min_length: passwordError.minLength,
+      max_length: passwordError.maxLength,
+    });
+  }
   if (!isValidEmail(email)) {
     throw new InvalidInputError('Email inválido.');
   }
@@ -258,8 +273,7 @@ export async function createUserAccountAdmin(params: {
 
     await assertAccountNameAvailable(adminDb, name);
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(String(password), salt);
+    const passwordHash = await hashNewPassword(String(password));
     const [userResult] = await adminDb.query<ResultSetHeader>(
       'INSERT INTO users (name, email, phone, password_hash, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [

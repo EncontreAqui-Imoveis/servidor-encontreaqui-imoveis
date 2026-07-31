@@ -127,9 +127,11 @@ describe('propertyDiscoveryService', () => {
     expect(result.properties[0]).toMatchObject({
       id: 1,
       title: 'Casa A',
-      broker_name: 'Broker A',
       images: ['a.jpg', 'b.jpg'],
     });
+    expect(result.properties[0]).not.toHaveProperty('broker_name');
+    expect(result.properties[0]).not.toHaveProperty('broker_phone');
+    expect(result.properties[0]).not.toHaveProperty('broker_email');
 
     const [featuredSql, featuredParams] = runPropertyQueryMock.mock.calls[0];
     const placeholderCount = (String(featuredSql).match(/\?/g) ?? []).length;

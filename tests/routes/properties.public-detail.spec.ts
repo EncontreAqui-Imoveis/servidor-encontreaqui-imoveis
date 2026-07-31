@@ -157,6 +157,10 @@ describe('GET /public/properties/:id', () => {
       purpose: 'Venda',
       images: ['https://cdn/1.jpg', 'https://cdn/2.jpg'],
     });
+    expect(response.body).not.toHaveProperty('broker_phone');
+    expect(response.body).not.toHaveProperty('broker_email');
+    expect(response.body).not.toHaveProperty('activeNegotiationId');
+    expect(response.body).not.toHaveProperty('latestContractId');
     const normalizedAmenities = Array.isArray(response.body.amenities)
       ? response.body.amenities
           .map((amenity: string) => toCanonicalAmenity(amenity))

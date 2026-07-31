@@ -3,12 +3,22 @@ import { authController } from '../controllers/AuthController';
 import { registrationDraftController } from '../controllers/RegistrationDraftController';
 import { authMiddleware } from '../middlewares/auth';
 import { brokerDocsUpload } from '../middlewares/uploadMiddleware';
-import { createAuthLightLimiter, createAuthLoginLimiter, createAuthSensitiveLimiter } from '../config/rateLimiters';
+import {
+  createAuthLightLimiter,
+  createAuthLoginLimiter,
+  createAuthRegistrationLimiter,
+  createAuthSensitiveLimiter,
+  createOtpVerificationLimiter,
+  createPreAuthUploadLimiter,
+} from '../config/rateLimiters';
 
 const authRoutes = Router();
 const authSensitiveLimiter = createAuthSensitiveLimiter();
 const authLightLimiter = createAuthLightLimiter();
 const authLoginLimiter = createAuthLoginLimiter();
+const authRegistrationLimiter = createAuthRegistrationLimiter();
+const otpVerificationLimiter = createOtpVerificationLimiter();
+const preAuthUploadLimiter = createPreAuthUploadLimiter();
 
 function handleDraftUploadError(
   error: unknown,
@@ -38,8 +48,8 @@ function handleDraftUploadError(
   });
 }
 
-authRoutes.post('/register', (req, res) => authController.register(req, res));
-authRoutes.post('/register/draft', authLightLimiter, (req, res) =>
+authRoutes.post('/register', authRegistrationLimiter, (req, res) => authController.register(req, res));
+authRoutes.post('/register/draft', authRegistrationLimiter, (req, res) =>
   registrationDraftController.create(req, res),
 );
 authRoutes.patch('/register/draft/:draftId', authLightLimiter, (req, res) =>
@@ -63,6 +73,7 @@ authRoutes.post('/register/draft/:draftId/verify-phone/confirm', authSensitiveLi
 authRoutes.post(
   '/register/draft/:draftId/submit-documents',
   authSensitiveLimiter,
+  preAuthUploadLimiter,
   brokerDocsUpload.fields([
     { name: 'crecifront', maxCount: 1 },
     { name: 'creciFront', maxCount: 1 },
@@ -91,8 +102,15 @@ authRoutes.post('/otp/request', authSensitiveLimiter, (req, res) =>
 authRoutes.post('/otp/resend', authSensitiveLimiter, (req, res) =>
   authController.resendOtp(req, res)
 );
-authRoutes.post('/otp/verify', (req, res) => authController.verifyOtp(req, res));
-authRoutes.post('/verify-phone', (req, res) => authController.verifyPhone(req, res));
+authRoutes.post('/otp/verify', otpVerificationLimiter, (req, res) => authController.verifyOtp(req, res));
+// Retired: the previous public lookup returned profile data by e-mail.
+// Phone verification remains available only in the registration-draft flow.
+authRoutes.post('/verify-phone', authSensitiveLimiter, (_req, res) =>
+  res.status(410).json({
+    code: 'LEGACY_ENDPOINT_RETIRED',
+    error: 'Este endpoint foi desativado. Use a verificação no cadastro.',
+  }),
+);
 authRoutes.post('/email-verification/send', authSensitiveLimiter, (req, res) =>
   authController.sendEmailVerification(req, res)
 );

@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -53,6 +54,30 @@ type StoredObjectDescriptor = {
   etag: string | null;
 };
 
+export type ManagedNegotiationDocumentStorageObject = {
+  bucket: string;
+  key: string;
+  sizeBytes: number;
+  etag: string | null;
+  lastModified: Date | null;
+};
+
+export class InvalidNegotiationDocumentContentError extends Error {
+  readonly statusCode = 422;
+  readonly code = 'DOCUMENT_CONTENT_TYPE_MISMATCH';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidNegotiationDocumentContentError';
+  }
+}
+
+export function isInvalidNegotiationDocumentContentError(
+  error: unknown
+): error is InvalidNegotiationDocumentContentError {
+  return error instanceof InvalidNegotiationDocumentContentError;
+}
+
 let cachedR2Client: S3Client | null = null;
 
 function parseJsonObjectSafe(value: unknown): Record<string, unknown> {
@@ -94,6 +119,10 @@ function getR2Config() {
     String(process.env.R2_ENDPOINT ?? '').trim() ||
     `https://${accountId}.r2.cloudflarestorage.com`;
 
+  if (process.env.NODE_ENV === 'production' && !/^https:\/\//i.test(endpoint)) {
+    throw new Error('R2_ENDPOINT deve usar HTTPS em produção.');
+  }
+
   return {
     accountId,
     accessKeyId,
@@ -103,6 +132,11 @@ function getR2Config() {
     prefix,
     endpoint,
   };
+}
+
+function getManagedStoragePrefix(): string {
+  const config = getR2Config();
+  return [config.prefix, 'negotiations'].filter(Boolean).join('/') + '/';
 }
 
 function getR2Client(): S3Client {
@@ -149,6 +183,47 @@ const STORABLE_CONTENT_TYPES = new Set([
   'image/png',
   'image/webp',
 ]);
+
+function hasPdfSignature(content: Buffer): boolean {
+  return content.subarray(0, Math.min(content.length, 1024)).includes(Buffer.from('%PDF-'));
+}
+
+function hasJpegSignature(content: Buffer): boolean {
+  return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+}
+
+function hasPngSignature(content: Buffer): boolean {
+  return content.length >= 8 && content.subarray(0, 8).equals(
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  );
+}
+
+function hasWebpSignature(content: Buffer): boolean {
+  return content.length >= 12 &&
+    content.subarray(0, 4).equals(Buffer.from('RIFF')) &&
+    content.subarray(8, 12).equals(Buffer.from('WEBP'));
+}
+
+export function assertNegotiationDocumentContentIntegrity(
+  content: Buffer,
+  contentType: string
+): void {
+  if (!Buffer.isBuffer(content) || content.length === 0) {
+    throw new InvalidNegotiationDocumentContentError('Arquivo vazio ou inválido.');
+  }
+
+  const isValid =
+    (contentType === 'application/pdf' && hasPdfSignature(content)) ||
+    (contentType === 'image/jpeg' && hasJpegSignature(content)) ||
+    (contentType === 'image/png' && hasPngSignature(content)) ||
+    (contentType === 'image/webp' && hasWebpSignature(content));
+
+  if (!isValid) {
+    throw new InvalidNegotiationDocumentContentError(
+      'O conteúdo do arquivo não corresponde ao formato informado.'
+    );
+  }
+}
 
 function resolveContentType(
   type: string,
@@ -307,6 +382,69 @@ export async function deleteNegotiationDocumentObject(
   );
 }
 
+/**
+ * Lists only objects managed by this service. It is intentionally scoped to
+ * the document prefix so an operational reconciliation can never inspect or
+ * delete unrelated bucket contents.
+ */
+export async function listManagedNegotiationDocumentStorageObjects(): Promise<
+  ManagedNegotiationDocumentStorageObject[]
+> {
+  const config = getR2Config();
+  const prefix = getManagedStoragePrefix();
+  const client = getR2Client();
+  const objects: ManagedNegotiationDocumentStorageObject[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: config.bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    for (const item of response.Contents ?? []) {
+      const key = String(item.Key ?? '').trim();
+      if (!key || !key.startsWith(prefix)) continue;
+      objects.push({
+        bucket: config.bucket,
+        key,
+        sizeBytes: Number(item.Size ?? 0),
+        etag: item.ETag ?? null,
+        lastModified: item.LastModified ?? null,
+      });
+    }
+
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return objects;
+}
+
+/**
+ * Used only by the reconciliation command. The bucket and prefix checks make
+ * a destructive operational command incapable of reaching another R2 area.
+ */
+export async function deleteManagedNegotiationDocumentStorageObject(params: {
+  bucket: string;
+  key: string;
+}): Promise<void> {
+  const config = getR2Config();
+  const prefix = getManagedStoragePrefix();
+  if (params.bucket !== config.bucket || !params.key.startsWith(prefix)) {
+    throw new Error('Objeto fora do escopo gerenciado de documentos R2.');
+  }
+
+  await getR2Client().send(
+    new DeleteObjectCommand({
+      Bucket: config.bucket,
+      Key: params.key,
+    })
+  );
+}
+
 export async function storeNegotiationDocumentToR2(
   params: UploadNegotiationDocumentParams
 ): Promise<number> {
@@ -317,6 +455,7 @@ export async function storeNegotiationDocumentToR2(
     metadata,
     params.contentType
   );
+  assertNegotiationDocumentContentIntegrity(params.content, contentType);
   const storageKey = buildStorageKey({
     negotiationId: params.negotiationId,
     documentType: params.documentType,

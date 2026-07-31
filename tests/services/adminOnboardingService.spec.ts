@@ -68,7 +68,7 @@ describe('adminOnboardingService', () => {
         name: 'Cliente Teste',
         email: 'cliente@test.com',
         phone: '(64) 99999-0000',
-        password: '123456',
+        password: 'SenhaMuitoSegura123',
         street: 'Rua A',
         number: '10',
         bairro: 'Centro',
@@ -105,7 +105,7 @@ describe('adminOnboardingService', () => {
         city: 'Rio Verde',
         state: 'GO',
         cep: '75900000',
-        password: '123456',
+        password: 'SenhaMuitoSegura123',
         status: 'approved',
       },
       files: {

@@ -11,6 +11,12 @@ const DEFAULT_AUTH_LIMIT = 60;
 const DEFAULT_AUTH_LIGHT_LIMIT = 180;
 const DEFAULT_ADMIN_AUTH_LIMIT = 30;
 const DEFAULT_AUTH_ACCOUNT_LIMIT = 5;
+const DEFAULT_REGISTRATION_IP_LIMIT = 30;
+const DEFAULT_REGISTRATION_ACCOUNT_LIMIT = 4;
+const DEFAULT_OTP_VERIFY_IP_LIMIT = 60;
+const DEFAULT_OTP_VERIFY_ACCOUNT_LIMIT = 5;
+const DEFAULT_PREAUTH_UPLOAD_IP_LIMIT = 20;
+const DEFAULT_PREAUTH_UPLOAD_DRAFT_LIMIT = 6;
 
 function resolveNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -251,6 +257,27 @@ function accountRateLimitKey(req: Request): string {
   return `account:${createHash('sha256').update(`auth:${account}`).digest('hex')}`;
 }
 
+function requestFieldRateLimitKey(req: Request, fields: string[], scope: string): string {
+  const body = req.body as Record<string, unknown> | undefined;
+  const params = req.params as Record<string, unknown> | undefined;
+  const query = req.query as Record<string, unknown> | undefined;
+
+  for (const field of fields) {
+    const candidate = body?.[field] ?? params?.[field] ?? query?.[field];
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+
+    const normalized = candidate.trim().toLowerCase();
+    if (normalized) {
+      // Do not retain raw e-mails, phone numbers, OTP sessions, or draft IDs in Redis.
+      return `${scope}:${createHash('sha256').update(`${scope}:${normalized}`).digest('hex')}`;
+    }
+  }
+
+  return `ip:${req.ip}`;
+}
+
 function chainLimiters(...limiters: RequestHandler[]): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     let index = 0;
@@ -322,6 +349,105 @@ export function createAuthLightLimiter() {
     message: 'Muitas tentativas de consulta de autenticacao. Tente novamente em instantes.',
     prefix: 'rl:auth:light:',
   });
+}
+
+/**
+ * Registration is public, so it needs two independent ceilings: one for
+ * volumetric IP abuse and one for repeated attempts against the same e-mail.
+ */
+export function createAuthRegistrationLimiter(): RequestHandler {
+  const windowMs = resolveNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
+  const ipLimit = resolveNumber(
+    process.env.AUTH_REGISTRATION_RATE_LIMIT_MAX,
+    DEFAULT_REGISTRATION_IP_LIMIT,
+  );
+  const accountLimit = resolveNumber(
+    process.env.AUTH_REGISTRATION_ACCOUNT_RATE_LIMIT_MAX,
+    DEFAULT_REGISTRATION_ACCOUNT_LIMIT,
+  );
+  const message = 'Muitas tentativas de cadastro. Tente novamente em instantes.';
+
+  return chainLimiters(
+    createLimiter({
+      windowMs,
+      limit: ipLimit,
+      message,
+      prefix: 'rl:auth:registration:ip:',
+    }),
+    createLimiter({
+      windowMs,
+      limit: accountLimit,
+      message,
+      prefix: 'rl:auth:registration:account:',
+      keyGenerator: (req) => requestFieldRateLimitKey(req, ['email'], 'registration'),
+    }),
+  );
+}
+
+/**
+ * OTP validation is keyed by the opaque session token. An attacker can use
+ * many IPs, but cannot gain extra guesses for the same verification session.
+ */
+export function createOtpVerificationLimiter(): RequestHandler {
+  const windowMs = resolveNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
+  const ipLimit = resolveNumber(
+    process.env.OTP_VERIFY_RATE_LIMIT_MAX,
+    DEFAULT_OTP_VERIFY_IP_LIMIT,
+  );
+  const sessionLimit = resolveNumber(
+    process.env.OTP_VERIFY_SESSION_RATE_LIMIT_MAX,
+    DEFAULT_OTP_VERIFY_ACCOUNT_LIMIT,
+  );
+  const message = 'Muitas tentativas de verificacao. Tente novamente em instantes.';
+
+  return chainLimiters(
+    createLimiter({
+      windowMs,
+      limit: ipLimit,
+      message,
+      prefix: 'rl:auth:otp-verify:ip:',
+    }),
+    createLimiter({
+      windowMs,
+      limit: sessionLimit,
+      message,
+      prefix: 'rl:auth:otp-verify:session:',
+      keyGenerator: (req) => requestFieldRateLimitKey(req, ['sessionToken'], 'otp-session'),
+    }),
+  );
+}
+
+/**
+ * Uploads before authentication are expensive because Multer buffers files.
+ * Limit by both source IP and the capability-scoped draft ID.
+ */
+export function createPreAuthUploadLimiter(): RequestHandler {
+  const windowMs = resolveNumber(process.env.AUTH_RATE_LIMIT_WINDOW_MS, DEFAULT_WINDOW_MS);
+  const ipLimit = resolveNumber(
+    process.env.PREAUTH_UPLOAD_RATE_LIMIT_MAX,
+    DEFAULT_PREAUTH_UPLOAD_IP_LIMIT,
+  );
+  const draftLimit = resolveNumber(
+    process.env.PREAUTH_UPLOAD_DRAFT_RATE_LIMIT_MAX,
+    DEFAULT_PREAUTH_UPLOAD_DRAFT_LIMIT,
+  );
+  const message = 'Muitos envios de documento. Tente novamente em instantes.';
+
+  return chainLimiters(
+    createLimiter({
+      windowMs,
+      limit: ipLimit,
+      message,
+      prefix: 'rl:auth:preauth-upload:ip:',
+    }),
+    createLimiter({
+      windowMs,
+      limit: draftLimit,
+      message,
+      prefix: 'rl:auth:preauth-upload:draft:',
+      keyGenerator: (req) => requestFieldRateLimitKey(req, ['draftId'], 'draft-upload'),
+    }),
+  );
 }
 
 export function createAdminAuthLimiter() {

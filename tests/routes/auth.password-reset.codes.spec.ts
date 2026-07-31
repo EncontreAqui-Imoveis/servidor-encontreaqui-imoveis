@@ -156,7 +156,7 @@ describe('POST /auth/password-reset/*', () => {
       .send({
         email: 'user@test.com',
         reset_session_token: 'reset-session-token',
-        new_password: '123456',
+        new_password: 'SenhaMuitoSegura123',
       });
 
     expect(response.status).toBe(200);

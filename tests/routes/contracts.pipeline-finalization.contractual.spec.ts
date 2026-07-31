@@ -419,6 +419,69 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     });
   });
 
+  it('replays finalization with the same commission data without duplicating side effects', async () => {
+    contractState = createContractState({
+      status: 'AWAITING_SIGNATURES',
+      property_purpose: 'Venda',
+    });
+    evidenceCounts = {
+      signedContract: 1,
+      paymentReceipt: 1,
+      inspectionBoleto: 0,
+    };
+    const commissionData = {
+      valorBaseComissao: 10000,
+      comissaoCaptador: 5000,
+      comissaoVendedor: 3000,
+      taxaPlataforma: 2000,
+    };
+
+    const first = await request(app)
+      .post('/admin/contracts/contract-1/finalize')
+      .send({ commissionData });
+    const second = await request(app)
+      .post('/admin/contracts/contract-1/finalize')
+      .send({ commissionData });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.body.idempotent).toBe(true);
+    expect(txMock.query.mock.calls.filter(([sql]) =>
+      String(sql).includes("status = 'FINALIZED'")
+    )).toHaveLength(1);
+  });
+
+  it('rejects a finalization retry with different commission data', async () => {
+    contractState = createContractState({
+      status: 'FINALIZED',
+      property_purpose: 'Venda',
+      commission_data: {
+        valorBaseComissao: 10000,
+        valorVenda: 10000,
+        comissaoCaptador: 5000,
+        comissaoVendedor: 3000,
+        taxaPlataforma: 2000,
+      },
+    });
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/finalize')
+      .send({
+        commissionData: {
+          valorBaseComissao: 10000,
+          comissaoCaptador: 4000,
+          comissaoVendedor: 4000,
+          taxaPlataforma: 2000,
+        },
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('CONTRACT_ALREADY_FINALIZED_WITH_DIFFERENT_COMMISSION');
+    expect(txMock.query.mock.calls.filter(([sql]) =>
+      String(sql).includes("status = 'FINALIZED'")
+    )).toHaveLength(0);
+  });
+
   it('rejects finalization when financial split exceeds the commission base', async () => {
     contractState = createContractState({
       status: 'AWAITING_SIGNATURES',

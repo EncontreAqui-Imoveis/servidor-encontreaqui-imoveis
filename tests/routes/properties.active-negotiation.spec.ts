@@ -14,7 +14,11 @@ vi.mock('../../src/database/connection', () => ({
 }));
 
 vi.mock('../../src/middlewares/auth', () => ({
-  authMiddleware: (_req: any, _res: any, next: () => void) => next(),
+  authMiddleware: (req: any, _res: any, next: () => void) => {
+    req.userId = 30003;
+    req.userRole = 'broker';
+    next();
+  },
   isBroker: (_req: any, _res: any, next: () => void) => next(),
   isClient: (_req: any, _res: any, next: () => void) => next(),
 }));

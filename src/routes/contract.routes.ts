@@ -36,13 +36,15 @@ contractRoutes.get('/contracts/negotiation/:negotiationId', authMiddleware, cont
   contractController.getByNegotiationId(req, res)
 );
 
-contractRoutes.get('/contracts/negotiation/:negotiationId/property', authMiddleware, (req, res) =>
+contractRoutes.get('/contracts/negotiation/:negotiationId/property', authMiddleware, contractAuthMiddleware, (req, res) =>
   contractController.getPropertyByNegotiationId(req, res)
 );
 
 contractRoutes.patch(
   '/contracts/negotiation/:negotiationId/selling-broker',
   authMiddleware,
+  isAdmin,
+  requireAdminCapability('manage_contract_workflow'),
   (req, res) => contractController.updateSellingBrokerByNegotiation(req, res)
 );
 

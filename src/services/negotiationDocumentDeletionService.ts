@@ -337,7 +337,7 @@ export async function processPendingNegotiationDocumentDeletionJobs(
           jobId: job.id,
           negotiationId: job.negotiation_id,
           documentType: job.document_type ?? null,
-          storageKey: job.storage_key,
+          storageKeyHash: toStorageKeyHash(job.storage_key).slice(0, 16),
           error,
         });
       }

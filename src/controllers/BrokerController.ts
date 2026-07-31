@@ -13,6 +13,7 @@ import {
     isDuplicateAccountNameError,
 } from '../services/userAccountNameService';
 import { buildPropertyOwnerListingFilters } from '../services/propertyOwnerListingFilterService';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 const jwtSecret = requireEnv("JWT_SECRET");
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -88,6 +89,16 @@ class BrokerController {
         } = req.body;
         const resolvedAgencyId = agencyId ?? agency_id ?? null;
         const normalizedCreci = normalizeCreci(creci);
+        const passwordError = validateNewPassword(password);
+
+        if (passwordError) {
+            return res.status(400).json({
+                code: passwordError.code,
+                error: passwordError.message,
+                min_length: passwordError.minLength,
+                max_length: passwordError.maxLength,
+            });
+        }
 
         if (!hasValidCreci(normalizedCreci)) {
             return res.status(400).json({
@@ -134,7 +145,7 @@ class BrokerController {
                 });
             }
 
-            const passwordHash = await bcrypt.hash(password, 8);
+            const passwordHash = await hashNewPassword(String(password));
             const [userResult] = await brokerDb.query(
                 "INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
@@ -198,6 +209,15 @@ class BrokerController {
         if (!name || !email || !password || !normalizedCreci) {
             return res.status(400).json({ error: "Nome, email, senha e CRECI s?o obrigat?rios." });
         }
+        const passwordError = validateNewPassword(password);
+        if (passwordError) {
+            return res.status(400).json({
+                code: passwordError.code,
+                error: passwordError.message,
+                min_length: passwordError.minLength,
+                max_length: passwordError.maxLength,
+            });
+        }
 
         if (!hasValidCreci(normalizedCreci)) {
             return res.status(400).json({
@@ -257,7 +277,7 @@ class BrokerController {
                 return res.status(409).json({ error: "Este CRECI já está em uso." });
             }
 
-            const passwordHash = await bcrypt.hash(password, 8);
+            const passwordHash = await hashNewPassword(String(password));
             const [userResult] = await db.query(
                 "INSERT INTO users (name, email, password_hash, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
@@ -440,7 +460,7 @@ class BrokerController {
             const token = jwt.sign(
                 { id: user.id, role: "broker" },
                 jwtSecret,
-                { expiresIn: "1d" }
+                { expiresIn: "1d", algorithm: "HS256" }
             );
 
             const { password_hash, ...userWithoutPassword } = user;

@@ -24,7 +24,7 @@ export function signUserToken(
   return jwt.sign(
     { id: userId, role, token_version: normalizeTokenVersion(tokenVersion) },
     jwtSecret,
-    { expiresIn },
+    { expiresIn, algorithm: 'HS256' },
   );
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createHttpApp } from '../../src/httpApp';
 
@@ -12,8 +12,22 @@ const localOrigins = [
 const preflightHeaders = 'x-draft-token,x-draft-id,authorization,content-type';
 
 describe('CORS preflight para rotas de draft', () => {
-  const app = createHttpApp();
+  let app: ReturnType<typeof createHttpApp>;
   const draftId = 'draft-abc';
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalCorsOrigins = process.env.CORS_ORIGINS;
+
+  beforeAll(() => {
+    // Produção só aceita origens configuradas explicitamente.
+    process.env.NODE_ENV = 'production';
+    process.env.CORS_ORIGINS = origin;
+    app = createHttpApp();
+  });
+
+  afterAll(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    process.env.CORS_ORIGINS = originalCorsOrigins;
+  });
 
   const optionsRequest = async (route: string, method: string) => {
     return request(app)
@@ -55,7 +69,7 @@ describe('CORS preflight para rotas de draft', () => {
     assertCorsHeaders(await optionsRequest(`/auth/register/draft/${draftId}/discard`, 'POST'));
   });
 
-  it('aceita localhost e 127.0.0.1 no preflight de PATCH draft', async () => {
+  it('rejeita origens locais quando não foram configuradas em produção', async () => {
     for (const localOrigin of localOrigins) {
       const response = await request(app)
         .options(`/auth/register/draft/${draftId}`)
@@ -63,9 +77,8 @@ describe('CORS preflight para rotas de draft', () => {
         .set('Access-Control-Request-Method', 'PATCH')
         .set('Access-Control-Request-Headers', preflightHeaders);
 
-      assertCorsHeaders(response);
       expect(response.status).toBe(204);
-      expect(response.headers['access-control-allow-origin']).toBe(localOrigin);
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
     }
   });
 });

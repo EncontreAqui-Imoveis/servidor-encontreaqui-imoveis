@@ -121,7 +121,7 @@ export function signUserToken(id: number, role: ProfileType, tokenVersion: unkno
   return jwt.sign(
     { id, role, token_version: normalizeTokenVersion(tokenVersion) },
     jwtSecret,
-    { expiresIn: '7d' },
+    { expiresIn: '7d', algorithm: 'HS256' },
   );
 }
 

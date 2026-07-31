@@ -1,4 +1,3 @@
-import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { ApplicationErrorCode } from '../errors/ApplicationError';
@@ -40,6 +39,7 @@ import {
   assertAccountNameAvailable,
   isDuplicateAccountNameError,
 } from './userAccountNameService';
+import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 export type DraftFinalizeAction = 'send_later' | 'submit_documents';
 
@@ -661,8 +661,9 @@ export async function createRegistrationDraft(input: {
   const profileType = normalizeProfileType(input.profileType);
   const normalizedProvider = normalizeDraftAuthProvider(input.authProvider);
   const password = String(input.password ?? '');
-  if (normalizedProvider === 'email' && password.trim().length < 6) {
-    throw draftError('DRAFT_PASSWORD_INVALID', 'Senha obrigatoria com 6 caracteres no minimo.');
+  const passwordError = normalizedProvider === 'email' ? validateNewPassword(password) : null;
+  if (passwordError) {
+    throw draftError('DRAFT_PASSWORD_INVALID', passwordError.message);
   }
 
   const [existingUsers] = await authDb.query<RowDataPacket[]>(
@@ -725,7 +726,7 @@ export async function createRegistrationDraft(input: {
     );
   }
 
-  const passwordHash = normalizedProvider === 'email' ? await bcrypt.hash(password, 8) : null;
+  const passwordHash = normalizedProvider === 'email' ? await hashNewPassword(password) : null;
   const passwordHashExpiresAt = passwordHash
     ? new Date(now().getTime() + getRegistrationDraftTtlMinutes() * 60 * 1000)
     : null;

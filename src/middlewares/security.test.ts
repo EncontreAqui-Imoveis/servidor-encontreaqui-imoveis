@@ -184,7 +184,7 @@ describe('buildCorsOptions', () => {
     originFn('https://painel-adm-encontreaquiimoveis.vercel.app', (_err, isAllowed) => {
       allowed = isAllowed;
     });
-    expect(allowed).toBe(true);
+    expect(allowed).toBe(false);
 
     originFn('https://malicioso.exemplo.com', (_err, isAllowed) => {
       allowed = isAllowed;

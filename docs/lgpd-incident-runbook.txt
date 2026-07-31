@@ -1,0 +1,39 @@
+RUNBOOK DE INCIDENTE COM DADOS PESSOAIS - ENCONTRE AQUI
+Versao: 1.0 - 2026-07-31
+
+ESCOPO
+Usar em suspeita de acesso indevido, perda, alteracao, vazamento, envio de
+dados a terceiro indevido, segredo exposto ou indisponibilidade que afete dados.
+
+1. CONTER
+- Registrar hora, ambiente, pessoa que detectou e request IDs, sem copiar PII.
+- Revogar segredo, token ou sessao potencialmente exposto.
+- Bloquear rota, conta, worker ou integracao se necessario.
+- Nao apagar logs, objetos ou bancos antes de preservar a evidencia minima.
+
+2. AVALIAR
+- Identificar sistemas, categorias de dados, periodo e quantidade aproximada.
+- Verificar se houve acesso, exfiltracao, alteracao ou apenas tentativa bloqueada.
+- Acionar responsavel de privacidade/juridico para decidir comunicacoes.
+
+3. CORRIGIR E RECUPERAR
+- Corrigir causa-raiz, testar localmente e retestar o fluxo afetado.
+- Rotacionar credenciais comprometidas.
+- Reconciliar banco/storage se documentos forem envolvidos.
+
+4. COMUNICAR
+- O responsavel de privacidade e o juridico definem se ha comunicacao a
+  titulares ou ANPD, prazo, conteudo e evidencias necessarias.
+- Nao comunicar detalhes tecnicos, credenciais, CPF, URLs de storage ou IDs
+  internos em canais publicos.
+
+5. ENCERRAR
+- Registrar impacto, decisoes, acoes, versao da correcao e responsavel.
+- Manter somente o registro minimo pelo prazo definido na politica.
+
+CONTATOS A PREENCHER ANTES DE PRODUCAO
+- Responsavel tecnico:
+- Responsavel de privacidade/encarregado:
+- Juridico:
+- Responsavel operacional:
+- Canal de emergencia:

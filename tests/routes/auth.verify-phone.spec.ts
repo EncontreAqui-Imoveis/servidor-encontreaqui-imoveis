@@ -24,6 +24,15 @@ vi.mock('../../src/config/firebaseAdmin', () => ({
   },
 }));
 
+vi.mock('../../src/config/rateLimiters', () => ({
+  createAuthLightLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  createAuthLoginLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  createAuthSensitiveLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  createAuthRegistrationLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  createOtpVerificationLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  createPreAuthUploadLimiter: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
+
 describe('POST /auth/verify-phone', () => {
   let app: express.Express;
 
@@ -33,73 +42,34 @@ describe('POST /auth/verify-phone', () => {
     app = express();
     app.use(express.json());
     app.use('/auth', authRoutes);
-  });
+  }, 30000);
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('returns 400 when email is missing', async () => {
+  it('retires the public profile lookup without querying user data', async () => {
     const response = await request(app)
       .post('/auth/verify-phone')
-      .send({});
+      .send({ email: 'qualquer@teste.com' });
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(410);
     expect(response.body).toEqual({
-      error: 'Email e obrigatorio.',
+      code: 'LEGACY_ENDPOINT_RETIRED',
+      error: 'Este endpoint foi desativado. Use a verificação no cadastro.',
     });
+    expect(queryMock).not.toHaveBeenCalled();
   });
 
-  it('returns 404 when user does not exist', async () => {
-    queryMock.mockResolvedValueOnce([[]]);
-
-    const response = await request(app)
-      .post('/auth/verify-phone')
-      .send({ email: 'naoexiste@teste.com' });
-
-    expect(response.status).toBe(404);
-    expect(response.body).toEqual({
-      error: 'Usuario nao encontrado.',
-    });
-  });
-
-  it('returns nested broker payload with pending_verification status', async () => {
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 30003,
-          name: 'PedroMCorretor',
-          email: 'testec@gmail.com',
-          phone: '12345678901',
-          street: 'Rua 105',
-          number: '323',
-          complement: 'asdds',
-          bairro: 'De Lourdes',
-          city: 'Rio Verde',
-          state: 'GO',
-          cep: '75908220',
-          broker_id: 30003,
-          broker_status: 'pending_verification',
-          creci: '343434-F',
-        },
-      ],
-    ]);
-
-    const response = await request(app)
-      .post('/auth/verify-phone')
-      .send({ email: 'testec@gmail.com' });
+  it('returns a generic result from check-email without querying account data', async () => {
+    const response = await request(app).get('/auth/check-email?email=qualquer@teste.com');
 
     expect(response.status).toBe(200);
-    expect(response.body.user.role).toBe('broker');
-    expect(response.body.user.broker).toEqual({
-      id: 30003,
-      status: 'pending_documents',
-      creci: '343434-F',
+    expect(response.body).toEqual({
+      exists: false,
+      hasFirebaseUid: false,
+      hasPassword: false,
     });
-    expect(response.body.broker).toEqual({
-      id: 30003,
-      status: 'pending_documents',
-      creci: '343434-F',
-    });
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });

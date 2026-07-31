@@ -231,6 +231,10 @@ export async function downloadDocument(
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', buildAttachmentDisposition(filename));
     res.setHeader('Content-Length', document.fileContent.length.toString());
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Content-Security-Policy', 'sandbox');
 
     res.end(document.fileContent);
     return res;

@@ -265,6 +265,10 @@ export async function downloadLatestProposal(
     res.setHeader('Content-Disposition', 'attachment; filename="proposta.pdf"');
     res.setHeader('Content-Length', document.fileContent.length.toString());
     res.setHeader('X-Document-Id', String(document.id));
+    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Content-Security-Policy', 'sandbox');
 
     res.end(document.fileContent);
     return res;

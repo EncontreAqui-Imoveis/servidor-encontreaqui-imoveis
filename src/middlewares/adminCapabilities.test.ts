@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   forbidRestrictedAdminDocumentCreate,
   getAdminCapabilities,
+  requireAdminCapability,
   requireRestrictedAdminDocumentReplacement,
 } from './adminCapabilities';
 import type { AuthRequest } from './auth';
@@ -33,6 +34,7 @@ describe('admin document operator capabilities', () => {
       canReplaceDocuments: true,
       canCreateDocuments: false,
       canManageContractWorkflow: false,
+      canManageAdministration: false,
       canDeleteDocuments: false,
       canDeleteEntities: false,
       canClearNotifications: false,
@@ -76,6 +78,51 @@ describe('admin document operator capabilities', () => {
       response as any,
       next
     );
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(response.status).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'manage_contract_workflow',
+    'manage_administration',
+    'delete',
+  ] as const)('denies %s to the document operator', (capability) => {
+    const response = responseStub();
+    const next = vi.fn();
+
+    requireAdminCapability(capability)(documentOperatorRequest(), response as any, next);
+
+    expect(response.status).toHaveBeenCalledWith(403);
+    expect(response.json).toHaveBeenCalledWith(expect.objectContaining({
+      code: 'ADMIN_CAPABILITY_DENIED',
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it.each(['review_documents', 'replace_documents'] as const)(
+    'allows %s to the document operator',
+    (capability) => {
+      const response = responseStub();
+      const next = vi.fn();
+
+      requireAdminCapability(capability)(documentOperatorRequest(), response as any, next);
+
+      expect(next).toHaveBeenCalledOnce();
+      expect(response.status).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps all capabilities available to the full administrator', () => {
+    const response = responseStub();
+    const next = vi.fn();
+    const request = {
+      userRole: 'admin',
+      adminValidated: true,
+      adminRole: 'admin',
+    } as AuthRequest;
+
+    requireAdminCapability('manage_administration')(request, response as any, next);
 
     expect(next).toHaveBeenCalledOnce();
     expect(response.status).not.toHaveBeenCalled();

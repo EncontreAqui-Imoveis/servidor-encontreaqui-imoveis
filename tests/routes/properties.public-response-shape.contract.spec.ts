@@ -153,8 +153,6 @@ describe('Public property response shape contracts', () => {
         area_terreno_m2: 250,
           city: 'Brasil',
           state: 'GO',
-          broker_name: 'Corretor Público',
-          broker_phone: '64988887777',
           images: ['https://cdn/1.jpg', 'https://cdn/2.jpg'],
         },
       ],
@@ -164,6 +162,10 @@ describe('Public property response shape contracts', () => {
     });
 
     const firstProperty = response.body.properties?.[0];
+    expect(firstProperty).not.toHaveProperty('broker_phone');
+    expect(firstProperty).not.toHaveProperty('broker_email');
+    expect(firstProperty).not.toHaveProperty('activeNegotiationId');
+    expect(firstProperty).not.toHaveProperty('latestContractId');
     const normalizedAmenities = Array.isArray(firstProperty?.amenities)
       ? firstProperty.amenities
           .map((amenity: string) => toCanonicalAmenity(amenity))
@@ -660,13 +662,15 @@ describe('Public property response shape contracts', () => {
         area_terreno_unidade: 'm2',
         area_terreno_m2: 250,
       public_id: '123e4567-e89b-12d3-a456-426614174000',
-      broker_name: 'Corretor Público',
-      broker_phone: '64988887777',
       images: ['https://cdn/1.jpg', 'https://cdn/2.jpg'],
       agency: {
         name: 'Encontre Aqui',
         address: 'Rua da Agência, 10',
       },
     });
+    expect(response.body).not.toHaveProperty('broker_phone');
+    expect(response.body).not.toHaveProperty('broker_email');
+    expect(response.body).not.toHaveProperty('activeNegotiationId');
+    expect(response.body).not.toHaveProperty('latestContractId');
   });
 });

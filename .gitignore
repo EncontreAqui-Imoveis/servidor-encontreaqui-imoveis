@@ -33,3 +33,4 @@ scripts/*
 !scripts/schema/20260729_001_current_schema.sql
 !scripts/audit-contract-buyer-legal-names.ts
 scripts/smoke/
+viadodabike.txt

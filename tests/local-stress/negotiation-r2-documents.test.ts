@@ -128,7 +128,7 @@ describe('local stress: negotiation R2 documents', () => {
         negotiationId: `neg-stress-${index % 5}`,
         type: 'proposal',
         documentType: 'contrato_minuta',
-        content: Buffer.from(`pdf-${index}`),
+        content: Buffer.from(`%PDF-1.7\nstress-pdf-${index}`),
         metadataJson: {
           originalFileName: `proposal-${index}.pdf`,
         },

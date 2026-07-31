@@ -330,19 +330,19 @@ function mapProperty(
         .filter((imageUrl): imageUrl is string => Boolean(imageUrl))
     : [];
   const mergedAmenities = mergePropertyAmenities(row);
-  const activeNegotiationId = stringOrNull(row.active_negotiation_id);
-  const activeNegotiationStatus = stringOrNull(row.active_negotiation_status);
-  const activeNegotiationClientName = stringOrNull(
-    row.active_negotiation_client_name
-  );
+  const activeNegotiationId = includeOwnerInfo ? stringOrNull(row.active_negotiation_id) : null;
+  const activeNegotiationStatus = includeOwnerInfo ? stringOrNull(row.active_negotiation_status) : null;
+  const activeNegotiationClientName = includeOwnerInfo
+    ? stringOrNull(row.active_negotiation_client_name)
+    : null;
   const activeNegotiationValue =
-    row.active_negotiation_value != null
+    includeOwnerInfo && row.active_negotiation_value != null
       ? Number(row.active_negotiation_value)
       : null;
-  const latestNegotiationId = stringOrNull(row.latest_negotiation_id);
-  const latestNegotiationStatus = stringOrNull(row.latest_negotiation_status);
-  const latestContractId = stringOrNull(row.latest_contract_id);
-  const latestContractStatus = stringOrNull(row.latest_contract_status);
+  const latestNegotiationId = includeOwnerInfo ? stringOrNull(row.latest_negotiation_id) : null;
+  const latestNegotiationStatus = includeOwnerInfo ? stringOrNull(row.latest_negotiation_status) : null;
+  const latestContractId = includeOwnerInfo ? stringOrNull(row.latest_contract_id) : null;
+  const latestContractStatus = includeOwnerInfo ? stringOrNull(row.latest_contract_status) : null;
   const contractReadyProposal =
     Boolean(latestContractId) ||
     (latestNegotiationStatus != null &&
@@ -436,8 +436,12 @@ function mapProperty(
       row.promotional_rent_percentage != null
         ? Number(row.promotional_rent_percentage)
         : null,
-    broker_id: row.broker_id != null ? Number(row.broker_id) : null,
-    owner_id: row.owner_id != null ? Number(row.owner_id) : null,
+    ...(includeOwnerInfo
+      ? {
+          broker_id: row.broker_id != null ? Number(row.broker_id) : null,
+          owner_id: row.owner_id != null ? Number(row.owner_id) : null,
+        }
+      : {}),
     code: row.code ?? null,
     public_id: row.public_id ?? null,
     public_code: row.public_code ?? null,
@@ -503,35 +507,41 @@ function mapProperty(
     video_url: row.video_url ?? null,
     images,
     agency,
-    broker_name: row.broker_name ?? null,
-    broker_phone: row.broker_phone ?? null,
-    broker_email: row.broker_email ?? null,
-    negotiation_id: activeNegotiationId,
-    active_negotiation_id: activeNegotiationId,
-    activeNegotiationId: activeNegotiationId,
-    negotiation,
-    activeNegotiation: negotiation,
-    contractReadyProposal,
-    contractReadyProposalReason:
-      latestContractId != null
-        ? 'contract_created'
-        : latestNegotiationStatus != null &&
-            CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus)
-          ? 'contract_stage'
-          : null,
-    latestNegotiationId,
-    latestNegotiationStatus,
-    latestContractId,
-    latestContractStatus,
-    hasPendingEditRequest:
-      row.pending_edit_request_id != null &&
-      Number(row.pending_edit_request_id) > 0,
-    pendingEditRequestId:
-      row.pending_edit_request_id != null
-        ? Number(row.pending_edit_request_id)
-        : null,
-    rejection_reason: row.rejection_reason != null ? String(row.rejection_reason) : null,
-    rejectionReason: row.rejection_reason != null ? String(row.rejection_reason) : null,
+    ...(includeOwnerInfo
+      ? {
+          broker_name: row.broker_name ?? null,
+          broker_phone: row.broker_phone ?? null,
+          broker_email: row.broker_email ?? null,
+          negotiation_id: activeNegotiationId,
+          active_negotiation_id: activeNegotiationId,
+          activeNegotiationId,
+          negotiation,
+          activeNegotiation: negotiation,
+          contractReadyProposal,
+          contractReadyProposalReason:
+            latestContractId != null
+              ? 'contract_created'
+              : latestNegotiationStatus != null &&
+                  CONTRACT_READY_NEGOTIATION_STATUSES.has(latestNegotiationStatus)
+                ? 'contract_stage'
+                : null,
+          latestNegotiationId,
+          latestNegotiationStatus,
+          latestContractId,
+          latestContractStatus,
+          hasPendingEditRequest:
+            row.pending_edit_request_id != null &&
+            Number(row.pending_edit_request_id) > 0,
+          pendingEditRequestId:
+            row.pending_edit_request_id != null
+              ? Number(row.pending_edit_request_id)
+              : null,
+          rejection_reason:
+            row.rejection_reason != null ? String(row.rejection_reason) : null,
+          rejectionReason:
+            row.rejection_reason != null ? String(row.rejection_reason) : null,
+        }
+      : {}),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

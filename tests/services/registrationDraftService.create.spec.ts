@@ -90,10 +90,10 @@ describe('createRegistrationDraft', () => {
     findOpenDraftByEmailMock.mockResolvedValueOnce(null);
     createDraftMock.mockResolvedValueOnce(buildDraftRow());
 
-    await createRegistrationDraft({
+    const created = await createRegistrationDraft({
       email: 'novo@dominio.com',
       name: 'Usuario',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
       phone: '61999999999',
       profileType: 'client',
     });
@@ -112,6 +112,9 @@ describe('createRegistrationDraft', () => {
     const draftPayload = createDraftMock.mock.calls[0]?.[0];
     expect(draftPayload.draftId).toHaveLength(36);
     expect(draftPayload.draftId.startsWith('draft-')).toBe(false);
+    expect(created.draftToken).toMatch(/^[a-f0-9]{64}$/);
+    expect(draftPayload.draftTokenHash).toHaveLength(64);
+    expect(draftPayload.draftTokenHash).not.toBe(created.draftToken);
   });
 
   it('aceita criação com campos de endereço vazios', async () => {
@@ -122,7 +125,7 @@ describe('createRegistrationDraft', () => {
     await createRegistrationDraft({
       email: 'vazio@dominio.com',
       name: 'Usuario',
-      password: 'Senha123',
+      password: 'SenhaMuitoSegura123',
       phone: '61999999999',
       profileType: 'client',
       street: '',
@@ -153,7 +156,7 @@ describe('createRegistrationDraft', () => {
       createRegistrationDraft({
         email: 'erro@dominio.com',
         name: 'Usuario',
-        password: 'Senha123',
+        password: 'SenhaMuitoSegura123',
         phone: '61999999999',
         profileType: 'client',
         cep: '123',
@@ -185,6 +188,18 @@ describe('createRegistrationDraft', () => {
     expect(getDraftByDraftIdAndTokenMock).toHaveBeenCalledTimes(2);
     expect(getDraftByDraftIdAndTokenMock).toHaveBeenNthCalledWith(1, 'draft-abc', expect.any(String));
     expect(response.name).toBe('Nome Atualizado');
+  });
+
+  it('rejeita PATCH sem o token opaco do rascunho antes de consultar o banco', async () => {
+    await expect(
+      patchRegistrationDraft('draft-abc', '', { name: 'Nao deve salvar' }),
+    ).rejects.toMatchObject({
+      code: 'DRAFT_TOKEN_REQUIRED',
+      appCode: 'UNAUTHORIZED',
+    });
+
+    expect(getDraftByDraftIdAndTokenMock).not.toHaveBeenCalled();
+    expect(updateDraftByDraftIdMock).not.toHaveBeenCalled();
   });
 
   it('aceita PATCH com campos de endereço vazios (ignorados)', async () => {

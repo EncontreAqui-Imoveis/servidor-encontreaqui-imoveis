@@ -15,6 +15,8 @@ import { tempUploadCleanup } from './middlewares/tempUploadCleanup';
 import { patchConsoleRedaction } from './utils/logSanitizer';
 import { metricsMiddleware, getMetrics } from './middlewares/metrics';
 import { createGlobalRateLimiter } from './config/rateLimiters';
+import { captureWebhookRawBody, requireOperationalSecret } from './middlewares/operationalAccess';
+import { isSentryEnabled } from './config/sentry';
 
 export function createHttpApp() {
   const app = express();
@@ -69,6 +71,7 @@ export function createHttpApp() {
     express.json({
       limit: '10mb',
       type: 'application/json',
+      verify: captureWebhookRawBody,
     }),
   );
 
@@ -94,7 +97,7 @@ export function createHttpApp() {
     });
   });
 
-  app.get('/metrics', async (req, res) => {
+  app.get('/metrics', requireOperationalSecret('METRICS_SECRET_KEY', 'x-metrics-secret'), async (req, res) => {
     try {
       res.set('Content-Type', 'text/plain; charset=utf-8');
       res.end(await getMetrics());
@@ -103,9 +106,11 @@ export function createHttpApp() {
     }
   });
 
-  // Sentry error handler - must be registered after routes and before custom error handlers
-  const Sentry = require("@sentry/node");
-  Sentry.setupExpressErrorHandler(app);
+  if (isSentryEnabled()) {
+    // Sentry must run only when explicitly enabled after privacy review.
+    const Sentry = require('@sentry/node');
+    Sentry.setupExpressErrorHandler(app);
+  }
 
   app.use(notFoundHandler);
   app.use(globalErrorHandler);

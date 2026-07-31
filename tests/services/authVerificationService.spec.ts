@@ -185,13 +185,13 @@ describe('authVerificationService', () => {
     const confirmResult = await confirmPasswordReset({
       email: 'user@test.com',
       reset_session_token: 'reset-session',
-      new_password: 'Senha123',
+      new_password: 'SenhaMuitoSegura123',
     });
     expect(confirmResult.status).toBe('consumed');
-    expect(hashMock).toHaveBeenCalledWith('Senha123', 8);
+    expect(hashMock).toHaveBeenCalledWith('SenhaMuitoSegura123', 4);
   });
 
-  it('verifies phone profile lookup and CRECI lookup', async () => {
+  it('verifies phone profile lookup and keeps public availability checks generic', async () => {
     const { verifyPhone, checkCreci, checkEmail } = await import('../../src/services/authVerificationService');
 
     queryMock.mockResolvedValueOnce([
@@ -222,8 +222,9 @@ describe('authVerificationService', () => {
     const emailResult = await checkEmail({ email: 'missing@test.com' });
     expect(emailResult.exists).toBe(false);
 
-    queryMock.mockResolvedValueOnce([[]]);
+    queryMock.mockClear();
     const creciResult = await checkCreci({ creci: '123456-A' });
     expect(creciResult.exists).toBe(false);
+    expect(queryMock).not.toHaveBeenCalled();
   });
 });

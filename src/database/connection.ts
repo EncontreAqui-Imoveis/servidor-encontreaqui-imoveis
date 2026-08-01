@@ -2,7 +2,8 @@ import mysql from 'mysql2';
 import dotenv from 'dotenv';
 
 if (process.env.NODE_ENV !== 'production') {
-  dotenv.config();
+  const configuredPath = String(process.env.DOTENV_CONFIG_PATH ?? '').trim();
+  dotenv.config(configuredPath ? { path: configuredPath } : undefined);
 }
 
 const env = process.env;

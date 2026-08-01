@@ -15,7 +15,7 @@ import { setupNegotiationDocumentDeletionWorker } from './services/negotiationDo
 import { discardExpiredDrafts } from './services/registrationDraftRepository';
 import { discardExpiredPhoneOtps } from './services/phoneOtpService';
 import { ensureBrazilianCityCatalogSeeded } from './services/locationCatalogSeedService';
-import { startSreStatsService, stopSreStatsService } from './services/sreStatsService';
+import { isSreStatsEnabled, startSreStatsService, stopSreStatsService } from './services/sreStatsService';
 import { setupPrivacyRetentionWorker } from './services/privacyRetentionService';
 
 const app = createHttpApp();
@@ -108,7 +108,12 @@ async function startServer() {
   const server = app.listen(Number(PORT), HOST, () => {
     console.log(`Servidor rodando em ${HOST}:${PORT} com suporte a UTF-8`);
   });
-  startSreStatsService();
+  if (isSreStatsEnabled()) {
+    startSreStatsService();
+    console.log('Coletor SRE inicializado.');
+  } else {
+    console.log('Coletor SRE desativado (defina SRE_STATS_ENABLED=true para habilitar).');
+  }
 
   setupProcessHandlers(server);
   server.on('close', () => {

@@ -1,9 +1,15 @@
 import { randomUUID } from 'crypto';
 import type { Request, RequestHandler } from 'express';
+import { resolveOperationalRouteLabel } from '../utils/operationalRouteLabel';
 
 type RequestWithContext = Request & {
   requestId?: string;
   requestStartedAtMs?: number;
+};
+
+type RequestWithOperationalRole = RequestWithContext & {
+  userRole?: string;
+  adminRole?: string;
 };
 
 export function getRequestId(req: Request): string | null {
@@ -34,13 +40,37 @@ export const requestContextMiddleware: RequestHandler = (req, res, next) => {
 
   res.on('finish', () => {
     const durationMs = Math.max(Date.now() - startedAtMs, 0);
+    const route = resolveOperationalRouteLabel(req);
     console.info('HTTP request completed:', {
       requestId,
       method: req.method,
-      path: req.originalUrl,
+      route,
       statusCode: res.statusCode,
       durationMs,
     });
+
+    const securityEvent = res.statusCode === 401
+      ? 'authentication_denied'
+      : res.statusCode === 403
+        ? 'authorization_denied'
+        : res.statusCode === 429
+          ? 'rate_limited'
+          : res.statusCode >= 500
+            ? 'server_error'
+            : null;
+
+    if (securityEvent) {
+      const requestWithRole = req as RequestWithOperationalRole;
+      console.warn('Operational security event:', {
+        requestId,
+        event: securityEvent,
+        method: req.method,
+        route,
+        statusCode: res.statusCode,
+        actorRole: requestWithRole.userRole ?? null,
+        adminRole: requestWithRole.adminRole ?? null,
+      });
+    }
   });
 
   next();

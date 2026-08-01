@@ -1,0 +1,28 @@
+PROVISIONAMENTO DAS CONTAS DO PAINEL
+
+MODELO APROVADO
+- Uma conta principal: role admin.
+- Uma conta auxiliar documental: role document_operator.
+- Clientes e corretores nao sao operadores do painel.
+- Nao usar CreateUser.svelte para criar conta administrativa.
+
+SEGURANCA
+- Senhas administrativas exigem 14 a 128 caracteres.
+- Nunca gravar as senhas em Git, .env.example, painel ou ticket.
+- Os scripts falham se o e-mail ja existir; isso evita duplicar contas.
+- O auxiliar documental nao recebe capability de exclusao manual, administracao
+  geral ou alteracao do fluxo de contrato.
+
+CRIAR ADMIN PRINCIPAL (uma vez, em terminal seguro)
+1. Definir BOOTSTRAP_ADMIN_NAME, BOOTSTRAP_ADMIN_EMAIL e
+   BOOTSTRAP_ADMIN_PASSWORD no ambiente do comando.
+2. Executar: npm run admin:create-initial
+
+CRIAR AUXILIAR DOCUMENTAL (uma vez, em terminal seguro)
+1. Definir PANEL_ADMIN_NAME, PANEL_ADMIN_EMAIL, PANEL_ADMIN_PASSWORD.
+2. Manter PANEL_ADMIN_ROLE=document_operator.
+3. Executar: npm run admin:create-document-operator
+
+OBSERVACAO
+Os scripts nao sao executados no startup do Railway. Isto evita criar contas
+automaticamente por erro de configuracao ou recria-las em deploys futuros.

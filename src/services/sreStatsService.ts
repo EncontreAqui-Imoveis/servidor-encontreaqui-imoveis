@@ -1,517 +1,432 @@
 import fs from 'fs';
 import os from 'os';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { RowDataPacket } from 'mysql2';
+
 import connection from '../database/connection';
 import { getRegistry } from '../middlewares/metrics';
 
-const execAsync = promisify(exec);
+const ENABLED_VALUES = new Set(['1', 'true', 'yes']);
+const DEFAULT_SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_RETENTION_DAYS = 30;
+const MIN_SNAPSHOT_INTERVAL_MS = 60 * 1000;
+const MAX_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
+const MIN_RETENTION_DAYS = 1;
+const MAX_RETENTION_DAYS = 90;
+
+type HealthStatus = 'healthy' | 'warning' | 'critical';
+type Trend = 'up' | 'down' | 'neutral';
+
+type MetricSnapshot = {
+  latencyMs: number;
+  requestsPerSecond: number;
+  errorRatePercent: number;
+  cpuPercent: number;
+  memoryPercent: number;
+};
+
+type MetricHistoryRow = RowDataPacket & { value: number | string };
+type ReleaseRow = RowDataPacket & {
+  id: number;
+  platform: string;
+  repo: string;
+  version: string;
+  status: string;
+  impact: string | null;
+  applied_at: Date | string;
+};
+type ExternalServiceRow = RowDataPacket & {
+  name: string;
+  provider: string;
+  status: 'operational' | 'degraded' | 'outage';
+  latency: string | null;
+  cost: number | string;
+};
 
 export interface SreStats {
-    latency: {
-        p99: string;
-        unit: string;
-        status: 'healthy' | 'warning' | 'critical';
-        trend: 'up' | 'down' | 'neutral';
-        trendValue: string;
-        history: number[];
-    };
-    traffic: {
-        rps: string;
-        unit: string;
-        status: 'healthy' | 'warning' | 'critical';
-        trend: 'up' | 'down' | 'neutral';
-        trendValue: string;
-        history: number[];
-    };
-    errors: {
-        rate: string;
-        unit: string;
-        status: 'healthy' | 'warning' | 'critical';
-        trend: 'up' | 'down' | 'neutral';
-        trendValue: string;
-        history: number[];
-    };
-    saturation: {
-        cpu: string;
-        memory: string;
-        unit: string;
-        status: 'healthy' | 'warning' | 'critical';
-        trend: 'up' | 'down' | 'neutral';
-        trendValue: string;
-        history: number[];
-    };
-    availability: Record<string, {
-        uptimeCurrent: number;
-        downtimeMinutes: number;
-        history: number[];
-    }>;
-    alerts: {
-        id: string;
-        severity: 'critical' | 'warning' | 'info';
-        service: string;
-        message: string;
-        duration: string;
-        time: string;
-    }[];
-    externalServices: {
-        name: string;
-        provider: string;
-        status: 'operational' | 'degraded' | 'outage';
-        latency?: string;
-        cost: number;
-    }[];
-    releases: Record<string, {
-        version: string;
-        date: string;
-        time: string;
-        status: 'success' | 'rollback' | 'stable';
-        impact: string;
-    }[]>;
+  latency: SreMetricCard & { p99: string };
+  traffic: SreMetricCard & { rps: string };
+  errors: SreMetricCard & { rate: string };
+  saturation: SreMetricCard & { cpu: string; memory: string };
+  availability: Record<string, { uptimeCurrent: number; downtimeMinutes: number; history: number[] }>;
+  alerts: SreAlert[];
+  externalServices: SreExternalService[];
+  releases: Record<string, SreRelease[]>;
 }
 
-function generateHistory(baseline: number, count: number, variance: number = 0.2): number[] {
-    const history: number[] = [];
-    for (let i = 0; i < count; i++) {
-        const factor = 1 + (Math.random() * variance * 2 - variance);
-        history.push(Number((baseline * factor).toFixed(2)));
+type SreMetricCard = {
+  unit: string;
+  status: HealthStatus;
+  trend: Trend;
+  trendValue: string;
+  history: number[];
+};
+type SreAlert = {
+  id: string;
+  severity: 'critical' | 'warning' | 'info';
+  service: string;
+  message: string;
+  duration: string;
+  time: string;
+};
+type SreExternalService = {
+  name: string;
+  provider: string;
+  status: 'operational' | 'degraded' | 'outage';
+  latency?: string;
+  cost: number;
+};
+type SreRelease = {
+  version: string;
+  date: string;
+  time: string;
+  status: 'success' | 'rollback' | 'stable' | 'failed' | 'building';
+  impact: string;
+};
+
+export function isSreStatsEnabled(value = process.env.SRE_STATS_ENABLED): boolean {
+  return ENABLED_VALUES.has(String(value ?? '').trim().toLowerCase());
+}
+
+function parseBoundedInteger(value: unknown, fallback: number, minimum: number, maximum: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.trunc(parsed)));
+}
+
+export function getSreSnapshotIntervalMs(value = process.env.SRE_METRICS_SNAPSHOT_INTERVAL_MS): number {
+  return parseBoundedInteger(value, DEFAULT_SNAPSHOT_INTERVAL_MS, MIN_SNAPSHOT_INTERVAL_MS, MAX_SNAPSHOT_INTERVAL_MS);
+}
+
+export function getSreRetentionIntervalMs(value = process.env.SRE_RETENTION_INTERVAL_MS): number {
+  return parseBoundedInteger(value, DEFAULT_RETENTION_INTERVAL_MS, MIN_SNAPSHOT_INTERVAL_MS, DEFAULT_RETENTION_INTERVAL_MS);
+}
+
+export function getSreRetentionDays(value = process.env.SRE_METRICS_RETENTION_DAYS): number {
+  return parseBoundedInteger(value, DEFAULT_RETENTION_DAYS, MIN_RETENTION_DAYS, MAX_RETENTION_DAYS);
+}
+
+function safeNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function percentageChange(history: number[]): { trend: Trend; value: string } {
+  if (history.length < 2) return { trend: 'neutral', value: 'sem histórico' };
+  const previous = history[history.length - 2];
+  const current = history[history.length - 1];
+  if (!Number.isFinite(previous) || !Number.isFinite(current) || previous === 0) {
+    return { trend: 'neutral', value: 'sem comparação' };
+  }
+  const change = ((current - previous) / Math.abs(previous)) * 100;
+  if (Math.abs(change) < 0.1) return { trend: 'neutral', value: '0.0%' };
+  return { trend: change > 0 ? 'up' : 'down', value: `${change > 0 ? '+' : ''}${change.toFixed(1)}%` };
+}
+
+/** Calculates a quantile from cumulative Prometheus histogram buckets. */
+export function calculateHistogramQuantile(
+  quantile: number,
+  buckets: Array<{ upperBound: number; count: number }>,
+): number {
+  const sorted = buckets
+    .filter((bucket) => Number.isFinite(bucket.upperBound) && Number.isFinite(bucket.count))
+    .sort((left, right) => left.upperBound - right.upperBound);
+  const total = sorted.at(-1)?.count ?? 0;
+  if (total <= 0) return 0;
+
+  const target = total * quantile;
+  let previousCount = 0;
+  let previousUpperBound = 0;
+  for (const bucket of sorted) {
+    if (bucket.count >= target) {
+      const bucketDelta = bucket.count - previousCount;
+      if (bucketDelta <= 0) return bucket.upperBound;
+      return previousUpperBound + ((target - previousCount) / bucketDelta) * (bucket.upperBound - previousUpperBound);
     }
-    return history;
+    previousCount = bucket.count;
+    previousUpperBound = bucket.upperBound;
+  }
+  return sorted.at(-1)?.upperBound ?? 0;
+}
+
+function statusFor(value: number, warning: number, critical: number): HealthStatus {
+  if (value >= critical) return 'critical';
+  if (value >= warning) return 'warning';
+  return 'healthy';
 }
 
 export class SreStatsService {
-    private railwayStatus: string = 'UP';
-    private metricsTimer?: NodeJS.Timeout;
-    private healthTimer?: NodeJS.Timeout;
+  private metricsTimer?: NodeJS.Timeout;
+  private retentionTimer?: NodeJS.Timeout;
+  private snapshotInFlight = false;
+  private retentionInFlight = false;
 
-    start(): void {
-        if (this.metricsTimer || this.healthTimer) {
-            return;
-        }
+  start(): void {
+    if (this.metricsTimer || this.retentionTimer) return;
+    void this.takeMetricsSnapshot();
+    void this.pruneMetricHistory();
+    this.metricsTimer = setInterval(() => void this.takeMetricsSnapshot(), getSreSnapshotIntervalMs());
+    this.retentionTimer = setInterval(() => void this.pruneMetricHistory(), getSreRetentionIntervalMs());
+  }
 
-        void this.takeMetricsSnapshot();
-        this.metricsTimer = setInterval(() => void this.takeMetricsSnapshot(), 5 * 60 * 1000);
+  stop(): void {
+    if (this.metricsTimer) clearInterval(this.metricsTimer);
+    if (this.retentionTimer) clearInterval(this.retentionTimer);
+    this.metricsTimer = undefined;
+    this.retentionTimer = undefined;
+  }
 
-        void this.checkExternalHealth();
-        this.healthTimer = setInterval(() => void this.checkExternalHealth(), 10 * 60 * 1000);
+  private async takeMetricsSnapshot(): Promise<void> {
+    if (this.snapshotInFlight) return;
+    this.snapshotInFlight = true;
+    try {
+      const metrics = await this.getRuntimeMetrics();
+      const entries: Array<[string, number]> = [
+        ['latency_ms', metrics.latencyMs],
+        ['requests_per_second', metrics.requestsPerSecond],
+        ['error_rate_percent', metrics.errorRatePercent],
+        ['cpu_percent', metrics.cpuPercent],
+        ['memory_percent', metrics.memoryPercent],
+      ];
+      for (const [metricName, value] of entries) {
+        await connection.query(
+          'INSERT INTO sre_metrics_history (metric_name, value, source) VALUES (?, ?, ?)',
+          [metricName, value, 'backend'],
+        );
+      }
+    } catch (error) {
+      console.error('SRE_METRICS_SNAPSHOT_FAILED', {
+        message: error instanceof Error ? error.message : 'Erro não identificado',
+      });
+    } finally {
+      this.snapshotInFlight = false;
     }
+  }
 
-    stop(): void {
-        if (this.metricsTimer) {
-            clearInterval(this.metricsTimer);
-            this.metricsTimer = undefined;
-        }
-        if (this.healthTimer) {
-            clearInterval(this.healthTimer);
-            this.healthTimer = undefined;
-        }
+  private async pruneMetricHistory(): Promise<void> {
+    if (this.retentionInFlight) return;
+    this.retentionInFlight = true;
+    try {
+      await connection.query(
+        'DELETE FROM sre_metrics_history WHERE timestamp < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)',
+        [getSreRetentionDays()],
+      );
+    } catch (error) {
+      console.error('SRE_METRICS_RETENTION_FAILED', {
+        message: error instanceof Error ? error.message : 'Erro não identificado',
+      });
+    } finally {
+      this.retentionInFlight = false;
     }
+  }
 
-    private async takeMetricsSnapshot() {
-        try {
-            const real = await this.getRealMetrics();
-            const { cpu, memory } = this.getContainerMetrics();
-            const utilization = (cpu + memory) / 2;
-
-            const queries = [
-                ['latency', real.latency],
-                ['traffic', real.rps],
-                ['errors', real.errorRate],
-                ['utilization', utilization]
-            ];
-
-            for (const [name, value] of queries) {
-                await connection.query(
-                    'INSERT INTO sre_metrics_history (metric_name, value) VALUES (?, ?)',
-                    [name, value]
-                );
-            }
-        } catch (e) {
-            console.error('Falha ao tirar snapshot de métricas:', e);
-        }
+  private getContainerMetrics(): { cpuPercent: number; memoryPercent: number } {
+    try {
+      if (fs.existsSync('/sys/fs/cgroup/memory.current') && fs.existsSync('/sys/fs/cgroup/memory.max')) {
+        const current = safeNumber(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8').trim());
+        const maximumRaw = fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim();
+        const maximum = maximumRaw === 'max' ? os.totalmem() : safeNumber(maximumRaw);
+        const memoryPercent = maximum > 0 ? Math.min(100, (current / maximum) * 100) : 0;
+        const cpuPercent = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
+        return { cpuPercent, memoryPercent };
+      }
+      const memoryPercent = Math.min(100, (1 - os.freemem() / os.totalmem()) * 100);
+      const cpuPercent = process.platform === 'win32'
+        ? 0
+        : Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
+      return { cpuPercent, memoryPercent };
+    } catch {
+      return { cpuPercent: 0, memoryPercent: 0 };
     }
+  }
 
-    private async checkExternalHealth() {
-        try {
-            // Check Railway Status API directly
-            try {
-                const railwayRes = await fetch('https://status.railway.com/api/v2/summary.json', { signal: AbortSignal.timeout(5000) });
-                if (railwayRes.ok) {
-                    const contentType = railwayRes.headers.get('content-type') || '';
-                    if (contentType.includes('application/json')) {
-                        const data = await railwayRes.json() as { page?: { status?: string } };
-                        this.railwayStatus = data?.page?.status || 'UP';
-                    } else {
-                        // Alguns proxies retornam HTML 200 para esse endpoint; tratamos como indisponível sem poluir logs.
-                        this.railwayStatus = 'UNKNOWN';
-                    }
-                }
-            } catch (e) {
-                console.error('Falha ao buscar status do Railway:', e);
-            }
+  private async getRuntimeMetrics(): Promise<MetricSnapshot> {
+    const { cpuPercent, memoryPercent } = this.getContainerMetrics();
+    const metrics = await getRegistry().getMetricsAsJSON();
+    const duration = metrics.find((metric) => metric.name === 'http_request_duration_seconds');
+    const responses = metrics.find((metric) => metric.name === 'http_responses_total');
+    const bucketTotals = (duration?.values ?? [])
+      .filter((value) => value.labels?.le !== undefined)
+      .reduce<Map<string, number>>((totals, value) => {
+        const upperBound = String(value.labels?.le ?? '');
+        if (upperBound === '+Inf') return totals;
+        totals.set(upperBound, (totals.get(upperBound) ?? 0) + safeNumber(value.value));
+        return totals;
+      }, new Map());
+    const latencyMs = calculateHistogramQuantile(
+      0.99,
+      [...bucketTotals.entries()].map(([upperBound, count]) => ({ upperBound: Number(upperBound), count })),
+    ) * 1000;
+    const responseValues = responses?.values ?? [];
+    const totalResponses = responseValues.reduce((total, value) => total + safeNumber(value.value), 0);
+    const failedResponses = responseValues
+      .filter((value) => Number(value.labels?.code ?? 0) >= 400)
+      .reduce((total, value) => total + safeNumber(value.value), 0);
+    return {
+      latencyMs,
+      requestsPerSecond: totalResponses / Math.max(process.uptime(), 1),
+      errorRatePercent: totalResponses > 0 ? (failedResponses / totalResponses) * 100 : 0,
+      cpuPercent,
+      memoryPercent,
+    };
+  }
 
-            const [rows] = await connection.query('SELECT name, probe_url FROM sre_external_services WHERE probe_url IS NOT NULL') as any;
-
-            for (const service of rows) {
-                try {
-                    const start = Date.now();
-                    const response = await fetch(service.probe_url, { method: 'HEAD', signal: AbortSignal.timeout(5000) });
-                    const latency = Date.now() - start;
-
-                    const status = response.ok ? 'operational' : 'degraded';
-                    await connection.query(
-                        'UPDATE sre_external_services SET status = ?, latency = ? WHERE name = ?',
-                        [status, `${latency}ms`, service.name]
-                    );
-                } catch (e) {
-                    await connection.query(
-                        'UPDATE sre_external_services SET status = ?, latency = ? WHERE name = ?',
-                        ['outage', 'timeout', service.name]
-                    );
-                }
-            }
-        } catch (e) {
-            console.error('Erro no worker de health check:', e);
-        }
+  private async getMetricHistory(metricName: string, count = 24): Promise<number[]> {
+    try {
+      const [rows] = await connection.query<MetricHistoryRow[]>(
+        `SELECT value FROM sre_metrics_history WHERE metric_name = ? AND source = 'backend' ORDER BY timestamp DESC LIMIT ?`,
+        [metricName, count],
+      );
+      return rows.map((row) => safeNumber(row.value)).reverse();
+    } catch (error) {
+      console.error('SRE_METRICS_HISTORY_UNAVAILABLE', {
+        message: error instanceof Error ? error.message : 'Erro não identificado',
+      });
+      return [];
     }
+  }
 
-    private async getSystemLoadFactor(): Promise<number> {
-        try {
-            const [props] = await connection.query('SELECT COUNT(*) as total FROM properties') as any;
-            const [users] = await connection.query('SELECT COUNT(*) as total FROM users') as any;
-            const totalItems = (props[0]?.total || 0) + (users[0]?.total || 0);
+  public async getSreStats(): Promise<SreStats> {
+    const metrics = await this.getRuntimeMetrics();
+    const [latencyHistory, trafficHistory, errorHistory, cpuHistory, memoryHistory] = await Promise.all([
+      this.getMetricHistory('latency_ms'),
+      this.getMetricHistory('requests_per_second'),
+      this.getMetricHistory('error_rate_percent'),
+      this.getMetricHistory('cpu_percent'),
+      this.getMetricHistory('memory_percent'),
+    ]);
+    const saturationHistory = cpuHistory.length > 0 ? cpuHistory : memoryHistory;
+    const latencyTrend = percentageChange(latencyHistory);
+    const trafficTrend = percentageChange(trafficHistory);
+    const errorTrend = percentageChange(errorHistory);
+    const saturationTrend = percentageChange(saturationHistory);
 
-            const cpuUsage = os.loadavg()[0] * 10;
-            const totalMem = os.totalmem();
-            const freeMem = os.freemem();
-            const memUsage = ((totalMem - freeMem) / totalMem) * 100;
-            const currentUtil = (cpuUsage + memUsage) / 2;
+    return {
+      latency: {
+        p99: metrics.latencyMs.toFixed(0), unit: 'ms', status: statusFor(metrics.latencyMs, 500, 1000),
+        trend: latencyTrend.trend, trendValue: latencyTrend.value, history: latencyHistory,
+      },
+      traffic: {
+        rps: metrics.requestsPerSecond.toFixed(2), unit: 'req/s', status: 'healthy',
+        trend: trafficTrend.trend, trendValue: trafficTrend.value, history: trafficHistory,
+      },
+      errors: {
+        rate: metrics.errorRatePercent.toFixed(3), unit: '%', status: statusFor(metrics.errorRatePercent, 0.1, 1),
+        trend: errorTrend.trend, trendValue: errorTrend.value, history: errorHistory,
+      },
+      saturation: {
+        cpu: metrics.cpuPercent.toFixed(1), memory: metrics.memoryPercent.toFixed(1), unit: '%',
+        status: statusFor(Math.max(metrics.cpuPercent, metrics.memoryPercent), 80, 95),
+        trend: saturationTrend.trend, trendValue: saturationTrend.value, history: saturationHistory,
+      },
+      // Uptime externo exige uma fonte verificável. Não fabricamos disponibilidade.
+      availability: { 'Processo atual': { uptimeCurrent: Number((process.uptime() / 60).toFixed(2)), downtimeMinutes: 0, history: [] } },
+      alerts: this.buildAlerts(metrics),
+      externalServices: await this.getExternalServices(),
+      releases: await this.getReleases(),
+    };
+  }
 
-            return Math.min(1, (currentUtil / 100) * 0.7 + (totalItems / 5000) * 0.3);
-        } catch (e) {
-            return 0.5; // Fallback
-        }
+  private buildAlerts(metrics: MetricSnapshot): SreAlert[] {
+    const alerts: SreAlert[] = [];
+    const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    if (metrics.errorRatePercent >= 1) {
+      alerts.push({ id: 'http-error-rate', severity: 'critical', service: 'API', message: `Taxa de respostas de erro: ${metrics.errorRatePercent.toFixed(2)}%.`, duration: 'amostra atual', time });
     }
-
-    private getContainerMetrics() {
-        try {
-            // Check cgroups v2
-            if (fs.existsSync('/sys/fs/cgroup/memory.current') && fs.existsSync('/sys/fs/cgroup/memory.max')) {
-                const memCurrent = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.current', 'utf8').trim());
-                let memMax = parseInt(fs.readFileSync('/sys/fs/cgroup/memory.max', 'utf8').trim());
-                if (isNaN(memMax) || memMax <= 0) memMax = os.totalmem();
-                const memoryUtil = Math.min(100, (memCurrent / memMax) * 100);
-
-                const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
-                return { cpu: cpuUtil, memory: memoryUtil };
-            }
-
-            // Check cgroups v1
-            if (fs.existsSync('/sys/fs/cgroup/memory/memory.usage_in_bytes') && fs.existsSync('/sys/fs/cgroup/memory/memory.limit_in_bytes')) {
-                const memCurrent = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.usage_in_bytes', 'utf8').trim());
-                let memMax = parseInt(fs.readFileSync('/sys/fs/cgroup/memory/memory.limit_in_bytes', 'utf8').trim());
-                if (isNaN(memMax) || memMax <= 0) memMax = os.totalmem();
-
-                const memoryUtil = Math.min(100, (memCurrent / Math.min(memMax, os.totalmem())) * 100);
-                const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
-                return { cpu: cpuUtil, memory: memoryUtil };
-            }
-
-            // Fallback for Windows/macOS or when cgroups are unavailable
-            const memoryUtil = Math.min(100, (1 - os.freemem() / os.totalmem()) * 100);
-            const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
-            return { cpu: cpuUtil, memory: memoryUtil };
-        } catch (e) {
-            const memoryUtil = Math.min(100, (1 - os.freemem() / os.totalmem()) * 100);
-            const cpuUtil = Math.min(100, (os.loadavg()[0] / Math.max(1, os.cpus().length)) * 100);
-            return { cpu: cpuUtil, memory: memoryUtil };
-        }
+    if (metrics.latencyMs >= 500) {
+      alerts.push({ id: 'http-latency', severity: 'warning', service: 'API', message: `Latência P99 estimada: ${metrics.latencyMs.toFixed(0)} ms.`, duration: 'amostra atual', time });
     }
-
-    private generateAvailabilityData() {
-        const isUp = this.railwayStatus === 'UP';
-        const currentUptime = isUp ? 100 : 0;
-        const currentDowntime = isUp ? 0 : 1; // Simplificado
-
-        return {
-            "Minuto": { uptimeCurrent: currentUptime, downtimeMinutes: currentDowntime, history: generateHistory(currentUptime, 5, 0) },
-            "Hora": { uptimeCurrent: isUp ? 99.99 : 98.5, downtimeMinutes: isUp ? 0.1 : 15, history: generateHistory(isUp ? 100 : 95, 10, 2) },
-            "Dia": { uptimeCurrent: isUp ? 99.98 : 99.2, downtimeMinutes: isUp ? 0.5 : 45, history: generateHistory(isUp ? 99.99 : 98, 10, 1) },
-            "Semana": { uptimeCurrent: 99.88, downtimeMinutes: 12.0, history: generateHistory(99.88, 7, 0.05) },
-            "Mês": { uptimeCurrent: 99.92, downtimeMinutes: 34.5, history: generateHistory(99.92, 30, 0.1) },
-            "Ano": { uptimeCurrent: 99.50, downtimeMinutes: 438, history: generateHistory(99.5, 12, 0.5) }
-        };
+    if (Math.max(metrics.cpuPercent, metrics.memoryPercent) >= 80) {
+      alerts.push({ id: 'runtime-saturation', severity: 'warning', service: 'Runtime', message: `Saturação de runtime: CPU ${metrics.cpuPercent.toFixed(1)}%, memória ${metrics.memoryPercent.toFixed(1)}%.`, duration: 'amostra atual', time });
     }
+    return alerts;
+  }
 
-    private async getRealMetrics() {
-        try {
-            const registry = getRegistry();
-            const metrics = await registry.getMetricsAsJSON();
-
-            const durationMetric: any = metrics.find((m: any) => m.name === 'http_request_duration_seconds');
-
-            let p99 = 0;
-            let avgLatency = 0;
-            let totalReqs = 0;
-            let errorReqs = 0;
-
-            if (durationMetric && durationMetric.values) {
-                totalReqs = durationMetric.values
-                    .filter((v: any) => v.metricName === 'http_request_duration_seconds_count')
-                    .reduce((a: any, b: any) => a + b.value, 0);
-
-                errorReqs = durationMetric.values
-                    .filter((v: any) => v.metricName === 'http_request_duration_seconds_count' && v.labels.code >= 400)
-                    .reduce((a: any, b: any) => a + b.value, 0);
-
-                const sum = durationMetric.values.find((v: any) => v.metricName === 'http_request_duration_seconds_sum')?.value || 0;
-                avgLatency = totalReqs > 0 ? (sum / totalReqs) * 1000 : 45;
-                p99 = avgLatency * 1.5;
-            }
-
-            return {
-                latency: p99 || 45,
-                errorRate: totalReqs > 0 ? (errorReqs / totalReqs) * 100 : 0,
-                rps: totalReqs / 60
-            };
-        } catch (e) {
-            return { latency: 45, errorRate: 0, rps: 0.5 };
-        }
-    }
-
-    private async getHistoryFromDb(metricName: string, count: number): Promise<number[]> {
-        try {
-            const [rows] = await connection.query(
-                'SELECT value FROM sre_metrics_history WHERE metric_name = ? ORDER BY timestamp DESC LIMIT ?',
-                [metricName, count]
-            ) as any;
-
-            if (!rows || rows.length === 0) return [];
-            return rows.map((r: any) => Number(r.value)).reverse();
-        } catch (e) {
-            return [];
-        }
-    }
-
-    public async getSreStats(): Promise<SreStats> {
-        const { cpu, memory } = this.getContainerMetrics();
-        const cpuUtil = cpu;
-        const memoryUtil = memory;
-        const real = await this.getRealMetrics();
-
-        // Gerar Alertas Reais baseado em heurísticas SRE
-        const alerts: any[] = [];
-        if (real.errorRate > 1) {
-            alerts.push({
-                id: 'err-' + Date.now(),
-                severity: 'critical',
-                service: 'API Server',
-                message: `Taxa de erro elevada (${real.errorRate.toFixed(2)}%) detectada no Railway.`,
-                duration: 'Agora',
-                time: new Date().toLocaleTimeString()
-            });
-        }
-        if (real.latency > 500) {
-            alerts.push({
-                id: 'lat-' + Date.now(),
-                severity: 'warning',
-                service: 'Database/API',
-                message: `Latência P99 acima do SLO: ${real.latency.toFixed(0)}ms.`,
-                duration: '2m',
-                time: new Date().toLocaleTimeString()
-            });
-        }
-        if (cpuUtil > 80) {
-            alerts.push({
-                id: 'cpu-' + Date.now(),
-                severity: 'warning',
-                service: 'Railway Engine',
-                message: `Alta utilização de CPU: ${cpuUtil.toFixed(1)}%.`,
-                duration: '1m',
-                time: new Date().toLocaleTimeString()
-            });
-        }
-
-        alerts.push({
-            id: 'info-1',
-            severity: 'info',
-            service: 'SRE Core',
-            message: 'Monitoramento Ativo: Railway, Cloudinary e TiDB saudáveis.',
-            duration: 'Ativo',
-            time: 'Agora'
+  private async getReleases(): Promise<Record<string, SreRelease[]>> {
+    try {
+      const [rows] = await connection.query<ReleaseRow[]>(
+        'SELECT platform, repo, version, status, impact, applied_at FROM sre_releases ORDER BY applied_at DESC LIMIT 50',
+      );
+      return rows.reduce<Record<string, SreRelease[]>>((grouped, row) => {
+        const key = `${row.platform}:${row.repo}`;
+        const appliedAt = new Date(row.applied_at);
+        const status = ['success', 'rollback', 'stable', 'failed', 'building'].includes(row.status)
+          ? row.status as SreRelease['status']
+          : 'stable';
+        (grouped[key] ??= []).push({
+          version: row.version,
+          date: appliedAt.toLocaleDateString('pt-BR'),
+          time: appliedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          status,
+          impact: row.impact ?? '',
         });
-
-        // Buscar histórico real do banco
-        const latencyHistory = await this.getHistoryFromDb('latency', 24);
-        const trafficHistory = await this.getHistoryFromDb('traffic', 24);
-        const errorHistory = await this.getHistoryFromDb('errors', 24);
-        const utilHistory = await this.getHistoryFromDb('utilization', 24);
-
-        return {
-            latency: {
-                p99: `${real.latency.toFixed(0)}`,
-                unit: 'ms',
-                status: real.latency > 500 ? 'warning' : 'healthy',
-                trend: 'neutral',
-                trendValue: `0%`,
-                history: latencyHistory.length > 0 ? latencyHistory : generateHistory(real.latency, 24)
-            },
-            traffic: {
-                rps: `${real.rps.toFixed(1)}`,
-                unit: 'req/s',
-                status: 'healthy',
-                trend: 'neutral',
-                trendValue: '0%',
-                history: trafficHistory.length > 0 ? trafficHistory : generateHistory(real.rps || 0.5, 24)
-            },
-            errors: {
-                rate: `${real.errorRate.toFixed(3)}`,
-                unit: '%',
-                status: real.errorRate > 1 ? 'critical' : real.errorRate > 0.1 ? 'warning' : 'healthy',
-                trend: 'neutral',
-                trendValue: '0%',
-                history: errorHistory.length > 0 ? errorHistory : generateHistory(real.errorRate, 24, 0.5)
-            },
-            saturation: {
-                cpu: `${cpuUtil.toFixed(1)}`,
-                memory: `${memoryUtil.toFixed(1)}`,
-                unit: '%',
-                status: cpuUtil > 80 ? 'warning' : 'healthy',
-                trend: 'neutral',
-                trendValue: '0%',
-                history: utilHistory.length > 0 ? utilHistory : generateHistory(cpuUtil, 24)
-            },
-            availability: this.generateAvailabilityData(),
-            alerts,
-            externalServices: await this.getExternalServices(),
-            releases: await this.getReleases()
-        };
+        return grouped;
+      }, {});
+    } catch (error) {
+      console.error('SRE_RELEASES_UNAVAILABLE', { message: error instanceof Error ? error.message : 'Erro não identificado' });
+      return {};
     }
+  }
 
-    private async getReleases(): Promise<Record<string, any[]>> {
-        try {
-            const [rows] = await connection.query('SELECT platform, repo, version, status, impact, applied_at FROM sre_releases ORDER BY applied_at DESC LIMIT 50') as any;
-            const grouped: Record<string, any[]> = {};
-
-            rows.forEach((r: any) => {
-                const key = `${r.platform}:${r.repo}`;
-                if (!grouped[key]) grouped[key] = [];
-                grouped[key].push({
-                    version: r.version,
-                    date: 'Hoje',
-                    time: new Date(r.applied_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                    status: r.status,
-                    impact: r.impact
-                });
-            });
-
-            return grouped;
-        } catch (e) {
-            // Em vez de retornar fakes, retorna vazio se a tabela não existir ou der erro
-            return {};
-        }
+  private async getExternalServices(): Promise<SreExternalService[]> {
+    try {
+      const [rows] = await connection.query<ExternalServiceRow[]>(
+        'SELECT name, provider, status, latency, cost FROM sre_external_services ORDER BY name ASC',
+      );
+      return rows.map((row) => ({
+        name: row.name, provider: row.provider, status: row.status,
+        ...(row.latency ? { latency: row.latency } : {}), cost: safeNumber(row.cost),
+      }));
+    } catch (error) {
+      console.error('SRE_EXTERNAL_SERVICES_UNAVAILABLE', { message: error instanceof Error ? error.message : 'Erro não identificado' });
+      return [];
     }
+  }
 
-    private async getExternalServices(): Promise<any[]> {
-        try {
-            const [rows] = await connection.query('SELECT name, provider, status, latency, cost FROM sre_external_services') as any;
-            if (rows.length === 0) throw new Error('No data');
-            return rows.map((s: any) => ({
-                name: s.name,
-                provider: s.provider,
-                status: s.status,
-                latency: s.latency,
-                cost: Number(s.cost)
-            }));
-        } catch (e) {
-            // Fallback for initial setup or if migration hasn't run
-            return [
-                { name: 'Vercel', provider: 'Deployment', status: 'operational', latency: '45ms', cost: 135.50 },
-                { name: 'Railway', provider: 'API Engine', status: 'operational', latency: '82ms', cost: 180.00 },
-                { name: 'Cloudflare R2', provider: 'Storage', status: 'operational', cost: 45.00 },
-                { name: 'Cloudinary', provider: 'CDN', status: 'operational', cost: 89.90 },
-                { name: 'Brevo', provider: 'Email/Marketing', status: 'operational', cost: 50.00 },
-                { name: 'Firebase', provider: 'Auth/Push', status: 'operational', cost: 0.00 }
-            ];
-        }
+  public async updateExternalService(name: string, data: { cost?: number; status?: 'operational' | 'degraded' | 'outage' }): Promise<boolean> {
+    const fields: string[] = [];
+    const values: Array<number | string> = [];
+    if (data.cost !== undefined) {
+      if (!Number.isFinite(data.cost) || data.cost < 0) return false;
+      fields.push('cost = ?'); values.push(data.cost);
     }
+    if (data.status !== undefined) { fields.push('status = ?'); values.push(data.status); }
+    if (fields.length === 0) return false;
+    const [result] = await connection.query(
+      `UPDATE sre_external_services SET ${fields.join(', ')} WHERE name = ?`, [...values, name],
+    );
+    return Number((result as { affectedRows?: number }).affectedRows ?? 0) > 0;
+  }
 
-    public async updateExternalService(name: string, data: { cost?: number; status?: 'operational' | 'degraded' | 'outage' }) {
-        try {
-            const fields: string[] = [];
-            const values: any[] = [];
-
-            if (data.cost !== undefined) {
-                fields.push('cost = ?');
-                values.push(data.cost);
-            }
-            if (data.status !== undefined) {
-                fields.push('status = ?');
-                values.push(data.status);
-            }
-
-            if (fields.length === 0) return false;
-
-            values.push(name);
-            await connection.query(`UPDATE sre_external_services SET ${fields.join(', ')} WHERE name = ?`, values);
-            return true;
-        } catch (e) {
-            console.error('Erro ao persistir custo no banco:', e);
-            return false;
-        }
+  public async updateRelease(platform: string, repo: string, data: { version?: string; status?: string; impact?: string; applied_at?: Date }): Promise<boolean> {
+    const version = String(data.version ?? 'unknown').trim().slice(0, 50) || 'unknown';
+    const status = String(data.status ?? 'success').trim().slice(0, 50) || 'success';
+    const impact = String(data.impact ?? 'Webhook de deploy').trim().slice(0, 4000);
+    const [existing] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM sre_releases WHERE platform = ? AND repo = ? AND version = ? LIMIT 1', [platform, repo, version],
+    );
+    if (existing.length > 0) {
+      await connection.query(
+        'UPDATE sre_releases SET status = ?, impact = ?, applied_at = ? WHERE id = ?',
+        [status, impact, data.applied_at ?? new Date(), existing[0].id],
+      );
+      return true;
     }
-
-    public async updateRelease(platform: string, repo: string, data: any) {
-        try {
-            // Check if release with this version already exists
-            const [existing] = await connection.query(
-                'SELECT id FROM sre_releases WHERE version = ? LIMIT 1',
-                [data.version]
-            ) as any;
-
-            if (existing && existing.length > 0) {
-                // Update
-                const fields: string[] = [];
-                const values: any[] = [];
-                if (data.status) { fields.push('status = ?'); values.push(data.status); }
-                if (data.impact) { fields.push('impact = ?'); values.push(data.impact); }
-
-                if (fields.length > 0) {
-                    values.push(existing[0].id);
-                    await connection.query(`UPDATE sre_releases SET ${fields.join(', ')} WHERE id = ?`, values);
-                }
-            } else {
-                // Insert
-                await connection.query(
-                    'INSERT INTO sre_releases (platform, repo, version, status, impact, applied_at) VALUES (?, ?, ?, ?, ?, ?)',
-                    [platform, repo, data.version || 'unknown', data.status || 'success', data.impact || 'Webhook Deploy', data.applied_at || new Date()]
-                );
-            }
-            return true;
-        } catch (e) {
-            console.error('Erro ao persistir release no banco:', e);
-            return false;
-        }
-    }
+    await connection.query(
+      'INSERT INTO sre_releases (platform, repo, version, status, impact, applied_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [platform, repo, version, status, impact, data.applied_at ?? new Date()],
+    );
+    return true;
+  }
 }
 
 const sreStatsService = new SreStatsService();
-export function startSreStatsService() {
-    sreStatsService.start();
+export function startSreStatsService(): void { sreStatsService.start(); }
+export function stopSreStatsService(): void { sreStatsService.stop(); }
+export async function loadSreStats(): Promise<SreStats> { return sreStatsService.getSreStats(); }
+export function updateExternalService(name: string, data: { cost?: number; status?: 'operational' | 'degraded' | 'outage' }): Promise<boolean> {
+  return sreStatsService.updateExternalService(name, data);
 }
-
-export function stopSreStatsService() {
-    sreStatsService.stop();
-}
-
-export async function loadSreStats() {
-    return sreStatsService.getSreStats();
-}
-
-export function updateExternalService(name: string, data: any) {
-    return sreStatsService.updateExternalService(name, data);
-}
-
-export async function updateRelease(platform: string, repo: string, data: any) {
-    return sreStatsService.updateRelease(platform, repo, data);
+export function updateRelease(platform: string, repo: string, data: { version?: string; status?: string; impact?: string; applied_at?: Date }): Promise<boolean> {
+  return sreStatsService.updateRelease(platform, repo, data);
 }

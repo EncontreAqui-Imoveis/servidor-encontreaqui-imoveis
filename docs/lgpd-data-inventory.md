@@ -31,8 +31,9 @@ anonimizado quando aplicável.
 | Documento substituído | versão anterior | nenhum após novo upload confirmado | R2 e TiDB | nenhum após substituição | imediato após confirmação do novo arquivo | exclusão lógica e física imediata; evento mínimo |
 | Notificação | texto operacional, IDs técnicos, token de dispositivo | informar ação e deep link | TiDB, Firebase | titular e serviços autorizados | 180 dias | exclusão |
 | Segurança | hashes de limiter, sessão, OTP/PIN temporário | prevenção de abuso e autenticação | Redis/TiDB | backend restrito | TTL técnico | expiração automática |
-| Auditoria mínima | ação, categoria, operador, data/hora e motivo | rastreabilidade operacional | TiDB | administradores autorizados | 2 anos, sujeito ao jurídico | exclusão ou anonimização |
-| Logs | request ID, rota, erro sanitizado | diagnóstico e segurança | plataforma de logs | operação restrita | 30 dias; logs de segurança até 1 ano | rotação/exclusão |
+| Auditoria contratual mínima | ação, categoria, operador, data/hora e motivo | rastreabilidade operacional | TiDB | administradores autorizados | 2 anos, sujeito ao jurídico | exclusão ou anonimização |
+| Auditoria técnica de segurança | tipo de evento, papel, método, rota normalizada, código HTTP e request ID | detectar abuso e investigar falhas | TiDB | operação restrita | 180 dias | exclusão automática |
+| Logs | request ID, rota, erro sanitizado | diagnóstico e segurança | plataforma de logs | operação restrita | 30 dias; incidente com dados pessoais segue decisão jurídica | rotação/exclusão |
 
 ## Regras inegociáveis
 

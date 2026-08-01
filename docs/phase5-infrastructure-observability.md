@@ -16,11 +16,9 @@ COLETOR SRE MODERNIZADO
 - A disponibilidade externa deve ser monitorada pelos provedores ou por uma
   ferramenta dedicada; o dashboard não declara serviços saudáveis sem uma
   fonte verificável.
-- O painel SRE aparece somente para a conta `admin` com a capacidade
-  `manage_administration`. O perfil auxiliar de documentos não recebe nem
-  consulta telemetria, custos ou eventos de deploy.
-- Os atalhos Railway e Vercel no painel abrem as páginas oficiais de status;
-  eles não simulam um sinal de disponibilidade.
+- A Central SRE está desativada no painel administrativo para não misturar
+  telemetria técnica com a operação imobiliária. O perfil auxiliar também não
+  recebe nem consulta telemetria, custos ou eventos de deploy.
 
 CONTROLES NO CODIGO
 - /health permanece publico para healthchecks e nao expoe estado interno.

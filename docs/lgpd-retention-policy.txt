@@ -34,8 +34,12 @@ REGRAS APROVADAS
 4. Dados temporarios
 - OTP, PIN e sessoes temporarias: expirar pelo TTL tecnico ja existente.
 - Rascunhos abandonados: descartar pelo fluxo de expiracao existente.
-- Notificacoes e logs: prazo operacional sera configurado em etapa posterior,
-  com job, evidencia de execucao e revisao juridica.
+- Notificacoes: 180 dias, quando o worker de retencao estiver habilitado.
+- Auditoria tecnica de seguranca sem PII: 180 dias, quando o worker de
+  retencao estiver habilitado.
+- Logs de plataforma: 30 dias, configurados diretamente no provedor.
+- Registro de incidente que envolva dados pessoais: prazo minimo de cinco anos
+  quando aplicavel, sob avaliacao juridica.
 
 LIMITES DE IMPLEMENTACAO ATUAL
 - Esta politica nao cria job de exclusao para contratos finalizados.

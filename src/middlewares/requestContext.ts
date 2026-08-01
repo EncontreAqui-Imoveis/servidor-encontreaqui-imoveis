@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { Request, RequestHandler } from 'express';
+import { buildSecurityAuditEvent, recordSecurityAuditEvent } from '../services/securityAuditService';
 import { resolveOperationalRouteLabel } from '../utils/operationalRouteLabel';
 
 type RequestWithContext = Request & {
@@ -70,6 +71,11 @@ export const requestContextMiddleware: RequestHandler = (req, res, next) => {
         actorRole: requestWithRole.userRole ?? null,
         adminRole: requestWithRole.adminRole ?? null,
       });
+    }
+
+    const auditEvent = buildSecurityAuditEvent(req as RequestWithOperationalRole, res);
+    if (auditEvent) {
+      void recordSecurityAuditEvent(auditEvent);
     }
   });
 

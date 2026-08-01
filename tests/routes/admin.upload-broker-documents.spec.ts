@@ -46,6 +46,8 @@ vi.mock('../../src/middlewares/auth', () => ({
   authMiddleware: (req: any, _res: any, next: () => void) => {
     req.userId = 30003;
     req.userRole = 'admin';
+    req.adminValidated = true;
+    req.adminRole = 'admin';
     next();
   },
   isAdmin: (_req: any, _res: any, next: () => void) => next(),

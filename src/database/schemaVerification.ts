@@ -105,6 +105,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'brokers',
     'property_edit_requests',
     'negotiation_responsibles',
+    'security_audit_events',
   ] as const;
 
   for (const tableName of requiredTables) {

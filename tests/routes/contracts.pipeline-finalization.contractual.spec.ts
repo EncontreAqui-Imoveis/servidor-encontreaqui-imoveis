@@ -44,6 +44,7 @@ vi.mock('../../src/database/connection', () => ({
 
 vi.mock('../../src/services/notificationService', () => ({
   createUserNotification: createUserNotificationMock,
+  createAdminNotification: vi.fn(),
   notifyAdmins: vi.fn(),
 }));
 
@@ -126,6 +127,20 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
   app.post('/admin/contracts/:id/finalize', (req, res) =>
     contractController.finalize(req as any, res)
   );
+  app.post('/contracts/:id/draft-review/:side', (req, res) => {
+    const side = req.params.side === 'seller' ? 'seller' : 'buyer';
+    (req as any).userId = side === 'seller' ? 7001 : 7002;
+    (req as any).contractContext = {
+      userRole: side,
+      canReadMeta: true,
+      canReadSeller: side === 'seller',
+      canReadBuyer: side === 'buyer',
+      canEditSeller: false,
+      canEditBuyer: false,
+      isReadOnly: true,
+    };
+    return contractController.reviewDraft(req as any, res);
+  });
 
   let contractState: MutableContractState;
   let evidenceCounts: {
@@ -146,6 +161,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     storage_etag: string | null;
   }>;
   let draftInsertCount: number;
+  let draftReviewDecisions: Record<'seller' | 'buyer', string | null>;
   let negotiationStatusUpdate: string | null;
   let propertyStatusUpdate: {
     status: string;
@@ -164,6 +180,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     };
     draftDocumentsState = [];
     draftInsertCount = 0;
+    draftReviewDecisions = { seller: null, buyer: null };
     negotiationStatusUpdate = null;
     propertyStatusUpdate = null;
 
@@ -181,6 +198,31 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       async (sql: string, params: unknown[] = []) => {
         if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
           return [[{ ...contractState }]];
+        }
+
+        if (
+          sql.includes('UPDATE contracts') &&
+          sql.includes("SET status = 'AWAITING_MINUTE_REVIEW'")
+        ) {
+          contractState.status = 'AWAITING_MINUTE_REVIEW';
+          return [{ affectedRows: 1 }];
+        }
+
+        if (sql.includes('SELECT id FROM contract_draft_revisions')) {
+          return [[{ id: 91 }]];
+        }
+
+        if (sql.includes('INSERT INTO contract_draft_reviews')) {
+          const side = String(params[3] ?? '') as 'seller' | 'buyer';
+          draftReviewDecisions[side] = String(params[4] ?? '');
+          return [{ affectedRows: 1 }];
+        }
+
+        if (sql.includes('SELECT COUNT(*) AS consent_count')) {
+          return [[{
+            consent_count: Object.values(draftReviewDecisions)
+              .filter((decision) => decision === 'CONSENTED').length,
+          }]];
         }
 
         if (
@@ -248,7 +290,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     );
   });
 
-  it('moves contract from IN_DRAFT to AWAITING_SIGNATURES when draft PDF is uploaded', async () => {
+  it('moves contract from IN_DRAFT to minute review when draft PDF is uploaded', async () => {
     contractState = createContractState({
       status: 'IN_DRAFT',
       property_purpose: 'Venda',
@@ -260,7 +302,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .attach('file', Buffer.from('%PDF-1.4 draft%'), 'minuta.pdf');
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(response.body.contract.status).toBe('AWAITING_MINUTE_REVIEW');
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
       expect.objectContaining({
         negotiationId: 'neg-1',
@@ -305,7 +347,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .field('reuseCurrentDraft', 'true');
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(response.body.contract.status).toBe('AWAITING_MINUTE_REVIEW');
     expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
     expect(deleteNegotiationDocumentObjectMock).not.toHaveBeenCalled();
     expect(enqueueNegotiationDocumentDeletionMock).not.toHaveBeenCalled();
@@ -345,10 +387,30 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       .attach('file', Buffer.from('%PDF-1.4 nova minuta%'), 'nova_minuta.pdf');
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(response.body.contract.status).toBe('AWAITING_MINUTE_REVIEW');
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
     expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
     expect(draftDocumentsState).toHaveLength(0);
+  });
+
+  it('releases signatures only after buyer and seller consent to the active draft', async () => {
+    contractState = createContractState({
+      status: 'AWAITING_MINUTE_REVIEW',
+      property_purpose: 'Venda',
+    });
+
+    const buyerResponse = await request(app)
+      .post('/contracts/contract-1/draft-review/buyer')
+      .send({ decision: 'CONSENTED' });
+    expect(buyerResponse.status).toBe(200);
+    expect(contractState.status).toBe('AWAITING_MINUTE_REVIEW');
+
+    const sellerResponse = await request(app)
+      .post('/contracts/contract-1/draft-review/seller')
+      .send({ decision: 'CONSENTED' });
+    expect(sellerResponse.status).toBe(200);
+    expect(sellerResponse.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(contractState.status).toBe('AWAITING_SIGNATURES');
   });
 
   it('blocks finalization when signed contract or payment proof is missing', async () => {

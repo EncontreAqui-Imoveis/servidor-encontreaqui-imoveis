@@ -33,6 +33,7 @@ type PropertyRow = RowDataPacket & {
 type PropertyDeletionRow = RowDataPacket & {
   broker_id?: number | null;
   owner_id?: number | null;
+  deleted_at?: Date | string | null;
 };
 
 const DEAL_TYPE_MAP: Record<string, DealType> = {
@@ -288,15 +289,48 @@ export async function deleteProperty(req: AuthRequest, res: Response) {
   if (Number.isNaN(propertyId)) return res.status(400).json({ error: 'Identificador de imóvel inválido.' });
 
   try {
-    const propertyRows = await runPropertyQuery<PropertyDeletionRow[]>('SELECT broker_id, owner_id, video_url FROM properties WHERE id = ?', [propertyId]);
+    const propertyRows = await runPropertyQuery<PropertyDeletionRow[]>('SELECT broker_id, owner_id, deleted_at FROM properties WHERE id = ?', [propertyId]);
     if (!propertyRows || propertyRows.length === 0) return res.status(404).json({ error: 'Imóvel não encontrado.' });
     const property = propertyRows[0];
     const isOwner = (property.broker_id != null && property.broker_id === userId) || (property.owner_id != null && property.owner_id === userId);
     if (!isOwner) return res.status(403).json({ error: 'Voce nao tem permissao para deletar este imovel.' });
 
-    await runPropertyQuery(
-      `UPDATE properties SET status = 'sold', visibility = 'HIDDEN', lifecycle_status = 'SOLD', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    if (property.deleted_at) {
+      return res.status(200).json({ message: 'Imóvel já foi removido.', status: 'removed', idempotent: true });
+    }
+
+    const activeContractRows = await runPropertyQuery<RowDataPacket[]>(
+      `SELECT 1 FROM contracts WHERE property_id = ? AND status IN ('AWAITING_DOCS', 'IN_DRAFT', 'AWAITING_MINUTE_REVIEW', 'AWAITING_SIGNATURES') LIMIT 1`,
       [propertyId]
+    );
+    if (activeContractRows.length > 0) {
+      return res.status(409).json({ error: 'Não é possível remover um imóvel com contrato ativo.' });
+    }
+    const activeNegotiationRows = await runPropertyQuery<RowDataPacket[]>(
+      `SELECT 1 FROM negotiations WHERE property_id = ? AND UPPER(COALESCE(status, '')) NOT IN ('CANCELLED', 'CANCELED', 'REJECTED', 'REFUSED', 'EXPIRED', 'SOLD', 'RENTED', 'CONCLUDED') LIMIT 1`,
+      [propertyId]
+    );
+    if (activeNegotiationRows.length > 0) {
+      return res.status(409).json({ error: 'Não é possível remover um imóvel com negociação ativa.' });
+    }
+
+    const body = (req.body ?? {}) as { reason?: unknown; reasonOmitted?: unknown; reason_omitted?: unknown };
+    const reason = String(body.reason ?? '').trim().slice(0, 2000);
+    const reasonOmitted = body.reasonOmitted === true || body.reason_omitted === true;
+    if (!reason && !reasonOmitted) {
+      return res.status(400).json({ error: 'Informe o motivo da remoção ou confirme que não deseja informá-lo.' });
+    }
+
+    await runPropertyQuery(
+      `UPDATE properties
+       SET deleted_at = CURRENT_TIMESTAMP,
+           deleted_by_user_id = ?,
+           deletion_reason = ?,
+           deletion_reason_omitted = ?,
+           visibility = 'HIDDEN',
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [userId, reason || null, reasonOmitted ? 1 : 0, propertyId]
     );
     try {
       await runPropertyQuery('DELETE FROM featured_properties WHERE property_id = ?', [propertyId]);
@@ -304,7 +338,7 @@ export async function deleteProperty(req: AuthRequest, res: Response) {
       /* tabela/caso legacy */
     }
 
-    return res.status(200).json({ message: 'Imóvel marcado como vendido e removido da vitrine pública.', status: 'sold' });
+    return res.status(200).json({ message: 'Imóvel removido da vitrine pública com registro de auditoria.', status: 'removed' });
   } catch (error) {
     console.error('Erro ao deletar imóvel:', error);
     return res.status(500).json({ error: 'Ocorreu um erro inesperado no servidor.' });

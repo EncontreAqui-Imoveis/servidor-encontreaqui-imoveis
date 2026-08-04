@@ -1,6 +1,7 @@
 export const CONTRACT_STATUSES = [
   'AWAITING_DOCS',
   'IN_DRAFT',
+  'AWAITING_MINUTE_REVIEW',
   'AWAITING_SIGNATURES',
   'FINALIZED',
   // Historical terminal state: the record remains auditable after its

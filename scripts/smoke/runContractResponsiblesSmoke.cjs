@@ -7,6 +7,7 @@
 const assert = require('node:assert/strict');
 const mysql = require('mysql2/promise');
 const path = require('node:path');
+const { assertLocalOnlyDatabase, createLocalOnlyEnvironment } = require('./localOnlyRuntime.cjs');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 const apiBase = process.env.SMOKE_API_BASE || 'http://127.0.0.1:3334';
@@ -14,10 +15,17 @@ const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
 const contractId = '00000000-0000-4000-8000-000000000101';
 const password = 'SmokePass!123';
 
+Object.assign(process.env, createLocalOnlyEnvironment({
+  database: smokeDatabase,
+  port: '0',
+  r2Bucket: smokeDatabase === 'encontre_aqui_pentest' ? 'imobiliaria-pentest' : 'imobiliaria-smoke',
+  r2Prefix: 'contract-smoke',
+  pdfServiceUrl: 'http://127.0.0.1:3336',
+  pdfInternalApiKey: 'deal-e2e-local-key',
+}));
+
 function assertSmokeDatabase() {
-  if (smokeDatabase !== 'imobiliaria_smoke_v2') {
-    throw new Error(`Recusando alterar status fora do schema isolado. Recebido: ${smokeDatabase}`);
-  }
+  assertLocalOnlyDatabase(smokeDatabase, 'Smoke de corretores responsáveis');
 }
 
 async function request(pathname, options = {}) {

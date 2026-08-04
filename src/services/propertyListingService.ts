@@ -272,6 +272,7 @@ function buildPublicListingWhereClauses(params: {
   whereClauses.push('p.status = ?');
   queryParams.push('approved');
   whereClauses.push("COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'");
+  whereClauses.push('p.deleted_at IS NULL');
 
   if (params.type) {
     const normalizedType = normalizePropertyType(params.type);
@@ -580,7 +581,8 @@ export async function listUserProperties(userId: number) {
         ON per.property_id = p.id
        AND per.status = 'PENDING'
       LEFT JOIN property_images pi ON pi.property_id = p.id
-      WHERE p.owner_id = ? OR p.broker_id = ?
+      WHERE (p.owner_id = ? OR p.broker_id = ?)
+        AND p.deleted_at IS NULL
       GROUP BY p.id
       ORDER BY p.created_at DESC
     `,

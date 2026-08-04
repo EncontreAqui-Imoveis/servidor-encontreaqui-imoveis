@@ -4,6 +4,7 @@ import { PROPERTY_TYPE_LEGACY_UPDATES } from '../utils/propertyTypes';
 import {
   CONTRACT_APPROVAL_STATUSES,
   CONTRACT_DOCUMENT_TYPES,
+  CONTRACT_STATUSES,
 } from '../modules/contracts/domain/contract.types';
 import { ensurePublicPropertyIdentifiersForLegacyRows } from '../utils/propertyCode';
 
@@ -880,7 +881,7 @@ async function ensureContractsTable(): Promise<void> {
       negotiation_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
       property_id INT NOT NULL,
       deal_type ENUM('sale', 'rent') NULL,
-      status ENUM('AWAITING_DOCS', 'IN_DRAFT', 'AWAITING_SIGNATURES', 'FINALIZED') NOT NULL DEFAULT 'AWAITING_DOCS',
+      status ENUM(${CONTRACT_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'AWAITING_DOCS',
       seller_info JSON NULL,
       buyer_info JSON NULL,
       commission_data JSON NULL,
@@ -903,6 +904,74 @@ async function ensureContractsTable(): Promise<void> {
         FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
+}
+
+const CONTRACT_STATUS_VALUES = Array.from(CONTRACT_STATUSES);
+const CONTRACT_STATUS_ENUM_SQL = CONTRACT_STATUS_VALUES.map((value) => `'${value}'`).join(', ');
+
+async function ensureContractStatusColumn(): Promise<void> {
+  if (!(await tableExists('contracts'))) return;
+  const currentType = (await getColumnType('contracts', 'status'))?.toLowerCase() ?? '';
+  if (CONTRACT_STATUS_VALUES.some((value) => !currentType.includes(`'${value.toLowerCase()}'`))) {
+    await connection.query(
+      `ALTER TABLE contracts MODIFY COLUMN status ENUM(${CONTRACT_STATUS_ENUM_SQL}) NOT NULL DEFAULT 'AWAITING_DOCS'`
+    );
+  }
+}
+
+async function ensureContractDraftReviewTables(): Promise<void> {
+  if (!(await tableExists('contracts'))) return;
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS contract_draft_revisions (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      contract_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      negotiation_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      document_id BIGINT UNSIGNED NOT NULL,
+      revision_number INT UNSIGNED NOT NULL,
+      original_file_name VARCHAR(512) NULL,
+      created_by_admin_id INT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      replaced_at DATETIME NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_contract_draft_revision_number (contract_id, revision_number),
+      KEY idx_contract_draft_revision_active (contract_id, is_active, id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS contract_draft_reviews (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      revision_id BIGINT UNSIGNED NOT NULL,
+      contract_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      reviewer_user_id INT NOT NULL,
+      reviewer_side ENUM('seller', 'buyer') NOT NULL,
+      decision ENUM('CONSENTED', 'CHANGES_REQUESTED') NOT NULL,
+      reason TEXT NULL,
+      decided_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_contract_draft_review_side (revision_id, reviewer_side),
+      KEY idx_contract_draft_review_contract (contract_id, revision_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+}
+
+async function ensurePropertyAuditedRemovalColumns(): Promise<void> {
+  if (!(await tableExists('properties'))) return;
+  if (!(await columnExists('properties', 'deleted_at'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN deleted_at DATETIME NULL');
+  }
+  if (!(await columnExists('properties', 'deleted_by_user_id'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN deleted_by_user_id INT NULL');
+  }
+  if (!(await columnExists('properties', 'deletion_reason'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN deletion_reason TEXT NULL');
+  }
+  if (!(await columnExists('properties', 'deletion_reason_omitted'))) {
+    await connection.query('ALTER TABLE properties ADD COLUMN deletion_reason_omitted TINYINT(1) NOT NULL DEFAULT 0');
+  }
+  if (!(await indexExists('properties', 'idx_properties_deleted_at'))) {
+    await connection.query('ALTER TABLE properties ADD INDEX idx_properties_deleted_at (deleted_at)');
+  }
 }
 
 async function ensureContractApprovalColumns(): Promise<void> {
@@ -1586,6 +1655,7 @@ async function ensureGeneralIndices(): Promise<void> {
 export async function applyMigrations(): Promise<void> {
   try {
     await ensurePropertiesColumns();
+    await ensurePropertyAuditedRemovalColumns();
     await ensurePropertyEditRequestsTable();
     await ensureFeaturedPropertiesTable();
     await runFeaturedPropertiesScopeMigration();
@@ -1597,9 +1667,11 @@ export async function applyMigrations(): Promise<void> {
     await ensureSupportRequestsTable();
     await ensurePasswordResetTokensTable();
     await ensureContractsTable();
+    await ensureContractStatusColumn();
     await ensureContractApprovalColumns();
     await ensureContractWorkflowMetadataColumn();
     await ensureContractDealTypeColumn();
+    await ensureContractDraftReviewTables();
     await ensureContractCommissionAllocations();
     await ensureContractDocumentRejectionsTable();
     await ensureNegotiationDocumentTypeColumn();

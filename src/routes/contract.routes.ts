@@ -64,6 +64,10 @@ contractRoutes.post('/contracts/:id/reject-association', authMiddleware, contrac
   contractController.rejectBuyerHandshakeAssociation(req, res)
 );
 
+contractRoutes.post('/contracts/:id/draft-review', authMiddleware, contractAuthMiddleware, (req, res) =>
+  contractController.reviewDraft(req, res)
+);
+
 contractRoutes.post(
   '/contracts/:id/documents',
   authMiddleware,

@@ -87,8 +87,8 @@ describe('verifyCriticalSchemaState', () => {
     const result = await verifyCriticalSchemaState();
 
     expect(result).toEqual({
-      checkedTables: 11,
-      checkedColumns: 42,
+      checkedTables: 13,
+      checkedColumns: 49,
       checkedEnums: 7,
     });
   });

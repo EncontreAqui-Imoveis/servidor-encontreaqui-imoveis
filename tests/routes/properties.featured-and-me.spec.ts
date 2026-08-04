@@ -180,7 +180,10 @@ describe('GET /properties/featured e /properties/me', () => {
         return [[featuredRow], []] as const;
       }
 
-      if (normalizedSql.includes('WHERE p.owner_id = ? OR p.broker_id = ?')) {
+      if (
+        normalizedSql.includes('WHERE (p.owner_id = ? OR p.broker_id = ?)') &&
+        normalizedSql.includes('p.deleted_at IS NULL')
+      ) {
         return [[userRow], []] as const;
       }
 

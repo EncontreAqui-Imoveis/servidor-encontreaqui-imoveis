@@ -106,6 +106,8 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'property_edit_requests',
     'negotiation_responsibles',
     'security_audit_events',
+    'contract_draft_revisions',
+    'contract_draft_reviews',
   ] as const;
 
   for (const tableName of requiredTables) {
@@ -145,6 +147,9 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['properties', 'area_terreno_valor'],
     ['properties', 'area_terreno_unidade'],
     ['properties', 'area_terreno_m2'],
+    ['properties', 'deleted_at'],
+    ['properties', 'deleted_by_user_id'],
+    ['properties', 'deletion_reason'],
     ['property_edit_requests', 'updated_at'],
     ['property_edit_requests', 'before_json'],
     ['property_edit_requests', 'after_json'],
@@ -155,6 +160,10 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['negotiation_document_deletion_jobs', 'negotiation_id'],
     ['negotiation_document_deletion_jobs', 'storage_key'],
     ['negotiation_document_deletion_jobs', 'status'],
+    ['contract_draft_revisions', 'document_id'],
+    ['contract_draft_revisions', 'is_active'],
+    ['contract_draft_reviews', 'reviewer_side'],
+    ['contract_draft_reviews', 'decision'],
   ] as const;
 
   for (const [tableName, columnName] of requiredColumns) {

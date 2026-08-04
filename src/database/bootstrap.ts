@@ -8,6 +8,7 @@ import {
   getAppliedMigrations,
   getMigrationNamesThrough,
   markMigrationsAppliedThrough,
+  runSqlMigrations,
 } from './migrationRunner';
 import { verifyCriticalSchemaState } from './schemaVerification';
 
@@ -80,7 +81,6 @@ export async function bootstrapDatabaseSchema(): Promise<BootstrapResult> {
 
   // Repairs legacy partial bootstraps before the migration ledger is marked.
   await applyMigrations();
-  await verifyCriticalSchemaState();
 
   const applied = await getAppliedMigrations();
   const expectedBaselineNames = getMigrationNamesThrough(BASELINE_MIGRATION_CUTOFF);
@@ -99,6 +99,12 @@ export async function bootstrapDatabaseSchema(): Promise<BootstrapResult> {
   const markedMigrations = applied.length === 0
     ? await markMigrationsAppliedThrough(BASELINE_MIGRATION_CUTOFF)
     : 0;
+
+  // The baseline intentionally stops before newer SQL migrations. Apply those
+  // before verifying the final schema so fresh databases satisfy the same
+  // contract as upgraded databases.
+  await runSqlMigrations('up');
+  await verifyCriticalSchemaState();
 
   return {
     database,

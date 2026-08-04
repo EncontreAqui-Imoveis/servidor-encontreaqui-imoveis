@@ -451,7 +451,7 @@ async function fetchPropertyAggregateByLookup(
       ${buildPropertyAggregateSelectClause(true)}
       ${buildPropertyAggregateJoins(true)}
       WHERE ${whereClause}
-        ${publicOnly ? "AND p.status = 'approved' AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'" : ''}
+        ${publicOnly ? "AND p.status = 'approved' AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC' AND p.deleted_at IS NULL" : ''}
       GROUP BY p.id
     `,
     [...NEGOTIATION_PUBLIC_BLOCKING_STATUSES, lookup.value]
@@ -702,6 +702,7 @@ export async function getAvailableCities() {
         AND city <> ''
         AND status = 'approved'
         AND COALESCE(visibility, 'PUBLIC') = 'PUBLIC'
+        AND deleted_at IS NULL
       ORDER BY city ASC
     `,
     []
@@ -721,6 +722,7 @@ export async function getAvailableCitiesWithCount() {
         AND p.city <> ''
         AND p.status = 'approved'
         AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+        AND p.deleted_at IS NULL
         AND NOT EXISTS (
           SELECT 1
           FROM negotiations nx
@@ -759,6 +761,7 @@ export async function getAvailableBairrosWithCount(city: string) {
         AND p.bairro <> ''
         AND p.status = 'approved'
         AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+        AND p.deleted_at IS NULL
         ${cityClause}
         AND NOT EXISTS (
           SELECT 1
@@ -799,6 +802,7 @@ export async function listFeaturedProperties(params: {
       ${buildPropertyAggregateJoinsOnly(false)}
       WHERE p.status = 'approved'
         AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+        AND p.deleted_at IS NULL
         AND fp.scope = ?
         AND (
           (fp.scope = 'sale' AND p.purpose IN ('Venda', 'Venda e Aluguel'))
@@ -830,6 +834,7 @@ export async function listFeaturedProperties(params: {
       JOIN properties p ON p.id = fp.property_id
       WHERE p.status = 'approved'
         AND COALESCE(p.visibility, 'PUBLIC') = 'PUBLIC'
+        AND p.deleted_at IS NULL
         AND fp.scope = ?
         AND (
           (fp.scope = 'sale' AND p.purpose IN ('Venda', 'Venda e Aluguel'))

@@ -152,6 +152,7 @@ const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
 const CONTRACT_STATUS_FLOW: ContractStatus[] = [
   'AWAITING_DOCS',
   'IN_DRAFT',
+  'AWAITING_MINUTE_REVIEW',
   'AWAITING_SIGNATURES',
   'FINALIZED',
 ];
@@ -233,6 +234,17 @@ export interface ContractRow extends RowDataPacket {
   capturing_agency_name: string | null;
   capturing_agency_address: string | null;
   responsible_user_ids: string | null;
+  draft_review_revision_id?: number | null;
+  draft_review_revision_number?: number | null;
+  draft_review_document_id?: number | null;
+  draft_review_original_file_name?: string | null;
+  draft_review_created_at?: Date | string | null;
+  seller_draft_review_decision?: 'CONSENTED' | 'CHANGES_REQUESTED' | null;
+  seller_draft_review_reason?: string | null;
+  seller_draft_review_at?: Date | string | null;
+  buyer_draft_review_decision?: 'CONSENTED' | 'CHANGES_REQUESTED' | null;
+  buyer_draft_review_reason?: string | null;
+  buyer_draft_review_at?: Date | string | null;
 }
 
 export interface ContractDocumentRow extends RowDataPacket {
@@ -1209,6 +1221,21 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     : {};
   const viewerSide = resolveContractViewerSide(req, row);
   const status = resolveContractStatus(row.status);
+  const draftReviewRevisionId = Number(row.draft_review_revision_id ?? 0);
+  const draftReviewCanBeRead = !handshakeRestricted && !statusOnlyResponsible;
+  const viewerDraftDecision = viewerSide === 'seller'
+    ? row.seller_draft_review_decision ?? null
+    : viewerSide === 'buyer'
+      ? row.buyer_draft_review_decision ?? null
+      : null;
+  const viewerDraftReason = viewerSide === 'seller'
+    ? row.seller_draft_review_reason ?? null
+    : viewerSide === 'buyer'
+      ? row.buyer_draft_review_reason ?? null
+      : null;
+  const bothSidesConsented =
+    row.seller_draft_review_decision === 'CONSENTED' &&
+    row.buyer_draft_review_decision === 'CONSENTED';
   const capabilities = readContext
     ? {
         canReadMeta: readContext.canReadMeta,
@@ -1251,6 +1278,42 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
       status: readContext?.handshakeStatus ?? null,
       requiresVerification: Boolean(readContext?.requiresHandshakeVerification),
     },
+    draftReview: draftReviewCanBeRead && draftReviewRevisionId > 0
+      ? {
+          revisionId: draftReviewRevisionId,
+          revisionNumber: Number(row.draft_review_revision_number ?? 1),
+          documentId: Number(row.draft_review_document_id ?? 0) || null,
+          originalFileName: row.draft_review_original_file_name ?? null,
+          createdAt: row.draft_review_created_at ?? null,
+          canReview:
+            status === 'AWAITING_MINUTE_REVIEW' &&
+            (viewerSide === 'seller' || viewerSide === 'buyer') &&
+            viewerDraftDecision == null,
+          viewerDecision: viewerDraftDecision,
+          viewerReason: viewerDraftReason,
+          sellerDecision: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
+            ? row.seller_draft_review_decision ?? null
+            : viewerSide === 'seller'
+              ? row.seller_draft_review_decision ?? null
+              : null,
+          sellerReason: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
+            ? row.seller_draft_review_reason ?? null
+            : viewerSide === 'seller'
+              ? row.seller_draft_review_reason ?? null
+              : null,
+          buyerDecision: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
+            ? row.buyer_draft_review_decision ?? null
+            : viewerSide === 'buyer'
+              ? row.buyer_draft_review_decision ?? null
+              : null,
+          buyerReason: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
+            ? row.buyer_draft_review_reason ?? null
+            : viewerSide === 'buyer'
+              ? row.buyer_draft_review_reason ?? null
+              : null,
+          allConsented: bothSidesConsented,
+        }
+      : null,
     sellerInfo: sellerInfoForViewer,
     // Compatibilidade legada: ownerInfo permanece somente como alias de sellerInfo.
     ownerInfo: sellerInfoForViewer,
@@ -1979,6 +2042,17 @@ export const CONTRACT_SELECT_BASE_SQL = `
     c.buyer_approval_reason,
     c.created_at,
     c.updated_at,
+    active_draft_revision.id AS draft_review_revision_id,
+    active_draft_revision.revision_number AS draft_review_revision_number,
+    active_draft_revision.document_id AS draft_review_document_id,
+    active_draft_revision.original_file_name AS draft_review_original_file_name,
+    active_draft_revision.created_at AS draft_review_created_at,
+    seller_draft_review.decision AS seller_draft_review_decision,
+    seller_draft_review.reason AS seller_draft_review_reason,
+    seller_draft_review.decided_at AS seller_draft_review_at,
+    buyer_draft_review.decision AS buyer_draft_review_decision,
+    buyer_draft_review.reason AS buyer_draft_review_reason,
+    buyer_draft_review.decided_at AS buyer_draft_review_at,
     n.capturing_broker_id,
     n.selling_broker_id,
     n.advertiser_id,
@@ -2039,6 +2113,15 @@ export const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN users advertiser_user ON advertiser_user.id = n.advertiser_id
   LEFT JOIN users owner_user ON owner_user.id = p.owner_id
   LEFT JOIN users seller_user ON seller_user.id = n.selling_broker_id
+  LEFT JOIN contract_draft_revisions active_draft_revision
+    ON active_draft_revision.contract_id = c.id
+   AND active_draft_revision.is_active = 1
+  LEFT JOIN contract_draft_reviews seller_draft_review
+    ON seller_draft_review.revision_id = active_draft_revision.id
+   AND seller_draft_review.reviewer_side = 'seller'
+  LEFT JOIN contract_draft_reviews buyer_draft_review
+    ON buyer_draft_review.revision_id = active_draft_revision.id
+   AND buyer_draft_review.reviewer_side = 'buyer'
 `;
 
 let negotiationResponsiblesTableCache: boolean | null = null;
@@ -2645,12 +2728,6 @@ class ContractController {
     }
 
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const side = parseDocumentSide(body.side);
-    if (!side) {
-      return res.status(400).json({
-        error: 'Informe o dono da minuta (side: seller|buyer).',
-      });
-    }
     const reuseCurrentDraft = readBooleanLike(body.reuseCurrentDraft);
     const uploadedFile = (req as Request & { file?: Express.Multer.File }).file;
     if (!reuseCurrentDraft && (!uploadedFile?.buffer || uploadedFile.buffer.length === 0)) {
@@ -2668,10 +2745,10 @@ class ContractController {
       }
 
       const currentStatus = resolveContractStatus(contract.status);
-      if (currentStatus !== 'IN_DRAFT') {
+      if (currentStatus !== 'IN_DRAFT' && currentStatus !== 'AWAITING_MINUTE_REVIEW') {
         await tx.rollback();
         return res.status(400).json({
-          error: 'Somente contratos em Em Confecção podem receber minuta.',
+          error: 'Somente contratos em Confecção ou Conferência da Minuta podem receber minuta.',
         });
       }
 
@@ -2700,8 +2777,10 @@ class ContractController {
         });
       }
 
+      let activeDraftDocumentId = Number(activeDraftDocuments[0]?.id ?? 0) || null;
+      let activeDraftOriginalFileName = activeDraftDocuments[0]?.original_file_name ?? null;
       if (uploadedFile?.buffer && uploadedFile.buffer.length > 0) {
-        await storeNegotiationDocumentToR2({
+        activeDraftDocumentId = await storeNegotiationDocumentToR2({
           executor: tx,
           negotiationId: contract.negotiation_id,
           type: 'contract',
@@ -2716,12 +2795,14 @@ class ContractController {
               originalFileName: uploadedFile.originalname ?? 'minuta-contrato.pdf',
               generationRevision: activeDraftDocuments.length + 1,
             }),
-            owner_side: side,
-            side,
+            // A minuta é um artefato administrativo compartilhado. Ela não
+            // pertence ao dossiê pessoal de comprador ou vendedor.
+            visibility: 'CONTRACT_SHARED',
             uploadedAt: new Date().toISOString(),
             uploadedVia: 'admin_upload',
           },
         });
+        activeDraftOriginalFileName = uploadedFile.originalname ?? 'minuta-contrato.pdf';
 
         if (existingDraftDocuments.length > 0) {
           const existingDraftIds = existingDraftDocuments.map((document) => Number(document.id));
@@ -2735,10 +2816,49 @@ class ContractController {
         }
       }
 
+      if (!activeDraftDocumentId) {
+        await tx.rollback();
+        return res.status(400).json({ error: 'Não foi possível localizar a minuta ativa.' });
+      }
+
+      const [revisionRows] = await tx.query<Array<RowDataPacket & { next_revision: number }>>(
+        `
+          SELECT COALESCE(MAX(revision_number), 0) + 1 AS next_revision
+          FROM contract_draft_revisions
+          WHERE contract_id = ?
+          FOR UPDATE
+        `,
+        [contractId]
+      );
+      await tx.query(
+        `
+          UPDATE contract_draft_revisions
+          SET is_active = 0, replaced_at = CURRENT_TIMESTAMP
+          WHERE contract_id = ? AND is_active = 1
+        `,
+        [contractId]
+      );
+      await tx.query(
+        `
+          INSERT INTO contract_draft_revisions (
+            contract_id, negotiation_id, document_id, revision_number,
+            original_file_name, created_by_admin_id, is_active
+          ) VALUES (?, ?, ?, ?, ?, ?, 1)
+        `,
+        [
+          contractId,
+          contract.negotiation_id,
+          activeDraftDocumentId,
+          Number(revisionRows[0]?.next_revision ?? 1),
+          activeDraftOriginalFileName,
+          Number((req as AuthRequest).userId ?? 0) || null,
+        ]
+      );
+
       await tx.query(
         `
           UPDATE contracts
-          SET status = 'AWAITING_SIGNATURES', updated_at = CURRENT_TIMESTAMP
+          SET status = 'AWAITING_MINUTE_REVIEW', updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `,
         [contractId]
@@ -2773,13 +2893,34 @@ class ContractController {
           )
         )
       );
+      const sellerRecipientIds = Array.from(
+        new Set(
+          [
+            updatedContract?.advertiser_id,
+            updatedContract?.property_owner_id,
+            updatedContract?.initiator_side === 'seller'
+              ? updatedContract?.proposer_id
+              : null,
+          ].filter((value): value is number => value != null && Number.isFinite(Number(value)))
+        )
+      );
+      const buyerRecipientIds = Array.from(
+        new Set(
+          [
+            updatedContract?.legal_buyer_user_id,
+            updatedContract?.initiator_side === 'buyer'
+              ? updatedContract?.proposer_id
+              : null,
+          ].filter((value): value is number => value != null && Number.isFinite(Number(value)))
+        )
+      );
 
       for (const recipientId of brokerRecipientIds) {
         try {
           await createUserNotification({
             type: 'negotiation',
-            title: 'Minuta pronta para assinatura',
-            message: `A minuta do contrato do imóvel ${propertyTitle} está pronta para assinatura!`,
+            title: 'Minuta pronta para conferência',
+            message: `A minuta do contrato do imóvel ${propertyTitle} está pronta para conferência pelas partes.`,
             recipientId,
             relatedEntityId: Number(contract.property_id),
             recipientRole: 'broker',
@@ -2787,7 +2928,7 @@ class ContractController {
               contractId,
               negotiationId: contract.negotiation_id,
               propertyId: Number(contract.property_id),
-              stage: 'AWAITING_SIGNATURES',
+              stage: 'AWAITING_MINUTE_REVIEW',
             },
             target: 'contract_details',
           });
@@ -2796,17 +2937,15 @@ class ContractController {
         }
       }
 
-      const legalBuyerRecipientId = Number(updatedContract?.legal_buyer_user_id ?? 0);
       const handshakeStatus = String(updatedContract?.handshake_status ?? '').trim().toUpperCase();
-      if (legalBuyerRecipientId > 0 && handshakeStatus !== 'REJECTED') {
+      for (const recipientId of sellerRecipientIds) {
         try {
           await createUserNotification({
             type: 'negotiation',
             title: 'Minuta pronta para revisão',
-            message: `A minuta do contrato do imóvel ${propertyTitle} está disponível para revisão.`,
-            recipientId: legalBuyerRecipientId,
+            message: `A minuta do contrato do imóvel ${propertyTitle} está disponível para a sua conferência.`,
+            recipientId,
             relatedEntityId: Number(contract.property_id),
-            recipientRole: 'client',
             metadata: {
               contractId,
               negotiationId: contract.negotiation_id,
@@ -2815,12 +2954,33 @@ class ContractController {
             target: 'contract_details',
           });
         } catch (notificationError) {
-          console.error('Falha ao notificar comprador vinculado sobre minuta:', notificationError);
+          console.error('Falha ao notificar vendedor sobre minuta:', notificationError);
+        }
+      }
+      if (handshakeStatus !== 'REJECTED') {
+        for (const recipientId of buyerRecipientIds) {
+          try {
+            await createUserNotification({
+              type: 'negotiation',
+              title: 'Minuta pronta para revisão',
+              message: `A minuta do contrato do imóvel ${propertyTitle} está disponível para a sua conferência.`,
+              recipientId,
+              relatedEntityId: Number(contract.property_id),
+              metadata: {
+                contractId,
+                negotiationId: contract.negotiation_id,
+                propertyId: Number(contract.property_id),
+              },
+              target: 'contract_details',
+            });
+          } catch (notificationError) {
+            console.error('Falha ao notificar comprador sobre minuta:', notificationError);
+          }
         }
       }
 
       return res.status(200).json({
-        message: 'Minuta anexada e contrato avançado para AWAITING_SIGNATURES.',
+        message: 'Minuta anexada e enviada para conferência do comprador e vendedor.',
         contract: updatedContract ? mapContract(updatedContract, req) : null,
       });
     } catch (error) {
@@ -2830,6 +2990,111 @@ class ContractController {
       }
       console.error('Erro ao anexar minuta do contrato:', error);
       return res.status(500).json({ error: 'Falha ao anexar minuta do contrato.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async reviewDraft(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    const context = req.contractContext;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const decision = String(body.decision ?? '').trim().toUpperCase();
+    const reason = String(body.reason ?? '').trim().slice(0, 2000);
+    if (!contractId) return res.status(400).json({ error: 'ID do contrato inválido.' });
+    if (decision !== 'CONSENTED' && decision !== 'CHANGES_REQUESTED') {
+      return res.status(400).json({ error: 'Decisão inválida para conferência da minuta.' });
+    }
+    if (decision === 'CHANGES_REQUESTED' && !reason) {
+      return res.status(400).json({ error: 'Informe o motivo da solicitação de correção.' });
+    }
+    if (!context || (context.userRole !== 'seller' && context.userRole !== 'buyer')) {
+      return res.status(403).json({ error: 'Apenas comprador ou vendedor podem conferir a minuta.' });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+      if (resolveContractStatus(contract.status) !== 'AWAITING_MINUTE_REVIEW') {
+        await tx.rollback();
+        return res.status(409).json({ error: 'A minuta não está disponível para conferência nesta etapa.' });
+      }
+      const side = context.userRole;
+      const [revisionRows] = await tx.query<Array<RowDataPacket & { id: number }>>(
+        `SELECT id FROM contract_draft_revisions WHERE contract_id = ? AND is_active = 1 LIMIT 1 FOR UPDATE`,
+        [contractId]
+      );
+      const revisionId = Number(revisionRows[0]?.id ?? 0);
+      if (!revisionId) {
+        await tx.rollback();
+        return res.status(409).json({ error: 'A minuta ativa não possui uma revisão válida.' });
+      }
+      await tx.query(
+        `
+          INSERT INTO contract_draft_reviews (
+            revision_id, contract_id, reviewer_user_id, reviewer_side, decision, reason, decided_at
+          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON DUPLICATE KEY UPDATE
+            reviewer_user_id = VALUES(reviewer_user_id),
+            decision = VALUES(decision),
+            reason = VALUES(reason),
+            decided_at = CURRENT_TIMESTAMP
+        `,
+        [revisionId, contractId, Number(req.userId), side, decision, reason || null]
+      );
+      const [decisionRows] = await tx.query<Array<RowDataPacket & { consent_count: number }>>(
+        `
+          SELECT COUNT(*) AS consent_count
+          FROM contract_draft_reviews
+          WHERE revision_id = ? AND decision = 'CONSENTED'
+        `,
+        [revisionId]
+      );
+      const allConsented = Number(decisionRows[0]?.consent_count ?? 0) === 2;
+      if (allConsented) {
+        await tx.query(
+          `UPDATE contracts SET status = 'AWAITING_SIGNATURES', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          [contractId]
+        );
+      }
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+      try {
+        await createAdminNotification({
+          type: 'negotiation',
+          title: decision === 'CONSENTED' ? 'Minuta conferida' : 'Correção solicitada na minuta',
+          message: decision === 'CONSENTED'
+            ? `A parte ${side === 'seller' ? 'vendedora' : 'compradora'} conferiu a minuta do contrato ${contractId}.`
+            : `A parte ${side === 'seller' ? 'vendedora' : 'compradora'} solicitou correção na minuta: ${reason}`,
+          relatedEntityId: Number(contract.property_id),
+          metadata: {
+            contractId,
+            negotiationId: contract.negotiation_id,
+            propertyId: Number(contract.property_id),
+            stage: allConsented ? 'AWAITING_SIGNATURES' : 'AWAITING_MINUTE_REVIEW',
+          },
+          target: 'contract_details',
+        });
+      } catch (notificationError) {
+        console.error('Falha ao notificar administração sobre conferência da minuta:', notificationError);
+      }
+      return res.status(200).json({
+        message: allConsented
+          ? 'Os dois lados conferiram a minuta. O contrato avançou para assinaturas presenciais.'
+          : decision === 'CONSENTED'
+            ? 'Conferência da minuta registrada. Aguarde a outra parte.'
+            : 'Solicitação de correção registrada para a administração.',
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao registrar conferência da minuta:', error);
+      return res.status(500).json({ error: 'Falha ao registrar conferência da minuta.' });
     } finally {
       tx.release();
     }

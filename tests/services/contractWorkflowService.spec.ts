@@ -215,20 +215,19 @@ describe('contractWorkflowService', () => {
     expect(txMock.commit).not.toHaveBeenCalled();
   });
 
-  it('advances to AWAITING_SIGNATURES when the draft exists', async () => {
+  it('blocks direct advancement from IN_DRAFT even when the draft exists', async () => {
     contractState = createContractState({ status: 'IN_DRAFT' });
     draftTotal = 1;
 
-    const result = await transitionContractStatus({
-      contractIdInput: 'contract-1',
-      directionInput: 'next',
-      loadContractForUpdate: async () => contractState,
-    });
-
-    expect(result.message).toContain('AWAITING_SIGNATURES');
-    expect(result.contract?.status).toBe('AWAITING_SIGNATURES');
-    expect(contractState.status).toBe('AWAITING_SIGNATURES');
-    expect(txMock.commit).toHaveBeenCalledTimes(1);
+    await expect(
+      transitionContractStatus({
+        contractIdInput: 'contract-1',
+        directionInput: 'next',
+        loadContractForUpdate: async () => contractState,
+      })
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(contractState.status).toBe('IN_DRAFT');
+    expect(txMock.commit).not.toHaveBeenCalled();
   });
 
   it('blocks a legacy or mismatched draft even when a draft row exists', async () => {
@@ -245,7 +244,7 @@ describe('contractWorkflowService', () => {
     ).rejects.toMatchObject({ statusCode: 400 });
   });
 
-  it('steps back and cleans documents when returning to IN_DRAFT', async () => {
+  it('steps back and cleans signature documents when returning to minute review', async () => {
     contractState = createContractState({ status: 'AWAITING_SIGNATURES' });
     documentsState = [
       {
@@ -266,8 +265,8 @@ describe('contractWorkflowService', () => {
       loadContractForUpdate: async () => contractState,
     });
 
-    expect(result.contract?.status).toBe('IN_DRAFT');
-    expect(contractState.status).toBe('IN_DRAFT');
+    expect(result.contract?.status).toBe('AWAITING_MINUTE_REVIEW');
+    expect(contractState.status).toBe('AWAITING_MINUTE_REVIEW');
     expect(contractState.workflow_metadata).toEqual({ extra: 'keep-me' });
     expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
     expect(deleteCloudinaryAssetMock).not.toHaveBeenCalled();

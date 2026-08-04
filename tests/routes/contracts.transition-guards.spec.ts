@@ -238,7 +238,7 @@ describe('PUT /admin/contracts/:id/transition guards', () => {
     expect(contractState.status).toBe('IN_DRAFT');
   });
 
-  it('allows moving to AWAITING_SIGNATURES only when draft exists for this contract', async () => {
+  it('blocks direct movement to signatures even when a valid draft exists', async () => {
     contractState = createContractState({ status: 'IN_DRAFT' });
     draftTotal = 1;
     documentsState = [
@@ -262,12 +262,12 @@ describe('PUT /admin/contracts/:id/transition guards', () => {
       .put('/admin/contracts/contract-1/transition')
       .send({ direction: 'next' });
 
-    expect(response.status).toBe(200);
-    expect(response.body.contract.status).toBe('AWAITING_SIGNATURES');
-    expect(contractState.status).toBe('AWAITING_SIGNATURES');
+    expect(response.status).toBe(400);
+    expect(String(response.body.error ?? '')).toContain('Anexe ou substitua');
+    expect(contractState.status).toBe('IN_DRAFT');
   });
 
-  it('removes signature-step documents when returning from AWAITING_SIGNATURES to IN_DRAFT', async () => {
+  it('removes signature-step documents when returning from AWAITING_SIGNATURES to minute review', async () => {
     contractState = createContractState({ status: 'AWAITING_SIGNATURES' });
     documentsState = [
       {
@@ -298,7 +298,7 @@ describe('PUT /admin/contracts/:id/transition guards', () => {
       .send({ direction: 'previous' });
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.status).toBe('IN_DRAFT');
+    expect(response.body.contract.status).toBe('AWAITING_MINUTE_REVIEW');
     expect(documentsState.map((item) => item.document_type)).toEqual(['contrato_minuta']);
     expect(contractState.workflow_metadata).toBeNull();
   });

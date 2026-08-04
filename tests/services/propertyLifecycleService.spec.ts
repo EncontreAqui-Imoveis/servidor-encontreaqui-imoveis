@@ -241,20 +241,24 @@ describe('propertyLifecycleService', () => {
     expect(dbMock.beginTransaction).not.toHaveBeenCalled();
   });
 
-  it('deleta imóvel como sold e remove da vitrine', async () => {
+  it('remove imóvel da vitrine com motivo auditável', async () => {
     runPropertyQueryMock
       .mockResolvedValueOnce([
         {
           broker_id: 30003,
           owner_id: null,
-          video_url: null,
+          deleted_at: null,
         },
       ])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
       .mockResolvedValueOnce([{ affectedRows: 1 }]);
 
     const req = {
       params: { id: '10' },
       userId: 30003,
+      body: { reason: 'Imóvel retirado pelo proprietário.' },
     } as any;
     const res = createMockResponse();
 
@@ -263,9 +267,30 @@ describe('propertyLifecycleService', () => {
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: 'Imóvel marcado como vendido e removido da vitrine pública.',
-        status: 'sold',
+        message: 'Imóvel removido da vitrine pública com registro de auditoria.',
+        status: 'removed',
       })
+    );
+    expect(runPropertyQueryMock).toHaveBeenCalledWith(
+      expect.stringContaining('SET deleted_at = CURRENT_TIMESTAMP'),
+      [30003, 'Imóvel retirado pelo proprietário.', 0, 10]
+    );
+  });
+
+  it('exige motivo ou confirmação explícita de omissão ao remover imóvel', async () => {
+    runPropertyQueryMock
+      .mockResolvedValueOnce([{ broker_id: 30003, owner_id: null, deleted_at: null }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const req = { params: { id: '10' }, userId: 30003, body: {} } as any;
+    const res = createMockResponse();
+
+    await deleteProperty(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.stringContaining('motivo') })
     );
   });
 });

@@ -148,6 +148,7 @@ export function resolveContractAccessContext(
 
   const workflowFrozen =
     workflowStatus === 'IN_DRAFT' ||
+    workflowStatus === 'AWAITING_MINUTE_REVIEW' ||
     workflowStatus === 'AWAITING_SIGNATURES' ||
     workflowStatus === 'FINALIZED' ||
     workflowStatus === 'CANCELLED';

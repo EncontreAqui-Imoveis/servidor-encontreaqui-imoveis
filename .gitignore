@@ -23,7 +23,7 @@ gitleaks-backend.json
 backend-threat-model.md
 docs/sast_negotiation_documents_r2.md
 cassino.code-workspace
-docs/rental-contract-flow-plan.txt
+docs/
 docs/contract-ecosystem-plan-status-and-viability.txt
 scratch/
 scripts/*
@@ -32,5 +32,17 @@ scripts/*
 !scripts/schema/
 !scripts/schema/20260729_001_current_schema.sql
 !scripts/audit-contract-buyer-legal-names.ts
-scripts/smoke/
+!scripts/smoke/
+scripts/smoke/*
+!scripts/smoke/localOnlyRuntime.cjs
 viadodabike.txt
+docs/local-pentest-and-resilience-plan.txt
+docs/rental-contract-flow-plan.txt
+
+# Artefatos locais de smoke e segurança
+smoke-artifacts/
+test-logs/
+zap-*.html
+zap-*.json
+semgrep-*.json
+gitleaks-*.json

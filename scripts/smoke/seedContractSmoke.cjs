@@ -5,19 +5,26 @@
  */
 const bcrypt = require('bcryptjs');
 const mysql = require('mysql2/promise');
+const { assertLocalOnlyDatabase, createLocalOnlyEnvironment } = require('./localOnlyRuntime.cjs');
 const path = require('node:path');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 
 const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
-const requiredDatabase = 'imobiliaria_smoke_v2';
 const contractId = '00000000-0000-4000-8000-000000000101';
 const negotiationId = '00000000-0000-4000-8000-000000000201';
 const password = 'SmokePass!123';
 
+Object.assign(process.env, createLocalOnlyEnvironment({
+  database: smokeDatabase,
+  port: '0',
+  r2Bucket: smokeDatabase === 'encontre_aqui_pentest' ? 'imobiliaria-pentest' : 'imobiliaria-smoke',
+  r2Prefix: 'contract-smoke',
+  pdfServiceUrl: 'http://127.0.0.1:3336',
+  pdfInternalApiKey: 'deal-e2e-local-key',
+}));
+
 function assertSmokeDatabase() {
-  if (smokeDatabase !== requiredDatabase) {
-    throw new Error(`Recusando seed fora do schema isolado ${requiredDatabase}. Recebido: ${smokeDatabase}`);
-  }
+  assertLocalOnlyDatabase(smokeDatabase, 'Seed de smoke de contratos');
 }
 
 function connectionConfig() {

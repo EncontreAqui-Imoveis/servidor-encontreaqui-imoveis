@@ -72,6 +72,7 @@ export function isContractWorkflowError(error: unknown): error is ContractWorkfl
 const CONTRACT_STATUS_FLOW: ContractStatus[] = [
   'AWAITING_DOCS',
   'IN_DRAFT',
+  'AWAITING_MINUTE_REVIEW',
   'AWAITING_SIGNATURES',
   'FINALIZED',
 ];
@@ -121,6 +122,10 @@ function toDocumentCount(value: unknown): number {
 }
 
 function resolveRollbackDocumentTypes(targetStatus: ContractStatus): string[] {
+  if (targetStatus === 'AWAITING_MINUTE_REVIEW') {
+    return ['contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria', 'outro'];
+  }
+
   if (targetStatus === 'IN_DRAFT') {
     return ['contrato_assinado', 'comprovante_pagamento', 'boleto_vistoria', 'outro'];
   }
@@ -454,6 +459,22 @@ export async function transitionContractStatus(
       );
     }
 
+    if (currentStatus === 'IN_DRAFT' && direction === 'next') {
+      await tx.rollback();
+      throw contractWorkflowError(
+        400,
+        'Anexe ou substitua a minuta para iniciar a conferência pelas partes.'
+      );
+    }
+
+    if (currentStatus === 'AWAITING_MINUTE_REVIEW' && direction === 'next') {
+      await tx.rollback();
+      throw contractWorkflowError(
+        400,
+        'A etapa de assinaturas é liberada automaticamente após os dois lados conferirem a minuta.'
+      );
+    }
+
     const targetIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
     if (targetIndex < 0 || targetIndex >= CONTRACT_STATUS_FLOW.length) {
       await tx.rollback();
@@ -489,6 +510,20 @@ export async function transitionContractStatus(
           'Transição bloqueada: gere uma minuta ativa compatível com a modalidade do contrato antes de avançar.'
         );
       }
+    }
+
+    // Returning from the signature stage reopens the same draft for a new
+    // bilateral review. Previous acknowledgements cannot authorize it again.
+    if (direction === 'previous' && nextStatus === 'AWAITING_MINUTE_REVIEW') {
+      await tx.query(
+        `
+          DELETE review
+          FROM contract_draft_reviews review
+          INNER JOIN contract_draft_revisions revision ON revision.id = review.revision_id
+          WHERE revision.contract_id = ? AND revision.is_active = 1
+        `,
+        [contractId]
+      );
     }
 
     await tx.query(

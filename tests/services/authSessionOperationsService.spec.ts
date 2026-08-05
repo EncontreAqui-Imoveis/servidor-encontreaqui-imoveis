@@ -239,6 +239,39 @@ describe('authSessionOperationsService', () => {
     expect(signUserTokenMock).toHaveBeenCalledWith(42, 'broker', 3);
   });
 
+  it('returns an unauthorized error when Firebase rejects the ID token', async () => {
+    verifyIdTokenMock.mockRejectedValueOnce({ code: 'auth/id-token-expired' });
+
+    const { google } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(google({ idToken: 'expired-google-token' })).rejects.toMatchObject({
+      code: 'UNAUTHORIZED',
+      details: {
+        code: 'GOOGLE_TOKEN_INVALID',
+        retryable: false,
+      },
+    });
+  });
+
+  it('reports a database failure as temporarily unavailable', async () => {
+    mockUserSchema();
+    queryMock.mockRejectedValueOnce({
+      code: 'ER_BAD_FIELD_ERROR',
+      errno: 1054,
+      sqlState: '42S22',
+    });
+
+    const { google } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(google({ idToken: 'google-token', requestId: 'request-google-db' })).rejects.toMatchObject({
+      code: 'UNAVAILABLE',
+      details: {
+        code: 'AUTH_STORAGE_UNAVAILABLE',
+        retryable: true,
+      },
+    });
+  });
+
   it('rejects logout without authenticated user and handles missing rows', async () => {
     const { logout } = await import('../../src/services/authSessionOperationsService');
 

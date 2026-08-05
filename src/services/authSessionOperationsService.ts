@@ -7,6 +7,8 @@ import {
   InvalidInputError,
   NotFoundError,
   UnauthorizedError,
+  UnavailableError,
+  isApplicationError,
 } from '../errors/ApplicationError';
 import { authDb } from './authPersistenceService';
 import {
@@ -58,6 +60,7 @@ export interface LoginResult {
 export interface GoogleInput {
   idToken?: string;
   profileType?: string;
+  requestId?: string | null;
 }
 
 export interface GoogleResult {
@@ -117,10 +120,66 @@ function hasColumn(table: string, column: string): Promise<boolean> {
       [table, column],
     )
     .then(([rows]) => rows.length > 0)
-    .catch(() => false);
+    .catch((error) => {
+      // Missing tables return an empty result from information_schema. A
+      // connection/query failure must remain visible instead of looking like a
+      // legacy schema, otherwise every login degrades into a misleading 500.
+      columnExistsCache.delete(key);
+      throw error;
+    });
 
   columnExistsCache.set(key, promise);
   return promise;
+}
+
+type ErrorMetadata = {
+  code?: unknown;
+  errno?: unknown;
+  sqlState?: unknown;
+};
+
+function errorCode(error: unknown): string {
+  const value = (error as ErrorMetadata | null)?.code;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function isDatabaseError(error: unknown): boolean {
+  const metadata = error as ErrorMetadata | null;
+  const code = errorCode(error);
+  return (
+    code.startsWith('ER_') ||
+    typeof metadata?.errno === 'number' ||
+    typeof metadata?.sqlState === 'string'
+  );
+}
+
+function isInvalidFirebaseTokenError(error: unknown): boolean {
+  return new Set([
+    'auth/argument-error',
+    'auth/id-token-expired',
+    'auth/id-token-revoked',
+    'auth/invalid-id-token',
+  ]).has(errorCode(error));
+}
+
+function isFirebaseServiceError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code.startsWith('auth/') || code.startsWith('app/');
+}
+
+function logGoogleAuthFailure(
+  stage: string,
+  requestId: string | null | undefined,
+  error: unknown,
+): void {
+  const normalized = error instanceof Error ? error : null;
+  console.error('Google auth failure:', {
+    stage,
+    requestId: requestId ?? null,
+    errorName: normalized?.name ?? 'UnknownError',
+    errorCode: errorCode(error) || null,
+    databaseError: isDatabaseError(error),
+  });
 }
 
 type UserSelectQuery = {
@@ -261,6 +320,8 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
   }
 
   const requestedProfile = normalizeRequestedProfile(input.profileType);
+  const requestId = input.requestId;
+  let stage = 'firebase_verify';
 
   try {
     const decoded = await withTimeout(
@@ -280,12 +341,14 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       throw new InvalidInputError('Email não disponível no token do Google.');
     }
 
+    stage = 'schema_probe';
     const userSelectQuery = await buildUserSelectQuery();
     const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
     const lookupWhere = hasFirebaseUidColumn
       ? 'WHERE u.firebase_uid = ? OR u.email = ?'
       : 'WHERE u.email = ?';
     const lookupParams = hasFirebaseUidColumn ? [uid, email] : [email];
+    stage = 'user_lookup';
     const [existingRows] = await authDb.query<AuthUserRow[]>(
       `SELECT ${userSelectQuery.selectClause}
          FROM users u
@@ -313,6 +376,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
     }
 
     const row = existingRows[0];
+    stage = 'profile_update';
     if (hasFirebaseUidColumn && !row.firebase_uid) {
       await authDb.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
     }
@@ -331,6 +395,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
     const requiresDocuments =
       effectiveProfile === 'broker' &&
       requiresBrokerDocuments(brokerStatus, brokerDocsStatus);
+    stage = 'session_issue';
     const token = signUserToken(row.id, effectiveProfile, row.token_version);
 
     return {
@@ -344,14 +409,39 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       requestedProfile,
     };
   } catch (error) {
-    if (error instanceof InvalidInputError) {
+    if (isApplicationError(error)) {
       throw error;
     }
     if (error instanceof Error && error.message.includes('Timeout while waiting for')) {
-      throw new GatewayTimeoutError('Erro ao autenticar com Google.');
+      logGoogleAuthFailure(stage, requestId, error);
+      throw new GatewayTimeoutError('A autenticação com Google demorou demais. Tente novamente.', {
+        code: 'GOOGLE_AUTH_TIMEOUT',
+        retryable: true,
+      });
     }
-    console.error('Google auth error:', error);
-    throw new InternalError('Erro ao autenticar com Google.');
+    logGoogleAuthFailure(stage, requestId, error);
+    if (isInvalidFirebaseTokenError(error)) {
+      throw new UnauthorizedError('Não foi possível validar sua sessão com o Google. Faça login novamente.', {
+        code: 'GOOGLE_TOKEN_INVALID',
+        retryable: false,
+      });
+    }
+    if (isDatabaseError(error)) {
+      throw new UnavailableError('Não foi possível acessar sua conta agora. Tente novamente.', {
+        code: 'AUTH_STORAGE_UNAVAILABLE',
+        retryable: true,
+      });
+    }
+    if (isFirebaseServiceError(error)) {
+      throw new UnavailableError('A autenticação com Google está temporariamente indisponível. Tente novamente.', {
+        code: 'GOOGLE_AUTH_UNAVAILABLE',
+        retryable: true,
+      });
+    }
+    throw new InternalError('Erro ao autenticar com Google.', {
+      code: 'GOOGLE_AUTH_INTERNAL',
+      retryable: false,
+    });
   }
 }
 

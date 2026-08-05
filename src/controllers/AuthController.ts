@@ -74,12 +74,11 @@ function respondStructuredError(req: Request, res: Response, error: unknown): Re
     });
   }
 
-  const message = error instanceof Error ? error.message : 'Erro interno do servidor.';
   return res.status(500).json({
     status: 'error',
     code: 'INTERNAL_SERVER_ERROR',
-    error: message,
-    retryable: false,
+    error: 'Erro interno do servidor.',
+    retryable: true,
     correlation_id: getRequestId(req),
   });
 }
@@ -481,10 +480,11 @@ class AuthController {
       const result = await googleSession({
         idToken: req.body?.idToken,
         profileType: req.body?.profileType,
+        requestId: getRequestId(req),
       });
       return res.status(200).json(result);
     } catch (error) {
-      return respondPlainError(res, error);
+      return respondStructuredError(req, res, error);
     }
   }
 

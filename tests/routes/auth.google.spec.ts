@@ -98,4 +98,25 @@ describe('POST /auth/google', () => {
       },
     });
   });
+
+  it('returns a structured 401 when Firebase rejects the token', async () => {
+    const { UnauthorizedError } = await import('../../src/errors/ApplicationError');
+    googleSessionMock.mockRejectedValueOnce(
+      new UnauthorizedError('Não foi possível validar sua sessão com o Google. Faça login novamente.', {
+        code: 'GOOGLE_TOKEN_INVALID',
+        retryable: false,
+      }),
+    );
+
+    const response = await request(app)
+      .post('/auth/google')
+      .send({ idToken: 'invalid-token', profileType: 'auto' });
+
+    expect(response.status).toBe(401);
+    expect(response.body).toMatchObject({
+      status: 'error',
+      code: 'GOOGLE_TOKEN_INVALID',
+      retryable: false,
+    });
+  });
 });

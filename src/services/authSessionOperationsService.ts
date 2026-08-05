@@ -123,11 +123,20 @@ function hasColumn(table: string, column: string): Promise<boolean> {
   return promise;
 }
 
-async function buildUserSelectClause(): Promise<string> {
+type UserSelectQuery = {
+  selectClause: string;
+  brokerDocumentsJoin: string;
+};
+
+async function buildUserSelectQuery(): Promise<UserSelectQuery> {
   const hasCpfColumn = await hasColumn('users', 'cpf');
   const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
+  // Bancos legados podem nao ter a tabela de documentos do corretor. O login
+  // continua valido; apenas o status documental fica indisponivel nesse caso.
+  const hasBrokerDocumentsStatus = await hasColumn('broker_documents', 'status');
 
-  return [
+  return {
+    selectClause: [
     'u.id',
     'u.name',
     'u.email',
@@ -153,8 +162,14 @@ async function buildUserSelectClause(): Promise<string> {
     'b.status AS broker_status',
     'b.profile_type AS broker_profile_type',
     'b.creci AS creci',
-    'bd.status AS broker_documents_status',
-  ].join(', ');
+      hasBrokerDocumentsStatus
+        ? 'bd.status AS broker_documents_status'
+        : 'NULL AS broker_documents_status',
+    ].join(', '),
+    brokerDocumentsJoin: hasBrokerDocumentsStatus
+      ? 'LEFT JOIN broker_documents bd ON b.id = bd.broker_id'
+      : '',
+  };
 }
 
 function mapProfile(row: AuthUserRow): ProfileType {
@@ -190,13 +205,13 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   }
 
   try {
-    const userSelectClause = await buildUserSelectClause();
+    const userSelectQuery = await buildUserSelectQuery();
     const [rows] = await authDb.query<AuthUserRow[]>(
       `
-        SELECT ${userSelectClause}
+        SELECT ${userSelectQuery.selectClause}
         FROM users u
         LEFT JOIN brokers b ON u.id = b.id
-        LEFT JOIN broker_documents bd ON b.id = bd.broker_id
+        ${userSelectQuery.brokerDocumentsJoin}
         WHERE u.email = ?
       `,
       [email],
@@ -265,17 +280,17 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       throw new InvalidInputError('Email não disponível no token do Google.');
     }
 
-    const userSelectClause = await buildUserSelectClause();
+    const userSelectQuery = await buildUserSelectQuery();
     const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
     const lookupWhere = hasFirebaseUidColumn
       ? 'WHERE u.firebase_uid = ? OR u.email = ?'
       : 'WHERE u.email = ?';
     const lookupParams = hasFirebaseUidColumn ? [uid, email] : [email];
     const [existingRows] = await authDb.query<AuthUserRow[]>(
-      `SELECT ${userSelectClause}
+      `SELECT ${userSelectQuery.selectClause}
          FROM users u
          LEFT JOIN brokers b ON u.id = b.id
-         LEFT JOIN broker_documents bd ON u.id = bd.broker_id
+         ${userSelectQuery.brokerDocumentsJoin}
         ${lookupWhere}
         LIMIT 1`,
       lookupParams,

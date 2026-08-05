@@ -65,12 +65,15 @@ beforeEach(() => {
 function mockUserSchema({
   hasCpf = true,
   hasFirebaseUid = true,
+  hasBrokerDocumentsStatus = true,
 }: {
   hasCpf?: boolean;
   hasFirebaseUid?: boolean;
+  hasBrokerDocumentsStatus?: boolean;
 } = {}) {
   queryMock.mockResolvedValueOnce(hasCpf ? [[{}]] : [[]]);
   queryMock.mockResolvedValueOnce(hasFirebaseUid ? [[{}]] : [[]]);
+  queryMock.mockResolvedValueOnce(hasBrokerDocumentsStatus ? [[{}]] : [[]]);
 }
 
 describe('authSessionOperationsService', () => {
@@ -129,6 +132,42 @@ describe('authSessionOperationsService', () => {
       'Credenciais inválidas.',
     );
     expect(compareMock).not.toHaveBeenCalled();
+  });
+
+  it('authenticates clients when the legacy broker documents table is absent', async () => {
+    mockUserSchema({ hasBrokerDocumentsStatus: false });
+    queryMock.mockResolvedValueOnce([
+      [
+        {
+          id: 11,
+          name: 'Cliente Sem Documentos de Corretor',
+          email: 'cliente-legado@test.com',
+          email_verified_at: null,
+          password_hash: 'hash',
+          phone: '62999998888',
+          street: 'Rua A',
+          number: '100',
+          complement: null,
+          bairro: 'Centro',
+          city: 'Cidade',
+          state: 'GO',
+          cep: '75900000',
+          token_version: 2,
+          role: 'client',
+          broker_id: null,
+          broker_status: null,
+          broker_profile_type: null,
+          creci: null,
+          broker_documents_status: null,
+        },
+      ],
+    ]);
+
+    const { login } = await import('../../src/services/authSessionOperationsService');
+    const result = await login({ email: 'cliente-legado@test.com', password: 'Senha123' });
+
+    expect(result.user.role).toBe('client');
+    expect(queryMock.mock.calls[3]?.[0]).not.toContain('broker_documents bd');
   });
 
   it('returns new-user handshake for google login without existing account', async () => {

@@ -24,6 +24,7 @@ type AdminRow = RowDataPacket & {
   password_hash?: string | null;
   token_version?: number | null;
   role?: string | null;
+  is_active?: number | boolean | null;
 };
 
 type AdminPublicRow = Omit<AdminRow, 'password_hash'>;
@@ -48,7 +49,7 @@ export type AdminReauthResult = {
 async function findAdminByEmail(email: unknown): Promise<AdminRow[]> {
   try {
     const [rows] = await adminDb.query<AdminRow[]>(
-      'SELECT id, name, email, role, password_hash, token_version FROM admins WHERE email = ?',
+      'SELECT id, name, email, role, password_hash, token_version, is_active FROM admins WHERE email = ?',
       [email]
     );
     return rows;
@@ -83,6 +84,9 @@ export async function login(params: {
     }
 
     const admin = rows[0];
+    if (admin.is_active != null && !(admin.is_active === true || Number(admin.is_active) === 1)) {
+      throw new UnauthorizedError('Credenciais invalidas.');
+    }
     const passwordHash = String((admin as { password_hash?: unknown }).password_hash ?? '');
     const isPasswordCorrect = await bcrypt.compare(passwordValue, passwordHash);
     if (!isPasswordCorrect) {

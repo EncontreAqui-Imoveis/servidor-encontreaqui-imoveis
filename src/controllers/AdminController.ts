@@ -85,6 +85,14 @@ import {
 } from '../services/adminOnboardingService';
 import { buildCloudinarySignature } from '../services/adminCloudinarySignatureService';
 import { respondWithAppError } from '../utils/appErrorResponse';
+import {
+  changeOwnAdministrativePassword,
+  createAdministrativeAssistant,
+  listAdministrativeAssistants,
+  resetAdministrativeAssistantPassword,
+  setAdministrativeAssistantActive,
+  updateAdministrativeAssistant,
+} from '../services/adminAssistantManagementService';
 
 function buildAttachmentDisposition(filename: string): string {
   const safeName = String(filename ?? '').trim() || 'download';
@@ -128,6 +136,66 @@ class AdminController {
     try {
       const payload = await adminReauth(req, req.body?.password);
       return res.status(200).json(payload);
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async listAdministrativeAssistants(req: AuthRequest, res: Response) {
+    try {
+      return res.status(200).json(await listAdministrativeAssistants(req.query));
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async createAdministrativeAssistant(req: AuthRequest, res: Response) {
+    try {
+      return res.status(201).json(await createAdministrativeAssistant({ actorAdminId: req.userId, ...req.body }));
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async updateAdministrativeAssistant(req: AuthRequest, res: Response) {
+    try {
+      return res.status(200).json(await updateAdministrativeAssistant({ id: req.params.id, ...req.body }));
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async deactivateAdministrativeAssistant(req: AuthRequest, res: Response) {
+    try {
+      return res.status(200).json(await setAdministrativeAssistantActive({ id: req.params.id, active: false }));
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async reactivateAdministrativeAssistant(req: AuthRequest, res: Response) {
+    try {
+      return res.status(200).json(await setAdministrativeAssistantActive({ id: req.params.id, active: true }));
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async resetAdministrativeAssistantPassword(req: AuthRequest, res: Response) {
+    try {
+      return res.status(200).json(await resetAdministrativeAssistantPassword({ id: req.params.id, password: req.body?.password }));
+    } catch (error) {
+      return respondWithAppError(res, error);
+    }
+  }
+
+  async changeOwnAdministrativePassword(req: AuthRequest, res: Response) {
+    try {
+      return res.status(200).json(await changeOwnAdministrativePassword({
+        adminId: req.userId,
+        currentPassword: req.body?.currentPassword,
+        newPassword: req.body?.newPassword,
+      }));
     } catch (error) {
       return respondWithAppError(res, error);
     }

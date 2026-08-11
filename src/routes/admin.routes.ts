@@ -41,6 +41,13 @@ adminRoutes.post('/login', adminAuthLimiter, adminController.login);
 adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
 adminRoutes.post('/logout', adminController.logout);
 adminRoutes.post('/reauth', adminController.reauth);
+adminRoutes.put('/me/password', adminController.changeOwnAdministrativePassword);
+adminRoutes.get('/assistants', requireAdminCapability('manage_administration'), adminController.listAdministrativeAssistants);
+adminRoutes.post('/assistants', requireAdminCapability('manage_administration'), adminController.createAdministrativeAssistant);
+adminRoutes.patch('/assistants/:id', requireAdminCapability('manage_administration'), adminController.updateAdministrativeAssistant);
+adminRoutes.delete('/assistants/:id', requireAdminCapability('manage_administration'), requireAdminReauth, adminController.deactivateAdministrativeAssistant);
+adminRoutes.post('/assistants/:id/reactivate', requireAdminCapability('manage_administration'), adminController.reactivateAdministrativeAssistant);
+adminRoutes.put('/assistants/:id/password', requireAdminCapability('manage_administration'), requireAdminReauth, adminController.resetAdministrativeAssistantPassword);
 
 adminRoutes.post('/notifications/send', requireAdminCapability('manage_administration'), async (req, res) => {
   try {

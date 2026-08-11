@@ -3011,6 +3011,12 @@ class ContractController {
     if (!context || (context.userRole !== 'seller' && context.userRole !== 'buyer')) {
       return res.status(403).json({ error: 'Apenas comprador ou vendedor podem conferir a minuta.' });
     }
+    if (context.requiresHandshakeVerification) {
+      return res.status(403).json({
+        error: 'Confirme sua associação por PIN antes de conferir a minuta.',
+        code: 'CONTRACT_HANDSHAKE_REQUIRED',
+      });
+    }
 
     const tx = await getContractDbConnection();
     try {
@@ -3034,16 +3040,28 @@ class ContractController {
         await tx.rollback();
         return res.status(409).json({ error: 'A minuta ativa não possui uma revisão válida.' });
       }
+      const [existingReviewRows] = await tx.query<Array<RowDataPacket & { id: number }>>(
+        `
+          SELECT id
+          FROM contract_draft_reviews
+          WHERE revision_id = ? AND reviewer_side = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [revisionId, side]
+      );
+      if (existingReviewRows.length > 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'Sua decisão para esta versão da minuta já foi registrada.',
+          code: 'DRAFT_REVIEW_ALREADY_DECIDED',
+        });
+      }
       await tx.query(
         `
           INSERT INTO contract_draft_reviews (
             revision_id, contract_id, reviewer_user_id, reviewer_side, decision, reason, decided_at
           ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-          ON DUPLICATE KEY UPDATE
-            reviewer_user_id = VALUES(reviewer_user_id),
-            decision = VALUES(decision),
-            reason = VALUES(reason),
-            decided_at = CURRENT_TIMESTAMP
         `,
         [revisionId, contractId, Number(req.userId), side, decision, reason || null]
       );

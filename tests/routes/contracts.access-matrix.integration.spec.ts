@@ -8,6 +8,7 @@ const {
   queryMock,
   storeNegotiationDocumentToR2Mock,
   enqueueNegotiationDocumentDeletionMock,
+  createAdminNotificationMock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -22,6 +23,7 @@ const {
     queryMock: vi.fn(),
     storeNegotiationDocumentToR2Mock: vi.fn(),
     enqueueNegotiationDocumentDeletionMock: vi.fn(),
+    createAdminNotificationMock: vi.fn(),
     tx,
   };
 });
@@ -82,10 +84,16 @@ vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
   enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
 }));
 
+vi.mock('../../src/services/notificationService', () => ({
+  createAdminNotification: createAdminNotificationMock,
+  createUserNotification: vi.fn(),
+  notifyAdmins: vi.fn(),
+}));
+
 import contractRoutes from '../../src/routes/contract.routes';
 
 type ContractState = {
-  status: 'AWAITING_DOCS' | 'AWAITING_SIGNATURES' | 'FINALIZED';
+  status: 'AWAITING_DOCS' | 'AWAITING_MINUTE_REVIEW' | 'AWAITING_SIGNATURES' | 'FINALIZED';
   sellerInfo: Record<string, unknown>;
   buyerInfo: Record<string, unknown>;
   workflowMetadata: Record<string, unknown> | null;
@@ -94,6 +102,7 @@ type ContractState = {
   handshakePin?: string | null;
   handshakeAttempts?: number;
   propertyOwnerId?: number;
+  draftReviewDecisions?: Partial<Record<'seller' | 'buyer', 'CONSENTED' | 'CHANGES_REQUESTED'>>;
 };
 
 function createContractRow(state: ContractState) {
@@ -138,6 +147,12 @@ function createContractRow(state: ContractState) {
     handshake_status: state.handshakeStatus ?? null,
     handshake_pin: state.handshakePin ?? null,
     handshake_attempts: state.handshakeAttempts ?? 0,
+    draft_review_revision_id: 9101,
+    draft_review_revision_number: 1,
+    draft_review_document_id: 8101,
+    draft_review_original_file_name: 'minuta-revisao-1.pdf',
+    seller_draft_review_decision: state.draftReviewDecisions?.seller ?? null,
+    buyer_draft_review_decision: state.draftReviewDecisions?.buyer ?? null,
   };
 }
 
@@ -196,6 +211,7 @@ describe('Contract access matrix HTTP integration', () => {
       sellerInfo: { privateSellerField: 'seller-only' },
       buyerInfo: { privateBuyerField: 'buyer-only' },
       workflowMetadata: null,
+      draftReviewDecisions: {},
     };
 
     transaction = {
@@ -226,6 +242,28 @@ describe('Contract access matrix HTTP integration', () => {
         }
         if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
           return [[createContractRow(state)]];
+        }
+        if (sql.includes('FROM contract_draft_revisions') && sql.includes('is_active = 1')) {
+          return [[{ id: 9101 }]];
+        }
+        if (sql.includes('FROM contract_draft_reviews') && sql.includes('reviewer_side = ?')) {
+          const side = String(params[1] ?? '') as 'seller' | 'buyer';
+          return state.draftReviewDecisions?.[side] ? [[{ id: 9200 }]] : [[]];
+        }
+        if (sql.includes('INSERT INTO contract_draft_reviews')) {
+          const side = String(params[3] ?? '') as 'seller' | 'buyer';
+          const decision = String(params[4] ?? '') as 'CONSENTED' | 'CHANGES_REQUESTED';
+          state.draftReviewDecisions = { ...state.draftReviewDecisions, [side]: decision };
+          return [{ affectedRows: 1 }];
+        }
+        if (sql.includes('SELECT COUNT(*) AS consent_count')) {
+          const count = Object.values(state.draftReviewDecisions ?? {})
+            .filter((decision) => decision === 'CONSENTED').length;
+          return [[{ consent_count: count }]];
+        }
+        if (sql.includes("SET status = 'AWAITING_SIGNATURES'")) {
+          state.status = 'AWAITING_SIGNATURES';
+          return [{ affectedRows: 1 }];
         }
         if (sql.includes('FROM negotiation_documents') && sql.includes('FOR UPDATE')) {
           return [[{
@@ -376,6 +414,56 @@ describe('Contract access matrix HTTP integration', () => {
       canEditSeller: false,
       canEditBuyer: false,
     });
+  });
+
+  it('bloqueia a conferência da minuta enquanto o comprador legal não conclui o handshake', async () => {
+    state.status = 'AWAITING_MINUTE_REVIEW';
+    state.legalBuyerUserId = actors.legalBuyer.id;
+    state.handshakeStatus = 'PENDING';
+    state.handshakePin = 'hash-do-pin-pendente';
+
+    const response = await request(app)
+      .post('/contracts/contract-matrix-1/draft-review')
+      .set(asActor('legalBuyer'))
+      .send({ decision: 'CONSENTED' });
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('CONTRACT_HANDSHAKE_REQUIRED');
+    expect(state.draftReviewDecisions).toEqual({});
+  });
+
+  it('aceita uma decisão por lado e só avança quando ambos consentem a mesma revisão', async () => {
+    state.status = 'AWAITING_MINUTE_REVIEW';
+
+    const buyerDecision = await request(app)
+      .post('/contracts/contract-matrix-1/draft-review')
+      .set(asActor('buyer'))
+      .send({ decision: 'CONSENTED' });
+    expect(buyerDecision.status).toBe(200);
+    expect(buyerDecision.body.contract.status).toBe('AWAITING_MINUTE_REVIEW');
+
+    const sellerDecision = await request(app)
+      .post('/contracts/contract-matrix-1/draft-review')
+      .set(asActor('seller'))
+      .send({ decision: 'CONSENTED' });
+    expect(sellerDecision.status).toBe(200);
+    expect(sellerDecision.body.contract.status).toBe('AWAITING_SIGNATURES');
+    expect(state.status).toBe('AWAITING_SIGNATURES');
+    expect(createAdminNotificationMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('não permite que o mesmo lado altere a decisão diretamente por HTTP', async () => {
+    state.status = 'AWAITING_MINUTE_REVIEW';
+    state.draftReviewDecisions = { buyer: 'CHANGES_REQUESTED' };
+
+    const response = await request(app)
+      .post('/contracts/contract-matrix-1/draft-review')
+      .set(asActor('buyer'))
+      .send({ decision: 'CONSENTED' });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('DRAFT_REVIEW_ALREADY_DECIDED');
+    expect(state.draftReviewDecisions.buyer).toBe('CHANGES_REQUESTED');
   });
 
   it('bloqueia a sexta tentativa de PIN após revogar o vínculo na quinta falha', async () => {

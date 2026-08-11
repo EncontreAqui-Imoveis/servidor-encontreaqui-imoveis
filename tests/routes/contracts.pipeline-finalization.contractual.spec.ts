@@ -138,6 +138,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       canEditSeller: false,
       canEditBuyer: false,
       isReadOnly: true,
+      requiresHandshakeVerification: false,
     };
     return contractController.reviewDraft(req as any, res);
   });
@@ -210,6 +211,17 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
 
         if (sql.includes('SELECT id FROM contract_draft_revisions')) {
           return [[{ id: 91 }]];
+        }
+
+        if (
+          sql.includes('FROM contract_draft_reviews') &&
+          sql.includes('reviewer_side = ?') &&
+          sql.includes('FOR UPDATE')
+        ) {
+          const side = String(params[1] ?? '') as 'seller' | 'buyer';
+          return draftReviewDecisions[side]
+            ? [[{ id: side === 'seller' ? 1 : 2 }]]
+            : [[]];
         }
 
         if (sql.includes('INSERT INTO contract_draft_reviews')) {
@@ -411,6 +423,25 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(sellerResponse.status).toBe(200);
     expect(sellerResponse.body.contract.status).toBe('AWAITING_SIGNATURES');
     expect(contractState.status).toBe('AWAITING_SIGNATURES');
+  });
+
+  it('does not allow a side to overwrite its decision for the same minute revision', async () => {
+    contractState = createContractState({
+      status: 'AWAITING_MINUTE_REVIEW',
+      property_purpose: 'Venda',
+    });
+
+    const firstDecision = await request(app)
+      .post('/contracts/contract-1/draft-review/buyer')
+      .send({ decision: 'CHANGES_REQUESTED', reason: 'Revisar a cláusula de prazo.' });
+    expect(firstDecision.status).toBe(200);
+
+    const retry = await request(app)
+      .post('/contracts/contract-1/draft-review/buyer')
+      .send({ decision: 'CONSENTED' });
+    expect(retry.status).toBe(409);
+    expect(retry.body.code).toBe('DRAFT_REVIEW_ALREADY_DECIDED');
+    expect(draftReviewDecisions.buyer).toBe('CHANGES_REQUESTED');
   });
 
   it('blocks finalization when signed contract or payment proof is missing', async () => {

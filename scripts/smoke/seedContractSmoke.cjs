@@ -7,7 +7,8 @@ const bcrypt = require('bcryptjs');
 const mysql = require('mysql2/promise');
 const { assertLocalOnlyDatabase, createLocalOnlyEnvironment } = require('./localOnlyRuntime.cjs');
 const path = require('node:path');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+// Smoke data must never inherit the repository's remote .env configuration.
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env.local'), override: true });
 
 const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
 const contractId = '00000000-0000-4000-8000-000000000101';

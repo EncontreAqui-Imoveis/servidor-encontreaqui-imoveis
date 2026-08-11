@@ -2,14 +2,21 @@ const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const path = require('node:path');
 
-dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 
 const sourceDatabase = process.env.DB_DATABASE || process.env.DATABASE_NAME;
 const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
 const allowedSmokeDatabases = new Set(['imobiliaria_smoke_v2', 'imobiliaria_contract_e2e']);
+const sourceHost = String(process.env.DB_HOST || process.env.DATABASE_HOST || '').trim().toLowerCase();
+const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
 
-if (!sourceDatabase || sourceDatabase === smokeDatabase || !allowedSmokeDatabases.has(smokeDatabase)) {
-  throw new Error('O schema de origem do smoke deve ser o banco local de desenvolvimento.');
+if (
+  !sourceDatabase ||
+  sourceDatabase === smokeDatabase ||
+  !allowedSmokeDatabases.has(smokeDatabase) ||
+  !localHosts.has(sourceHost)
+) {
+  throw new Error('O schema de origem do smoke deve ser um banco local e a saída deve usar uma base allowlisted.');
 }
 
 function connectionOptions(database) {
@@ -79,6 +86,9 @@ async function main() {
         }
       }
 
+      if (pending.size === 0) {
+        break;
+      }
       if (createdInPass === 0) {
         throw new Error(`Não foi possível ordenar as dependências de: ${Array.from(pending).join(', ')}`);
       }

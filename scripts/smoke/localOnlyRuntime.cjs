@@ -20,6 +20,12 @@ function assertLocalOnlyDatabase(database, label = 'processo local') {
 function createLocalOnlyEnvironment({ database, port, r2Bucket, r2Prefix, pdfServiceUrl, pdfInternalApiKey }) {
   assertLocalOnlyDatabase(database, 'Runtime de smoke/pentest');
 
+  // Local Docker can expose MySQL on a port other than TiDB's default 4000.
+  // The host remains forced to loopback and the database remains allowlisted.
+  const localDatabasePort = String(process.env.LOCAL_SMOKE_DB_PORT || process.env.DB_PORT || process.env.DATABASE_PORT || '4000');
+  const localDatabaseUser = String(process.env.LOCAL_SMOKE_DB_USER || process.env.DB_USER || process.env.DATABASE_USER || 'root');
+  const localDatabasePassword = String(process.env.LOCAL_SMOKE_DB_PASSWORD || process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || '');
+
   const environment = { ...process.env };
   for (const name of Object.keys(environment)) {
     if (/^(SENTRY|FIREBASE|R2|CLOUDINARY|BREVO|RESEND|SMTP|SENDGRID|TWILIO|MAILGUN|POSTMARK|EMAIL_|GOOGLE|VERCEL|RAILWAY|DATABASE_URL|DB_URL|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)/i.test(name)) {
@@ -34,12 +40,12 @@ function createLocalOnlyEnvironment({ database, port, r2Bucket, r2Prefix, pdfSer
     PORT: String(port),
     DB_HOST: '127.0.0.1',
     DATABASE_HOST: '127.0.0.1',
-    DB_PORT: '4000',
-    DATABASE_PORT: '4000',
-    DB_USER: 'root',
-    DATABASE_USER: 'root',
-    DB_PASSWORD: '',
-    DATABASE_PASSWORD: '',
+    DB_PORT: localDatabasePort,
+    DATABASE_PORT: localDatabasePort,
+    DB_USER: localDatabaseUser,
+    DATABASE_USER: localDatabaseUser,
+    DB_PASSWORD: localDatabasePassword,
+    DATABASE_PASSWORD: localDatabasePassword,
     DB_DATABASE: database,
     DATABASE_NAME: database,
     DB_SSL: 'false',

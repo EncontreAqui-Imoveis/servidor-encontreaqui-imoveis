@@ -61,6 +61,12 @@ describe('applyMigrations', () => {
             collation_name: null,
           }]];
         }
+        if (
+          (tableName === 'negotiation_history' && ['from_status', 'to_status'].includes(columnName)) ||
+          (tableName === 'negotiations' && columnName === 'status')
+        ) {
+          return [[{ column_type: "enum('PROPOSAL_SENT','REFUSED')" }]];
+        }
         if (tableName === 'properties' && columnName === 'purpose') {
           return [[{ column_type: "enum('Venda','Aluguel','Venda e Aluguel')" }]];
         }
@@ -127,6 +133,24 @@ describe('applyMigrations', () => {
     expect(
       sqlStatements.some((sql) =>
         sql.includes('ALTER TABLE negotiation_history MODIFY COLUMN actor_id int(10) unsigned NULL')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE negotiation_history MODIFY COLUMN `from_status` VARCHAR(64) NOT NULL')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE negotiation_history MODIFY COLUMN `to_status` VARCHAR(64) NOT NULL')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE negotiations MODIFY COLUMN status VARCHAR(64) NOT NULL')
       )
     ).toBe(true);
 

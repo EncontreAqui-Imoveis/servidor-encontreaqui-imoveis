@@ -1538,7 +1538,10 @@ async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
 
   if (await tableExists('negotiations') && (await columnExists('negotiations', 'status'))) {
     const t = (await getColumnType('negotiations', 'status')) ?? '';
-    if (t.toLowerCase().startsWith('enum(') && !t.includes('REFUSED')) {
+    // A legacy ENUM may already contain REFUSED and still omit active workflow
+    // values such as CONTRACT_DRAFTING. Statuses are workflow data, not a
+    // database-level closed set, so every legacy ENUM must be widened.
+    if (t.toLowerCase().startsWith('enum(')) {
       await connection.query(
         `ALTER TABLE negotiations MODIFY COLUMN status VARCHAR(64) NOT NULL`
       );

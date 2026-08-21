@@ -103,7 +103,7 @@ async function loadDecisionNegotiationRow(
         ) AS responsible_broker_id
         ${proposerSelect},
         n.client_name,
-        JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_legal_cpf,
+        NULL AS buyer_legal_cpf,
         p.title AS property_title,
         p.owner_name AS property_owner_name,
         p.owner_phone AS property_owner_phone,

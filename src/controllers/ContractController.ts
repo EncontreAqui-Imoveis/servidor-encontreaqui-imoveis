@@ -5,6 +5,7 @@ import { PoolConnection } from 'mysql2/promise';
 import { deleteCloudinaryAsset, optimizeCloudinaryImageUrl } from '../config/cloudinary';
 import type { AuthRequest } from '../middlewares/auth';
 import { getRequestId } from '../middlewares/requestContext';
+import { hydrateCpfFieldsInJson, resolveStoredCpf } from '../security/personalDataProtection';
 import {
   createAdminNotification,
   createUserNotification,
@@ -216,6 +217,7 @@ export interface ContractRow extends RowDataPacket {
   handshake_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
   handshake_attempts: number | null;
   seller_cpf: string | null;
+  seller_cpf_ciphertext: string | null;
   buyer_cpf: string | null;
   client_name: string | null;
   property_title: string | null;
@@ -1097,11 +1099,16 @@ function redactOwnerInfoByRole(
 }
 
 function buildOwnerInfoFromContractRow(row: ContractRow): Record<string, unknown> {
-  const fromStored = parseStoredJsonObject(row.seller_info);
+  const fromStored = hydrateCpfFieldsInJson(
+    parseStoredJsonObject(row.seller_info),
+    'contracts:seller_info',
+  );
   const fallback: Record<string, unknown> = { ...fromStored };
   const ownerName = String(row.property_owner_name ?? '').trim();
   const ownerPhone = String(row.property_owner_phone ?? '').trim();
-  const ownerCpf = String(row.seller_cpf ?? '').trim();
+  const ownerCpf = String(
+    resolveStoredCpf(row.seller_cpf_ciphertext, row.seller_cpf, 'users:cpf') ?? ''
+  ).trim();
 
   if (ownerName && !String(fallback.nome ?? fallback.name ?? '').trim()) {
     fallback.nome = ownerName;
@@ -1115,7 +1122,10 @@ function buildOwnerInfoFromContractRow(row: ContractRow): Record<string, unknown
 }
 
 function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown> {
-  const buyerInfo = parseStoredJsonObject(row.buyer_info);
+  const buyerInfo = hydrateCpfFieldsInJson(
+    parseStoredJsonObject(row.buyer_info),
+    'contracts:buyer_info',
+  );
   const buyerName = String(row.client_name ?? '').trim();
   const buyerCpf = String(row.buyer_cpf ?? '').trim();
   const currentName = String(
@@ -2064,7 +2074,8 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.handshake_attempts,
     n.client_name,
     owner_user.cpf AS seller_cpf,
-    JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_cpf,
+    owner_user.cpf_ciphertext AS seller_cpf_ciphertext,
+    NULL AS buyer_cpf,
     p.title AS property_title,
     p.purpose AS property_purpose,
     COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS property_code,

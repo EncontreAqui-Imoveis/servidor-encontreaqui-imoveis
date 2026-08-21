@@ -32,6 +32,7 @@
     "audit:contract-deal-types": "ts-node scripts/audit-contract-deal-types.ts",
     "audit:contract-buyer-names": "ts-node scripts/audit-contract-buyer-legal-names.ts",
     "audit:contract-document-rejections": "ts-node scripts/backfill-contract-document-rejections.ts",
+    "privacy:cpf-backfill": "npm run build && node dist/scripts/backfillCpfProtection.js",
     "audit:r2-documents": "npm run build && node dist/scripts/reconcileNegotiationDocumentStorage.js",
     "admin:create-document-operator": "ts-node src/scripts/createPanelDocumentOperator.ts",
     "sentry:test": "ts-node scripts/sentry-test.ts"

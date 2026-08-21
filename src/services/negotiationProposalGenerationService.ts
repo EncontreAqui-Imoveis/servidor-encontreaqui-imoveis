@@ -31,6 +31,11 @@ import {
 } from './negotiationProposalSupportService';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 import {
+  hashCpfForLookup,
+  protectCpfFieldsInJson,
+  resolveStoredCpf,
+} from '../security/personalDataProtection';
+import {
   resolveAdvertiserIdFromProperty,
   resolveNegotiationInitiatorSide,
 } from '../utils/negotiationActorResolution';
@@ -76,6 +81,7 @@ interface UserRow extends RowDataPacket {
   id: number;
   name: string;
   cpf?: string | null;
+  cpf_ciphertext?: string | null;
 }
 
 type BrokerProposalContext = {
@@ -149,7 +155,7 @@ async function resolveBuyerUserIdentity(
   }
 
   const [rows] = await tx.query<UserRow[]>(
-    'SELECT id, name, cpf FROM users WHERE id = ? LIMIT 1',
+    'SELECT id, name, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
     [normalizedBuyerUserId]
   );
   const row = rows[0];
@@ -177,14 +183,16 @@ async function resolveBuyerUserIdentityByCpf(
     return null;
   }
 
+  const lookupHash = hashCpfForLookup(cpfKey);
   const [rows] = await tx.query<UserRow[]>(
     `
-      SELECT id, name, cpf
+      SELECT id, name, cpf, cpf_ciphertext
       FROM users
-      WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
+      WHERE cpf_lookup_hash = ?
+         OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
       LIMIT 1
     `,
-    [cpfKey]
+    [lookupHash, cpfKey]
   );
 
   const row = rows[0];
@@ -208,12 +216,12 @@ async function resolveCurrentUserIdentity(
   userId: number
 ): Promise<{ name: string | null; cpf: string | null }> {
   const [rows] = await tx.query<UserRow[]>(
-    'SELECT name, cpf FROM users WHERE id = ? LIMIT 1',
+    'SELECT name, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
     [userId]
   );
   return {
     name: rows[0]?.name ?? null,
-    cpf: rows[0]?.cpf ?? null,
+    cpf: resolveStoredCpf(rows[0]?.cpf_ciphertext, rows[0]?.cpf, 'users:cpf'),
   };
 }
 
@@ -607,9 +615,10 @@ export async function generateProposalFromProperty(
 
     // Lock the account row so concurrent requests cannot bypass the one-minute cooldown.
     await tx.query('SELECT id FROM users WHERE id = ? FOR UPDATE', [proposerId]);
-    const [recentRows] = await tx.query<Array<RowDataPacket & { created_at: Date | string }>>(
+    const [recentRows] = await tx.query<Array<RowDataPacket & { seconds_since_created: number | null }>>(
       `
-        SELECT created_at
+        SELECT GREATEST(0, TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP))
+          AS seconds_since_created
         FROM negotiations
         WHERE proposer_id = ?
         ORDER BY created_at DESC
@@ -617,8 +626,12 @@ export async function generateProposalFromProperty(
       `,
       [proposerId]
     );
-    const latestCreatedAt = recentRows[0]?.created_at ? new Date(recentRows[0].created_at).getTime() : 0;
-    const elapsed = latestCreatedAt > 0 ? Date.now() - latestCreatedAt : PROPOSAL_CREATION_COOLDOWN_MS;
+    // DATETIME has no timezone. Let TiDB compare both values in the same
+    // session instead of parsing it in Node with a potentially different zone.
+    const secondsSinceCreated = Number(recentRows[0]?.seconds_since_created);
+    const elapsed = Number.isFinite(secondsSinceCreated) && secondsSinceCreated >= 0
+      ? secondsSinceCreated * 1_000
+      : PROPOSAL_CREATION_COOLDOWN_MS;
     if (elapsed < PROPOSAL_CREATION_COOLDOWN_MS) {
       const secondsUntilNextProposal = Math.max(1, Math.ceil((PROPOSAL_CREATION_COOLDOWN_MS - elapsed) / 1000));
       await tx.rollback();
@@ -634,7 +647,7 @@ export async function generateProposalFromProperty(
       );
     }
 
-    const paymentDetails = JSON.stringify({
+    const paymentDetails = JSON.stringify(protectCpfFieldsInJson({
       method: 'OTHER',
       validadeDias: payload.validadeDias,
       amount: Number(proposalValue.toFixed(2)),
@@ -646,7 +659,7 @@ export async function generateProposalFromProperty(
         listingValue: Number(listingValue.toFixed(2)),
         rentalTerms,
       },
-    });
+    }, 'negotiations:payment_details'));
     const proposalValidityDate = buildProposalValidityDate(payload.validadeDias);
     assertProposalValidityDateNotPast(proposalValidityDate);
 
@@ -715,7 +728,6 @@ export async function generateProposalFromProperty(
           proposerId,
           dealType,
           clientName: payload.clientName,
-          clientCpf: payload.clientCpf,
           clientEmail: payload.buyerEmail,
           rentalTerms,
           initiatorSide,
@@ -725,6 +737,8 @@ export async function generateProposalFromProperty(
 
     const proposalData: ProposalData = {
       clientName: payload.clientName,
+      // The PDF is generated in-memory; this value is never persisted in its
+      // plaintext form after the request completes.
       clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
       dealType,
@@ -766,7 +780,6 @@ export async function generateProposalFromProperty(
       proposerId,
       advertiserId,
       clientName: payload.clientName,
-      clientCpf: payload.clientCpf,
     });
   } catch (error: any) {
     if (tx) {

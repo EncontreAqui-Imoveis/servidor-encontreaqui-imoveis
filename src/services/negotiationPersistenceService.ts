@@ -10,6 +10,7 @@ import {
   normalizeDealType,
   resolvePropertyAddress,
 } from './negotiationProposalSupportService';
+import { hydrateCpfFieldsInJson } from '../security/personalDataProtection';
 
 const executor: SqlExecutor = {
   execute<T = unknown>(sql: string, params?: unknown[]): Promise<T | [T, unknown]> {
@@ -152,7 +153,10 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
     throw new Error('Negotiation not found for proposal generation.');
   }
 
-  const paymentDetails = parseJsonObjectSafe(row.payment_details);
+  const paymentDetails = hydrateCpfFieldsInJson(
+    parseJsonObjectSafe(row.payment_details),
+    'negotiations:payment_details',
+  );
   const details = parseJsonObjectSafe(paymentDetails.details);
   const finalValue = Number(row.final_value ?? paymentDetails.amount ?? 0);
   const validityDays = Number(paymentDetails.validadeDias ?? paymentDetails.validityDays ?? 10);

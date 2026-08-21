@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import { requireEnv } from '../config/env';
 import type { ContractAccessContext } from '../types/contractAuth';
 import { normalizeAdminPanelRole, type AdminPanelRole } from './adminCapabilities';
+import { resolveStoredCpf } from '../security/personalDataProtection';
 
 interface UserFromDB extends RowDataPacket {
   id: number;
@@ -12,6 +13,7 @@ interface UserFromDB extends RowDataPacket {
   broker_status?: string;
   token_version?: number | string | null;
   cpf?: string | null;
+  cpf_ciphertext?: string | null;
 }
 
 interface BrokerRoleRow extends RowDataPacket {
@@ -148,7 +150,7 @@ async function validateUserSession(
 ): Promise<{ exists: boolean; tokenVersion: number; cpf: string | null }> {
   try {
     const [userRows] = await connection.query<UserFromDB[]>(
-      'SELECT id, token_version, cpf FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, token_version, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
 
@@ -159,7 +161,7 @@ async function validateUserSession(
     return {
       exists: true,
       tokenVersion: normalizeTokenVersion(userRows[0].token_version),
-      cpf: String(userRows[0].cpf ?? '').trim() || null,
+      cpf: resolveStoredCpf(userRows[0].cpf_ciphertext, userRows[0].cpf, 'users:cpf'),
     };
   } catch (error: any) {
     if (error?.code !== 'ER_BAD_FIELD_ERROR') {

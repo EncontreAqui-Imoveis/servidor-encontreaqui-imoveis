@@ -6,7 +6,11 @@ dotenv.config({ path: '.env.local', override: true });
 
 const sourceDatabase = process.env.DB_DATABASE || process.env.DATABASE_NAME;
 const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
-const allowedSmokeDatabases = new Set(['imobiliaria_smoke_v2', 'imobiliaria_contract_e2e']);
+const allowedSmokeDatabases = new Set([
+  'imobiliaria_smoke_v2',
+  'imobiliaria_contract_e2e',
+  'imobiliaria_ui_smoke',
+]);
 const sourceHost = String(process.env.DB_HOST || process.env.DATABASE_HOST || '').trim().toLowerCase();
 const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
 

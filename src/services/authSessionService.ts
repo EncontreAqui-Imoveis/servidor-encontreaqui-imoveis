@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { requireEnv } from '../config/env';
+import { resolveStoredCpf } from '../security/personalDataProtection';
 
 const jwtSecret = requireEnv('JWT_SECRET');
 
@@ -73,7 +74,9 @@ export function buildUserPayload(row: any, profileType: ProfileType) {
     id: row.id,
     name: row.name,
     email: row.email,
-    cpf: row.cpf ?? null,
+    // Ciphertext is resolved only after the authentication query identified
+    // the account. Legacy plaintext remains a temporary read fallback.
+    cpf: resolveStoredCpf(row.cpf_ciphertext, row.cpf, 'users:cpf'),
     email_verified: emailVerifiedAt != null,
     email_verified_at: emailVerifiedAt,
     phone: row.phone ?? null,

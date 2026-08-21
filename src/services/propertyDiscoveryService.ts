@@ -818,8 +818,8 @@ export async function listFeaturedProperties(params: {
       LIMIT ? OFFSET ?
     `, 
     [
-      scope,
       ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES,
+      scope,
       // The aggregate join and the public visibility filter each bind this set.
       ...NEGOTIATION_PUBLIC_BLOCKING_STATUSES,
       limit,

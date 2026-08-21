@@ -169,8 +169,9 @@ describe('PUT /contracts/:id/data', () => {
           expect(sellerPayload).toMatchObject({
             email: 'new@test.com',
             legacy: 'remove-me',
-            cpf: '111.111.111-11',
+            cpf: null,
           });
+          expect(sellerPayload.cpf_ciphertext).toEqual(expect.any(String));
           expect(buyerPayload).toEqual({ keep: true });
 
           contractState.seller_info = sellerPayload;
@@ -195,7 +196,7 @@ describe('PUT /contracts/:id/data', () => {
     expect(response.body.contract.sellerInfo).toMatchObject({
       email: 'new@test.com',
       legacy: 'remove-me',
-      cpf: '111.111.111-11',
+      cpf: '11111111111',
     });
     expect(response.body.contract.buyerInfo).toEqual({});
   });
@@ -243,8 +244,9 @@ describe('PUT /contracts/:id/data', () => {
           expect(sellerPayload).toMatchObject({
             email: 'owner-new@test.com',
             legacy: 'remove-me',
-            cpf: '111.111.111-11',
+            cpf: null,
           });
+          expect(sellerPayload.cpf_ciphertext).toEqual(expect.any(String));
           contractState.seller_info = sellerPayload;
           return [{ affectedRows: 1 }];
         }
@@ -266,12 +268,12 @@ describe('PUT /contracts/:id/data', () => {
     expect(response.body.contract.sellerInfo).toMatchObject({
       email: 'owner-new@test.com',
       legacy: 'remove-me',
-      cpf: '111.111.111-11',
+      cpf: '11111111111',
     });
     expect(response.body.contract.ownerInfo).toMatchObject({
       email: 'owner-new@test.com',
       legacy: 'remove-me',
-      cpf: '111.111.111-11',
+      cpf: '11111111111',
     });
   });
 

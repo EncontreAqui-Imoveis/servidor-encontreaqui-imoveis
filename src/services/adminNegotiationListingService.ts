@@ -1,6 +1,7 @@
 import { RowDataPacket } from 'mysql2';
 
 import { optimizeCloudinaryImageUrl } from '../config/cloudinary';
+import { hydrateCpfFieldsInJson } from '../security/personalDataProtection';
 import { adminDb } from './adminPersistenceService';
 
 const NEGOTIATION_INTERNAL_STATUSES = new Set([
@@ -292,12 +293,9 @@ async function resolveNegotiationClientSqlFragments(): Promise<NegotiationClient
             JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.client_name'))
           )`
       : 'NULL';
-    const paymentDetailsClientCpfExpr = hasPaymentDetails
-      ? `COALESCE(
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')),
-            JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.clientCpf'))
-          )`
-      : 'NULL';
+    // CPF is hydrated in memory only for the authorized admin response. Do
+    // not project its plaintext JSON value through the listing SQL.
+    const paymentDetailsClientCpfExpr = 'NULL';
     const paymentDetailsDinheiroExpr = hasPaymentDetails
       ? `COALESCE(
             CAST(JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.dinheiro')) AS DECIMAL(18,2)),
@@ -385,7 +383,10 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
   const draftDocumentMetadata = parseJsonObjectSafe(row.draft_document_metadata_json);
   const draftDocumentFileName = String(draftDocumentMetadata.originalFileName ?? '').trim();
   const hasSignedProposalDocument = row.signed_document_id != null;
-  const paymentDetails = parseJsonObjectSafe(row.payment_details_json);
+  const paymentDetails = hydrateCpfFieldsInJson(
+    parseJsonObjectSafe(row.payment_details_json),
+    'negotiations:payment_details',
+  );
   const paymentDetailValues = parseJsonObjectSafe(paymentDetails.details);
   const rentalTerms = parseJsonObjectSafe(paymentDetailValues.rentalTerms ?? paymentDetails.rentalTerms);
   const dealType = row.deal_type === 'rent' || row.deal_type === 'sale' ? row.deal_type : null;
@@ -410,7 +411,7 @@ function mapAdminNegotiation(row: AdminNegotiationListRow) {
     sellingBrokerName: row.selling_broker_name ?? null,
     sellerClientName: row.seller_client_name ?? null,
     clientName: row.client_name ?? null,
-    clientCpf: row.buyer_legal_cpf ?? null,
+    clientCpf: String(paymentDetailValues.clientCpf ?? row.buyer_legal_cpf ?? '').trim() || null,
     value: toNullableNumber(row.final_value),
     createdAt: toNullableIsoDate(row.created_at),
     validityDate: row.proposal_validity_date ? String(row.proposal_validity_date) : null,

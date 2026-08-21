@@ -23,6 +23,11 @@ import {
 } from './negotiationProposalSupportService';
 import { isValidCpf, normalizeCpfDigits } from '../utils/cpfValidator';
 import {
+  hashCpfForLookup,
+  protectCpfFieldsInJson,
+  resolveStoredCpf,
+} from '../security/personalDataProtection';
+import {
   resolveAdvertiserIdFromProperty,
   resolveNegotiationInitiatorSide,
 } from '../utils/negotiationActorResolution';
@@ -58,6 +63,7 @@ interface UserRow extends RowDataPacket {
   id: number;
   name: string;
   cpf?: string | null;
+  cpf_ciphertext?: string | null;
 }
 
 const PRE_SIGNED_PROPOSAL_EDIT_STATUSES = new Set([
@@ -143,7 +149,7 @@ async function resolveBuyerUserIdentity(
   }
 
   const [rows] = await tx.query<UserRow[]>(
-    'SELECT id, name, cpf FROM users WHERE id = ? LIMIT 1',
+    'SELECT id, name, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
     [normalizedBuyerUserId]
   );
   const row = rows[0];
@@ -171,14 +177,16 @@ async function resolveBuyerUserIdentityByCpf(
     return null;
   }
 
+  const lookupHash = hashCpfForLookup(cpfKey);
   const [rows] = await tx.query<UserRow[]>(
     `
-      SELECT id, name, cpf
+      SELECT id, name, cpf, cpf_ciphertext
       FROM users
-      WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
+      WHERE cpf_lookup_hash = ?
+         OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cpf, ''), '.', ''), '-', ''), '/', ''), ' ', '') = ?
       LIMIT 1
     `,
-    [cpfKey]
+    [lookupHash, cpfKey]
   );
 
   const row = rows[0];
@@ -202,12 +210,12 @@ async function resolveCurrentUserIdentity(
   userId: number
 ): Promise<{ name: string | null; cpf: string | null }> {
   const [rows] = await tx.query<UserRow[]>(
-    'SELECT name, cpf FROM users WHERE id = ? LIMIT 1',
+    'SELECT name, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
     [userId]
   );
   return {
     name: rows[0]?.name ?? null,
-    cpf: rows[0]?.cpf ?? null,
+    cpf: resolveStoredCpf(rows[0]?.cpf_ciphertext, rows[0]?.cpf, 'users:cpf'),
   };
 }
 
@@ -516,7 +524,7 @@ async function updateProposalFromWizardInternal(
     const listingValue = Number(property.price ?? proposalValue ?? 0);
     const safeListingValue = Number.isFinite(listingValue) && listingValue > 0 ? listingValue : proposalValue;
 
-    const paymentDetails = JSON.stringify({
+    const paymentDetails = JSON.stringify(protectCpfFieldsInJson({
       method: 'OTHER',
       validadeDias: payload.validadeDias,
       amount: Number(proposalValue.toFixed(2)),
@@ -533,7 +541,7 @@ async function updateProposalFromWizardInternal(
               }
             : null,
       },
-    });
+    }, 'negotiations:payment_details'));
     let proposalValidityDate = String(buildProposalValidityDate(payload.validadeDias) ?? '').trim();
     if (!proposalValidityDate) {
       const fallbackDate = new Date();
@@ -607,7 +615,6 @@ async function updateProposalFromWizardInternal(
           proposerId: nRow.proposer_id,
           dealType,
           clientName: payload.clientName,
-          clientCpf: payload.clientCpf,
           rentalTerms:
             dealType === 'rent'
               ? {
@@ -622,6 +629,7 @@ async function updateProposalFromWizardInternal(
 
     const proposalData: ProposalData = {
       clientName: payload.clientName,
+      // Used only to render the in-memory PDF, never written in plaintext.
       clientCpf: payload.clientCpf,
       propertyAddress: resolvePropertyAddress(property),
       dealType,
@@ -662,7 +670,6 @@ async function updateProposalFromWizardInternal(
       negotiationId,
       propertyId: payload.propertyId,
       clientName: payload.clientName,
-      clientCpf: payload.clientCpf,
       proposerId: nRow.proposer_id,
       advertiserId: nRow.advertiser_id,
       validityDays: payload.validadeDias,

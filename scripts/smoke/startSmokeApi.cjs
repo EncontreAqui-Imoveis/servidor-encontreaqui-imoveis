@@ -7,7 +7,9 @@ const backendRoot = path.resolve(__dirname, '..', '..');
 const smokeDatabase = process.env.SMOKE_DATABASE || 'imobiliaria_smoke_v2';
 assertLocalOnlyDatabase(smokeDatabase, 'API de smoke de contratos');
 
-dotenv.config({ path: path.join(backendRoot, '.env') });
+// The smoke API must never inherit remote credentials from the default .env.
+// Its runtime guard then replaces every outbound integration with local-only values.
+dotenv.config({ path: path.join(backendRoot, '.env.local'), override: true });
 
 const smokeEnvironment = createLocalOnlyEnvironment({
   database: smokeDatabase,

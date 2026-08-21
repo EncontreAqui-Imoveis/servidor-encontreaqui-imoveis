@@ -193,12 +193,12 @@ describe('negotiationProposalMutationService', () => {
         negotiationId: 'neg-1',
         propertyId: 101,
         clientName: 'Maria Cliente',
-        clientCpf: '52998224725',
         status: 'PROPOSAL_SENT',
         value: 500000,
         documentId: 9001,
       })
     );
+    expect(res.json.mock.calls[0]?.[0]).not.toHaveProperty('clientCpf');
     expect(txMock.execute.mock.calls[0]?.[0]).toContain('UPDATE negotiations');
     expect(txMock.execute.mock.calls[0]?.[1]).toEqual([
       101,

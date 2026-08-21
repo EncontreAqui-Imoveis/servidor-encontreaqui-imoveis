@@ -19,12 +19,14 @@ import {
   type ProfileType,
   withTimeout,
 } from './authSessionService';
+import { resolveStoredCpf } from '../security/personalDataProtection';
 
 type AuthUserRow = RowDataPacket & {
   id: number;
   name?: string | null;
   email?: string | null;
   cpf?: string | null;
+  cpf_ciphertext?: string | null;
   email_verified_at?: string | null;
   password_hash?: string | null;
   phone?: string | null;
@@ -189,6 +191,7 @@ type UserSelectQuery = {
 
 async function buildUserSelectQuery(): Promise<UserSelectQuery> {
   const hasCpfColumn = await hasColumn('users', 'cpf');
+  const hasCpfCiphertextColumn = await hasColumn('users', 'cpf_ciphertext');
   const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
   // Bancos legados podem nao ter a tabela de documentos do corretor. O login
   // continua valido; apenas o status documental fica indisponivel nesse caso.
@@ -200,6 +203,7 @@ async function buildUserSelectQuery(): Promise<UserSelectQuery> {
     'u.name',
     'u.email',
     hasCpfColumn ? 'u.cpf' : 'NULL AS cpf',
+    hasCpfCiphertextColumn ? 'u.cpf_ciphertext' : 'NULL AS cpf_ciphertext',
     'u.email_verified_at',
     'u.password_hash',
     'u.phone',
@@ -228,6 +232,13 @@ async function buildUserSelectQuery(): Promise<UserSelectQuery> {
     brokerDocumentsJoin: hasBrokerDocumentsStatus
       ? 'LEFT JOIN broker_documents bd ON b.id = bd.broker_id'
       : '',
+  };
+}
+
+function hydrateProtectedCpf(row: AuthUserRow): AuthUserRow {
+  return {
+    ...row,
+    cpf: resolveStoredCpf(row.cpf_ciphertext, row.cpf, 'users:cpf'),
   };
 }
 
@@ -280,7 +291,7 @@ export async function login(input: LoginInput): Promise<LoginResult> {
       throw new UnauthorizedError('Credenciais inválidas.');
     }
 
-    const user = rows[0];
+    const user = hydrateProtectedCpf(rows[0]);
     const passwordHash = user.password_hash != null ? String(user.password_hash) : '';
     if (!passwordHash) {
       throw new UnauthorizedError('Credenciais inválidas.');
@@ -375,7 +386,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       };
     }
 
-    const row = existingRows[0];
+    const row = hydrateProtectedCpf(existingRows[0]);
     stage = 'profile_update';
     if (hasFirebaseUidColumn && !row.firebase_uid) {
       await authDb.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);

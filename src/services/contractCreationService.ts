@@ -15,6 +15,11 @@ import {
   isContractDealType,
   type ContractDealType,
 } from '../modules/contracts/domain/contract.types';
+import {
+  hydrateCpfFieldsInJson,
+  protectCpfFieldsInJson,
+  resolveStoredCpf,
+} from '../security/personalDataProtection';
 
 type CreatedContractResult = {
   contract: ContractRow;
@@ -46,6 +51,23 @@ function normalizePositiveId(value: unknown): number | null {
 function resolveApprovedNegotiationDealType(value: unknown): ContractDealType | null {
   const normalized = String(value ?? '').trim().toLowerCase();
   return isContractDealType(normalized) ? normalized : null;
+}
+
+function parseStoredPaymentDetails(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
@@ -89,27 +111,32 @@ export async function createContractFromApprovedNegotiation(
       handshake_status: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
       handshake_attempts: number | null;
       client_name: string | null;
+      payment_details: unknown;
       buyer_legal_cpf: string | null;
       buyer_legal_email: string | null;
       property_title: string | null;
       property_owner_name: string | null;
       property_owner_phone: string | null;
       property_owner_cpf: string | null;
+      property_owner_cpf_ciphertext: string | null;
       property_broker_id: number | null;
       proposer_user_id: number | null;
       proposer_user_name: string | null;
       proposer_user_email: string | null;
       proposer_user_cpf: string | null;
+      proposer_user_cpf_ciphertext: string | null;
       proposer_user_phone: string | null;
       owner_user_id: number | null;
       owner_user_name: string | null;
       owner_user_email: string | null;
       owner_user_cpf: string | null;
+      owner_user_cpf_ciphertext: string | null;
       owner_user_phone: string | null;
       legal_buyer_user_id_resolved: number | null;
       legal_buyer_user_name: string | null;
       legal_buyer_user_email: string | null;
       legal_buyer_user_cpf: string | null;
+      legal_buyer_user_cpf_ciphertext: string | null;
       legal_buyer_user_phone: string | null;
     }>>(
       `
@@ -128,27 +155,32 @@ export async function createContractFromApprovedNegotiation(
           n.handshake_status,
           n.handshake_attempts,
           n.client_name,
-          JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientCpf')) AS buyer_legal_cpf,
+          n.payment_details,
+          NULL AS buyer_legal_cpf,
           JSON_UNQUOTE(JSON_EXTRACT(n.payment_details, '$.details.clientEmail')) AS buyer_legal_email,
           p.title AS property_title,
           COALESCE(owner_user.name, p.owner_name) AS property_owner_name,
           p.owner_phone AS property_owner_phone,
           owner_user.cpf AS property_owner_cpf,
+          owner_user.cpf_ciphertext AS property_owner_cpf_ciphertext,
           p.broker_id AS property_broker_id,
           proposer_user.id AS proposer_user_id,
           proposer_user.name AS proposer_user_name,
           proposer_user.email AS proposer_user_email,
           proposer_user.cpf AS proposer_user_cpf,
+          proposer_user.cpf_ciphertext AS proposer_user_cpf_ciphertext,
           proposer_user.phone AS proposer_user_phone,
           owner_user.id AS owner_user_id,
           owner_user.name AS owner_user_name,
           owner_user.email AS owner_user_email,
           owner_user.cpf AS owner_user_cpf,
+          owner_user.cpf_ciphertext AS owner_user_cpf_ciphertext,
           owner_user.phone AS owner_user_phone,
           COALESCE(linked_buyer_user.id, email_buyer_user.id) AS legal_buyer_user_id_resolved,
           COALESCE(linked_buyer_user.name, email_buyer_user.name) AS legal_buyer_user_name,
           COALESCE(linked_buyer_user.email, email_buyer_user.email) AS legal_buyer_user_email,
           COALESCE(linked_buyer_user.cpf, email_buyer_user.cpf) AS legal_buyer_user_cpf,
+          COALESCE(linked_buyer_user.cpf_ciphertext, email_buyer_user.cpf_ciphertext) AS legal_buyer_user_cpf_ciphertext,
           COALESCE(linked_buyer_user.phone, email_buyer_user.phone) AS legal_buyer_user_phone
         FROM negotiations n
         JOIN properties p ON p.id = n.property_id
@@ -172,6 +204,31 @@ export async function createContractFromApprovedNegotiation(
     if (!negotiation) {
       throw contractCreationError(404, 'Negociação não encontrada.');
     }
+    const protectedPaymentDetails = hydrateCpfFieldsInJson(
+      parseStoredPaymentDetails(negotiation.payment_details),
+      'negotiations:payment_details',
+    ) as { details?: { clientCpf?: string | null } };
+    negotiation.buyer_legal_cpf = protectedPaymentDetails.details?.clientCpf ?? null;
+    negotiation.property_owner_cpf = resolveStoredCpf(
+      negotiation.property_owner_cpf_ciphertext,
+      negotiation.property_owner_cpf,
+      'users:cpf',
+    );
+    negotiation.proposer_user_cpf = resolveStoredCpf(
+      negotiation.proposer_user_cpf_ciphertext,
+      negotiation.proposer_user_cpf,
+      'users:cpf',
+    );
+    negotiation.owner_user_cpf = resolveStoredCpf(
+      negotiation.owner_user_cpf_ciphertext,
+      negotiation.owner_user_cpf,
+      'users:cpf',
+    );
+    negotiation.legal_buyer_user_cpf = resolveStoredCpf(
+      negotiation.legal_buyer_user_cpf_ciphertext,
+      negotiation.legal_buyer_user_cpf,
+      'users:cpf',
+    );
 
     if (
       normalizePositiveId(negotiation.advertiser_id) === null &&
@@ -403,8 +460,8 @@ export async function createContractFromApprovedNegotiation(
         negotiationId,
         negotiation.property_id,
         dealType,
-        JSON.stringify(partyResolution.sellerInfo),
-        JSON.stringify(partyResolution.buyerInfo),
+        JSON.stringify(protectCpfFieldsInJson(partyResolution.sellerInfo, 'contracts:seller_info')),
+        JSON.stringify(protectCpfFieldsInJson(partyResolution.buyerInfo, 'contracts:buyer_info')),
         JSON.stringify(workflowMetadata),
       ],
     );

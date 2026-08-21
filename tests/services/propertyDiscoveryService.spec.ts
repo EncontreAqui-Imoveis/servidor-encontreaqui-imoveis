@@ -137,13 +137,13 @@ describe('propertyDiscoveryService', () => {
     const placeholderCount = (String(featuredSql).match(/\?/g) ?? []).length;
     expect(featuredParams).toHaveLength(placeholderCount);
     expect(featuredParams).toEqual([
-      'sale',
       'DOCUMENTATION_PHASE',
       'IN_NEGOTIATION',
       'CONTRACT_DRAFTING',
       'AWAITING_SIGNATURES',
       'SOLD',
       'RENTED',
+      'sale',
       'DOCUMENTATION_PHASE',
       'IN_NEGOTIATION',
       'CONTRACT_DRAFTING',

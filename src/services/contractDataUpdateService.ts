@@ -12,6 +12,10 @@ import {
   assertParticipantMutationAllowed,
   isContractWorkflowGuardError,
 } from './contractWorkflowGuard';
+import {
+  hydrateCpfFieldsInJson,
+  protectCpfFieldsInJson,
+} from '../security/personalDataProtection';
 
 class ContractDataUpdateError extends Error {
   statusCode: number;
@@ -490,8 +494,16 @@ export async function updateContractData(
     throw mutationError(403, 'Seu acesso não permite editar o lado comprador nesta etapa.');
   }
 
-  const sellerInfo = parseStoredJsonObject(contract.seller_info);
-  const buyerInfo = parseStoredJsonObject(contract.buyer_info);
+  // Decrypt only inside the locked, authorized transaction. Persistence below
+  // replaces the plaintext CPF keys with authenticated ciphertext again.
+  const sellerInfo = hydrateCpfFieldsInJson(
+    parseStoredJsonObject(contract.seller_info),
+    'contracts:seller_info',
+  );
+  const buyerInfo = hydrateCpfFieldsInJson(
+    parseStoredJsonObject(contract.buyer_info),
+    'contracts:buyer_info',
+  );
 
   const nextSellerInfo =
     side === 'seller'
@@ -533,8 +545,8 @@ export async function updateContractData(
       WHERE id = ?
     `,
     [
-      JSON.stringify(nextSellerInfo),
-      JSON.stringify(nextBuyerInfo),
+      JSON.stringify(protectCpfFieldsInJson(nextSellerInfo, 'contracts:seller_info')),
+      JSON.stringify(protectCpfFieldsInJson(nextBuyerInfo, 'contracts:buyer_info')),
       workflowMetadata ? JSON.stringify(workflowMetadata) : null,
       workflowMetadata ? JSON.stringify(workflowMetadata) : null,
       params.contractId,

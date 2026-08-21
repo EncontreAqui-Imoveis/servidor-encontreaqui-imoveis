@@ -6,6 +6,7 @@ import type { ProposalData } from '../modules/negotiations/domain/states/Negotia
 import { addPdfJob } from '../modules/negotiations/infra/PdfQueue';
 import { parseProposalData } from './negotiationProposalSupportService';
 import { isNegotiationAdmin } from '../utils/negotiationActorAccess';
+import { protectCpf } from '../security/personalDataProtection';
 import {
   executeNegotiationStatement,
   generateNegotiationProposalPdf,
@@ -158,6 +159,10 @@ export async function generateProposal(
       return res.status(403).json({ error: 'Apenas o proponente pode atualizar a proposta.' });
     }
 
+    const protectedCpf = protectCpf(
+      proposalData.clientCpf,
+      'negotiations:payment_details.details.clientCpf',
+    );
     await executeNegotiationStatement(
       `
         UPDATE negotiations
@@ -166,11 +171,17 @@ export async function generateProposal(
           payment_details = JSON_SET(
             COALESCE(payment_details, JSON_OBJECT()),
             '$.details.clientName', ?,
-            '$.details.clientCpf', ?
+            '$.details.clientCpf', NULL,
+            '$.details.clientCpf_ciphertext', ?
           )
         WHERE id = ?
       `,
-      [proposalData.clientName, proposalData.clientName, proposalData.clientCpf, negotiationId]
+      [
+        proposalData.clientName,
+        proposalData.clientName,
+        protectedCpf?.ciphertext ?? null,
+        negotiationId,
+      ]
     );
 
     try {

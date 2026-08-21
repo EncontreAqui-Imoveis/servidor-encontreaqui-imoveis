@@ -253,7 +253,8 @@ describe('PUT /admin/negotiations/:id/approve contract auto-creation', () => {
     expect(contractState?.buyerInfo).toEqual(
       expect.objectContaining({
         nome: 'FGFG',
-        cpf: '52998224725',
+        cpf: null,
+        cpf_ciphertext: expect.any(String),
       })
     );
     expect(contractInsertCount).toBe(1);

@@ -38,6 +38,7 @@ import {
   isDuplicateAccountNameError,
 } from '../services/userAccountNameService';
 import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
+import { protectCpf } from '../security/personalDataProtection';
 
 function appErrorDetails(error: unknown): Record<string, unknown> {
   if (!isApplicationError(error)) {
@@ -369,6 +370,7 @@ class AuthController {
       const passwordHash = isGoogleRegistration
         ? null
         : await hashNewPassword(password);
+      const protectedCpf = protectCpf(cpf, 'users:cpf');
       let emailVerifiedAt: Date | null = isGoogleRegistration ? new Date() : null;
       if (!isGoogleRegistration) {
         const verificationStatus = await getEmailVerificationStatus({ email });
@@ -379,14 +381,21 @@ class AuthController {
 
       const [userResult] = await authDb.query<ResultSetHeader>(
         `
-          INSERT INTO users (firebase_uid, name, email, cpf, email_verified_at, password_hash, phone, street, number, complement, bairro, city, state, cep)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (
+            firebase_uid, name, email, cpf, cpf_ciphertext, cpf_lookup_hash,
+            cpf_last4, cpf_key_version, email_verified_at, password_hash, phone,
+            street, number, complement, bairro, city, state, cep
+          )
+          VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           firebaseUid,
           name,
           email,
-          cpf || null,
+          protectedCpf?.ciphertext ?? null,
+          protectedCpf?.lookupHash ?? null,
+          protectedCpf?.last4 ?? null,
+          protectedCpf?.keyVersion ?? null,
           emailVerifiedAt,
           passwordHash,
           phone ?? null,
@@ -415,7 +424,7 @@ class AuthController {
           id: userId,
           name,
           email,
-          cpf: cpf || null,
+          cpf: protectedCpf ? cpf.replace(/\D/g, '') : null,
           email_verified_at: emailVerifiedAt?.toISOString() ?? null,
           phone,
           street: addressResult.value.street,

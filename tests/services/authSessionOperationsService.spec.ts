@@ -64,14 +64,17 @@ beforeEach(() => {
 
 function mockUserSchema({
   hasCpf = true,
+  hasCpfCiphertext = true,
   hasFirebaseUid = true,
   hasBrokerDocumentsStatus = true,
 }: {
   hasCpf?: boolean;
+  hasCpfCiphertext?: boolean;
   hasFirebaseUid?: boolean;
   hasBrokerDocumentsStatus?: boolean;
 } = {}) {
   queryMock.mockResolvedValueOnce(hasCpf ? [[{}]] : [[]]);
+  queryMock.mockResolvedValueOnce(hasCpfCiphertext ? [[{}]] : [[]]);
   queryMock.mockResolvedValueOnce(hasFirebaseUid ? [[{}]] : [[]]);
   queryMock.mockResolvedValueOnce(hasBrokerDocumentsStatus ? [[{}]] : [[]]);
 }

@@ -8,7 +8,9 @@
 const LOCAL_ONLY_DATABASES = new Set([
   'imobiliaria_smoke_v2',
   'imobiliaria_contract_e2e',
+  'imobiliaria_ui_smoke',
   'encontre_aqui_pentest',
+  'encontreaqui_local',
 ]);
 
 function assertLocalOnlyDatabase(database, label = 'processo local') {

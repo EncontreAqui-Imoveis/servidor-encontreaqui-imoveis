@@ -28,6 +28,7 @@ import {
 } from '../services/userAccountNameService';
 import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 import { buildPropertyOwnerListingFilters } from '../services/propertyOwnerListingFilterService';
+import { protectCpf, resolveStoredCpf } from '../security/personalDataProtection';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -134,6 +135,17 @@ function stringOrNull(value: unknown): string | null {
   }
   const asString = String(value).trim();
   return asString.length > 0 ? asString : null;
+}
+
+function hydrateProtectedCpf<T extends RowDataPacket>(row: T): T {
+  return {
+    ...row,
+    cpf: resolveStoredCpf(
+      typeof row.cpf_ciphertext === 'string' ? row.cpf_ciphertext : null,
+      typeof row.cpf === 'string' ? row.cpf : null,
+      'users:cpf',
+    ),
+  };
 }
 
 function mapFavorite(row: FavoriteRow) {
@@ -257,16 +269,23 @@ class UserController {
       await assertAccountNameAvailable(userNameQueryExecutor, name);
 
       const passwordHash = await hashNewPassword(String(password));
+      const protectedCpf = protectCpf(cpf, 'users:cpf');
 
       await runUserQuery(
         `
-          INSERT INTO users (name, email, cpf, password_hash, phone, street, number, complement, bairro, city, state, cep)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (
+            name, email, cpf, cpf_ciphertext, cpf_lookup_hash, cpf_last4, cpf_key_version,
+            password_hash, phone, street, number, complement, bairro, city, state, cep
+          )
+          VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           name,
           email,
-          stringOrNull(cpf),
+          protectedCpf?.ciphertext ?? null,
+          protectedCpf?.lookupHash ?? null,
+          protectedCpf?.last4 ?? null,
+          protectedCpf?.keyVersion ?? null,
           passwordHash,
           stringOrNull(phone),
           addressResult.value.street,
@@ -298,7 +317,7 @@ class UserController {
 
     try {
       const rows = await runUserQuery<RowDataPacket[]>(
-        'SELECT id, name, email, cpf, password_hash, token_version FROM users WHERE email = ?',
+        'SELECT id, name, email, cpf, cpf_ciphertext, password_hash, token_version FROM users WHERE email = ?',
         [email]
       );
 
@@ -306,7 +325,7 @@ class UserController {
         return res.status(401).json({ error: 'Credenciais inválidas.' });
       }
 
-      const user = rows[0];
+      const user = hydrateProtectedCpf(rows[0]);
       const isPasswordCorrect = await bcrypt.compare(password, String(user.password_hash));
 
       if (!isPasswordCorrect) {
@@ -338,6 +357,7 @@ class UserController {
               name,
               email,
               cpf,
+              cpf_ciphertext,
               email_verified_at,
               phone,
               street,
@@ -357,7 +377,7 @@ class UserController {
         return res.status(404).json({ error: 'Usuário não encontrado.' });
       }
 
-      const user = userRows[0];
+      const user = hydrateProtectedCpf(userRows[0]);
 
       const brokerRows = await runUserQuery<RowDataPacket[]>(
         `
@@ -523,7 +543,12 @@ class UserController {
       }
 
       if (hasField('cpf')) {
-        updates.cpf = stringOrNull(payload.cpf)?.replace(/\D/g, '') ?? null;
+        const protectedCpf = protectCpf(payload.cpf, 'users:cpf');
+        updates.cpf = null;
+        updates.cpf_ciphertext = protectedCpf?.ciphertext ?? null;
+        updates.cpf_lookup_hash = protectedCpf?.lookupHash ?? null;
+        updates.cpf_last4 = protectedCpf?.last4 ?? null;
+        updates.cpf_key_version = protectedCpf?.keyVersion ?? null;
       }
 
       const shouldProcessAddress = ['street', 'number', 'complement', 'bairro', 'city', 'state', 'cep']
@@ -604,6 +629,7 @@ class UserController {
             name,
             email,
             cpf,
+            cpf_ciphertext,
             email_verified_at,
             phone,
             street,
@@ -619,7 +645,7 @@ class UserController {
         [userId]
       );
 
-      const user = userRows[0];
+      const user = hydrateProtectedCpf(userRows[0]);
 
       const brokerRows = await runUserQuery<RowDataPacket[]>(
         `
@@ -772,9 +798,22 @@ class UserController {
 
       await assertAccountNameAvailable(userNameQueryExecutor, `User-${uid.substring(0, 8)}`);
 
+      const protectedCpf = protectCpf(cpf, 'users:cpf');
       await runUserQuery(
-        'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, ?)',
-        [uid, email, `User-${uid.substring(0, 8)}`, stringOrNull(cpf)]
+        `
+          INSERT INTO users (
+            firebase_uid, email, name, cpf, cpf_ciphertext, cpf_lookup_hash, cpf_last4, cpf_key_version
+          ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
+        `,
+        [
+          uid,
+          email,
+          `User-${uid.substring(0, 8)}`,
+          protectedCpf?.ciphertext ?? null,
+          protectedCpf?.lookupHash ?? null,
+          protectedCpf?.last4 ?? null,
+          protectedCpf?.keyVersion ?? null,
+        ]
       );
 
       return res.status(201).json({ message: 'Usuário sincronizado com sucesso!' });
@@ -803,7 +842,7 @@ class UserController {
 
       const userRows = await runUserQuery<RowDataPacket[]>(
         `
-          SELECT u.id, u.name, u.email, u.cpf, u.firebase_uid,
+          SELECT u.id, u.name, u.email, u.cpf, u.cpf_ciphertext, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep,
                  CASE
                    WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
@@ -824,7 +863,7 @@ class UserController {
       let isNewUser = false;
 
       if (userRows.length > 0) {
-        user = userRows[0];
+        user = hydrateProtectedCpf(userRows[0]);
         if (!user.firebase_uid) {
           await runUserQuery('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, user.id]);
         }
@@ -854,8 +893,8 @@ class UserController {
         const resolvedName = name || `User-${uid.substring(0, 8)}`;
         await assertAccountNameAvailable(userNameQueryExecutor, resolvedName);
         const result = await runUserQuery<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, ?)',
-          [uid, email, resolvedName, null]
+          'INSERT INTO users (firebase_uid, email, name, cpf) VALUES (?, ?, ?, NULL)',
+          [uid, email, resolvedName]
         );
         user = {
           id: result.insertId,
@@ -1030,7 +1069,7 @@ class UserController {
 
       const userRows = await runUserQuery<RowDataPacket[]>(
         `
-          SELECT u.id, u.name, u.email, u.firebase_uid,
+          SELECT u.id, u.name, u.email, u.cpf, u.cpf_ciphertext, u.firebase_uid,
                  u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
                  CASE
                    WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
@@ -1057,7 +1096,7 @@ class UserController {
         cep !== undefined;
 
       if (userRows.length > 0) {
-        user = userRows[0];
+        user = hydrateProtectedCpf(userRows[0]);
         const updates: Array<[string, any]> = [];
         if (!user.firebase_uid) updates.push(['firebase_uid', uid]);
         if ((phone || phoneOverride) && user.phone !== (phoneOverride ?? phone)) {
@@ -1132,12 +1171,11 @@ class UserController {
         const resolvedName = nameOverride ?? displayName;
         await assertAccountNameAvailable(userNameQueryExecutor, resolvedName);
         const result = await runUserQuery<ResultSetHeader>(
-          'INSERT INTO users (firebase_uid, email, name, cpf, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO users (firebase_uid, email, name, cpf, phone, street, number, complement, bairro, city, state, cep) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)',
           [
             uid,
             fallbackEmail,
             resolvedName,
-            null,
             phoneOverride ?? phone ?? null,
             addressPayload.street,
             addressPayload.number,

@@ -561,7 +561,11 @@ describe('Contract access matrix HTTP integration', () => {
 
     expect(ownSide.status).toBe(200);
     expect(state.buyerInfo).toEqual(
-      expect.objectContaining(buyerQualification)
+      expect.objectContaining({
+        ...buyerQualification,
+        conjuge_cpf: null,
+        conjuge_cpf_ciphertext: expect.any(String),
+      })
     );
     expect(state.sellerInfo).toEqual({
       estado_civil: 'Casado',
@@ -591,7 +595,11 @@ describe('Contract access matrix HTTP integration', () => {
     expect(malformedCrossSide.status).toBe(400);
     expect(malformedCrossSide.body.error).toContain('vendedor');
     expect(state.buyerInfo).toEqual(
-      expect.objectContaining(buyerQualification)
+      expect.objectContaining({
+        ...buyerQualification,
+        conjuge_cpf: null,
+        conjuge_cpf_ciphertext: expect.any(String),
+      })
     );
   });
 

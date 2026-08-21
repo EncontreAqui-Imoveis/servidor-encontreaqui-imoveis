@@ -27,38 +27,12 @@ CREATE TABLE IF NOT EXISTS privacy_requests (
   KEY idx_privacy_requests_status_requested (status, requested_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-SET @has_notifications_created_index := (
-  SELECT COUNT(*)
-  FROM information_schema.statistics
-  WHERE table_schema = DATABASE()
-    AND table_name = 'notifications'
-    AND index_name = 'idx_notifications_created_at'
-);
-SET @add_notifications_created_index_sql := IF(
-  @has_notifications_created_index = 0,
-  'ALTER TABLE notifications ADD INDEX idx_notifications_created_at (created_at)',
-  'SELECT 1'
-);
-PREPARE stmt FROM @add_notifications_created_index_sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- TiDB Cloud rejects PREPARE/EXECUTE unless multi-statement mode is enabled.
+-- Native idempotent DDL keeps this migration safe without weakening that setting.
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications (created_at);
 
 -- +migrate Down
-SET @has_notifications_created_index := (
-  SELECT COUNT(*)
-  FROM information_schema.statistics
-  WHERE table_schema = DATABASE()
-    AND table_name = 'notifications'
-    AND index_name = 'idx_notifications_created_at'
-);
-SET @drop_notifications_created_index_sql := IF(
-  @has_notifications_created_index > 0,
-  'ALTER TABLE notifications DROP INDEX idx_notifications_created_at',
-  'SELECT 1'
-);
-PREPARE stmt FROM @drop_notifications_created_index_sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+DROP INDEX IF EXISTS idx_notifications_created_at ON notifications;
 
 DROP TABLE IF EXISTS privacy_requests;
 DROP TABLE IF EXISTS privacy_retention_runs;

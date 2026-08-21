@@ -1,22 +1,11 @@
 -- +migrate Up
 -- Bilateral acknowledgement of the physical-contract draft. This is not an
 -- electronic signature: every decision is tied to one immutable revision.
-SET @contract_status_type := (
-  SELECT column_type
-  FROM information_schema.columns
-  WHERE table_schema = DATABASE()
-    AND table_name = 'contracts'
-    AND column_name = 'status'
-  LIMIT 1
-);
-SET @ensure_contract_review_status_sql := IF(
-  @contract_status_type IS NULL OR LOCATE('AWAITING_MINUTE_REVIEW', UPPER(@contract_status_type)) > 0,
-  'SELECT 1',
-  'ALTER TABLE contracts MODIFY COLUMN status ENUM(''AWAITING_DOCS'', ''IN_DRAFT'', ''AWAITING_MINUTE_REVIEW'', ''AWAITING_SIGNATURES'', ''FINALIZED'', ''CANCELLED'') NOT NULL DEFAULT ''AWAITING_DOCS'''
-);
-PREPARE stmt FROM @ensure_contract_review_status_sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- The enum definition is deterministic and the migration is applied once.
+-- Avoid PREPARE/EXECUTE, which TiDB Cloud blocks by default.
+ALTER TABLE contracts
+  MODIFY COLUMN status ENUM('AWAITING_DOCS', 'IN_DRAFT', 'AWAITING_MINUTE_REVIEW', 'AWAITING_SIGNATURES', 'FINALIZED', 'CANCELLED')
+  NOT NULL DEFAULT 'AWAITING_DOCS';
 
 CREATE TABLE IF NOT EXISTS contract_draft_revisions (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

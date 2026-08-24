@@ -2,7 +2,7 @@ import type { NextFunction, Response } from 'express';
 
 import type { AuthRequest } from './auth';
 
-export type AdminPanelRole = 'admin' | 'document_operator';
+export type AdminPanelRole = 'admin' | 'document_operator' | 'operational_assistant';
 export type AdminCapability =
   | 'review_documents'
   | 'replace_documents'
@@ -21,12 +21,20 @@ const ROLE_CAPABILITIES: Record<AdminPanelRole, ReadonlySet<AdminCapability>> = 
   // Operador documental pode revisar e substituir; exclusoes manuais continuam
   // reservadas ao administrador titular.
   document_operator: new Set(['review_documents', 'replace_documents']),
+  // Auxiliar operacional pode gerenciar o fluxo de contratos e revisar/substituir
+  // documentos, mas nao tem acesso a operacoes administrativas nem a exclusao de dados.
+  operational_assistant: new Set([
+    'review_documents',
+    'replace_documents',
+    'manage_contract_workflow',
+  ]),
 };
 
 export function normalizeAdminPanelRole(value: unknown): AdminPanelRole {
-  return String(value ?? '').trim().toLowerCase() === 'document_operator'
-    ? 'document_operator'
-    : 'admin';
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (normalized === 'document_operator') return 'document_operator';
+  if (normalized === 'operational_assistant') return 'operational_assistant';
+  return 'admin';
 }
 
 export function hasAdminCapability(

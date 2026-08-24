@@ -367,6 +367,22 @@ export async function updateProperty(req: AuthRequest, res: Response) {
     const values: any[] = [];
     let nextStatus: Nullable<PropertyStatus> = null;
 
+    // Resolve broker_id early (async) so the synchronous loop can use it safely.
+    // A non-null value that does not exist in the brokers table would cause an FK
+    // constraint violation, so we coerce invalid IDs to null here.
+    let resolvedBrokerId: number | null = null;
+    if (bodyKeys.includes('broker_id')) {
+      const rawBrokerId = normalizedUpdateBody['broker_id'];
+      const parsedBrokerId = rawBrokerId != null && rawBrokerId !== '' ? Number(rawBrokerId) : null;
+      if (parsedBrokerId && Number.isFinite(parsedBrokerId) && parsedBrokerId > 0) {
+        const [brokerRows] = await runPropertyQuery<RowDataPacket[]>(
+          'SELECT id FROM brokers WHERE id = ? LIMIT 1',
+          [parsedBrokerId]
+        );
+        resolvedBrokerId = brokerRows.length > 0 ? parsedBrokerId : null;
+      }
+    }
+
     for (const key of bodyKeys) {
       if (!ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS.has(key)) {
         continue;
@@ -785,10 +801,8 @@ export async function updateProperty(req: AuthRequest, res: Response) {
           values.push(normalizeCepForPersistence(normalizedUpdateBody[key], semCepBody));
           break;
         case 'broker_id': {
-          const rawId = normalizedUpdateBody[key];
-          const parsedId = rawId != null && rawId !== '' ? Number(rawId) : null;
           fields.push('broker_id = ?');
-          values.push(parsedId && Number.isFinite(parsedId) && parsedId > 0 ? parsedId : null);
+          values.push(resolvedBrokerId);
           break;
         }
         case 'owner_id': {

@@ -184,7 +184,24 @@ export async function reviewContractDocument(
 
   const normalizedReason = reason.length > 0 ? reason : null;
   const documentType = String(document.document_type ?? '').trim().toLowerCase() || null;
-  const originalFileName = String(metadata.originalFileName ?? '').trim() || null;
+  const rawOriginalFileName = String(
+    metadata.originalFileName ??
+      metadata.original_file_name ??
+      metadata.fileName ??
+      metadata.file_name ??
+      metadata.name ??
+      ''
+  ).trim();
+
+  let originalFileName: string | null = rawOriginalFileName || null;
+  if (!originalFileName && document.storage_key) {
+    const baseName = String(document.storage_key).split('/').pop() ?? '';
+    const cleanName = baseName.replace(/^\d+[-_]/, '');
+    if (cleanName.length > 0) {
+      originalFileName = cleanName;
+    }
+  }
+
   const uploadedByUserId = readPositiveUserId(metadata.uploadedBy);
   const ownerSideValue = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
   const ownerSide = ownerSideValue === 'seller' || ownerSideValue === 'buyer' ? ownerSideValue : null;

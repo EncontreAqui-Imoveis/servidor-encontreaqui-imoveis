@@ -156,6 +156,12 @@ describe('applyMigrations', () => {
 
     expect(
       sqlStatements.some((sql) =>
+        sql.includes('ALTER TABLE properties MODIFY COLUMN status VARCHAR(64) NOT NULL')
+      )
+    ).toBe(true);
+
+    expect(
+      sqlStatements.some((sql) =>
         sql.includes('ALTER TABLE users ADD COLUMN token_version INT NOT NULL DEFAULT 1')
       )
     ).toBe(true);

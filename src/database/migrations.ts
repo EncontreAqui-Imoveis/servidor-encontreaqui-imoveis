@@ -1550,6 +1550,24 @@ async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
   }
 }
 
+/**
+ * Property status is workflow data too. Legacy databases used a closed ENUM,
+ * but approval/relisting introduces operational states over time. Keep the
+ * database column extensible so valid new states are not truncated by TiDB.
+ */
+async function ensurePropertyStatusFreetext(): Promise<void> {
+  if (!(await tableExists('properties')) || !(await columnExists('properties', 'status'))) {
+    return;
+  }
+
+  const columnType = (await getColumnType('properties', 'status'))?.trim().toLowerCase() ?? '';
+  if (columnType.startsWith('enum(') || columnType !== 'varchar(64)') {
+    await connection.query(
+      'ALTER TABLE properties MODIFY COLUMN status VARCHAR(64) NOT NULL'
+    );
+  }
+}
+
 async function ensurePropertyIndices(): Promise<void> {
   if (!(await tableExists('properties'))) return;
 
@@ -1688,6 +1706,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureUsersTokenVersionColumn();
     await ensureNegotiationResponsiblesAndBrokerProfileType();
     await ensureNegotiationStatusHistoryColumnsFreetext();
+    await ensurePropertyStatusFreetext();
     await ensurePropertyIndices();
     await ensureGeneralIndices();
     console.log('Migrations aplicadas com sucesso.');

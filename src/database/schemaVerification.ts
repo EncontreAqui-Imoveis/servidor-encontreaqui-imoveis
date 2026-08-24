@@ -245,6 +245,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
   await assertNotEnum('negotiations', 'status');
   await assertNotEnum('negotiation_history', 'from_status');
   await assertNotEnum('negotiation_history', 'to_status');
+  await assertNotEnum('properties', 'status');
 
   return {
     checkedTables: requiredTables.length,

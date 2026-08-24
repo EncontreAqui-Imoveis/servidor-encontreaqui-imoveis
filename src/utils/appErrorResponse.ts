@@ -6,7 +6,15 @@ import {
   type ApplicationError,
 } from '../errors/ApplicationError';
 
-export function respondWithAppError(res: Response, error: unknown): Response {
+type AppErrorResponseContext = {
+  requestId?: string | null;
+};
+
+export function respondWithAppError(
+  res: Response,
+  error: unknown,
+  context: AppErrorResponseContext = {},
+): Response {
   if (isApplicationError(error)) {
     return res.status(applicationErrorToHttpStatus(error)).json({
       error: error.message,
@@ -17,13 +25,25 @@ export function respondWithAppError(res: Response, error: unknown): Response {
   // Never send raw driver/SQL messages to the browser. Besides exposing
   // implementation details, those messages are not actionable to an admin
   // and can contain schema/table information. Keep diagnostics server-side.
-  const diagnostic = error as { name?: unknown; code?: unknown; errno?: unknown };
+  const diagnostic = error as {
+    name?: unknown;
+    code?: unknown;
+    errno?: unknown;
+    sqlMessage?: unknown;
+    message?: unknown;
+  };
   console.error('Erro não tratado no controller:', {
+    requestId: context.requestId ?? null,
     name: diagnostic?.name,
     code: diagnostic?.code,
     errno: diagnostic?.errno,
+    message: diagnostic?.message,
+    sqlMessage: diagnostic?.sqlMessage,
   });
-  return res.status(500).json({ error: 'Erro interno do servidor.' });
+  return res.status(500).json({
+    error: 'Erro interno do servidor.',
+    ...(context.requestId ? { requestId: context.requestId } : {}),
+  });
 }
 
 export function appErrorToResponse(error: ApplicationError): {

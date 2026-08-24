@@ -88,6 +88,7 @@ import {
 } from '../services/adminOnboardingService';
 import { buildCloudinarySignature } from '../services/adminCloudinarySignatureService';
 import { respondWithAppError } from '../utils/appErrorResponse';
+import { getRequestId } from '../middlewares/requestContext';
 import {
   changeOwnAdministrativePassword,
   createAdministrativeAssistant,
@@ -351,7 +352,7 @@ class AdminController {
       const payload = await approveAdminNegotiation({ negotiationId, actorId });
       return res.status(200).json(payload);
     } catch (error) {
-      return respondWithAppError(res, error);
+      return respondWithAppError(res, error, { requestId: getRequestId(req) });
     }
   }
 
@@ -376,7 +377,7 @@ class AdminController {
       const payload = await rejectAdminNegotiation({ negotiationId, actorId, reason });
       return res.status(200).json(payload);
     } catch (error) {
-      return respondWithAppError(res, error);
+      return respondWithAppError(res, error, { requestId: getRequestId(req) });
     }
   }
 

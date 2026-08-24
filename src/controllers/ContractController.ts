@@ -2345,25 +2345,11 @@ class ContractController {
         loadContractForUpdate: fetchContractForUpdate,
       });
 
-      let draftGeneration: Awaited<ReturnType<typeof ensureContractDraftGenerated>> | null = null;
-      if (result.movedToDraft && result.contract?.id) {
-        try {
-          draftGeneration = await ensureContractDraftGenerated(result.contract.id);
-        } catch (error) {
-          console.error('Contrato entrou em IN_DRAFT, mas a minuta automática falhou:', error);
-          return res.status(502).json({
-            error:
-              'Documentação aprovada, mas a geração automática da minuta falhou. Tente gerar a minuta novamente.',
-            contract: mapContract(result.contract, req),
-          });
-        }
-      }
-
       return res.status(200).json({
         message: result.message,
         contract: result.contract ? mapContract(result.contract, req) : null,
         movedToDraft: result.movedToDraft,
-        draftGeneration,
+        draftGeneration: null,
       });
     } catch (error) {
       if (isContractSideReviewError(error)) {
@@ -2388,24 +2374,10 @@ class ContractController {
         loadContractForUpdate: fetchContractForUpdate,
       });
 
-      let draftGeneration: Awaited<ReturnType<typeof ensureContractDraftGenerated>> | null = null;
-      if (resolveContractStatus(result.contract?.status) === 'IN_DRAFT' && result.contract?.id) {
-        try {
-          draftGeneration = await ensureContractDraftGenerated(result.contract.id);
-        } catch (error) {
-          console.error('Contrato entrou em IN_DRAFT, mas a minuta automática falhou:', error);
-          return res.status(502).json({
-            error:
-              'Documentação aprovada, mas a geração automática da minuta falhou. Tente gerar a minuta novamente.',
-            contract: mapContract(result.contract, req),
-          });
-        }
-      }
-
       return res.status(200).json({
         message: result.message,
         contract: result.contract ? mapContract(result.contract, req) : null,
-        draftGeneration,
+        draftGeneration: null,
       });
     } catch (error) {
       if (isContractCategoryReviewError(error)) {

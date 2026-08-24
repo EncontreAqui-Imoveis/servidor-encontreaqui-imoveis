@@ -29,7 +29,7 @@ const MAX_CONTRACT_DRAFT_FILE_MB = parsePositiveEnvNumber(
 );
 const MAX_CONTRACT_DOCUMENT_FILE_MB = parsePositiveEnvNumber(
   'UPLOAD_MAX_CONTRACT_DOCUMENT_MB',
-  5
+  35
 );
 const MAX_MEDIA_UPLOAD_FIELDS = parsePositiveEnvNumber(
   'MEDIA_UPLOAD_MAX_FIELDS',

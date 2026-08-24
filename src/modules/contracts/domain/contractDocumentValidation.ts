@@ -51,7 +51,7 @@ const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
   'image/png',
   'image/webp',
 ]);
-const MAX_FILE_BYTES = 15 * 1024 * 1024;
+const MAX_FILE_BYTES = 35 * 1024 * 1024;
 const MIN_FILE_BYTES = 512;
 
 const CATEGORY_DOCUMENT_TYPES: Record<
@@ -194,7 +194,7 @@ export function validateContractDocumentUpload(input: {
     issues.push({
       code: 'FILE_TOO_LARGE',
       field: 'file',
-      message: 'Arquivo excede o limite máximo permitido (15MB).',
+      message: 'Arquivo excede o limite máximo permitido (35MB).',
       expected: `<=${MAX_FILE_BYTES}`,
       received: String(input.file.size),
     });

@@ -481,14 +481,17 @@ export async function deleteContractDocument(
     }
     throw error;
   }
-  if (!side) {
-    throw mutationError(409, 'Documento legado sem dono explícito. Corrija-o pelo painel administrativo.');
-  }
-  if (side === 'seller' && !context.canEditSeller) {
+  const isUploader = Number(metadata.uploadedBy) === Number(params.req.userId);
+  const isAdmin = context.userRole === 'admin';
+
+  if (side === 'seller' && !context.canEditSeller && !isAdmin) {
     throw mutationError(403, 'Seu acesso não permite remover documentos do lado vendedor nesta etapa.');
   }
-  if (side === 'buyer' && !context.canEditBuyer) {
+  if (side === 'buyer' && !context.canEditBuyer && !isAdmin) {
     throw mutationError(403, 'Seu acesso não permite remover documentos do lado comprador nesta etapa.');
+  }
+  if (!side && !isAdmin && !isUploader && !context.canEditSeller && !context.canEditBuyer) {
+    throw mutationError(403, 'Seu acesso não permite remover este documento.');
   }
 
   await tx.query(

@@ -123,6 +123,8 @@ const ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS = new Set([
   'valor_condominio',
   'valor_iptu',
   'video_url',
+  'broker_id',
+  'owner_id',
 ]);
 
 function sendPropertyError(
@@ -782,6 +784,20 @@ export async function updateProperty(req: AuthRequest, res: Response) {
           fields.push('cep = ?');
           values.push(normalizeCepForPersistence(normalizedUpdateBody[key], semCepBody));
           break;
+        case 'broker_id': {
+          const rawId = normalizedUpdateBody[key];
+          const parsedId = rawId != null && rawId !== '' ? Number(rawId) : null;
+          fields.push('broker_id = ?');
+          values.push(parsedId && Number.isFinite(parsedId) && parsedId > 0 ? parsedId : null);
+          break;
+        }
+        case 'owner_id': {
+          const rawId = normalizedUpdateBody[key];
+          const parsedId = rawId != null && rawId !== '' ? Number(rawId) : null;
+          fields.push('owner_id = ?');
+          values.push(parsedId && Number.isFinite(parsedId) && parsedId > 0 ? parsedId : null);
+          break;
+        }
         default: {
           if (!ALLOWED_PROPERTY_TEXT_UPDATE_FIELDS.has(key)) {
             continue;
@@ -989,7 +1005,11 @@ export async function updateProperty(req: AuthRequest, res: Response) {
       nextStatus = null;
     }
 
-    const hasImageListUpdate = Array.isArray((body as { images?: unknown }).images);
+    if (nextStatus === 'approved') {
+      fields.push('visibility = ?', 'lifecycle_status = ?', 'sale_value = ?', 'commission_rate = ?', 'commission_value = ?');
+      values.push('PUBLIC', 'AVAILABLE', null, null, null);
+    }
+
     if (wasRejected && (fields.length > 0 || hasImageListUpdate)) {
       fields.push('status = ?', 'rejection_reason = ?', 'visibility = ?');
       values.push('pending_approval', null, 'HIDDEN');

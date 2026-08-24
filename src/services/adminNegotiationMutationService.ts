@@ -142,6 +142,9 @@ export async function approveNegotiation(params: {
     }
 
     const currentStatus = normalizeNegotiationStatus(negotiation.status);
+    const fromStatusForHistory = NEGOTIATION_INTERNAL_STATUSES.has(currentStatus)
+      ? currentStatus
+      : (currentStatus || 'PROPOSAL_SENT');
     const resolvedSellingBrokerId = resolveOperationalBrokerId(negotiation);
     if (!resolvedSellingBrokerId) {
       await tx.rollback();
@@ -226,7 +229,7 @@ export async function approveNegotiation(params: {
       `,
       [
         negotiationId,
-        currentStatus,
+        fromStatusForHistory,
         null,
         JSON.stringify({
           action: 'admin_approved',
@@ -414,7 +417,7 @@ export async function rejectNegotiation(params: {
     const currentStatus = normalizeNegotiationStatus(negotiation.status);
     const fromStatusForHistory = NEGOTIATION_INTERNAL_STATUSES.has(currentStatus)
       ? currentStatus
-      : 'PROPOSAL_SENT';
+      : (currentStatus || 'PROPOSAL_SENT');
     const resolvedSellingBrokerId = resolveOperationalBrokerId(negotiation);
     if (!resolvedSellingBrokerId) {
       await tx.rollback();
@@ -578,6 +581,9 @@ export async function cancelNegotiation(params: {
 
     const negotiation = rows[0];
     const currentStatus = normalizeNegotiationStatus(negotiation.status);
+    const fromStatusForHistory = NEGOTIATION_INTERNAL_STATUSES.has(currentStatus)
+      ? currentStatus
+      : (currentStatus || 'IN_NEGOTIATION');
     const propertyStatus = String(negotiation.property_status ?? '').toLowerCase();
 
     if (currentStatus === 'SOLD' || currentStatus === 'RENTED') {
@@ -626,7 +632,7 @@ export async function cancelNegotiation(params: {
       `,
       [
         negotiationId,
-        currentStatus,
+        fromStatusForHistory,
         null,
         JSON.stringify({
           action: 'admin_cancelled',

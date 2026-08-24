@@ -1528,7 +1528,8 @@ async function ensureNegotiationStatusHistoryColumnsFreetext(): Promise<void> {
     for (const col of ['from_status', 'to_status'] as const) {
       if (!(await columnExists('negotiation_history', col))) continue;
       const t = (await getColumnType('negotiation_history', col)) ?? '';
-      if (t.toLowerCase().startsWith('enum(')) {
+      const normalizedType = t.trim().toLowerCase();
+      if (normalizedType.startsWith('enum(') || normalizedType !== 'varchar(64)') {
         await connection.query(
           `ALTER TABLE negotiation_history MODIFY COLUMN \`${col}\` VARCHAR(64) NOT NULL`
         );

@@ -93,6 +93,15 @@ async function assertEnumContains(
   }
 }
 
+async function assertNotEnum(tableName: string, columnName: string): Promise<void> {
+  const rawType = await getColumnType(tableName, columnName);
+  ensure(rawType, `Nao foi possivel ler o tipo da coluna: ${tableName}.${columnName}`);
+  ensure(
+    !rawType!.trim().toLowerCase().startsWith('enum('),
+    `Coluna de workflow ainda usa ENUM legado: ${tableName}.${columnName}`
+  );
+}
+
 export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSummary> {
   const requiredTables = [
     'schema_migrations',
@@ -230,10 +239,17 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'AUXILIARY_ADMINISTRATIVE',
   ]);
 
+  // Negotiation workflow values are extended over time. Keeping these columns
+  // as VARCHAR prevents TiDB/MySQL from returning "Data truncated" when a
+  // valid newer transition is written to a legacy ENUM column.
+  await assertNotEnum('negotiations', 'status');
+  await assertNotEnum('negotiation_history', 'from_status');
+  await assertNotEnum('negotiation_history', 'to_status');
+
   return {
     checkedTables: requiredTables.length,
     checkedColumns: requiredColumns.length,
-    checkedEnums: 7,
+    checkedEnums: 10,
   };
 }
 

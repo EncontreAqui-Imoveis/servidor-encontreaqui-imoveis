@@ -77,7 +77,10 @@ import {
   rejectPropertyEditRequest as rejectAdminPropertyEditRequest,
   reviewPropertyEditRequest as reviewAdminPropertyEditRequest,
 } from '../services/adminPropertyEditRequestService';
+import connection from '../database/connection';
+import type { RowDataPacket } from 'mysql2';
 import type AuthRequest from '../middlewares/auth';
+import { getAdminCapabilities, normalizeAdminPanelRole } from '../middlewares/adminCapabilities';
 import { login as adminLogin, logout as adminLogout, reauth as adminReauth } from '../services/adminAuthService';
 import {
   createBrokerAccountAdmin,
@@ -108,6 +111,34 @@ class AdminController {
       if (typeof value === 'function') {
         (this as any)[key] = value.bind(this);
       }
+    }
+  }
+
+  async getProfile(req: AuthRequest, res: Response) {
+    try {
+      const adminId = Number(req.userId);
+      if (!adminId) {
+        return res.status(401).json({ error: 'Administrador não autenticado.' });
+      }
+
+      const [rows] = await connection.query<RowDataPacket[]>(
+        'SELECT id, name, email, role FROM admins WHERE id = ? LIMIT 1',
+        [adminId]
+      );
+      const adminData = rows[0];
+      const role = normalizeAdminPanelRole(req.adminRole ?? adminData?.role);
+
+      return res.status(200).json({
+        admin: {
+          id: adminId,
+          name: String(adminData?.name ?? '').trim() || 'Administrador',
+          email: String(adminData?.email ?? '').trim(),
+          role,
+          capabilities: getAdminCapabilities(role),
+        },
+      });
+    } catch (error) {
+      return respondWithAppError(res, error);
     }
   }
 

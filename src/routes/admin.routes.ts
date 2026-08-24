@@ -39,6 +39,7 @@ const adminAuthLimiter = createAdminLoginLimiter();
 adminRoutes.post('/login', adminAuthLimiter, adminController.login);
 
 adminRoutes.use(authMiddlewareAdmin, isAdminAdmin);
+adminRoutes.get('/me', adminController.getProfile);
 adminRoutes.post('/logout', adminController.logout);
 adminRoutes.post('/reauth', adminController.reauth);
 adminRoutes.put('/me/password', adminController.changeOwnAdministrativePassword);

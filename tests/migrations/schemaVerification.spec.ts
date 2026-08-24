@@ -77,6 +77,13 @@ describe('verifyCriticalSchemaState', () => {
           }]];
         }
 
+        if (
+          (tableName === 'negotiations' && columnName === 'status') ||
+          (tableName === 'negotiation_history' && ['from_status', 'to_status'].includes(columnName))
+        ) {
+          return [[{ column_type: 'varchar(64)' }]];
+        }
+
         return [[{ column_type: 'varchar(255)' }]];
       }
 
@@ -89,7 +96,7 @@ describe('verifyCriticalSchemaState', () => {
     expect(result).toEqual({
       checkedTables: 13,
       checkedColumns: 71,
-      checkedEnums: 7,
+      checkedEnums: 10,
     });
   });
 

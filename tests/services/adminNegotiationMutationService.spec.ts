@@ -337,4 +337,50 @@ describe('adminNegotiationMutationService', () => {
 
     expect(getConnectionMock).not.toHaveBeenCalled();
   });
+
+  it('aprova negociação quando status no banco é null e aplica fallback PROPOSAL_SENT para o histórico', async () => {
+    txMock.query
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 'neg-null-status',
+            status: null,
+            property_id: 101,
+            property_broker_id: 30005,
+            capturing_broker_id: 30003,
+            proposer_id: 30004,
+            advertiser_id: 30003,
+            property_owner_id: 30003,
+            initiator_side: 'buyer',
+            responsible_broker_id: null,
+            property_title: 'Casa Teste',
+            property_code: 'RV-101',
+            property_address: 'Rua 1',
+            property_status: 'approved',
+            lifecycle_status: 'AVAILABLE',
+          },
+        ],
+      ])
+      .mockResolvedValueOnce([[{ id: 501 }]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const payload = await approveNegotiation({
+      negotiationId: 'neg-null-status',
+      actorId: 9,
+    });
+
+    expect(payload.status).toBe('APPROVED');
+    expect(
+      txMock.query.mock.calls.some(
+        ([sql, params]) =>
+          String(sql).includes('INSERT INTO negotiation_history') &&
+          Array.isArray(params) &&
+          params[1] === 'PROPOSAL_SENT'
+      )
+    ).toBe(true);
+  });
 });

@@ -208,14 +208,19 @@ export async function listMyContractsForUser(
       (
         n.advertiser_id = ?
         OR p.owner_id = ?
+        OR p.broker_id = ?
+        OR n.capturing_broker_id = ?
+        OR n.selling_broker_id = ?
+        OR c.selling_broker_id = ?
         OR n.proposer_id = ?
         OR n.legal_buyer_user_id = ?
         ${responsibleVisibilityClause}
       )
   `;
+  const baseVisibilityParams = [userId, userId, userId, userId, userId, userId, userId, userId];
   const visibilityParams = includeResponsibles
-    ? [userId, userId, userId, userId, userId]
-    : [userId, userId, userId, userId];
+    ? [...baseVisibilityParams, userId]
+    : baseVisibilityParams;
   const countRows = await queryContractRows<RowDataPacket>(
     `
       SELECT COUNT(*) AS total

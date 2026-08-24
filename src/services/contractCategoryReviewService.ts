@@ -602,8 +602,16 @@ export async function evaluateContractCategory(
         };
       }),
     });
+    const sellerReady =
+      effectiveStatuses.sellerStatus === 'APPROVED' ||
+      effectiveStatuses.sellerStatus === 'APPROVED_WITH_RES' ||
+      readiness.seller.complete;
+    const buyerReady =
+      effectiveStatuses.buyerStatus === 'APPROVED' ||
+      effectiveStatuses.buyerStatus === 'APPROVED_WITH_RES' ||
+      readiness.buyer.complete;
     const nextContractStatus: ContractStatus =
-      mustMoveBySide && mustMoveByCategories && readiness.eligibleForAdminApproval
+      mustMoveBySide && mustMoveByCategories && sellerReady && buyerReady
         ? 'IN_DRAFT'
         : 'AWAITING_DOCS';
 

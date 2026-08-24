@@ -729,9 +729,13 @@ export async function evaluateContractSide(
     // completude para o lado revisado. Pendências continuam registradas na
     // readiness, mas não podem impedir sozinhas o avanço daquele lado.
     const sellerReady =
-      effectiveStatuses.sellerStatus === 'APPROVED_WITH_RES' || readiness.seller.complete;
+      effectiveStatuses.sellerStatus === 'APPROVED' ||
+      effectiveStatuses.sellerStatus === 'APPROVED_WITH_RES' ||
+      readiness.seller.complete;
     const buyerReady =
-      effectiveStatuses.buyerStatus === 'APPROVED_WITH_RES' || readiness.buyer.complete;
+      effectiveStatuses.buyerStatus === 'APPROVED' ||
+      effectiveStatuses.buyerStatus === 'APPROVED_WITH_RES' ||
+      readiness.buyer.complete;
     const canMoveToDraft = mustMoveToDraft && sellerReady && buyerReady;
     const nextContractStatus: ContractStatus = canMoveToDraft
       ? 'IN_DRAFT'

@@ -375,11 +375,11 @@ export async function updateProperty(req: AuthRequest, res: Response) {
       const rawBrokerId = normalizedUpdateBody['broker_id'];
       const parsedBrokerId = rawBrokerId != null && rawBrokerId !== '' ? Number(rawBrokerId) : null;
       if (parsedBrokerId && Number.isFinite(parsedBrokerId) && parsedBrokerId > 0) {
-        const [brokerRows] = await runPropertyQuery<RowDataPacket[]>(
+        const brokerRows = await runPropertyQuery<RowDataPacket[]>(
           'SELECT id FROM brokers WHERE id = ? LIMIT 1',
           [parsedBrokerId]
         );
-        resolvedBrokerId = brokerRows.length > 0 ? parsedBrokerId : null;
+        resolvedBrokerId = Array.isArray(brokerRows) && brokerRows.length > 0 ? parsedBrokerId : null;
       }
     }
 

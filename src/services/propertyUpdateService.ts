@@ -1005,14 +1005,16 @@ export async function updateProperty(req: AuthRequest, res: Response) {
       nextStatus = null;
     }
 
-    if (nextStatus === 'approved') {
-      fields.push('visibility = ?', 'lifecycle_status = ?', 'sale_value = ?', 'commission_rate = ?', 'commission_value = ?');
-      values.push('PUBLIC', 'AVAILABLE', null, null, null);
-    }
+    const hasImageListUpdate = Array.isArray((body as { images?: unknown }).images);
 
     if (wasRejected && (fields.length > 0 || hasImageListUpdate)) {
       fields.push('status = ?', 'rejection_reason = ?', 'visibility = ?');
       values.push('pending_approval', null, 'HIDDEN');
+    }
+
+    if (nextStatus === 'approved') {
+      fields.push('visibility = ?', 'lifecycle_status = ?', 'sale_value = ?', 'commission_rate = ?', 'commission_value = ?');
+      values.push('PUBLIC', 'AVAILABLE', null, null, null);
     }
 
     if (fields.length === 0) {

@@ -25,7 +25,7 @@ const MAX_SIGNED_PROPOSAL_FILE_MB = parsePositiveEnvNumber(
 );
 const MAX_CONTRACT_DRAFT_FILE_MB = parsePositiveEnvNumber(
   'UPLOAD_MAX_CONTRACT_DRAFT_MB',
-  5
+  25
 );
 const MAX_CONTRACT_DOCUMENT_FILE_MB = parsePositiveEnvNumber(
   'UPLOAD_MAX_CONTRACT_DOCUMENT_MB',
@@ -218,12 +218,12 @@ export const contractDraftUpload = multer({
     const mime = (file.mimetype || '').toLowerCase();
     const name = file.originalname || '';
 
-    if (isAllowedPdf(mime, name)) {
+    if (isAllowedContractDocument(mime, name)) {
       cb(null, true);
       return;
     }
 
-    cb(new Error('Arquivo invalido. Envie apenas PDF da minuta.'));
+    cb(new Error('Arquivo invalido. Envie um PDF ou imagem (JPG, PNG, WEBP) da minuta.'));
   },
 });
 

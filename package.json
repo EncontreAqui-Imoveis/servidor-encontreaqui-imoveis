@@ -89,7 +89,7 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.23.1",
     "typescript": "^5.4.5",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "vitest-mock-extended": "^3.1.0"
   }
 }

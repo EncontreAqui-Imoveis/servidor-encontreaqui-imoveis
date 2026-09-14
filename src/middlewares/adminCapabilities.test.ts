@@ -28,10 +28,11 @@ function documentOperatorRequest(body: Record<string, unknown> = {}): AuthReques
 }
 
 describe('admin document operator capabilities', () => {
-  it('only exposes document review and replacement capabilities', () => {
+  it('allows the document operator to review proposals without granting workflow control', () => {
     expect(getAdminCapabilities('document_operator')).toEqual({
       canReviewDocuments: true,
       canReplaceDocuments: true,
+      canReviewProposals: true,
       canCreateDocuments: false,
       canManageContractWorkflow: false,
       canManageAdministration: false,
@@ -100,7 +101,7 @@ describe('admin document operator capabilities', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it.each(['review_documents', 'replace_documents'] as const)(
+  it.each(['review_documents', 'replace_documents', 'review_proposals'] as const)(
     'allows %s to the document operator',
     (capability) => {
       const response = responseStub();

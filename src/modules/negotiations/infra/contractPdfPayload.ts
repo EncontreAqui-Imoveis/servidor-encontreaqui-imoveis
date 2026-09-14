@@ -23,12 +23,8 @@ export type ContractDraftPdfInput = {
   rentalTerms: {
     monthlyRent: number;
     guaranteeType?: string | null;
-    guaranteeAmount?: number | null;
     leaseTermMonths?: number | null;
-    expectedStartDate?: string | null;
     monthlyDueDay?: number | null;
-    condominiumResponsibility?: string | null;
-    propertyTaxResponsibility?: string | null;
     observations?: string | null;
   };
 };
@@ -68,12 +64,8 @@ export function buildContractPdfPayload(data: ContractDraftPdfInput): Record<str
     rental_terms: {
       monthly_rent: nonNegative(data.rentalTerms.monthlyRent),
       guarantee_type: text(data.rentalTerms.guaranteeType),
-      guarantee_amount: nonNegative(data.rentalTerms.guaranteeAmount),
       lease_term_months: Math.trunc(nonNegative(data.rentalTerms.leaseTermMonths)),
-      expected_start_date: text(data.rentalTerms.expectedStartDate),
       monthly_due_day: Math.trunc(nonNegative(data.rentalTerms.monthlyDueDay)),
-      condominium_responsibility: text(data.rentalTerms.condominiumResponsibility),
-      property_tax_responsibility: text(data.rentalTerms.propertyTaxResponsibility),
       observations: text(data.rentalTerms.observations),
     },
   };

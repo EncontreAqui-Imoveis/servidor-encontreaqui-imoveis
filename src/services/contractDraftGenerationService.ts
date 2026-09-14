@@ -137,14 +137,8 @@ function resolvePaymentInput(row: ContractDraftRow, dealType: ContractDealType):
         rental.monthlyRent ?? rental.monthly_rent ?? paymentDetails.amount ?? details.amount
       ),
       guaranteeType: text(rental.guaranteeType ?? rental.guarantee_type) || null,
-      guaranteeAmount: number(rental.guaranteeAmount ?? rental.guarantee_amount),
       leaseTermMonths: number(rental.leaseTermMonths ?? rental.lease_term_months),
-      expectedStartDate: text(rental.expectedStartDate ?? rental.expected_start_date) || null,
       monthlyDueDay: number(rental.monthlyDueDay ?? rental.monthly_due_day),
-      condominiumResponsibility:
-        text(rental.condominiumResponsibility ?? rental.condominium_responsibility) || null,
-      propertyTaxResponsibility:
-        text(rental.propertyTaxResponsibility ?? rental.property_tax_responsibility) || null,
       observations: text(rental.observations) || null,
     },
   };

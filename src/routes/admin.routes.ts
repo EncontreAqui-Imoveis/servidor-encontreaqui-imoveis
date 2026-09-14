@@ -66,8 +66,8 @@ adminRoutes.post('/uploads/sign', requireAdminCapability('manage_administration'
 adminRoutes.get('/negotiations', adminController.listNegotiations);
 adminRoutes.get('/negotiations/requests/summary', adminController.listNegotiationRequestSummary);
 adminRoutes.get('/negotiations/requests/property/:propertyId', adminController.listNegotiationRequestsByProperty);
-adminRoutes.put('/negotiations/:id/approve', requireAdminCapability('manage_contract_workflow'), adminController.approveNegotiation);
-adminRoutes.put('/negotiations/:id/reject', requireAdminCapability('manage_contract_workflow'), adminController.rejectNegotiation);
+adminRoutes.put('/negotiations/:id/approve', requireAdminCapability('review_proposals'), adminController.approveNegotiation);
+adminRoutes.put('/negotiations/:id/reject', requireAdminCapability('review_proposals'), adminController.rejectNegotiation);
 adminRoutes.put('/negotiations/:id/cancel', requireAdminCapability('manage_contract_workflow'), adminController.cancelNegotiation);
 adminRoutes.put('/negotiations/:id/selling-broker', requireAdminCapability('manage_contract_workflow'), (req, res) =>
   (adminController as any).updateNegotiationSellingBroker(req, res)

@@ -70,18 +70,10 @@ interface RentalTermsBody {
   monthly_rent?: unknown;
   guaranteeType?: unknown;
   guarantee_type?: unknown;
-  guaranteeAmount?: unknown;
-  guarantee_amount?: unknown;
   leaseTermMonths?: unknown;
   lease_term_months?: unknown;
-  expectedStartDate?: unknown;
-  expected_start_date?: unknown;
   monthlyDueDay?: unknown;
   monthly_due_day?: unknown;
-  condominiumResponsibility?: unknown;
-  condominium_responsibility?: unknown;
-  propertyTaxResponsibility?: unknown;
-  property_tax_responsibility?: unknown;
   observations?: unknown;
 }
 
@@ -217,27 +209,6 @@ function parseOptionalDueDay(input: unknown): number | null {
   return value;
 }
 
-function parseOptionalIsoDate(input: unknown): string | null {
-  const value = parseOptionalText(input, 'rentalTerms.expectedStartDate', 10);
-  if (value === null) {
-    return null;
-  }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new Error('rentalTerms.expectedStartDate deve usar o formato YYYY-MM-DD.');
-  }
-  const [year, month, day] = value.split('-').map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    Number.isNaN(parsed.getTime()) ||
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    throw new Error('rentalTerms.expectedStartDate deve ser uma data válida.');
-  }
-  return value;
-}
-
 function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalProposalTerms | null {
   if (dealType !== 'rent') {
     return null;
@@ -247,26 +218,11 @@ function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalP
   return {
     monthlyRent: parseOptionalNonNegativeNumber(raw.monthlyRent ?? raw.monthly_rent, 'rentalTerms.monthlyRent'),
     guaranteeType: parseOptionalText(raw.guaranteeType ?? raw.guarantee_type, 'rentalTerms.guaranteeType', 80),
-    guaranteeAmount: parseOptionalNonNegativeNumber(
-      raw.guaranteeAmount ?? raw.guarantee_amount,
-      'rentalTerms.guaranteeAmount'
-    ),
     leaseTermMonths: parseOptionalPositiveInteger(
       raw.leaseTermMonths ?? raw.lease_term_months,
       'rentalTerms.leaseTermMonths'
     ),
-    expectedStartDate: parseOptionalIsoDate(raw.expectedStartDate ?? raw.expected_start_date),
     monthlyDueDay: parseOptionalDueDay(raw.monthlyDueDay ?? raw.monthly_due_day),
-    condominiumResponsibility: parseOptionalText(
-      raw.condominiumResponsibility ?? raw.condominium_responsibility,
-      'rentalTerms.condominiumResponsibility',
-      80
-    ),
-    propertyTaxResponsibility: parseOptionalText(
-      raw.propertyTaxResponsibility ?? raw.property_tax_responsibility,
-      'rentalTerms.propertyTaxResponsibility',
-      80
-    ),
     observations: parseOptionalText(raw.observations, 'rentalTerms.observations', 1000),
   };
 }

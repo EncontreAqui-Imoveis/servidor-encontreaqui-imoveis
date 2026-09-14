@@ -193,20 +193,10 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
         monthlyRent:
           readOptionalNumber(rentalDetails.monthlyRent ?? rentalDetails.monthly_rent) ?? normalizedFinalValue,
         guaranteeType: readOptionalText(rentalDetails.guaranteeType ?? rentalDetails.guarantee_type),
-        guaranteeAmount: readOptionalNumber(rentalDetails.guaranteeAmount ?? rentalDetails.guarantee_amount),
         leaseTermMonths: readOptionalNumber(
           rentalDetails.leaseTermMonths ?? rentalDetails.lease_term_months
         ),
-        expectedStartDate: readOptionalText(
-          rentalDetails.expectedStartDate ?? rentalDetails.expected_start_date
-        ),
         monthlyDueDay: readOptionalNumber(rentalDetails.monthlyDueDay ?? rentalDetails.monthly_due_day),
-        condominiumResponsibility: readOptionalText(
-          rentalDetails.condominiumResponsibility ?? rentalDetails.condominium_responsibility
-        ),
-        propertyTaxResponsibility: readOptionalText(
-          rentalDetails.propertyTaxResponsibility ?? rentalDetails.property_tax_responsibility
-        ),
         observations: readOptionalText(rentalDetails.observations),
       }
     : null;

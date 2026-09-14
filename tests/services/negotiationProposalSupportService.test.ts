@@ -32,7 +32,7 @@ describe('negotiationProposalSupportService', () => {
     expect(parsed.pagamento.dinheiro).toBe(1000.5);
   });
 
-  it('accepts rental-only terms without requiring a sale payment allocation', () => {
+  it('accepts rental-only terms without requiring a sale payment allocation and ignores deprecated inputs', () => {
     const parsed = parseProposalWizardBody({
       propertyId: 12,
       clientName: 'Pedro Matheus',
@@ -49,6 +49,8 @@ describe('negotiationProposalSupportService', () => {
       rentalTerms: {
         monthlyRent: 'R$ 2.500,00',
         guaranteeType: 'Caução',
+        // These keys are tolerated for an old client, but no longer enter the
+        // canonical proposal or PDF payload.
         guaranteeAmount: '2500',
         leaseTermMonths: 30,
         expectedStartDate: '2026-08-01',
@@ -62,12 +64,8 @@ describe('negotiationProposalSupportService', () => {
     expect(parsed.rentalTerms).toEqual({
       monthlyRent: 2500,
       guaranteeType: 'Caução',
-      guaranteeAmount: 2500,
       leaseTermMonths: 30,
-      expectedStartDate: '2026-08-01',
       monthlyDueDay: 10,
-      condominiumResponsibility: 'Locatário',
-      propertyTaxResponsibility: 'Locador',
       observations: 'Sem animais.',
     });
   });

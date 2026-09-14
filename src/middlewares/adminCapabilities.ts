@@ -6,6 +6,7 @@ export type AdminPanelRole = 'admin' | 'document_operator' | 'operational_assist
 export type AdminCapability =
   | 'review_documents'
   | 'replace_documents'
+  | 'review_proposals'
   | 'manage_contract_workflow'
   | 'manage_administration'
   | 'delete';
@@ -14,18 +15,20 @@ const ROLE_CAPABILITIES: Record<AdminPanelRole, ReadonlySet<AdminCapability>> = 
   admin: new Set([
     'review_documents',
     'replace_documents',
+    'review_proposals',
     'manage_contract_workflow',
     'manage_administration',
     'delete',
   ]),
   // Operador documental pode revisar e substituir; exclusoes manuais continuam
   // reservadas ao administrador titular.
-  document_operator: new Set(['review_documents', 'replace_documents']),
+  document_operator: new Set(['review_documents', 'replace_documents', 'review_proposals']),
   // Auxiliar operacional pode gerenciar o fluxo de contratos e revisar/substituir
   // documentos, mas nao tem acesso a operacoes administrativas nem a exclusao de dados.
   operational_assistant: new Set([
     'review_documents',
     'replace_documents',
+    'review_proposals',
     'manage_contract_workflow',
   ]),
 };
@@ -48,6 +51,7 @@ export function getAdminCapabilities(role: AdminPanelRole | undefined) {
   return {
     canReviewDocuments: hasAdminCapability(role, 'review_documents'),
     canReplaceDocuments: hasAdminCapability(role, 'replace_documents'),
+    canReviewProposals: hasAdminCapability(role, 'review_proposals'),
     canCreateDocuments: hasAdminCapability(role, 'manage_contract_workflow'),
     canManageContractWorkflow: hasAdminCapability(role, 'manage_contract_workflow'),
     canManageAdministration: hasAdminCapability(role, 'manage_administration'),
@@ -69,6 +73,8 @@ export function requireAdminCapability(capability: AdminCapability) {
           ? 'Sua conta administrativa não possui permissão para excluir dados.'
           : capability === 'manage_contract_workflow'
             ? 'Sua conta administrativa não possui permissão para alterar o fluxo do contrato.'
+            : capability === 'review_proposals'
+              ? 'Sua conta administrativa não possui permissão para analisar propostas.'
             : capability === 'manage_administration'
               ? 'Sua conta administrativa não possui permissão para esta operação administrativa.'
             : 'Sua conta administrativa não possui permissão para esta ação documental.',

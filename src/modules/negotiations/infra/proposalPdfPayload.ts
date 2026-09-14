@@ -53,12 +53,8 @@ export function buildProposalPdfPayload(data: ProposalData): {
   rental_terms?: {
     monthly_rent: number;
     guarantee_type: string | null;
-    guarantee_amount: number | null;
     lease_term_months: number | null;
-    expected_start_date: string | null;
     monthly_due_day: number | null;
-    condominium_responsibility: string | null;
-    property_tax_responsibility: string | null;
     observations: string | null;
   };
 } {
@@ -89,15 +85,11 @@ export function buildProposalPdfPayload(data: ProposalData): {
             monthly_rent: toOptionalNumber(rentalTerms?.monthlyRent, 'rentalTerms.monthlyRent') ??
               toRequiredNumber(data.value, 'value'),
             guarantee_type: toOptionalText(rentalTerms?.guaranteeType),
-            guarantee_amount: toOptionalNumber(rentalTerms?.guaranteeAmount, 'rentalTerms.guaranteeAmount'),
             lease_term_months: toOptionalNumber(
               rentalTerms?.leaseTermMonths,
               'rentalTerms.leaseTermMonths'
             ),
-            expected_start_date: toOptionalText(rentalTerms?.expectedStartDate),
             monthly_due_day: toOptionalNumber(rentalTerms?.monthlyDueDay, 'rentalTerms.monthlyDueDay'),
-            condominium_responsibility: toOptionalText(rentalTerms?.condominiumResponsibility),
-            property_tax_responsibility: toOptionalText(rentalTerms?.propertyTaxResponsibility),
             observations: toOptionalText(rentalTerms?.observations),
           },
         }

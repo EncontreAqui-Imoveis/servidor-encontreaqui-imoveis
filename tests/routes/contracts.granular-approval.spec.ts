@@ -61,6 +61,7 @@ vi.mock('../../src/services/contractDraftGenerationService', () => ({
 }));
 
 import { contractController } from '../../src/controllers/ContractController';
+import { ensureContractDraftGenerated } from '../../src/services/contractDraftGenerationService';
 import { contractDocumentUpload } from '../../src/middlewares/uploadMiddleware';
 
 type MutableContractState = {
@@ -148,6 +149,14 @@ describe('Contract granular approval and signed docs endpoints', () => {
     txMock.release.mockResolvedValue(undefined);
     createUserNotificationMock.mockResolvedValue(undefined);
     storeNegotiationDocumentToR2Mock.mockResolvedValue(90001);
+    vi.mocked(ensureContractDraftGenerated).mockResolvedValue({
+      contractId: 'contract-1',
+      documentId: 90002,
+      generated: true,
+      dealType: 'sale',
+      templateKey: 'sale',
+      templateVersion: 'test',
+    });
 
     txMock.query.mockImplementation(
       async (sql: string, params: unknown[] = []) => {
@@ -222,7 +231,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.body.movedToDraft).toBe(false);
   });
 
-  it('keeps AWAITING_DOCS when approvals are complete but readiness is incomplete', async () => {
+  it('moves to IN_DRAFT when approvals are complete despite documentary pending items', async () => {
     const firstResponse = await request(app)
       .put('/admin/contracts/contract-1/evaluate-side')
       .send({
@@ -242,8 +251,8 @@ describe('Contract granular approval and signed docs endpoints', () => {
       });
 
     expect(secondResponse.status).toBe(200);
-    expect(secondResponse.body.movedToDraft).toBe(false);
-    expect(secondResponse.body.contract.status).toBe('AWAITING_DOCS');
+    expect(secondResponse.body.movedToDraft).toBe(true);
+    expect(secondResponse.body.contract.status).toBe('IN_DRAFT');
     expect(secondResponse.body.contract.sellerApprovalStatus).toBe('APPROVED');
     expect(secondResponse.body.contract.buyerApprovalStatus).toBe(
       'APPROVED_WITH_RES'
@@ -251,7 +260,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(secondResponse.body.contract.approvalProgress).toMatchObject({
       status: 'APPROVED_WITH_RES',
       label: 'Aprovado com ressalvas',
-      nextStep: 'Aguardando liberação para minuta',
+      nextStep: 'Minuta liberada',
     });
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -291,6 +300,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(buyerResponse.body.contract.status).toBe('IN_DRAFT');
     expect(buyerResponse.body.contract.sellerApprovalStatus).toBe('APPROVED_WITH_RES');
     expect(buyerResponse.body.contract.buyerApprovalStatus).toBe('APPROVED_WITH_RES');
+    expect(ensureContractDraftGenerated).toHaveBeenCalledWith('contract-1');
+    expect(buyerResponse.body.draftGeneration).toMatchObject({
+      generated: true,
+      templateKey: 'sale',
+    });
   });
 
   it('persiste APPROVED_WITH_RES nos documentos quando a avaliação do lado tem ressalvas', async () => {

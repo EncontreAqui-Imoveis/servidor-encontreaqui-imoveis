@@ -1,6 +1,5 @@
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
-const path = require('node:path');
 
 dotenv.config({ path: '.env.local', override: true });
 
@@ -105,15 +104,15 @@ async function main() {
         applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    const migrationDirectory = path.resolve(__dirname, '..', 'migrations');
-    const migrationNames = require('node:fs')
-      .readdirSync(migrationDirectory)
-      .filter((fileName) => fileName.endsWith('.sql'))
-      .sort();
-    for (const migrationName of migrationNames) {
+    const sourceMigrationNames = await tableExists(source, 'schema_migrations')
+      ? (await source.query('SELECT name FROM schema_migrations ORDER BY name'))[0]
+          .map((row) => String(row.name || '').trim())
+          .filter(Boolean)
+      : [];
+    for (const migrationName of sourceMigrationNames) {
       await target.query('INSERT IGNORE INTO schema_migrations (name) VALUES (?)', [migrationName]);
     }
-    console.log(`Migrations históricas marcadas como aplicadas: ${migrationNames.length}`);
+    console.log(`Migrations da origem marcadas como aplicadas: ${sourceMigrationNames.length}`);
   } finally {
     await source.end();
     await target.end();

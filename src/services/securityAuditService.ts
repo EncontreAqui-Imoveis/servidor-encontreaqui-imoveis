@@ -26,7 +26,7 @@ let writeFailureReported = false;
 function normalizeRole(value: unknown): string {
   const role = String(value ?? '').trim().toLowerCase();
   if (!role) return 'anonymous';
-  if (role === 'admin' || role === 'document_operator') return role;
+  if (role === 'admin' || role === 'document_operator' || role === 'operational_assistant') return role;
   if (role === 'broker' || role === 'client' || role === 'user') return role;
   return 'authenticated';
 }

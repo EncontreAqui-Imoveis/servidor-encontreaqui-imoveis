@@ -1331,8 +1331,38 @@ async function ensureAdminPanelRoles(): Promise<void> {
   }
 
   await connection.query(
-    "UPDATE admins SET role = 'admin' WHERE role IS NULL OR LOWER(TRIM(role)) NOT IN ('admin', 'document_operator')"
+    "UPDATE admins SET role = 'admin' WHERE role IS NULL OR LOWER(TRIM(role)) NOT IN ('admin', 'document_operator', 'operational_assistant')"
   );
+}
+
+async function ensureAdminAssistantManagementColumns(): Promise<void> {
+  if (!(await tableExists('admins'))) {
+    return;
+  }
+
+  if (!(await columnExists('admins', 'is_active'))) {
+    await connection.query(
+      'ALTER TABLE admins ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1'
+    );
+  }
+
+  if (!(await columnExists('admins', 'updated_at'))) {
+    await connection.query(
+      'ALTER TABLE admins ADD COLUMN updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    );
+  }
+
+  if (!(await columnExists('admins', 'created_by_admin_id'))) {
+    await connection.query(
+      'ALTER TABLE admins ADD COLUMN created_by_admin_id INT NULL'
+    );
+  }
+
+  if (!(await columnExists('admins', 'last_login_at'))) {
+    await connection.query(
+      'ALTER TABLE admins ADD COLUMN last_login_at DATETIME NULL'
+    );
+  }
 }
 
 async function ensureUsersTokenVersionColumn(): Promise<void> {
@@ -1703,6 +1733,7 @@ export async function applyMigrations(): Promise<void> {
     await ensureNegotiationDocumentDeletionJobsTable();
     await ensureAdminsTokenVersionColumn();
     await ensureAdminPanelRoles();
+    await ensureAdminAssistantManagementColumns();
     await ensureUsersTokenVersionColumn();
     await ensureNegotiationResponsiblesAndBrokerProfileType();
     await ensureNegotiationStatusHistoryColumnsFreetext();

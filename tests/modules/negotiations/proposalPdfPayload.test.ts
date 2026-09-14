@@ -97,12 +97,8 @@ describe('proposalPdfPayload', () => {
         rentalTerms: {
           monthlyRent: 2500,
           guaranteeType: 'Seguro-fiança',
-          guaranteeAmount: 2500,
           leaseTermMonths: 30,
-          expectedStartDate: '2026-08-01',
           monthlyDueDay: 10,
-          condominiumResponsibility: 'Locatário',
-          propertyTaxResponsibility: 'Locador',
           observations: 'Primeiro aluguel proporcional.',
         },
       })
@@ -111,12 +107,8 @@ describe('proposalPdfPayload', () => {
       rental_terms: {
         monthly_rent: 2500,
         guarantee_type: 'Seguro-fiança',
-        guarantee_amount: 2500,
         lease_term_months: 30,
-        expected_start_date: '2026-08-01',
         monthly_due_day: 10,
-        condominium_responsibility: 'Locatário',
-        property_tax_responsibility: 'Locador',
         observations: 'Primeiro aluguel proporcional.',
       },
     });

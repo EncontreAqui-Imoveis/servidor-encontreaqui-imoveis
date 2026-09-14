@@ -107,16 +107,8 @@ function parseRentalTerms(value: unknown) {
     return {
       monthlyRent: toFiniteNumber(terms.monthlyRent ?? terms.monthly_rent),
       guaranteeType: toTextOrNull(terms.guaranteeType ?? terms.guarantee_type),
-      guaranteeAmount: toFiniteNumber(terms.guaranteeAmount ?? terms.guarantee_amount),
       leaseTermMonths: toFiniteNumber(terms.leaseTermMonths ?? terms.lease_term_months),
-      expectedStartDate: toTextOrNull(terms.expectedStartDate ?? terms.expected_start_date),
       monthlyDueDay: toFiniteNumber(terms.monthlyDueDay ?? terms.monthly_due_day),
-      condominiumResponsibility: toTextOrNull(
-        terms.condominiumResponsibility ?? terms.condominium_responsibility
-      ),
-      propertyTaxResponsibility: toTextOrNull(
-        terms.propertyTaxResponsibility ?? terms.property_tax_responsibility
-      ),
       observations: toTextOrNull(terms.observations),
     };
   } catch {

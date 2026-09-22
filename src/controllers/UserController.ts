@@ -29,6 +29,8 @@ import {
 import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 import { buildPropertyOwnerListingFilters } from '../services/propertyOwnerListingFilterService';
 import { protectCpf, resolveStoredCpf } from '../security/personalDataProtection';
+import { isApplicationError, applicationErrorToHttpStatus } from '../errors/ApplicationError';
+import { resolveSocialIdentity } from '../services/socialIdentityResolutionService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -96,6 +98,26 @@ interface FavoriteRow extends RowDataPacket {
   broker_name?: string | null;
   broker_phone?: string | null;
   broker_email?: string | null;
+}
+
+interface FirebaseLoginUserRow extends RowDataPacket {
+  id: number;
+  firebase_uid?: string | null;
+  name?: string | null;
+  email?: string | null;
+  cpf?: string | null;
+  cpf_ciphertext?: string | null;
+  phone?: string | null;
+  street?: string | null;
+  number?: string | null;
+  complement?: string | null;
+  bairro?: string | null;
+  city?: string | null;
+  state?: string | null;
+  cep?: string | null;
+  token_version?: number | null;
+  role?: string | null;
+  broker_status?: string | null;
 }
 
 function toBoolean(value: unknown): boolean {
@@ -1038,17 +1060,18 @@ class UserController {
     }
 
     try {
-      const decodedToken = await admin.auth().verifyIdToken(idToken);
-      const { uid, email, name, phone_number: phone } = decodedToken as any;
       if (isDraftContext && isDraftRegistrationEnabled()) {
         if (!draftId || !draftToken) {
           return res.status(400).json({ error: 'Draft context incompleto.' });
         }
         const draftResult = await upsertFirebaseContextToDraft(draftId, draftToken, {
-          firebaseUid: uid,
-          email,
-          name: nameOverride ?? name,
-          phone: phoneOverride ?? phone,
+          idToken,
+          firebaseUid: req.body.firebaseUid,
+          googleUid: req.body.googleUid,
+          email: req.body.email,
+          authProvider: req.body.authProvider,
+          name: nameOverride,
+          phone: phoneOverride,
           street: street,
           number: number,
           complement: complement,
@@ -1064,27 +1087,50 @@ class UserController {
         });
       }
 
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const { uid, email, name, phone_number: phone } = decodedToken as any;
       const fallbackEmail = email ?? `${uid}@noemail.firebase`;
       const displayName = name || `User-${uid.substring(0, 8)}`;
 
-      const userRows = await runUserQuery<RowDataPacket[]>(
-        `
-          SELECT u.id, u.name, u.email, u.cpf, u.cpf_ciphertext, u.firebase_uid,
-                 u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
-                 CASE
-                   WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
-                   WHEN b.id IS NOT NULL THEN 'broker'
-                   ELSE 'client'
-                 END AS role,
-                 b.status AS broker_status
-          FROM users u
-          LEFT JOIN brokers b ON u.id = b.id
-          WHERE u.firebase_uid = ? OR u.email = ?
-        `,
-        [uid, fallbackEmail]
-      );
+      const selectUser = async (whereClause: string, params: unknown[]) => {
+        const rows = await runUserQuery<FirebaseLoginUserRow[]>(
+          `
+            SELECT u.id, u.name, u.email, u.cpf, u.cpf_ciphertext, u.firebase_uid,
+                   u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
+                   CASE
+                     WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
+                     WHEN b.id IS NOT NULL THEN 'broker'
+                     ELSE 'client'
+                   END AS role,
+                   b.status AS broker_status
+            FROM users u
+            LEFT JOIN brokers b ON u.id = b.id
+            ${whereClause}
+            LIMIT 1
+          `,
+          params,
+        );
+        return rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+      };
 
-      let user: any;
+      let user: any = await resolveSocialIdentity(
+        { firebaseUid: uid, email: fallbackEmail },
+        {
+          findByFirebaseUid: (firebaseUid) =>
+            selectUser('WHERE u.firebase_uid = ?', [firebaseUid]),
+          findByEmail: (userEmail) => selectUser('WHERE u.email = ?', [userEmail]),
+          linkFirebaseUidIfEmpty: async (userId, firebaseUid) => {
+            const result = await runUserQuery<ResultSetHeader>(
+              `UPDATE users
+                  SET firebase_uid = ?
+                WHERE id = ?
+                  AND (firebase_uid IS NULL OR firebase_uid = '')`,
+              [firebaseUid, userId],
+            );
+            return result.affectedRows === 1;
+          },
+        },
+      );
 
       const hasAddressInput =
         street !== undefined ||
@@ -1095,10 +1141,8 @@ class UserController {
         state !== undefined ||
         cep !== undefined;
 
-      if (userRows.length > 0) {
-        user = hydrateProtectedCpf(userRows[0]);
+      if (user) {
         const updates: Array<[string, any]> = [];
-        if (!user.firebase_uid) updates.push(['firebase_uid', uid]);
         if ((phone || phoneOverride) && user.phone !== (phoneOverride ?? phone)) {
           updates.push(['phone', phoneOverride ?? phone]);
         }
@@ -1232,6 +1276,12 @@ class UserController {
         token,
       });
     } catch (error) {
+      if (isApplicationError(error)) {
+        return res.status(applicationErrorToHttpStatus(error)).json({
+          code: String(error.details?.code ?? error.code),
+          error: error.message,
+        });
+      }
       if (isDuplicateAccountNameError(error)) {
         return res.status(400).json({ code: error.code, error: error.message });
       }
@@ -1775,4 +1825,3 @@ class UserController {
 }
 
 export const userController = new UserController();
-

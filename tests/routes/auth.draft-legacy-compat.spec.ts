@@ -28,6 +28,30 @@ vi.mock('../../src/services/registrationDraftService', () => ({
   upsertFirebaseContextToDraft: upsertFirebaseContextToDraftMock,
 }));
 
+function firebaseUser(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 111,
+    name: 'Legacy Usuário',
+    email: 'legacy-user@dominio.com',
+    firebase_uid: 'legacy-uid-firebase',
+    token_version: 7,
+    role: 'client',
+    broker_status: null,
+    ...overrides,
+  };
+}
+
+function mockFirebaseIdentityResolution({
+  userByUid = null,
+  userByEmail = null,
+}: {
+  userByUid?: Record<string, unknown> | null;
+  userByEmail?: Record<string, unknown> | null;
+} = {}) {
+  queryMock.mockResolvedValueOnce([userByUid ? [userByUid] : []]);
+  queryMock.mockResolvedValueOnce([userByEmail ? [userByEmail] : []]);
+}
+
 describe('Compatibilidade legado de auth/users durante mudança de draft', () => {
   let app: express.Express;
 
@@ -73,17 +97,8 @@ describe('Compatibilidade legado de auth/users durante mudança de draft', () =>
       name: 'Legacy Usuário',
       phone_number: '+5511999990000',
     });
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 111,
-          name: 'Legacy Usuário',
-          email: 'legacy-user@dominio.com',
-          firebase_uid: 'legacy-uid-firebase',
-          token_version: 7,
-        },
-      ],
-    ]);
+    const user = firebaseUser();
+    mockFirebaseIdentityResolution({ userByUid: user, userByEmail: user });
 
     const response = await request(app).post('/users/auth/firebase').send({
       idToken: 'idTokenLegacyFirebase',
@@ -98,6 +113,92 @@ describe('Compatibilidade legado de auth/users durante mudança de draft', () =>
     });
     expect(response.body.token).toBeTruthy();
     expect(upsertFirebaseContextToDraftMock).not.toHaveBeenCalled();
+    expect(queryMock.mock.calls[0]?.[0]).toContain('WHERE u.firebase_uid = ?');
+    expect(queryMock.mock.calls[1]?.[0]).toContain('WHERE u.email = ?');
+  });
+
+  it('vincula uma conta existente por e-mail que ainda não possui Firebase UID', async () => {
+    verifyIdTokenMock.mockResolvedValue({
+      uid: 'legacy-uid-firebase',
+      email: 'legacy-user@dominio.com',
+      name: 'Legacy Usuário',
+    });
+    mockFirebaseIdentityResolution({
+      userByEmail: firebaseUser({ id: 112, firebase_uid: null }),
+    });
+    queryMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const response = await request(app).post('/users/auth/firebase').send({
+      idToken: 'idTokenLegacyFirebase',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.user.id).toBe(112);
+    expect(queryMock.mock.calls[2]?.[0]).toContain(
+      'AND (firebase_uid IS NULL OR firebase_uid = \'\')',
+    );
+  });
+
+  it('retorna conflito quando UID e e-mail resolvem usuários diferentes', async () => {
+    verifyIdTokenMock.mockResolvedValue({
+      uid: 'legacy-uid-firebase',
+      email: 'legacy-user@dominio.com',
+    });
+    mockFirebaseIdentityResolution({
+      userByUid: firebaseUser({ id: 111 }),
+      userByEmail: firebaseUser({ id: 222, firebase_uid: 'other-uid' }),
+    });
+
+    const response = await request(app).post('/users/auth/firebase').send({
+      idToken: 'idTokenLegacyFirebase',
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'SOCIAL_IDENTITY_CONFLICT',
+    });
+  });
+
+  it('retorna conflito quando o e-mail está vinculado a outro Firebase UID', async () => {
+    verifyIdTokenMock.mockResolvedValue({
+      uid: 'legacy-uid-firebase',
+      email: 'legacy-user@dominio.com',
+    });
+    mockFirebaseIdentityResolution({
+      userByEmail: firebaseUser({ firebase_uid: 'other-uid' }),
+    });
+
+    const response = await request(app).post('/users/auth/firebase').send({
+      idToken: 'idTokenLegacyFirebase',
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'SOCIAL_IDENTITY_CONFLICT',
+    });
+  });
+
+  it('mantém a criação de usuário social novo quando UID e e-mail não existem', async () => {
+    verifyIdTokenMock.mockResolvedValue({
+      uid: 'new-firebase-uid',
+      email: 'new-user@dominio.com',
+      name: 'Novo Usuário',
+    });
+    mockFirebaseIdentityResolution();
+    queryMock.mockResolvedValueOnce([[]]);
+    queryMock.mockResolvedValueOnce([{ insertId: 333 }]);
+
+    const response = await request(app).post('/users/auth/firebase').send({
+      idToken: 'newFirebaseToken',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.user).toMatchObject({
+      id: 333,
+      email: 'new-user@dominio.com',
+      role: 'client',
+    });
+    expect(queryMock.mock.calls[3]?.[0]).toContain('INSERT INTO users');
   });
 
   it('mantem /users/auth/firebase em modo draft sem criar usuário final ainda', async () => {
@@ -129,8 +230,7 @@ describe('Compatibilidade legado de auth/users durante mudança de draft', () =>
       'draft-xyz',
       'tok-xyz',
       expect.objectContaining({
-        firebaseUid: 'uid-firebase',
-        email: 'draft@dominio.com',
+        idToken: 'idTokenFirebase',
       }),
     );
   });

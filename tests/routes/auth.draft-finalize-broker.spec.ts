@@ -159,6 +159,7 @@ describe('Finalização de rascunho para corretor', () => {
         acceptedBrokerAgreement: true,
       }),
       expect.any(Object),
+      expect.any(Object),
     );
   });
 
@@ -250,6 +251,7 @@ describe('Finalização de rascunho para corretor', () => {
         acceptedPrivacyPolicy: true,
         acceptedBrokerAgreement: true,
       }),
+      expect.any(Object),
       expect.any(Object),
     );
   });

@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConflictError } from '../../src/errors/ApplicationError';
 
 const serviceMocks = vi.hoisted(() => ({
   createRegistrationDraftMock: vi.fn(),
@@ -56,6 +57,22 @@ describe('Finalização de rascunho para cliente', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('encaminha token na finalização de rascunho antigo e retorna conflito sem sessão', async () => {
+    serviceMocks.finalizeRegistrationDraftMock.mockRejectedValue(
+      new ConflictError('Identidade já associada', { code: 'SOCIAL_IDENTITY_CONFLICT' }),
+    );
+    const response = await request(app)
+      .post('/auth/register/draft/draft-client/finalize')
+      .set('x-draft-token', 'tok')
+      .send({ firebaseIdToken: 'firebase-token', email: 'google@example.com' });
+    expect(serviceMocks.finalizeRegistrationDraftMock.mock.calls[0][5]).toMatchObject({
+      idToken: 'firebase-token', email: 'google@example.com',
+    });
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe('SOCIAL_IDENTITY_CONFLICT');
+    expect(response.body.token).toBeUndefined();
   });
 
   it('finaliza cliente com sucesso e retorna token', async () => {
@@ -136,6 +153,7 @@ describe('Finalização de rascunho para cliente', () => {
         acceptedTerms: true,
         acceptedPrivacyPolicy: true,
       }),
+      expect.any(Object),
       expect.any(Object),
     );
   });

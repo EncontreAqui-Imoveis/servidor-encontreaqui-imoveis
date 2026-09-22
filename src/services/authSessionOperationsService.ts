@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import admin from '../config/firebaseAdmin';
 import {
   GatewayTimeoutError,
@@ -20,6 +20,7 @@ import {
   withTimeout,
 } from './authSessionService';
 import { resolveStoredCpf } from '../security/personalDataProtection';
+import { resolveSocialIdentity } from './socialIdentityResolutionService';
 
 type AuthUserRow = RowDataPacket & {
   id: number;
@@ -355,22 +356,48 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
     stage = 'schema_probe';
     const userSelectQuery = await buildUserSelectQuery();
     const hasFirebaseUidColumn = await hasColumn('users', 'firebase_uid');
-    const lookupWhere = hasFirebaseUidColumn
-      ? 'WHERE u.firebase_uid = ? OR u.email = ?'
-      : 'WHERE u.email = ?';
-    const lookupParams = hasFirebaseUidColumn ? [uid, email] : [email];
-    stage = 'user_lookup';
-    const [existingRows] = await authDb.query<AuthUserRow[]>(
-      `SELECT ${userSelectQuery.selectClause}
-         FROM users u
-         LEFT JOIN brokers b ON u.id = b.id
-         ${userSelectQuery.brokerDocumentsJoin}
-        ${lookupWhere}
-        LIMIT 1`,
-      lookupParams,
+    const selectUser = async (whereClause: string, params: unknown[]) => {
+      const [rows] = await authDb.query<AuthUserRow[]>(
+        `SELECT ${userSelectQuery.selectClause}
+           FROM users u
+           LEFT JOIN brokers b ON u.id = b.id
+           ${userSelectQuery.brokerDocumentsJoin}
+          ${whereClause}
+          LIMIT 1`,
+        params,
+      );
+      return rows;
+    };
+
+    stage = 'identity_resolution';
+    const row = await resolveSocialIdentity<AuthUserRow>(
+      { firebaseUid: uid, email },
+      {
+        findByFirebaseUid: async (firebaseUid) => {
+          if (!hasFirebaseUidColumn) return null;
+          const rows = await selectUser('WHERE u.firebase_uid = ?', [firebaseUid]);
+          return rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+        },
+        findByEmail: async (userEmail) => {
+          const rows = await selectUser('WHERE u.email = ?', [userEmail]);
+          return rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+        },
+        linkFirebaseUidIfEmpty: hasFirebaseUidColumn
+          ? async (userId, firebaseUid) => {
+              const [updateResult] = await authDb.query<ResultSetHeader>(
+                `UPDATE users
+                    SET firebase_uid = ?
+                  WHERE id = ?
+                    AND (firebase_uid IS NULL OR firebase_uid = '')`,
+                [firebaseUid, userId],
+              );
+              return updateResult.affectedRows === 1;
+            }
+          : undefined,
+      },
     );
 
-    if (existingRows.length === 0) {
+    if (!row) {
       return {
         isNewUser: true,
         requiresProfileChoice: true,
@@ -386,11 +413,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       };
     }
 
-    const row = hydrateProtectedCpf(existingRows[0]);
     stage = 'profile_update';
-    if (hasFirebaseUidColumn && !row.firebase_uid) {
-      await authDb.query('UPDATE users SET firebase_uid = ? WHERE id = ?', [uid, row.id]);
-    }
     if (decoded.email_verified === true && row.email_verified_at == null) {
       await authDb.query(
         'UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?',

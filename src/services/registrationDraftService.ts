@@ -1,10 +1,11 @@
 import crypto from 'crypto';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
-import { ApplicationErrorCode } from '../errors/ApplicationError';
+import { ApplicationErrorCode, ConflictError } from '../errors/ApplicationError';
 import { authDb } from './authPersistenceService';
 import {
   createDraft as insertDraftRecord,
   getDraftByDraftIdAndToken,
+  getDraftByDraftIdAndTokenForUpdate,
   updateDraftByDraftId,
   upsertDraftPhoneOtp,
   getDraftPhoneOtpBySessionToken,
@@ -39,6 +40,15 @@ import {
   assertAccountNameAvailable,
   isDuplicateAccountNameError,
 } from './userAccountNameService';
+import { resolveSocialIdentity } from './socialIdentityResolutionService';
+import {
+  DraftIdentityInput,
+  assertDraftIdentityMatches,
+  draftIdentityUpdates,
+  readVerifiedDraftIdentity,
+  requiresSocialIdentity,
+  verifyDraftSocialIdentity,
+} from './registrationDraftIdentityService';
 import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 
 export type DraftFinalizeAction = 'send_later' | 'submit_documents';
@@ -402,13 +412,6 @@ function normalizeProfileType(value: unknown): DraftProfileType {
   return String(value || '').trim().toLowerCase() === 'broker' ? 'broker' : 'client';
 }
 
-function normalizeDraftAuthProvider(value: unknown): DraftAuthProvider {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'google') return 'google';
-  if (raw === 'firebase') return 'firebase';
-  return 'email';
-}
-
 function now(): Date {
   return nowDate();
 }
@@ -632,7 +635,7 @@ async function resolveDraftContext(draftId: string, rawDraftToken: unknown): Pro
   return { draft, draftTokenHash };
 }
 
-export async function createRegistrationDraft(input: {
+export async function createRegistrationDraft(input: DraftIdentityInput & {
   email: string;
   name: string;
   password?: string;
@@ -653,13 +656,14 @@ export async function createRegistrationDraft(input: {
   currentStep?: DraftStep;
 }) {
   await discardExpiredDrafts();
-  const email = normalizeEmail(input.email);
+  const identity = requiresSocialIdentity(input) ? await verifyDraftSocialIdentity(input) : null;
+  const email = identity?.email ?? normalizeEmail(input.email);
   const name = String(input.name ?? '').trim();
   if (!email || !name) {
     throw draftError('DRAFT_INVALID_INPUT', 'Email e nome sao obrigatorios.');
   }
   const profileType = normalizeProfileType(input.profileType);
-  const normalizedProvider = normalizeDraftAuthProvider(input.authProvider);
+  const normalizedProvider = identity?.provider ?? 'email';
   const password = String(input.password ?? '');
   const passwordError = normalizedProvider === 'email' ? validateNewPassword(password) : null;
   if (passwordError) {
@@ -750,9 +754,8 @@ export async function createRegistrationDraft(input: {
     withoutNumber: !!input.withoutNumber,
     creci: profileType === 'broker' ? normalizedCreci : null,
     authProvider: normalizedProvider,
-    googleUid: input.googleUid,
-    firebaseUid: input.firebaseUid,
-    emailVerifiedAt: null,
+    ...(identity ? draftIdentityUpdates(identity) : {}),
+    emailVerifiedAt: identity ? now() : null,
     phoneVerifiedAt: null,
     passwordHash,
     passwordHashExpiresAt,
@@ -1228,6 +1231,7 @@ export async function finalizeRegistrationDraft(
   action: DraftFinalizeAction,
   legalAcceptance: DraftFinalizeLegalAcceptance = {},
   requestContext: DraftFinalizeRequestContext = {},
+  socialIdentityInput: DraftIdentityInput = {},
 ) {
   const token = normalizeToken(rawDraftToken);
   if (!token) {
@@ -1237,34 +1241,55 @@ export async function finalizeRegistrationDraft(
 
   const draftRows = await getDraftByDraftIdAndToken(draftId, draftTokenHash);
   const draft = await normalizeDraftResponse(draftRows);
+  const hasSuppliedToken = [socialIdentityInput.idToken, socialIdentityInput.firebaseIdToken,
+    socialIdentityInput.googleIdToken].some(value => value !== undefined);
+  const suppliedIdentity = hasSuppliedToken ? await verifyDraftSocialIdentity(socialIdentityInput) : null;
   const db = await authDb.getConnection();
   try {
     await db.beginTransaction();
-    const [lockRows] = await db.query<any[]>(
-      `
-        SELECT *
-        FROM registration_drafts
-        WHERE id = (
-          SELECT id
-          FROM registration_drafts
-          WHERE draft_id = ? AND draft_token_hash = ? AND status = 'OPEN'
-          ORDER BY id DESC
-          LIMIT 1
-        )
-        FOR UPDATE
-      `,
-      [draftId, draftTokenHash],
-    );
-    if (lockRows.length === 0) {
-      await db.rollback();
+    const lockedDraft = await getDraftByDraftIdAndTokenForUpdate(draftId, draftTokenHash, db);
+    if (!lockedDraft) {
       throw draftError('DRAFT_NOT_OPEN', 'Rascunho nao esta aberto para finalizacao.');
     }
-
-    const lockedDraft = lockRows[0] as RegistrationDraftRow;
     const lockedProfile = String(lockedDraft.profile_type || draft.profile_type) as DraftProfileType;
     const authProvider = String(lockedDraft.auth_provider || draft.auth_provider || 'email') as DraftAuthProvider;
     const acceptedLegal = resolveDraftLegalAcceptances(lockedProfile, action, legalAcceptance);
-    if (lockedProfile === 'client' && authProvider === 'email' && !lockedDraft.password_hash) {
+    if (authProvider !== 'email' || lockedDraft.firebase_uid || lockedDraft.google_uid || requiresSocialIdentity(socialIdentityInput)) {
+      const identity = suppliedIdentity ?? readVerifiedDraftIdentity(lockedDraft);
+      assertDraftIdentityMatches(socialIdentityInput, identity);
+      assertDraftIdentityMatches({
+        email: lockedDraft.email,
+        firebaseUid: lockedDraft.firebase_uid,
+        googleUid: lockedDraft.google_uid,
+        authProvider: authProvider === 'email' ? undefined : authProvider,
+      }, identity);
+      // A registration never updates an existing user or silently merges accounts.
+      const existingUser = await resolveSocialIdentity(identity, {
+        findByFirebaseUid: async uid => {
+          const [rows] = await db.query<(RowDataPacket & { id: number; firebase_uid: string | null })[]>(
+            'SELECT id, firebase_uid FROM users WHERE firebase_uid = ? LIMIT 1 FOR UPDATE', [uid],
+          );
+          return rows[0] ?? null;
+        },
+        findByEmail: async email => {
+          const [rows] = await db.query<(RowDataPacket & { id: number; firebase_uid: string | null })[]>(
+            'SELECT id, firebase_uid FROM users WHERE email = ? LIMIT 1 FOR UPDATE', [email],
+          );
+          return rows[0] ?? null;
+        },
+      });
+      if (existingUser) {
+        throw new ConflictError('Esta identidade já pertence a uma conta. Entre na conta existente.', {
+          code: 'SOCIAL_IDENTITY_CONFLICT',
+        });
+      }
+      lockedDraft.firebase_uid = identity.firebaseUid;
+      lockedDraft.email = identity.email;
+      lockedDraft.email_verified_at = lockedDraft.email_verified_at ?? now();
+      lockedDraft.password_hash = null;
+    }
+
+    if (lockedProfile === 'client' && authProvider === 'email' && !lockedDraft.firebase_uid && !lockedDraft.password_hash) {
       await db.rollback();
       throw draftError('DRAFT_PASSWORD_REQUIRED', 'Senha nao informada para cliente.');
     }
@@ -1460,8 +1485,7 @@ export async function discardRegistrationDraft(draftId: string, rawDraftToken: u
 export async function upsertFirebaseContextToDraft(
   draftId: string,
   rawDraftToken: unknown,
-  context: {
-    firebaseUid: string;
+  context: DraftIdentityInput & {
     withoutNumber?: unknown;
     without_number?: unknown;
     email?: unknown;
@@ -1477,19 +1501,19 @@ export async function upsertFirebaseContextToDraft(
   },
 ) {
   const { draft, draftTokenHash } = await resolveDraftContext(draftId, rawDraftToken);
-  const name = String(context.name ?? draft.name ?? '').trim() || draft.name;
-  const updates: { [key: string]: unknown } = {
-    authProvider: 'firebase',
-    firebaseUid: context.firebaseUid,
+  const identity = await verifyDraftSocialIdentity(context);
+  const name = String(context.name ?? identity.name ?? draft.name ?? '').trim() || draft.name;
+  const updates: Parameters<typeof updateDraftByDraftId>[2] = {
+    ...draftIdentityUpdates(identity),
+    emailVerifiedAt: now(),
+    passwordHash: null,
+    passwordHashExpiresAt: null,
     name,
   };
-  if (context.phone !== undefined) {
-    updates.phone = String(context.phone ?? '').trim();
+  if (context.phone !== undefined || identity.phone !== undefined) {
+    updates.phone = String(context.phone ?? identity.phone ?? '').trim();
   }
-  if (context.email !== undefined) {
-    updates.email = normalizeEmail(context.email);
-  }
-  const contextAddressInput = buildCreateDraftAddressInput(context as any);
+  const contextAddressInput = buildCreateDraftAddressInput(context);
   if (Object.keys(contextAddressInput).length > 0) {
     const addr = parseAddressBody(contextAddressInput, true);
     if (!addr.ok) {
@@ -1507,11 +1531,28 @@ export async function upsertFirebaseContextToDraft(
     updates.state = addr.value.state;
     updates.cep = addr.value.cep;
     updates.withoutNumber = isWithoutNumberText(addr.value.number)
-      || (context.withoutNumber ?? false);
+      || context.withoutNumber === true;
   }
 
-  await updateDraftByDraftId(draftId, draftTokenHash, updates as any);
+  const db = await authDb.getConnection();
+  try {
+    await db.beginTransaction();
+    const lockedDraft = await getDraftByDraftIdAndTokenForUpdate(draftId, draftTokenHash, db);
+    if (!lockedDraft) throw draftError('DRAFT_NOT_OPEN', 'Rascunho nao esta aberto.');
+    assertDraftIdentityMatches({
+      email: lockedDraft.email,
+      firebaseUid: lockedDraft.firebase_uid,
+      googleUid: lockedDraft.google_uid,
+      authProvider: lockedDraft.auth_provider === 'email' ? undefined : lockedDraft.auth_provider,
+    }, identity);
+    await updateDraftByDraftId(draftId, draftTokenHash, updates, db);
+    await db.commit();
+  } catch (error) {
+    await db.rollback();
+    throw error;
+  } finally {
+    db.release();
+  }
   const reloaded = await getDraftByDraftId(draft.draft_id);
   return draftPayload(await normalizeDraftResponse(reloaded));
 }
-

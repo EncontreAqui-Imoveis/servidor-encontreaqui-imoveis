@@ -79,6 +79,42 @@ function mockUserSchema({
   queryMock.mockResolvedValueOnce(hasBrokerDocumentsStatus ? [[{}]] : [[]]);
 }
 
+function mockSocialResolution({
+  userByUid = null,
+  userByEmail = null,
+}: {
+  userByUid?: Record<string, unknown> | null;
+  userByEmail?: Record<string, unknown> | null;
+} = {}) {
+  queryMock.mockResolvedValueOnce([userByUid ? [userByUid] : []]);
+  queryMock.mockResolvedValueOnce([userByEmail ? [userByEmail] : []]);
+}
+
+function socialUser(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 42,
+    name: 'Google User',
+    email: 'google.user@test.com',
+    email_verified_at: new Date().toISOString(),
+    phone: '62999998888',
+    street: 'Rua B',
+    number: '200',
+    complement: null,
+    bairro: 'Centro',
+    city: 'Cidade',
+    state: 'GO',
+    cep: '75900000',
+    firebase_uid: 'google-uid-1',
+    token_version: 3,
+    broker_id: 42,
+    broker_status: 'approved',
+    broker_profile_type: 'BROKER',
+    creci: '1234567',
+    broker_documents_status: 'approved',
+    ...overrides,
+  };
+}
+
 describe('authSessionOperationsService', () => {
   it('authenticates login and returns session payload', async () => {
     mockUserSchema();
@@ -175,7 +211,7 @@ describe('authSessionOperationsService', () => {
 
   it('returns new-user handshake for google login without existing account', async () => {
     mockUserSchema();
-    queryMock.mockResolvedValueOnce([[]]);
+    mockSocialResolution();
 
     const { google } = await import('../../src/services/authSessionOperationsService');
     const result = await google({ idToken: 'token-google', profileType: 'broker' });
@@ -194,33 +230,10 @@ describe('authSessionOperationsService', () => {
     });
   });
 
-  it('returns authenticated payload for existing google user', async () => {
+  it('authenticates an existing social user resolved by Firebase UID first', async () => {
     mockUserSchema();
-    queryMock.mockResolvedValueOnce([
-      [
-        {
-          id: 42,
-          name: 'Google User',
-          email: 'google.user@test.com',
-          email_verified_at: new Date().toISOString(),
-          phone: '62999998888',
-          street: 'Rua B',
-          number: '200',
-          complement: null,
-          bairro: 'Centro',
-          city: 'Cidade',
-          state: 'GO',
-          cep: '75900000',
-          firebase_uid: 'google-uid-1',
-          token_version: 3,
-          broker_id: 42,
-          broker_status: 'approved',
-          broker_profile_type: 'BROKER',
-          creci: '1234567',
-          broker_documents_status: 'approved',
-        },
-      ],
-    ]);
+    const user = socialUser();
+    mockSocialResolution({ userByUid: user, userByEmail: user });
 
     const { google } = await import('../../src/services/authSessionOperationsService');
     const result = await google({ idToken: 'token-google', profileType: 'client' });
@@ -240,6 +253,57 @@ describe('authSessionOperationsService', () => {
       },
     });
     expect(signUserTokenMock).toHaveBeenCalledWith(42, 'broker', 3);
+    expect(queryMock.mock.calls[4]?.[0]).toContain('WHERE u.firebase_uid = ?');
+    expect(queryMock.mock.calls[5]?.[0]).toContain('WHERE u.email = ?');
+  });
+
+  it('links an existing email account that has no Firebase UID', async () => {
+    mockUserSchema();
+    mockSocialResolution({
+      userByEmail: socialUser({ id: 17, firebase_uid: null, broker_id: null, broker_status: null }),
+    });
+    queryMock.mockResolvedValueOnce([{ affectedRows: 1 }]);
+
+    const { google } = await import('../../src/services/authSessionOperationsService');
+    const result = await google({ idToken: 'token-google' });
+
+    expect(result.user?.id).toBe(17);
+    expect(signUserTokenMock).toHaveBeenCalledWith(17, 'client', 3);
+    expect(queryMock).toHaveBeenLastCalledWith(
+      expect.stringContaining('AND (firebase_uid IS NULL OR firebase_uid = \'\')'),
+      ['google-uid-1', 17],
+    );
+  });
+
+  it('rejects when Firebase UID and email resolve to different users', async () => {
+    mockUserSchema();
+    mockSocialResolution({
+      userByUid: socialUser({ id: 42 }),
+      userByEmail: socialUser({ id: 84, firebase_uid: 'other-uid' }),
+    });
+
+    const { google } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(google({ idToken: 'token-google' })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      details: { code: 'SOCIAL_IDENTITY_CONFLICT', retryable: false },
+    });
+    expect(signUserTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects when an email account is already linked to another Firebase UID', async () => {
+    mockUserSchema();
+    mockSocialResolution({
+      userByEmail: socialUser({ id: 42, firebase_uid: 'other-uid' }),
+    });
+
+    const { google } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(google({ idToken: 'token-google' })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      details: { code: 'SOCIAL_IDENTITY_CONFLICT', retryable: false },
+    });
+    expect(signUserTokenMock).not.toHaveBeenCalled();
   });
 
   it('returns an unauthorized error when Firebase rejects the ID token', async () => {

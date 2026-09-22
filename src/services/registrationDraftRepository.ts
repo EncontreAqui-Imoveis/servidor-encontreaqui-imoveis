@@ -233,8 +233,9 @@ export async function getDraftByDraftId(draftId: string): Promise<RegistrationDr
 export async function getDraftByDraftIdAndTokenForUpdate(
   draftId: string,
   draftTokenHash: string,
+  db: Queryable = authDb,
 ): Promise<RegistrationDraftRow | null> {
-  const [rows] = await authDb.query<RegistrationDraftRow[]>(
+  const [rows] = await db.query<RegistrationDraftRow[]>(
     `
       SELECT *
       FROM registration_drafts
@@ -320,6 +321,7 @@ export async function updateDraftByDraftId(
   draftId: string,
   draftTokenHash: string,
   updates: {
+    email?: string;
     name?: string | null;
     phone?: string | null;
     street?: string | null;
@@ -357,6 +359,7 @@ export async function updateDraftByDraftId(
     values.push(value);
   };
 
+  if (Object.prototype.hasOwnProperty.call(updates, 'email')) push('email', updates.email);
   if (Object.prototype.hasOwnProperty.call(updates, 'name')) push('name', updates.name ?? null);
   if (Object.prototype.hasOwnProperty.call(updates, 'phone')) push('phone', updates.phone ?? null);
   if (Object.prototype.hasOwnProperty.call(updates, 'street')) push('street', updates.street ?? null);

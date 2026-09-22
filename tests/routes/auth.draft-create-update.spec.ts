@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConflictError, UnauthorizedError } from '../../src/errors/ApplicationError';
 
 const serviceMocks = vi.hoisted(() => ({
   createRegistrationDraftMock: vi.fn(),
@@ -64,6 +65,30 @@ describe('POST /auth/register/draft e PATCH /auth/register/draft/:draftId', () =
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each(['idToken', 'firebaseIdToken', 'googleIdToken'])('encaminha %s ao serviço para comprovar identidade', async tokenField => {
+    serviceMocks.createRegistrationDraftMock.mockResolvedValue({ draftId: 'draft-google' });
+    const response = await request(app).post('/auth/register/draft').send({
+      [tokenField]: 'firebase-token', authProvider: 'google', googleUid: 'claimed-uid',
+      email: 'google@example.com', name: 'Google',
+      providerMetadata: { verifiedSocialIdentity: { firebaseUid: 'forged' } },
+    });
+    expect(response.status).toBe(201);
+    expect(serviceMocks.createRegistrationDraftMock).toHaveBeenCalledWith(expect.objectContaining({
+      idToken: 'firebase-token', googleUid: 'claimed-uid', email: 'google@example.com',
+    }));
+    expect(serviceMocks.createRegistrationDraftMock.mock.calls[0][0]).not.toHaveProperty('providerMetadata');
+  });
+
+  it.each([
+    [new UnauthorizedError('Token inválido', { code: 'SOCIAL_IDENTITY_TOKEN_INVALID' }), 401],
+    [new ConflictError('Identidade divergente', { code: 'SOCIAL_IDENTITY_MISMATCH' }), 409],
+  ])('retorna o erro de identidade com status apropriado', async (error, status) => {
+    serviceMocks.createRegistrationDraftMock.mockRejectedValue(error);
+    const response = await request(app).post('/auth/register/draft').send({ idToken: 'token' });
+    expect(response.status).toBe(status);
+    expect(response.body.code).toBe((error as UnauthorizedError).details?.code);
   });
 
   it('rejeita cadastro de draft com email duplicado', async () => {

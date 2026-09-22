@@ -1,3 +1,4 @@
+import { isApplicationError, applicationErrorToHttpStatus } from '../errors/ApplicationError';
 import { Request, Response } from 'express';
 import { getRequestId } from '../middlewares/requestContext';
 import { deleteCloudinaryAsset, uploadToCloudinary } from '../config/cloudinary';
@@ -149,6 +150,14 @@ class RegistrationDraftController {
         correlation_id: this.correlationId(req),
       });
     }
+    if (isApplicationError(error)) {
+      return res.status(applicationErrorToHttpStatus(error)).json({
+        status: 'error',
+        code: error.details?.code ?? error.code,
+        error: error.message,
+        correlation_id: this.correlationId(req),
+      });
+    }
     console.error('Erro em fluxo de rascunho:', error);
     return res.status(500).json({
       status: 'error',
@@ -178,6 +187,7 @@ class RegistrationDraftController {
         profileType: body.profileType,
         creci: body.creci,
         authProvider: body.authProvider,
+        idToken: body.idToken ?? body.firebaseIdToken ?? body.googleIdToken,
         googleUid: body.googleUid,
         firebaseUid: body.firebaseUid,
         currentStep: body.currentStep,
@@ -378,7 +388,13 @@ class RegistrationDraftController {
         termsVersion: body.termsVersion,
         privacyPolicyVersion: body.privacyPolicyVersion,
         brokerAgreementVersion: body.brokerAgreementVersion,
-      }, requestContext);
+      }, requestContext, {
+        idToken: body.idToken ?? body.firebaseIdToken ?? body.googleIdToken,
+        firebaseUid: body.firebaseUid,
+        googleUid: body.googleUid,
+        email: body.email,
+        authProvider: body.authProvider,
+      });
       return res.status(200).json({ status: 'ok', ...response });
     } catch (error) {
       if (error instanceof DraftFlowError) {

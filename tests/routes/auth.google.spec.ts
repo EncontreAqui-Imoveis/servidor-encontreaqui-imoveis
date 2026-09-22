@@ -119,4 +119,25 @@ describe('POST /auth/google', () => {
       retryable: false,
     });
   });
+
+  it('returns a structured 409 when social identities conflict', async () => {
+    const { ConflictError } = await import('../../src/errors/ApplicationError');
+    googleSessionMock.mockRejectedValueOnce(
+      new ConflictError('Não foi possível associar esta conta social a uma conta existente.', {
+        code: 'SOCIAL_IDENTITY_CONFLICT',
+        retryable: false,
+      }),
+    );
+
+    const response = await request(app)
+      .post('/auth/google')
+      .send({ idToken: 'google-token', profileType: 'auto' });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      status: 'error',
+      code: 'SOCIAL_IDENTITY_CONFLICT',
+      retryable: false,
+    });
+  });
 });

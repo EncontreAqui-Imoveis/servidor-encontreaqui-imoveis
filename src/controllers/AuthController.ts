@@ -10,7 +10,12 @@ import {
   type ProfileType,
   withTimeout,
 } from '../services/authSessionService';
-import { google as googleSession, login as loginSession, logout as logoutSession } from '../services/authSessionOperationsService';
+import {
+  google as googleSession,
+  social as socialSession,
+  login as loginSession,
+  logout as logoutSession,
+} from '../services/authSessionOperationsService';
 import {
   checkCreci as checkCreciService,
   checkEmail as checkEmailService,
@@ -487,6 +492,19 @@ class AuthController {
   async google(req: Request, res: Response) {
     try {
       const result = await googleSession({
+        idToken: req.body?.idToken,
+        profileType: req.body?.profileType,
+        requestId: getRequestId(req),
+      });
+      return res.status(200).json(result);
+    } catch (error) {
+      return respondStructuredError(req, res, error);
+    }
+  }
+
+  async social(req: Request, res: Response) {
+    try {
+      const result = await socialSession({
         idToken: req.body?.idToken,
         profileType: req.body?.profileType,
         requestId: getRequestId(req),

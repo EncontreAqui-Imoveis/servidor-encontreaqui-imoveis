@@ -59,6 +59,7 @@ beforeEach(() => {
     email: 'google.user@test.com',
     name: 'Google User',
     email_verified: true,
+    firebase: { sign_in_provider: 'google.com' },
   });
 });
 
@@ -230,6 +231,52 @@ describe('authSessionOperationsService', () => {
     });
   });
 
+  it('returns the social new-user handshake from claims verified by Firebase', async () => {
+    mockUserSchema();
+    mockSocialResolution();
+
+    const { social } = await import('../../src/services/authSessionOperationsService');
+    const result = await social({ idToken: 'token-social', profileType: 'broker' });
+
+    expect(result).toMatchObject({
+      isNewUser: true,
+      requiresProfileChoice: true,
+      provider: 'google.com',
+      pending: {
+        email: 'google.user@test.com',
+        name: 'Google User',
+        firebaseUid: 'google-uid-1',
+        provider: 'google.com',
+      },
+    });
+    expect(queryMock.mock.calls[4]?.[0]).toContain('WHERE u.firebase_uid = ?');
+    expect(queryMock.mock.calls[5]?.[0]).toContain('WHERE u.email = ?');
+  });
+
+  it('derives a non-Google social provider from the verified Firebase token', async () => {
+    verifyIdTokenMock.mockResolvedValueOnce({
+      uid: 'facebook-uid-1',
+      email: 'facebook.user@test.com',
+      name: 'Facebook User',
+      email_verified: true,
+      firebase: { sign_in_provider: 'facebook.com' },
+    });
+    mockUserSchema();
+    mockSocialResolution();
+
+    const { social } = await import('../../src/services/authSessionOperationsService');
+    const result = await social({ idToken: 'facebook-token' });
+
+    expect(result).toMatchObject({
+      provider: 'facebook.com',
+      pending: {
+        firebaseUid: 'facebook-uid-1',
+        email: 'facebook.user@test.com',
+        provider: 'facebook.com',
+      },
+    });
+  });
+
   it('authenticates an existing social user resolved by Firebase UID first', async () => {
     mockUserSchema();
     const user = socialUser();
@@ -289,6 +336,23 @@ describe('authSessionOperationsService', () => {
       details: { code: 'SOCIAL_IDENTITY_CONFLICT', retryable: false },
     });
     expect(signUserTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('uses the same safe resolver for generic social authentication conflicts', async () => {
+    mockUserSchema();
+    mockSocialResolution({
+      userByUid: socialUser({ id: 42 }),
+      userByEmail: socialUser({ id: 84, firebase_uid: 'other-uid' }),
+    });
+
+    const { social } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(social({ idToken: 'token-social' })).rejects.toMatchObject({
+      code: 'CONFLICT',
+      details: { code: 'SOCIAL_IDENTITY_CONFLICT', retryable: false },
+    });
+    expect(queryMock.mock.calls[4]?.[0]).toContain('WHERE u.firebase_uid = ?');
+    expect(queryMock.mock.calls[5]?.[0]).toContain('WHERE u.email = ?');
   });
 
   it('rejects when an email account is already linked to another Firebase UID', async () => {

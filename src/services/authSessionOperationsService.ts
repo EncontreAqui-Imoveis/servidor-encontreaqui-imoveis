@@ -60,10 +60,31 @@ export interface LoginResult {
   requiresDocuments: boolean;
 }
 
-export interface GoogleInput {
+export interface SocialInput {
   idToken?: string;
   profileType?: string;
   requestId?: string | null;
+}
+
+export interface GoogleInput extends SocialInput {}
+
+export interface SocialResult {
+  user?: ReturnType<typeof buildUserPayload>;
+  token?: string;
+  needsCompletion: boolean;
+  requiresDocuments: boolean;
+  blockedBrokerRequest?: boolean;
+  roleLocked: boolean;
+  isNewUser: boolean;
+  requestedProfile: ProfileType | 'auto';
+  provider: string;
+  requiresProfileChoice?: boolean;
+  pending?: {
+    email: string;
+    name: string;
+    firebaseUid: string;
+    provider: string;
+  };
 }
 
 export interface GoogleResult {
@@ -325,10 +346,23 @@ export async function login(input: LoginInput): Promise<LoginResult> {
   }
 }
 
-export async function google(input: GoogleInput): Promise<GoogleResult> {
+type SocialAuthenticationOptions = {
+  expectedProvider?: string;
+  providerLabel: string;
+  errorCodePrefix: 'GOOGLE' | 'SOCIAL';
+};
+
+function socialProviderFromToken(decoded: { firebase?: { sign_in_provider?: unknown } }): string {
+  return String(decoded.firebase?.sign_in_provider ?? '').trim();
+}
+
+async function authenticateSocial(
+  input: SocialInput,
+  options: SocialAuthenticationOptions,
+): Promise<SocialResult> {
   const idToken = String(input.idToken ?? '').trim();
   if (!idToken) {
-    throw new InvalidInputError('idToken do Google é obrigatório.');
+    throw new InvalidInputError(`idToken do ${options.providerLabel} é obrigatório.`);
   }
 
   const requestedProfile = normalizeRequestedProfile(input.profileType);
@@ -344,13 +378,28 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
 
     const uid = decoded.uid;
     const email = String(decoded.email ?? '').trim().toLowerCase();
+    const provider = socialProviderFromToken(decoded);
     const displayName =
       String(decoded.name ?? '').trim() ||
       email.split('@')[0] ||
       `User-${uid}`;
 
+    if (!provider || ['anonymous', 'custom', 'password'].includes(provider)) {
+      throw new InvalidInputError('O token Firebase não representa um provedor social.', {
+        code: 'SOCIAL_PROVIDER_INVALID',
+        retryable: false,
+      });
+    }
+
+    if (options.expectedProvider && provider !== options.expectedProvider) {
+      throw new UnauthorizedError(`O token não corresponde ao provedor ${options.providerLabel}.`, {
+        code: 'SOCIAL_PROVIDER_MISMATCH',
+        retryable: false,
+      });
+    }
+
     if (!email) {
-      throw new InvalidInputError('Email não disponível no token do Google.');
+      throw new InvalidInputError(`Email não disponível no token do ${options.providerLabel}.`);
     }
 
     stage = 'schema_probe';
@@ -404,8 +453,10 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
         pending: {
           email,
           name: displayName,
-          googleUid: uid,
+          firebaseUid: uid,
+          provider,
         },
+        provider,
         roleLocked: false,
         needsCompletion: true,
         requiresDocuments: false,
@@ -441,6 +492,7 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       roleLocked: blockedBrokerRequest || effectiveProfile === 'broker',
       isNewUser: false,
       requestedProfile,
+      provider,
     };
   } catch (error) {
     if (isApplicationError(error)) {
@@ -448,15 +500,15 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
     }
     if (error instanceof Error && error.message.includes('Timeout while waiting for')) {
       logGoogleAuthFailure(stage, requestId, error);
-      throw new GatewayTimeoutError('A autenticação com Google demorou demais. Tente novamente.', {
-        code: 'GOOGLE_AUTH_TIMEOUT',
+      throw new GatewayTimeoutError(`A autenticação com ${options.providerLabel} demorou demais. Tente novamente.`, {
+        code: `${options.errorCodePrefix}_AUTH_TIMEOUT`,
         retryable: true,
       });
     }
     logGoogleAuthFailure(stage, requestId, error);
     if (isInvalidFirebaseTokenError(error)) {
-      throw new UnauthorizedError('Não foi possível validar sua sessão com o Google. Faça login novamente.', {
-        code: 'GOOGLE_TOKEN_INVALID',
+      throw new UnauthorizedError(`Não foi possível validar sua sessão com ${options.providerLabel}. Faça login novamente.`, {
+        code: `${options.errorCodePrefix}_TOKEN_INVALID`,
         retryable: false,
       });
     }
@@ -467,16 +519,41 @@ export async function google(input: GoogleInput): Promise<GoogleResult> {
       });
     }
     if (isFirebaseServiceError(error)) {
-      throw new UnavailableError('A autenticação com Google está temporariamente indisponível. Tente novamente.', {
-        code: 'GOOGLE_AUTH_UNAVAILABLE',
+      throw new UnavailableError(`A autenticação com ${options.providerLabel} está temporariamente indisponível. Tente novamente.`, {
+        code: `${options.errorCodePrefix}_AUTH_UNAVAILABLE`,
         retryable: true,
       });
     }
-    throw new InternalError('Erro ao autenticar com Google.', {
-      code: 'GOOGLE_AUTH_INTERNAL',
+    throw new InternalError(`Erro ao autenticar com ${options.providerLabel}.`, {
+      code: `${options.errorCodePrefix}_AUTH_INTERNAL`,
       retryable: false,
     });
   }
+}
+
+/** Generic entry point. Provider, UID and e-mail all come from verified Firebase claims. */
+export async function social(input: SocialInput): Promise<SocialResult> {
+  return authenticateSocial(input, { providerLabel: 'social', errorCodePrefix: 'SOCIAL' });
+}
+
+/** Preserves the established Google response shape while using the shared social flow. */
+export async function google(input: GoogleInput): Promise<GoogleResult> {
+  const result = await authenticateSocial(input, {
+    expectedProvider: 'google.com',
+    providerLabel: 'Google',
+    errorCodePrefix: 'GOOGLE',
+  });
+  const { provider: _provider, pending, ...googleResult } = result;
+  return {
+    ...googleResult,
+    ...(pending ? {
+      pending: {
+        email: pending.email,
+        name: pending.name,
+        googleUid: pending.firebaseUid,
+      },
+    } : {}),
+  };
 }
 
 export async function logout(input: LogoutInput): Promise<LogoutResult> {

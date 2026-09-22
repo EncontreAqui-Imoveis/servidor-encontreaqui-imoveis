@@ -2,12 +2,14 @@ import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { googleSessionMock } = vi.hoisted(() => ({
+const { googleSessionMock, socialSessionMock } = vi.hoisted(() => ({
   googleSessionMock: vi.fn(),
+  socialSessionMock: vi.fn(),
 }));
 
 vi.mock('../../src/services/authSessionOperationsService', () => ({
   google: googleSessionMock,
+  social: socialSessionMock,
   login: vi.fn(),
   logout: vi.fn(),
 }));
@@ -139,5 +141,61 @@ describe('POST /auth/google', () => {
       code: 'SOCIAL_IDENTITY_CONFLICT',
       retryable: false,
     });
+  });
+});
+
+describe('POST /auth/social', () => {
+  let app: express.Express;
+
+  beforeAll(async () => {
+    process.env.JWT_SECRET ??= 'test-secret';
+    vi.resetModules();
+    const { default: authRoutes } = await import('../../src/routes/auth.routes');
+    app = express();
+    app.use(express.json());
+    app.use('/auth', authRoutes);
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('accepts a verified social token and returns the existing new-user handshake', async () => {
+    socialSessionMock.mockResolvedValueOnce({
+      isNewUser: true,
+      requiresProfileChoice: true,
+      pending: {
+        email: 'novo@exemplo.com', name: 'Novo Usuario',
+        firebaseUid: 'firebase-uid-123', provider: 'google.com',
+      },
+      provider: 'google.com', roleLocked: false, needsCompletion: true,
+      requiresDocuments: false, requestedProfile: 'auto',
+    });
+
+    const response = await request(app)
+      .post('/auth/social')
+      .send({ idToken: 'firebase-social-token', profileType: 'auto', provider: 'forged' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      isNewUser: true, requiresProfileChoice: true, provider: 'google.com',
+      pending: { firebaseUid: 'firebase-uid-123', provider: 'google.com' },
+    });
+    expect(socialSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      idToken: 'firebase-social-token', profileType: 'auto',
+    }));
+    expect(socialSessionMock.mock.calls[0][0]).not.toHaveProperty('provider');
+  });
+
+  it('returns a structured 409 for a social identity conflict', async () => {
+    const { ConflictError } = await import('../../src/errors/ApplicationError');
+    socialSessionMock.mockRejectedValueOnce(new ConflictError('Conflito de identidade.', {
+      code: 'SOCIAL_IDENTITY_CONFLICT', retryable: false,
+    }));
+
+    const response = await request(app).post('/auth/social').send({ idToken: 'firebase-social-token' });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ status: 'error', code: 'SOCIAL_IDENTITY_CONFLICT' });
   });
 });

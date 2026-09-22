@@ -96,6 +96,9 @@ authRoutes.post('/login', authLoginLimiter, (req, res) =>
 authRoutes.post('/google', authSensitiveLimiter, (req, res) =>
   authController.google(req, res)
 );
+authRoutes.post('/social', authSensitiveLimiter, (req, res) =>
+  authController.social(req, res)
+);
 authRoutes.post('/otp/request', authSensitiveLimiter, (req, res) =>
   authController.requestOtp(req, res)
 );

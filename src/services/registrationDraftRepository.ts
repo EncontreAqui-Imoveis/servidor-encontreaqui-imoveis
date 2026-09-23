@@ -16,7 +16,7 @@ export type DraftStep =
   | 'FINALIZE_CHOICE'
   | 'FINALIZE_READY'
   | 'DONE';
-export type DraftAuthProvider = 'email' | 'google' | 'firebase';
+export type DraftAuthProvider = 'email' | 'google' | 'apple' | 'firebase';
 
 export interface RegistrationDraftRow extends RowDataPacket {
   id: number;

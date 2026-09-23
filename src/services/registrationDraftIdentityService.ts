@@ -12,11 +12,30 @@ export type DraftIdentityInput = {
   authProvider?: unknown;
 };
 
+type DraftSocialProvider = 'google' | 'apple';
+
 type VerifiedDraftIdentity = {
   firebaseUid: string;
   email: string;
-  provider: 'google';
+  provider: DraftSocialProvider;
 };
+
+function canonicalDraftSocialProvider(value: unknown): DraftSocialProvider | null {
+  switch (value) {
+    case 'google.com': return 'google';
+    case 'apple.com': return 'apple';
+    default: return null;
+  }
+}
+
+function isDraftSocialProvider(value: unknown): value is DraftSocialProvider {
+  return value === 'google' || value === 'apple';
+}
+
+function clientProviderMatchesIdentity(value: unknown, provider: DraftSocialProvider): boolean {
+  // "firebase" is the legacy transport label, never the source of the provider.
+  return ['firebase', provider, `${provider}.com`].includes(String(value));
+}
 
 export function requiresSocialIdentity(input: DraftIdentityInput): boolean {
   return [input.idToken, input.firebaseIdToken, input.googleIdToken,
@@ -30,9 +49,8 @@ export function assertDraftIdentityMatches(input: DraftIdentityInput, identity: 
   );
   const emailMismatch = input.email != null && input.email !== ''
     && String(input.email).trim().toLowerCase() !== identity.email;
-  // "firebase" is the legacy transport label, never the source of the provider.
   const providerMismatch = input.authProvider != null
-    && !['google', 'firebase'].includes(String(input.authProvider));
+    && !clientProviderMatchesIdentity(input.authProvider, identity.provider);
   if (uidMismatch || emailMismatch || providerMismatch) {
     throw new ConflictError('Os dados do cadastro não correspondem à identidade social comprovada.', {
       code: 'SOCIAL_IDENTITY_MISMATCH',
@@ -56,7 +74,8 @@ export async function verifyDraftSocialIdentity(input: DraftIdentityInput): Prom
   } catch {
     throw new UnauthorizedError('Token Firebase inválido ou expirado.', { code: 'SOCIAL_IDENTITY_TOKEN_INVALID' });
   }
-  if (claims.firebase?.sign_in_provider !== 'google.com') {
+  const provider = canonicalDraftSocialProvider(claims.firebase?.sign_in_provider);
+  if (!provider) {
     throw new InvalidInputError('Provider social não suportado neste cadastro.', {
       code: 'SOCIAL_IDENTITY_PROVIDER_UNSUPPORTED',
     });
@@ -69,7 +88,7 @@ export async function verifyDraftSocialIdentity(input: DraftIdentityInput): Prom
   const identity: VerifiedDraftIdentity = {
     firebaseUid: claims.uid,
     email: claims.email.trim().toLowerCase(),
-    provider: 'google',
+    provider,
   };
   assertDraftIdentityMatches(input, identity);
   return { ...identity, name: claims.name, phone: claims.phone_number };
@@ -95,7 +114,7 @@ export function readVerifiedDraftIdentity(draft: RegistrationDraftRow): Verified
       ? JSON.parse(draft.provider_metadata) : draft.provider_metadata;
   } catch { /* Old drafts require fresh proof, without losing their profile data. */ }
   const identity = metadata?.verifiedSocialIdentity;
-  if (identity?.version !== 1 || identity.provider !== 'google'
+  if (identity?.version !== 1 || !isDraftSocialProvider(identity?.provider)
     || !identity.firebaseUid || !identity.email
     || draft.firebase_uid !== identity.firebaseUid || draft.google_uid !== identity.firebaseUid
     || draft.email !== identity.email || draft.auth_provider !== identity.provider) {
@@ -103,5 +122,5 @@ export function readVerifiedDraftIdentity(draft: RegistrationDraftRow): Verified
       code: 'SOCIAL_IDENTITY_TOKEN_REQUIRED',
     });
   }
-  return identity;
+  return identity as VerifiedDraftIdentity;
 }

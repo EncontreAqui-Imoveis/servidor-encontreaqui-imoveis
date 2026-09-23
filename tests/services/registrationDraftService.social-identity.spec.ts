@@ -33,6 +33,8 @@ import {
 
 const identity = { firebaseUid: 'google-uid', email: 'google@example.com', provider: 'google' };
 const input = { idToken: 'valid-token', name: 'Google User', email: identity.email, authProvider: 'google' as const };
+const appleIdentity = { firebaseUid: 'apple-uid', email: 'user@privaterelay.appleid.com', provider: 'apple' as const };
+const appleInput = { idToken: 'apple-token', name: 'Apple User', email: appleIdentity.email, authProvider: 'apple' as const };
 const legal = { acceptedTerms: true, acceptedPrivacyPolicy: true, termsVersion: 'v1', privacyPolicyVersion: 'v1' };
 
 function draft(overrides: Record<string, unknown> = {}) {
@@ -45,6 +47,18 @@ function draft(overrides: Record<string, unknown> = {}) {
     provider_metadata: JSON.stringify({ verifiedSocialIdentity: { version: 1, ...identity } }),
     ...overrides,
   };
+}
+
+function appleDraft(overrides: Record<string, unknown> = {}) {
+  return draft({
+    name: appleInput.name,
+    email: appleIdentity.email,
+    auth_provider: 'apple',
+    firebase_uid: appleIdentity.firebaseUid,
+    google_uid: appleIdentity.firebaseUid,
+    provider_metadata: JSON.stringify({ verifiedSocialIdentity: { version: 1, ...appleIdentity } }),
+    ...overrides,
+  });
 }
 
 function arrangeFinalize(row = draft(), byUid: unknown = null, byEmail: unknown = null) {
@@ -85,6 +99,19 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     }));
   });
 
+  it('aceita token Apple verificado e e-mail private relay ao criar rascunho', async () => {
+    mocks.verify.mockResolvedValue({ uid: appleIdentity.firebaseUid, email: appleIdentity.email,
+      email_verified: true, firebase: { sign_in_provider: 'apple.com' } });
+
+    await createRegistrationDraft({ ...appleInput, googleUid: appleIdentity.firebaseUid, firebaseUid: appleIdentity.firebaseUid });
+
+    expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      authProvider: 'apple', googleUid: appleIdentity.firebaseUid, firebaseUid: appleIdentity.firebaseUid,
+      email: appleIdentity.email, emailVerifiedAt: expect.any(Date), passwordHash: null,
+      providerMetadata: { verifiedSocialIdentity: { version: 1, ...appleIdentity } },
+    }));
+  });
+
   it.each([{ googleUid: 'attacker' }, { firebaseUid: 'attacker' },
     { email: 'attacker@example.com' }, { authProvider: 'apple' }])(
     'rejeita dados do cliente incompatíveis: %j', async override => {
@@ -109,7 +136,7 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it.each(['apple.com', 'password', 'phone'])('não aceita token de %s como Google', async provider => {
+  it.each(['facebook.com', 'password', 'phone'])('rejeita token de provider não permitido: %s', async provider => {
     mocks.verify.mockResolvedValue({ uid: identity.firebaseUid, email: identity.email,
       email_verified: true, firebase: { sign_in_provider: provider } });
     await expect(createRegistrationDraft(input)).rejects.toMatchObject({
@@ -159,10 +186,38 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     expect(mocks.commit).toHaveBeenCalledOnce();
   });
 
+  it('conclui Apple comprovado usando a identidade do token', async () => {
+    mocks.verify.mockResolvedValue({ uid: appleIdentity.firebaseUid, email: appleIdentity.email,
+      email_verified: true, firebase: { sign_in_provider: 'apple.com' } });
+    arrangeFinalize(appleDraft());
+
+    const result = await finalizeRegistrationDraft('draft-social', 'draft-token', 'submit_documents', legal, {}, {
+      idToken: 'apple-token', authProvider: 'apple',
+    });
+
+    expect(result.user.id).toBe(501);
+    expect(mocks.verify).toHaveBeenCalledWith('apple-token');
+    const insert = mocks.query.mock.calls.find(([sql]) => sql.includes('INSERT INTO users'))!;
+    expect(insert[1].slice(0, 5)).toEqual([
+      appleIdentity.firebaseUid, appleInput.name, appleIdentity.email, expect.any(Date), null,
+    ]);
+    expect(mocks.commit).toHaveBeenCalledOnce();
+  });
+
   it('aceita dados redundantes compatíveis na finalização sem exigir outro token', async () => {
     arrangeFinalize();
     await finalizeRegistrationDraft('draft-social', 'draft-token', 'submit_documents', legal, {}, {
       googleUid: identity.firebaseUid, email: identity.email, authProvider: 'google',
+    });
+    expect(mocks.verify).not.toHaveBeenCalled();
+    expect(mocks.commit).toHaveBeenCalledOnce();
+  });
+
+  it('aceita metadata Apple comprovada na finalização sem exigir outro token', async () => {
+    arrangeFinalize(appleDraft());
+    await finalizeRegistrationDraft('draft-social', 'draft-token', 'submit_documents', legal, {}, {
+      firebaseUid: appleIdentity.firebaseUid, googleUid: appleIdentity.firebaseUid,
+      email: appleIdentity.email, authProvider: 'apple',
     });
     expect(mocks.verify).not.toHaveBeenCalled();
     expect(mocks.commit).toHaveBeenCalledOnce();
@@ -223,6 +278,36 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     }), expect.objectContaining({ query: mocks.query }));
     expect(mocks.update.mock.calls[0][2]).not.toHaveProperty('street');
     expect(mocks.query.mock.calls.some(([sql]) => sql.includes('DELETE'))).toBe(false);
+  });
+
+  it('atualiza e retoma rascunho Apple somente com token Firebase válido', async () => {
+    mocks.verify.mockResolvedValue({ uid: appleIdentity.firebaseUid, email: appleIdentity.email,
+      email_verified: true, firebase: { sign_in_provider: 'apple.com' },
+      name: 'Nome Apple', phone_number: '+5511988888888' });
+    arrangeFinalize(appleDraft());
+
+    await upsertFirebaseContextToDraft('draft-social', 'draft-token', {
+      idToken: 'apple-token', authProvider: 'apple.com' as any,
+    });
+
+    expect(mocks.update).toHaveBeenCalledWith('draft-social', expect.any(String), expect.objectContaining({
+      firebaseUid: appleIdentity.firebaseUid, googleUid: appleIdentity.firebaseUid, authProvider: 'apple',
+      name: 'Nome Apple', phone: '+5511988888888',
+      providerMetadata: { verifiedSocialIdentity: { version: 1, ...appleIdentity } },
+    }), expect.objectContaining({ query: mocks.query }));
+  });
+
+  it.each([
+    { authProvider: 'google' },
+    { firebaseUid: 'attacker' },
+    { email: 'attacker@example.com' },
+  ])('rejeita dados Apple do cliente divergentes do token: %j', async override => {
+    mocks.verify.mockResolvedValue({ uid: appleIdentity.firebaseUid, email: appleIdentity.email,
+      email_verified: true, firebase: { sign_in_provider: 'apple.com' } });
+
+    await expect(createRegistrationDraft({ ...appleInput, ...override } as any))
+      .rejects.toMatchObject({ details: { code: 'SOCIAL_IDENTITY_MISMATCH' } });
+    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it('não permite trocar identidade do rascunho por outro token válido', async () => {

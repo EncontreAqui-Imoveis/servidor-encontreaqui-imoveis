@@ -9,6 +9,8 @@ import {
   listOwnPrivacyRequests,
   PrivacyRequestValidationError,
 } from '../services/privacyRequestService';
+import { startAccountDeletion } from '../services/accountDeletionRequestService';
+import { applicationErrorToHttpStatus, isApplicationError } from '../errors/ApplicationError';
 
 const userRoutes = Router();
 const legacyAuthLimiter = createAuthLoginLimiter();
@@ -25,6 +27,28 @@ userRoutes.post('/sync', userController.syncUser);
 userRoutes.post('/auth/google', authSensitiveLimiter, (req, res) => authController.google(req, res));
 userRoutes.post('/auth/firebase', authSensitiveLimiter, userController.firebaseLogin);
 userRoutes.get('/me', authMiddleware, (req, res) => userController.getProfile(req as any, res));
+userRoutes.post('/me/deletion', authMiddleware, async (req, res) => {
+  try {
+    const deletion = await startAccountDeletion({
+      userId: Number((req as any).userId),
+      currentPassword: req.body?.currentPassword,
+      firebaseIdToken: req.body?.firebaseIdToken,
+    });
+    return res.status(202).json(deletion);
+  } catch (error) {
+    if (isApplicationError(error)) {
+      return res.status(applicationErrorToHttpStatus(error)).json({
+        code: String(error.details?.code ?? error.code),
+        error: error.message,
+      });
+    }
+    console.error('Falha ao iniciar exclusao de conta.', { code: 'ACCOUNT_DELETION_START_FAILED' });
+    return res.status(500).json({
+      code: 'ACCOUNT_DELETION_START_FAILED',
+      error: 'Não foi possível iniciar a exclusão da conta.',
+    });
+  }
+});
 userRoutes.get('/search', authMiddleware, (req, res) => userController.searchUsers(req as any, res));
 userRoutes.put('/me', authMiddleware, (req, res) => userController.updateProfile(req as any, res));
 userRoutes.get('/upload/signature', authMiddleware, (req, res) => uploadController.getSignature(req, res));

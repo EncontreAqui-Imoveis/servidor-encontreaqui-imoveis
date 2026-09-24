@@ -15,6 +15,7 @@ import { withTimeout } from './authSessionService';
 
 const ACCOUNT_DELETION_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_REAUTH_AGE_MS = 5 * 60 * 1000;
+const FIREBASE_SESSION_REVOCATION_FAILED = 'FIREBASE_SESSION_REVOCATION_FAILED';
 
 type AccountDeletionUserRow = RowDataPacket & {
   id: number;
@@ -142,6 +143,46 @@ async function removeTemporaryAccountCredentials(
   );
 }
 
+async function revokeFirebaseSessionsAfterDeletion(
+  firebaseUid: string | null,
+  requestId: string,
+): Promise<void> {
+  const normalizedFirebaseUid = normalizeOptionalString(firebaseUid);
+  if (!normalizedFirebaseUid) return;
+
+  try {
+    await admin.auth().revokeRefreshTokens(normalizedFirebaseUid);
+  } catch {
+    try {
+      await authDb.query(
+        'UPDATE privacy_requests SET last_error_code = ? WHERE id = ?',
+        [FIREBASE_SESSION_REVOCATION_FAILED, requestId],
+      );
+    } catch {
+      console.warn('Falha ao registrar revogacao externa de sessao pendente.', {
+        code: 'ACCOUNT_DELETION_FIREBASE_REVOCATION_RECORD_FAILED',
+      });
+      return;
+    }
+
+    console.warn('Falha ao revogar sessao externa apos exclusao de conta.', {
+      code: FIREBASE_SESSION_REVOCATION_FAILED,
+    });
+    return;
+  }
+
+  try {
+    await authDb.query(
+      'UPDATE privacy_requests SET last_error_code = NULL WHERE id = ? AND last_error_code = ?',
+      [requestId, FIREBASE_SESSION_REVOCATION_FAILED],
+    );
+  } catch {
+    console.warn('Falha ao atualizar status de revogacao externa de sessao.', {
+      code: 'ACCOUNT_DELETION_FIREBASE_REVOCATION_STATUS_RECORD_FAILED',
+    });
+  }
+}
+
 export async function startAccountDeletion(
   input: StartAccountDeletionInput,
 ): Promise<StartAccountDeletionResult> {
@@ -153,6 +194,8 @@ export async function startAccountDeletion(
   const now = input.now ?? new Date();
   const defaultScheduledFor = new Date(now.getTime() + ACCOUNT_DELETION_DELAY_MS);
   const db = await authDb.getConnection();
+  let committedResult: StartAccountDeletionResult | null = null;
+  let committedFirebaseUid: string | null = null;
 
   try {
     await db.beginTransaction();
@@ -201,53 +244,55 @@ export async function startAccountDeletion(
           [requestId, userId, scheduledFor, now],
         );
         await db.commit();
-        return { requestId, status: 'IN_REVIEW', scheduledFor: scheduledFor.toISOString() };
+        committedResult = { requestId, status: 'IN_REVIEW', scheduledFor: scheduledFor.toISOString() };
+        committedFirebaseUid = user.firebase_uid;
+      } else {
+        await db.commit();
+        committedResult = {
+          requestId: existingRequest.id,
+          status: 'IN_REVIEW',
+          scheduledFor: scheduledFor.toISOString(),
+        };
+        committedFirebaseUid = user.firebase_uid;
+      }
+    } else {
+      const requestId = existingRequest?.id ?? crypto.randomUUID();
+      if (existingRequest) {
+        await db.query(
+          `
+            UPDATE privacy_requests
+            SET status = 'IN_REVIEW',
+                scheduled_for = COALESCE(scheduled_for, ?),
+                access_revoked_at = COALESCE(access_revoked_at, ?)
+            WHERE id = ?
+          `,
+          [scheduledFor, now, requestId],
+        );
+      } else {
+        await db.query(
+          `
+            INSERT INTO privacy_requests (
+              id, requester_user_id, request_type, status, scheduled_for, access_revoked_at
+            ) VALUES (?, ?, 'DELETION', 'IN_REVIEW', ?, ?)
+          `,
+          [requestId, userId, scheduledFor, now],
+        );
       }
 
-      await db.commit();
-      return {
-        requestId: existingRequest.id,
-        status: 'IN_REVIEW',
-        scheduledFor: scheduledFor.toISOString(),
-      };
-    }
-
-    const requestId = existingRequest?.id ?? crypto.randomUUID();
-    if (existingRequest) {
       await db.query(
         `
-          UPDATE privacy_requests
-          SET status = 'IN_REVIEW',
-              scheduled_for = COALESCE(scheduled_for, ?),
-              access_revoked_at = COALESCE(access_revoked_at, ?)
+          UPDATE users
+          SET deletion_requested_at = ?,
+              token_version = COALESCE(token_version, 1) + 1
           WHERE id = ?
         `,
-        [scheduledFor, now, requestId],
+        [now, userId],
       );
-    } else {
-      await db.query(
-        `
-          INSERT INTO privacy_requests (
-            id, requester_user_id, request_type, status, scheduled_for, access_revoked_at
-          ) VALUES (?, ?, 'DELETION', 'IN_REVIEW', ?, ?)
-        `,
-        [requestId, userId, scheduledFor, now],
-      );
+      await removeTemporaryAccountCredentials(db, user);
+      await db.commit();
+      committedResult = { requestId, status: 'IN_REVIEW', scheduledFor: scheduledFor.toISOString() };
+      committedFirebaseUid = user.firebase_uid;
     }
-
-    await db.query(
-      `
-        UPDATE users
-        SET deletion_requested_at = ?,
-            token_version = COALESCE(token_version, 1) + 1
-        WHERE id = ?
-      `,
-      [now, userId],
-    );
-    await removeTemporaryAccountCredentials(db, user);
-    await db.commit();
-
-    return { requestId, status: 'IN_REVIEW', scheduledFor: scheduledFor.toISOString() };
   } catch (error) {
     await db.rollback();
     if (isApplicationError(error)) {
@@ -257,4 +302,11 @@ export async function startAccountDeletion(
   } finally {
     db.release();
   }
+
+  if (!committedResult) {
+    throw new InternalError('Não foi possível iniciar a exclusão da conta.');
+  }
+
+  await revokeFirebaseSessionsAfterDeletion(committedFirebaseUid, committedResult.requestId);
+  return committedResult;
 }

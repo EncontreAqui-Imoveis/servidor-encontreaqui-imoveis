@@ -4,6 +4,7 @@ const {
   compareMock,
   getConnectionMock,
   queryMock,
+  revokeRefreshTokensMock,
   verifyIdTokenMock,
   withTimeoutMock,
   txMock,
@@ -19,6 +20,7 @@ const {
     compareMock: vi.fn(),
     getConnectionMock: vi.fn(),
     queryMock: vi.fn(),
+    revokeRefreshTokensMock: vi.fn(),
     verifyIdTokenMock: vi.fn(),
     withTimeoutMock: vi.fn(),
     txMock: tx,
@@ -39,7 +41,10 @@ vi.mock('bcryptjs', () => ({
 vi.mock('../../src/config/firebaseAdmin', () => ({
   __esModule: true,
   default: {
-    auth: () => ({ verifyIdToken: verifyIdTokenMock }),
+    auth: () => ({
+      verifyIdToken: verifyIdTokenMock,
+      revokeRefreshTokens: revokeRefreshTokensMock,
+    }),
   },
 }));
 
@@ -87,6 +92,7 @@ describe('startAccountDeletion', () => {
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
     compareMock.mockResolvedValue(true);
+    revokeRefreshTokensMock.mockResolvedValue(undefined);
     withTimeoutMock.mockImplementation((promise: Promise<unknown>) => promise);
     arrangeTransaction();
   });
@@ -125,6 +131,10 @@ describe('startAccountDeletion', () => {
     );
     expect(txMock.commit).toHaveBeenCalledOnce();
     expect(txMock.rollback).not.toHaveBeenCalled();
+    expect(revokeRefreshTokensMock).toHaveBeenCalledWith('firebase-uid-42');
+    expect(txMock.commit.mock.invocationCallOrder[0]).toBeLessThan(
+      revokeRefreshTokensMock.mock.invocationCallOrder[0],
+    );
   });
 
   it('rejeita senha incorreta sem gravar solicitação ou revogar sessões', async () => {
@@ -205,5 +215,48 @@ describe('startAccountDeletion', () => {
     expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE users'))).toBe(false);
     expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('DELETE FROM user_device_tokens'))).toBe(false);
     expect(txMock.commit).toHaveBeenCalledOnce();
+    expect(revokeRefreshTokensMock).toHaveBeenCalledWith('firebase-uid-42');
+  });
+
+  it('não chama Firebase quando a conta não possui firebase_uid', async () => {
+    arrangeTransaction({ user: account({ firebase_uid: null }) });
+    const { startAccountDeletion } = await import('../../src/services/accountDeletionRequestService');
+
+    await expect(startAccountDeletion({
+      userId: 42,
+      currentPassword: 'SenhaAtual123',
+      now,
+    })).resolves.toMatchObject({ status: 'IN_REVIEW' });
+
+    expect(revokeRefreshTokensMock).not.toHaveBeenCalled();
+  });
+
+  it('mantém a exclusão confirmada quando a revogação Firebase falha sem logar UID ou token', async () => {
+    revokeRefreshTokensMock.mockRejectedValueOnce(new Error('Firebase unavailable'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { startAccountDeletion } = await import('../../src/services/accountDeletionRequestService');
+
+    await expect(startAccountDeletion({
+      userId: 42,
+      currentPassword: 'SenhaAtual123',
+      now,
+    })).resolves.toMatchObject({ status: 'IN_REVIEW', scheduledFor: scheduledFor.toISOString() });
+
+    expect(txMock.commit).toHaveBeenCalledOnce();
+    expect(txMock.query).toHaveBeenCalledWith(
+      expect.stringContaining('SET deletion_requested_at = ?'),
+      [now, 42],
+    );
+    expect(queryMock).toHaveBeenCalledWith(
+      'UPDATE privacy_requests SET last_error_code = ? WHERE id = ?',
+      ['FIREBASE_SESSION_REVOCATION_FAILED', expect.any(String)],
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Falha ao revogar sessao externa apos exclusao de conta.',
+      { code: 'FIREBASE_SESSION_REVOCATION_FAILED' },
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('firebase-uid-42');
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('SenhaAtual123');
+    warnSpy.mockRestore();
   });
 });

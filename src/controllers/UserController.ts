@@ -31,6 +31,7 @@ import { buildPropertyOwnerListingFilters } from '../services/propertyOwnerListi
 import { protectCpf, resolveStoredCpf } from '../security/personalDataProtection';
 import { isApplicationError, applicationErrorToHttpStatus } from '../errors/ApplicationError';
 import { resolveSocialIdentity } from '../services/socialIdentityResolutionService';
+import { assertAccountAuthenticationAllowed } from '../services/accountDeletionAccessService';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NEGOTIATION_TERMINAL_STATUSES = ['CANCELLED', 'REJECTED', 'EXPIRED', 'SOLD', 'RENTED'];
@@ -116,6 +117,7 @@ interface FirebaseLoginUserRow extends RowDataPacket {
   state?: string | null;
   cep?: string | null;
   token_version?: number | null;
+  deletion_requested_at?: Date | string | null;
   role?: string | null;
   broker_status?: string | null;
 }
@@ -1097,6 +1099,7 @@ class UserController {
           `
             SELECT u.id, u.name, u.email, u.cpf, u.cpf_ciphertext, u.firebase_uid,
                    u.phone, u.street, u.number, u.complement, u.bairro, u.city, u.state, u.cep, u.token_version,
+                   u.deletion_requested_at,
                    CASE
                      WHEN b.id IS NOT NULL AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
                      WHEN b.id IS NOT NULL THEN 'broker'
@@ -1116,9 +1119,16 @@ class UserController {
       let user: any = await resolveSocialIdentity(
         { firebaseUid: uid, email: fallbackEmail },
         {
-          findByFirebaseUid: (firebaseUid) =>
-            selectUser('WHERE u.firebase_uid = ?', [firebaseUid]),
-          findByEmail: (userEmail) => selectUser('WHERE u.email = ?', [userEmail]),
+          findByFirebaseUid: async (firebaseUid) => {
+            const existingUser = await selectUser('WHERE u.firebase_uid = ?', [firebaseUid]);
+            assertAccountAuthenticationAllowed(existingUser);
+            return existingUser;
+          },
+          findByEmail: async (userEmail) => {
+            const existingUser = await selectUser('WHERE u.email = ?', [userEmail]);
+            assertAccountAuthenticationAllowed(existingUser);
+            return existingUser;
+          },
           linkFirebaseUidIfEmpty: async (userId, firebaseUid) => {
             const result = await runUserQuery<ResultSetHeader>(
               `UPDATE users
@@ -1131,6 +1141,8 @@ class UserController {
           },
         },
       );
+
+      assertAccountAuthenticationAllowed(user);
 
       const hasAddressInput =
         street !== undefined ||

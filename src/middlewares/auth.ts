@@ -6,12 +6,17 @@ import { requireEnv } from '../config/env';
 import type { ContractAccessContext } from '../types/contractAuth';
 import { normalizeAdminPanelRole, type AdminPanelRole } from './adminCapabilities';
 import { resolveStoredCpf } from '../security/personalDataProtection';
+import {
+  ACCOUNT_DELETION_PENDING_CODE,
+  hasAccountDeletionPending,
+} from '../services/accountDeletionAccessService';
 
 interface UserFromDB extends RowDataPacket {
   id: number;
   role: string;
   broker_status?: string;
   token_version?: number | string | null;
+  deletion_requested_at?: Date | string | null;
   cpf?: string | null;
   cpf_ciphertext?: string | null;
 }
@@ -147,21 +152,27 @@ async function validateAdminAccount(
 
 async function validateUserSession(
   userId: number
-): Promise<{ exists: boolean; tokenVersion: number; cpf: string | null }> {
+): Promise<{
+  exists: boolean;
+  tokenVersion: number;
+  cpf: string | null;
+  deletionRequestedAt: Date | string | null;
+}> {
   try {
     const [userRows] = await connection.query<UserFromDB[]>(
-      'SELECT id, token_version, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, token_version, deletion_requested_at, cpf, cpf_ciphertext FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
 
     if (userRows.length === 0) {
-      return { exists: false, tokenVersion: 0, cpf: null };
+      return { exists: false, tokenVersion: 0, cpf: null, deletionRequestedAt: null };
     }
 
     return {
       exists: true,
       tokenVersion: normalizeTokenVersion(userRows[0].token_version),
       cpf: resolveStoredCpf(userRows[0].cpf_ciphertext, userRows[0].cpf, 'users:cpf'),
+      deletionRequestedAt: userRows[0].deletion_requested_at ?? null,
     };
   } catch (error: any) {
     if (error?.code !== 'ER_BAD_FIELD_ERROR') {
@@ -169,15 +180,20 @@ async function validateUserSession(
     }
 
     const [userRows] = await connection.query<RowDataPacket[]>(
-      'SELECT id FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, deletion_requested_at FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
 
     if (userRows.length === 0) {
-      return { exists: false, tokenVersion: 0, cpf: null };
+      return { exists: false, tokenVersion: 0, cpf: null, deletionRequestedAt: null };
     }
 
-    return { exists: true, tokenVersion: 1, cpf: null };
+    return {
+      exists: true,
+      tokenVersion: 1,
+      cpf: null,
+      deletionRequestedAt: userRows[0].deletion_requested_at ?? null,
+    };
   }
 }
 
@@ -271,6 +287,12 @@ export async function authMiddleware(
     if (!userSession.exists) {
       return res.status(401).json({
         error: 'Sessao invalida. Faca login novamente.',
+      });
+    }
+    if (hasAccountDeletionPending({ deletion_requested_at: userSession.deletionRequestedAt })) {
+      return res.status(403).json({
+        code: ACCOUNT_DELETION_PENDING_CODE,
+        error: 'Esta conta está em processo de exclusão.',
       });
     }
     if (normalizedTokenVersion !== userSession.tokenVersion) {

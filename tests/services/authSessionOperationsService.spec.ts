@@ -174,6 +174,29 @@ describe('authSessionOperationsService', () => {
     expect(compareMock).not.toHaveBeenCalled();
   });
 
+  it('rejects password login when the account deletion is pending', async () => {
+    mockUserSchema();
+    queryMock.mockResolvedValueOnce([[
+      {
+        id: 10,
+        name: 'Cliente Teste',
+        email: 'cliente@test.com',
+        password_hash: 'hash',
+        token_version: 2,
+        role: 'client',
+        deletion_requested_at: new Date(),
+      },
+    ]]);
+
+    const { login } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(login({ email: 'cliente@test.com', password: 'Senha123' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      details: { code: 'ACCOUNT_DELETION_PENDING', retryable: false },
+    });
+    expect(signUserTokenMock).not.toHaveBeenCalled();
+  });
+
   it('authenticates clients when the legacy broker documents table is absent', async () => {
     mockUserSchema({ hasBrokerDocumentsStatus: false });
     queryMock.mockResolvedValueOnce([
@@ -302,6 +325,45 @@ describe('authSessionOperationsService', () => {
     expect(signUserTokenMock).toHaveBeenCalledWith(42, 'broker', 3);
     expect(queryMock.mock.calls[4]?.[0]).toContain('WHERE u.firebase_uid = ?');
     expect(queryMock.mock.calls[5]?.[0]).toContain('WHERE u.email = ?');
+  });
+
+  it('rejects Google login when the resolved account deletion is pending', async () => {
+    mockUserSchema();
+    mockSocialResolution({ userByUid: socialUser({ deletion_requested_at: new Date() }) });
+
+    const { google } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(google({ idToken: 'token-google' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      details: { code: 'ACCOUNT_DELETION_PENDING', retryable: false },
+    });
+    expect(signUserTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects Apple/social login when the resolved account deletion is pending', async () => {
+    verifyIdTokenMock.mockResolvedValueOnce({
+      uid: 'apple-uid-1',
+      email: 'apple.user@privaterelay.appleid.com',
+      name: 'Apple User',
+      email_verified: true,
+      firebase: { sign_in_provider: 'apple.com' },
+    });
+    mockUserSchema();
+    mockSocialResolution({
+      userByUid: socialUser({
+        firebase_uid: 'apple-uid-1',
+        email: 'apple.user@privaterelay.appleid.com',
+        deletion_requested_at: new Date(),
+      }),
+    });
+
+    const { social } = await import('../../src/services/authSessionOperationsService');
+
+    await expect(social({ idToken: 'token-apple' })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      details: { code: 'ACCOUNT_DELETION_PENDING', retryable: false },
+    });
+    expect(signUserTokenMock).not.toHaveBeenCalled();
   });
 
   it('links an existing email account that has no Firebase UID', async () => {

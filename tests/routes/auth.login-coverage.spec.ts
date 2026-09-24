@@ -1,7 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { InvalidInputError, UnauthorizedError } from '../../src/errors/ApplicationError';
+import { ForbiddenError, InvalidInputError, UnauthorizedError } from '../../src/errors/ApplicationError';
 
 const {
   hashMock,
@@ -242,6 +242,27 @@ describe('POST /auth e /users login coverage', () => {
 
       throw new UnauthorizedError('Credenciais inválidas.');
     });
+  });
+
+  it('retorna código estável para conta em processo de exclusão no login por senha', async () => {
+    loginSessionMock.mockRejectedValueOnce(
+      new ForbiddenError('Esta conta está em processo de exclusão.', {
+        code: 'ACCOUNT_DELETION_PENDING',
+        retryable: false,
+      }),
+    );
+
+    const response = await request(app).post('/auth/login').send({
+      email: 'teste@dominio.com',
+      password: 'Senha123',
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      code: 'ACCOUNT_DELETION_PENDING',
+      error: 'Esta conta está em processo de exclusão.',
+    });
+    expect(signUserTokenMock).not.toHaveBeenCalled();
   });
 
   it('rejects /auth/login with missing password', async () => {

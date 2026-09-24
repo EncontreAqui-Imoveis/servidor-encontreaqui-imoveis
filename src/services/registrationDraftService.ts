@@ -50,6 +50,7 @@ import {
   verifyDraftSocialIdentity,
 } from './registrationDraftIdentityService';
 import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
+import { assertAccountAuthenticationAllowed } from './accountDeletionAccessService';
 
 export type DraftFinalizeAction = 'send_later' | 'submit_documents';
 
@@ -671,10 +672,13 @@ export async function createRegistrationDraft(input: DraftIdentityInput & {
   }
 
   const [existingUsers] = await authDb.query<RowDataPacket[]>(
-    'SELECT id FROM users WHERE email = ? LIMIT 1',
-    [email],
+    identity
+      ? 'SELECT id, deletion_requested_at FROM users WHERE email = ? OR firebase_uid = ? LIMIT 1'
+      : 'SELECT id, deletion_requested_at FROM users WHERE email = ? LIMIT 1',
+    identity ? [email, identity.firebaseUid] : [email],
   );
   if (existingUsers.length > 0) {
+    assertAccountAuthenticationAllowed(existingUsers[0]);
     throw draftError('EMAIL_ALREADY_EXISTS', 'Este email ja esta em uso.');
   }
   try {
@@ -1266,16 +1270,28 @@ export async function finalizeRegistrationDraft(
       // A registration never updates an existing user or silently merges accounts.
       const existingUser = await resolveSocialIdentity(identity, {
         findByFirebaseUid: async uid => {
-          const [rows] = await db.query<(RowDataPacket & { id: number; firebase_uid: string | null })[]>(
-            'SELECT id, firebase_uid FROM users WHERE firebase_uid = ? LIMIT 1 FOR UPDATE', [uid],
+          const [rows] = await db.query<(RowDataPacket & {
+            id: number;
+            firebase_uid: string | null;
+            deletion_requested_at?: Date | string | null;
+          })[]>(
+            'SELECT id, firebase_uid, deletion_requested_at FROM users WHERE firebase_uid = ? LIMIT 1 FOR UPDATE', [uid],
           );
-          return rows[0] ?? null;
+          const user = rows[0] ?? null;
+          assertAccountAuthenticationAllowed(user);
+          return user;
         },
         findByEmail: async email => {
-          const [rows] = await db.query<(RowDataPacket & { id: number; firebase_uid: string | null })[]>(
-            'SELECT id, firebase_uid FROM users WHERE email = ? LIMIT 1 FOR UPDATE', [email],
+          const [rows] = await db.query<(RowDataPacket & {
+            id: number;
+            firebase_uid: string | null;
+            deletion_requested_at?: Date | string | null;
+          })[]>(
+            'SELECT id, firebase_uid, deletion_requested_at FROM users WHERE email = ? LIMIT 1 FOR UPDATE', [email],
           );
-          return rows[0] ?? null;
+          const user = rows[0] ?? null;
+          assertAccountAuthenticationAllowed(user);
+          return user;
         },
       });
       if (existingUser) {
@@ -1539,6 +1555,13 @@ export async function upsertFirebaseContextToDraft(
     await db.beginTransaction();
     const lockedDraft = await getDraftByDraftIdAndTokenForUpdate(draftId, draftTokenHash, db);
     if (!lockedDraft) throw draftError('DRAFT_NOT_OPEN', 'Rascunho nao esta aberto.');
+    const [existingUsers] = await db.query<RowDataPacket[]>(
+      'SELECT id, deletion_requested_at FROM users WHERE firebase_uid = ? OR email = ? LIMIT 1 FOR UPDATE',
+      [identity.firebaseUid, identity.email],
+    );
+    if (existingUsers.length > 0) {
+      assertAccountAuthenticationAllowed(existingUsers[0]);
+    }
     assertDraftIdentityMatches({
       email: lockedDraft.email,
       firebaseUid: lockedDraft.firebase_uid,

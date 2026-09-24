@@ -44,6 +44,10 @@ import {
 } from '../services/userAccountNameService';
 import { hashNewPassword, validateNewPassword } from '../security/passwordPolicy';
 import { protectCpf } from '../security/personalDataProtection';
+import {
+  ACCOUNT_DELETION_PENDING_CODE,
+  assertAccountAuthenticationAllowed,
+} from '../services/accountDeletionAccessService';
 
 function appErrorDetails(error: unknown): Record<string, unknown> {
   if (!isApplicationError(error)) {
@@ -329,17 +333,18 @@ class AuthController {
       let existingUserRows: RowDataPacket[];
       if (firebaseUid) {
         [existingUserRows] = await authDb.query<RowDataPacket[]>(
-          'SELECT id FROM users WHERE email = ? OR firebase_uid = ? LIMIT 1',
+          'SELECT id, deletion_requested_at FROM users WHERE email = ? OR firebase_uid = ? LIMIT 1',
           [email, firebaseUid],
         );
       } else {
         [existingUserRows] = await authDb.query<RowDataPacket[]>(
-          'SELECT id FROM users WHERE email = ? LIMIT 1',
+          'SELECT id, deletion_requested_at FROM users WHERE email = ? LIMIT 1',
           [email],
         );
       }
 
       if (existingUserRows.length > 0) {
+        assertAccountAuthenticationAllowed(existingUserRows[0]);
         return res.status(409).json({ error: 'Este email ja esta em uso.' });
       }
 
@@ -463,6 +468,12 @@ class AuthController {
         requiresDocuments: normalizedProfile === 'broker',
       });
     } catch (error: any) {
+      if (isApplicationError(error) && error.details?.code === ACCOUNT_DELETION_PENDING_CODE) {
+        return res.status(applicationErrorToHttpStatus(error)).json({
+          code: ACCOUNT_DELETION_PENDING_CODE,
+          error: error.message,
+        });
+      }
       if (isDuplicateAccountNameError(error)) {
         return res.status(400).json({
           code: error.code,
@@ -485,6 +496,12 @@ class AuthController {
       });
       return res.status(200).json(result);
     } catch (error) {
+      if (isApplicationError(error) && error.details?.code === ACCOUNT_DELETION_PENDING_CODE) {
+        return res.status(applicationErrorToHttpStatus(error)).json({
+          code: ACCOUNT_DELETION_PENDING_CODE,
+          error: error.message,
+        });
+      }
       return respondPlainError(res, error);
     }
   }

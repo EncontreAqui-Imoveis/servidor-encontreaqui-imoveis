@@ -117,6 +117,24 @@ describe('Compatibilidade legado de auth/users durante mudança de draft', () =>
     expect(queryMock.mock.calls[1]?.[0]).toContain('WHERE u.email = ?');
   });
 
+  it('rejeita Firebase legado quando a conta está em processo de exclusão', async () => {
+    verifyIdTokenMock.mockResolvedValue({
+      uid: 'legacy-uid-firebase',
+      email: 'legacy-user@dominio.com',
+      name: 'Legacy Usuário',
+    });
+    mockFirebaseIdentityResolution({
+      userByUid: firebaseUser({ deletion_requested_at: new Date() }),
+    });
+
+    const response = await request(app).post('/users/auth/firebase').send({
+      idToken: 'idTokenLegacyFirebase',
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ code: 'ACCOUNT_DELETION_PENDING' });
+  });
+
   it('vincula uma conta existente por e-mail que ainda não possui Firebase UID', async () => {
     verifyIdTokenMock.mockResolvedValue({
       uid: 'legacy-uid-firebase',

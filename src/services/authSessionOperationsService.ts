@@ -21,6 +21,7 @@ import {
 } from './authSessionService';
 import { resolveStoredCpf } from '../security/personalDataProtection';
 import { resolveSocialIdentity } from './socialIdentityResolutionService';
+import { assertAccountAuthenticationAllowed } from './accountDeletionAccessService';
 
 type AuthUserRow = RowDataPacket & {
   id: number;
@@ -46,6 +47,7 @@ type AuthUserRow = RowDataPacket & {
   creci?: string | null;
   broker_documents_status?: string | null;
   firebase_uid?: string | null;
+  deletion_requested_at?: Date | string | null;
 };
 
 export interface LoginInput {
@@ -237,6 +239,7 @@ async function buildUserSelectQuery(): Promise<UserSelectQuery> {
     'u.state',
     'u.cep',
     'u.token_version',
+    'u.deletion_requested_at',
     hasFirebaseUidColumn ? 'u.firebase_uid' : 'NULL AS firebase_uid',
     `CASE
        WHEN b.id IS NOT NULL AND b.status IN ('approved', 'pending_verification') AND COALESCE(b.profile_type, 'BROKER') = 'AUXILIARY_ADMINISTRATIVE' THEN 'auxiliary_administrative'
@@ -324,6 +327,8 @@ export async function login(input: LoginInput): Promise<LoginResult> {
       throw new UnauthorizedError('Credenciais inválidas.');
     }
 
+    assertAccountAuthenticationAllowed(user);
+
     const profile = mapProfile(user);
     const brokerDocsStatus = String(user.broker_documents_status ?? '').trim().toLowerCase();
     const requiresDocuments =
@@ -338,7 +343,7 @@ export async function login(input: LoginInput): Promise<LoginResult> {
       requiresDocuments,
     };
   } catch (error) {
-    if (error instanceof UnauthorizedError || error instanceof InvalidInputError) {
+    if (isApplicationError(error)) {
       throw error;
     }
     console.error('Erro no login:', error);
@@ -425,11 +430,15 @@ async function authenticateSocial(
         findByFirebaseUid: async (firebaseUid) => {
           if (!hasFirebaseUidColumn) return null;
           const rows = await selectUser('WHERE u.firebase_uid = ?', [firebaseUid]);
-          return rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+          const user = rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+          assertAccountAuthenticationAllowed(user);
+          return user;
         },
         findByEmail: async (userEmail) => {
           const rows = await selectUser('WHERE u.email = ?', [userEmail]);
-          return rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+          const user = rows.length > 0 ? hydrateProtectedCpf(rows[0]) : null;
+          assertAccountAuthenticationAllowed(user);
+          return user;
         },
         linkFirebaseUidIfEmpty: hasFirebaseUidColumn
           ? async (userId, firebaseUid) => {
@@ -463,6 +472,8 @@ async function authenticateSocial(
         requestedProfile,
       };
     }
+
+    assertAccountAuthenticationAllowed(row);
 
     stage = 'profile_update';
     if (decoded.email_verified === true && row.email_verified_at == null) {

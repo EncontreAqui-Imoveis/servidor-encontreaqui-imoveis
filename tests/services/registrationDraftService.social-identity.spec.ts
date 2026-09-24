@@ -99,6 +99,18 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     }));
   });
 
+  it('não cria rascunho para identidade vinculada a uma conta em exclusão', async () => {
+    mocks.query.mockResolvedValueOnce([[
+      { id: 10, deletion_requested_at: new Date() },
+    ]]);
+
+    await expect(createRegistrationDraft(input)).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      details: { code: 'ACCOUNT_DELETION_PENDING', retryable: false },
+    });
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
   it('aceita token Apple verificado e e-mail private relay ao criar rascunho', async () => {
     mocks.verify.mockResolvedValue({ uid: appleIdentity.firebaseUid, email: appleIdentity.email,
       email_verified: true, firebase: { sign_in_provider: 'apple.com' } });
@@ -173,6 +185,23 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining('WHERE firebase_uid = ? LIMIT 1 FOR UPDATE'), [identity.firebaseUid]);
     expect(mocks.query).toHaveBeenCalledWith(expect.stringContaining('WHERE email = ? LIMIT 1 FOR UPDATE'), [identity.email]);
     expect(mocks.query.mock.calls.some(([sql]) => /INSERT INTO users|UPDATE users|DELETE FROM users/.test(sql))).toBe(false);
+    expect(mocks.rollback).toHaveBeenCalled();
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
+  it('não finaliza rascunho antigo vinculado a uma conta em exclusão', async () => {
+    arrangeFinalize(draft(), {
+      id: 10,
+      firebase_uid: identity.firebaseUid,
+      deletion_requested_at: new Date(),
+    });
+
+    await expect(finalizeRegistrationDraft('draft-social', 'draft-token', 'submit_documents', legal))
+      .rejects.toMatchObject({
+        code: 'FORBIDDEN',
+        details: { code: 'ACCOUNT_DELETION_PENDING', retryable: false },
+      });
+    expect(mocks.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO users'))).toBe(false);
     expect(mocks.rollback).toHaveBeenCalled();
     expect(mocks.commit).not.toHaveBeenCalled();
   });
@@ -278,6 +307,27 @@ describe('identidade comprovada no cadastro social por rascunho', () => {
     }), expect.objectContaining({ query: mocks.query }));
     expect(mocks.update.mock.calls[0][2]).not.toHaveProperty('street');
     expect(mocks.query.mock.calls.some(([sql]) => sql.includes('DELETE'))).toBe(false);
+  });
+
+  it('não retoma rascunho com identidade vinculada a uma conta em exclusão', async () => {
+    const row = draft();
+    mocks.get.mockResolvedValue(row);
+    mocks.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM registration_drafts')) return [[{ ...row }]];
+      if (sql.includes('SELECT id, deletion_requested_at FROM users')) {
+        return [[{ id: 10, deletion_requested_at: new Date() }]];
+      }
+      return [[]];
+    });
+
+    await expect(upsertFirebaseContextToDraft('draft-social', 'draft-token', {
+      idToken: 'valid-token',
+    })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+      details: { code: 'ACCOUNT_DELETION_PENDING', retryable: false },
+    });
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.rollback).toHaveBeenCalled();
   });
 
   it('atualiza e retoma rascunho Apple somente com token Firebase válido', async () => {

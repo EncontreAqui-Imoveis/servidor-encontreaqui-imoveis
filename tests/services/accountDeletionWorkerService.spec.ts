@@ -35,10 +35,27 @@ describe('accountDeletionWorkerService', () => {
 
   it('não inicia quando a flag está desligada', () => {
     delete process.env.ACCOUNT_DELETION_WORKER_ENABLED;
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
     expect(isAccountDeletionWorkerEnabled()).toBe(false);
     expect(setupAccountDeletionWorker()).toBeNull();
     expect(processOneDueAccountDeletionRequestMock).not.toHaveBeenCalled();
+    expect(infoSpy).not.toHaveBeenCalled();
+    infoSpy.mockRestore();
+  });
+
+  it('registra uma única inicialização quando habilitado', () => {
+    process.env.ACCOUNT_DELETION_WORKER_ENABLED = 'true';
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+
+    stopWorker = setupAccountDeletionWorker();
+    const duplicateStop = setupAccountDeletionWorker();
+
+    expect(stopWorker).toBeTypeOf('function');
+    expect(duplicateStop).toBeTypeOf('function');
+    expect(infoSpy).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith('Worker de exclusão de contas inicializado.');
+    infoSpy.mockRestore();
   });
 
   it('executa imediatamente quando a flag está ligada', async () => {

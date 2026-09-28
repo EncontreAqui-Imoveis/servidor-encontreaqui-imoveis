@@ -46,6 +46,7 @@ export function setupAccountDeletionWorker(
 
   tick();
   accountDeletionWorkerTimer = setInterval(tick, intervalMs);
+  console.info('Worker de exclusão de contas inicializado.');
   return () => {
     if (accountDeletionWorkerTimer) {
       clearInterval(accountDeletionWorkerTimer);

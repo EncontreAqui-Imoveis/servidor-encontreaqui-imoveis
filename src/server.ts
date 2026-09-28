@@ -12,6 +12,7 @@ import { setupProcessHandlers } from './serverLifecycle';
 import { redactValue } from './utils/logSanitizer';
 import { setupPdfWorker } from './modules/negotiations/infra/PdfWorker';
 import { setupNegotiationDocumentDeletionWorker } from './services/negotiationDocumentDeletionService';
+import { setupAccountDeletionWorker } from './services/accountDeletionWorkerService';
 import { discardExpiredDrafts } from './services/registrationDraftRepository';
 import { discardExpiredPhoneOtps } from './services/phoneOtpService';
 import { ensureBrazilianCityCatalogSeeded } from './services/locationCatalogSeedService';
@@ -104,6 +105,7 @@ async function startServer() {
 
   const draftCleanupTimer = setupRegistrationDraftCleanupWorker();
   const phoneOtpCleanupTimer = setupPhoneOtpCleanupWorker();
+  const stopAccountDeletionWorker = setupAccountDeletionWorker();
   const stopPrivacyRetentionWorker = setupPrivacyRetentionWorker();
   const stopSecurityAlertWorker = setupSecurityAlertWorker();
 
@@ -121,6 +123,7 @@ async function startServer() {
   server.on('close', () => {
     clearInterval(draftCleanupTimer);
     clearInterval(phoneOtpCleanupTimer);
+    stopAccountDeletionWorker?.();
     stopPrivacyRetentionWorker?.();
     stopSecurityAlertWorker?.();
     stopSreStatsService();

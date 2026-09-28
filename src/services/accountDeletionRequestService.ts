@@ -13,7 +13,7 @@ import {
 import { authDb } from './authPersistenceService';
 import { withTimeout } from './authSessionService';
 
-const ACCOUNT_DELETION_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
+const ACCOUNT_DELETION_DELAY_MS = 29 * 24 * 60 * 60 * 1000;
 const MAX_REAUTH_AGE_MS = 5 * 60 * 1000;
 const FIREBASE_SESSION_REVOCATION_FAILED = 'FIREBASE_SESSION_REVOCATION_FAILED';
 

@@ -53,7 +53,7 @@ vi.mock('../../src/services/authSessionService', () => ({
 }));
 
 const now = new Date('2026-09-23T12:00:00.000Z');
-const scheduledFor = new Date('2026-10-23T12:00:00.000Z');
+const scheduledFor = new Date('2026-10-22T12:00:00.000Z');
 
 function account(overrides: Record<string, unknown> = {}) {
   return {
@@ -97,7 +97,7 @@ describe('startAccountDeletion', () => {
     arrangeTransaction();
   });
 
-  it('confirma senha, agenda em 30 dias, revoga acesso local e remove credenciais temporárias', async () => {
+  it('confirma senha, agenda em 29 dias, revoga acesso local e remove credenciais temporárias', async () => {
     const { startAccountDeletion } = await import('../../src/services/accountDeletionRequestService');
 
     const result = await startAccountDeletion({

@@ -39,6 +39,7 @@ import {
   resolveAdvertiserIdFromProperty,
   resolveNegotiationInitiatorSide,
 } from '../utils/negotiationActorResolution';
+import { hasAccountDeletionPending } from './accountDeletionAccessService';
 
 interface NegotiationRow extends RowDataPacket {
   id: string;
@@ -55,6 +56,8 @@ interface PropertyRow extends RowDataPacket {
   id: number;
   broker_id: number | null;
   owner_id: number | null;
+  owner_deletion_requested_at?: Date | string | null;
+  broker_deletion_requested_at?: Date | string | null;
   status: string | null;
   address: string | null;
   numero: string | null;
@@ -442,23 +445,27 @@ export async function generateProposalFromProperty(
     const [propertyRows] = await tx.query<PropertyRow[]>(
       `
         SELECT
-          id,
-          broker_id,
-          owner_id,
-          status,
-          address,
-          numero,
-          quadra,
-          lote,
-          bairro,
-          city,
-          state,
-          purpose,
-          price,
-          price_sale,
-          price_rent
-        FROM properties
-        WHERE id = ?
+          p.id,
+          p.broker_id,
+          p.owner_id,
+          owner_user.deletion_requested_at AS owner_deletion_requested_at,
+          broker_user.deletion_requested_at AS broker_deletion_requested_at,
+          p.status,
+          p.address,
+          p.numero,
+          p.quadra,
+          p.lote,
+          p.bairro,
+          p.city,
+          p.state,
+          p.purpose,
+          p.price,
+          p.price_sale,
+          p.price_rent
+        FROM properties p
+        LEFT JOIN users owner_user ON owner_user.id = p.owner_id
+        LEFT JOIN users broker_user ON broker_user.id = p.broker_id
+        WHERE p.id = ?
         LIMIT 1
         FOR UPDATE
       `,
@@ -469,6 +476,20 @@ export async function generateProposalFromProperty(
     if (!property) {
       await tx.rollback();
       return res.status(404).json({ error: 'Imovel nao encontrado.' });
+    }
+    if (
+      hasAccountDeletionPending({ deletion_requested_at: property.owner_deletion_requested_at })
+      || hasAccountDeletionPending({ deletion_requested_at: property.broker_deletion_requested_at })
+    ) {
+      await tx.rollback();
+      return sendProposalError(
+        req,
+        res,
+        403,
+        'ACCOUNT_DELETION_PENDING',
+        'Não é possível criar proposta para um imóvel com conta em processo de exclusão.',
+        false,
+      );
     }
     const userRole = String(req.userRole ?? '').trim().toLowerCase();
     const isClientUser = userRole === 'client';

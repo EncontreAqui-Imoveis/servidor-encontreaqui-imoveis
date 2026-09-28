@@ -141,6 +141,126 @@ describe('POST /negotiations/proposal', () => {
     expect(txMock.commit).toHaveBeenCalledTimes(1);
   });
 
+  it('does not create a proposal when the property owner has account deletion pending or mutate existing negotiations', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[
+        {
+          id: 101,
+          broker_id: null,
+          owner_id: 40004,
+          owner_deletion_requested_at: new Date('2026-09-27T12:00:00.000Z'),
+          broker_deletion_requested_at: null,
+          status: 'approved',
+          address: 'Av. Paulista, 1000',
+          city: 'Sao Paulo',
+          state: 'SP',
+          price: 500000,
+          price_sale: 500000,
+        },
+      ]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-owner-deletion-pending',
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
+      validadeDias: 10,
+      pagamento: { dinheiro: 100000, permuta: 0, financiamento: 400000, outros: 0 },
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('ACCOUNT_DELETION_PENDING');
+    expect(txMock.execute.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO negotiations'))).toBe(false);
+    expect(txMock.execute.mock.calls.some(([sql]) => String(sql).includes('UPDATE negotiations'))).toBe(false);
+    expect(txMock.execute.mock.calls.some(([sql]) => String(sql).includes('DELETE FROM negotiations'))).toBe(false);
+    expect(txMock.rollback).toHaveBeenCalledTimes(1);
+    expect(generateProposalMock).not.toHaveBeenCalled();
+  });
+
+  it('does not create a proposal when the responsible broker has account deletion pending', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[
+        {
+          id: 101,
+          broker_id: 30004,
+          owner_id: 40004,
+          owner_deletion_requested_at: null,
+          broker_deletion_requested_at: new Date('2026-09-27T12:00:00.000Z'),
+          status: 'approved',
+          address: 'Av. Paulista, 1000',
+          city: 'Sao Paulo',
+          state: 'SP',
+          price: 500000,
+          price_sale: 500000,
+        },
+      ]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-broker-deletion-pending',
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
+      validadeDias: 10,
+      pagamento: { dinheiro: 100000, permuta: 0, financiamento: 400000, outros: 0 },
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('ACCOUNT_DELETION_PENDING');
+    expect(txMock.execute.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO negotiations'))).toBe(false);
+    expect(txMock.execute.mock.calls.some(([sql]) => String(sql).includes('UPDATE negotiations'))).toBe(false);
+    expect(txMock.rollback).toHaveBeenCalledTimes(1);
+    expect(generateProposalMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the existing proposal behavior for a hidden property whose accounts are active', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[
+        {
+          id: 101,
+          broker_id: 30003,
+          owner_id: 40004,
+          owner_deletion_requested_at: null,
+          broker_deletion_requested_at: null,
+          visibility: 'HIDDEN',
+          status: 'approved',
+          address: 'Av. Paulista, 1000',
+          numero: '1000',
+          quadra: 'Q1',
+          lote: 'L2',
+          bairro: 'Bela Vista',
+          city: 'Sao Paulo',
+          state: 'SP',
+          price: 500000,
+          price_sale: 500000,
+          price_rent: null,
+        },
+      ]])
+      .mockResolvedValueOnce([[{ name: 'Broker Teste' }]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([[]]);
+
+    const response = await request(app).post('/negotiations/proposal').send({
+      idempotency_key: 'proposal-hidden-active-accounts',
+      propertyId: 101,
+      clientName: 'Joao da Silva',
+      clientCpf: '529.982.247-25',
+      buyerEmail: 'joao.silva@example.test',
+      validadeDias: 10,
+      pagamento: { dinheiro: 100000, permuta: 0, financiamento: 400000, outros: 0 },
+    });
+
+    expect(response.status).toBe(201);
+    expect(txMock.execute).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO negotiations'),
+      expect.any(Array),
+    );
+  });
+
   it('rejects proposal when payment math does not match property value', async () => {
     txMock.query
       .mockResolvedValueOnce([[]])

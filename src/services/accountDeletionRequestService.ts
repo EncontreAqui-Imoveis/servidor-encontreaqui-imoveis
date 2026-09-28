@@ -143,6 +143,22 @@ async function removeTemporaryAccountCredentials(
   );
 }
 
+async function unpublishAccountProperties(
+  db: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  userId: number,
+): Promise<void> {
+  await db.query(
+    `
+      UPDATE properties
+      SET visibility = 'HIDDEN',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE (owner_id = ? OR broker_id = ?)
+        AND COALESCE(visibility, 'PUBLIC') = 'PUBLIC'
+    `,
+    [userId, userId],
+  );
+}
+
 async function revokeFirebaseSessionsAfterDeletion(
   firebaseUid: string | null,
   requestId: string,
@@ -288,6 +304,7 @@ export async function startAccountDeletion(
         `,
         [now, userId],
       );
+      await unpublishAccountProperties(db, userId);
       await removeTemporaryAccountCredentials(db, user);
       await db.commit();
       committedResult = { requestId, status: 'IN_REVIEW', scheduledFor: scheduledFor.toISOString() };

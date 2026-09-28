@@ -116,6 +116,15 @@ describe('startAccountDeletion', () => {
       expect.stringContaining('SET deletion_requested_at = ?'),
       [now, 42],
     );
+    expect(txMock.query).toHaveBeenCalledWith(
+      expect.stringContaining("UPDATE properties\n      SET visibility = 'HIDDEN'"),
+      [42, 42],
+    );
+    const unpublishQuery = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes("UPDATE properties\n      SET visibility = 'HIDDEN'"),
+    )?.[0] as string;
+    expect(unpublishQuery).toContain('(owner_id = ? OR broker_id = ?)');
+    expect(unpublishQuery).toContain("COALESCE(visibility, 'PUBLIC') = 'PUBLIC'");
     expect(txMock.query.mock.calls.some(([sql]) =>
       String(sql).includes('token_version = COALESCE(token_version, 1) + 1'),
     )).toBe(true);
@@ -213,6 +222,7 @@ describe('startAccountDeletion', () => {
       scheduledFor: scheduledFor.toISOString(),
     });
     expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE users'))).toBe(false);
+    expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE properties'))).toBe(false);
     expect(txMock.query.mock.calls.some(([sql]) => String(sql).includes('DELETE FROM user_device_tokens'))).toBe(false);
     expect(txMock.commit).toHaveBeenCalledOnce();
     expect(revokeRefreshTokensMock).toHaveBeenCalledWith('firebase-uid-42');

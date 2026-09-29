@@ -47,9 +47,7 @@ function normalizeOutgoingMessage(input: string): string {
     .normalize('NFC')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!compact) return '';
-  const hasTerminalPunctuation = /[.!?…]$/.test(compact);
-  return hasTerminalPunctuation ? compact : `${compact}.`;
+  return compact;
 }
 
 export async function notifyUsers({

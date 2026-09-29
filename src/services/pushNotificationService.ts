@@ -110,7 +110,7 @@ export async function sendPushNotifications(
       const response = await admin.messaging().sendEachForMulticast({
         tokens: batch,
         notification: {
-          title: (payload.title ?? '').trim() || 'Encontre Aqui',
+          title: (payload.title ?? '').trim() || 'Encontre Aqui Imóveis',
           body: payload.message,
         },
         android: {

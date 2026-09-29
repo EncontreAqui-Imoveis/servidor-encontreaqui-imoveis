@@ -28,7 +28,7 @@ describe('pushNotificationService branding', () => {
     vi.clearAllMocks();
   });
 
-  it('uses Encontre Aqui as push notification title', async () => {
+  it('uses Encontre Aqui Imóveis as push notification title', async () => {
     queryMock.mockResolvedValueOnce([
       [
         { user_id: 10, fcm_token: 'token-1' },
@@ -62,7 +62,7 @@ describe('pushNotificationService branding', () => {
     expect(sendEachForMulticastMock).toHaveBeenCalledWith(
       expect.objectContaining({
         notification: expect.objectContaining({
-          title: 'Encontre Aqui',
+          title: 'Encontre Aqui Imóveis',
           body: 'Mensagem teste',
         }),
         data: {
@@ -79,4 +79,3 @@ describe('pushNotificationService branding', () => {
     );
   });
 });
-

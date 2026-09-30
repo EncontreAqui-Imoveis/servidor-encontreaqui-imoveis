@@ -46,6 +46,7 @@ describe('contractCreationService', () => {
       initiator_side: 'seller',
       legal_buyer_user_id: null,
       client_name: 'Cliente Proponente',
+      payment_details: JSON.stringify({ details: {} }),
       buyer_legal_cpf: '12345678909',
       buyer_legal_email: 'comprador@example.com',
       property_title: 'Casa Centro',
@@ -139,7 +140,44 @@ describe('contractCreationService', () => {
       expect.any(String),
       expect.any(String),
     ]);
+    const saleBuyerInfo = JSON.parse(String(txMock.query.mock.calls[3]?.[1]?.[4] ?? '{}')) as Record<
+      string,
+      unknown
+    >;
+    expect(saleBuyerInfo).not.toHaveProperty('garantia_locacao');
     expect(result.handshakePin).toMatch(/^\d{4}$/);
+  });
+
+  it('persiste o CPF jurídico da proposta protegido e a garantia de aluguel no contrato', async () => {
+    txMock.query
+      .mockResolvedValueOnce([[
+        negotiationRow({
+          deal_type: 'rent',
+          payment_details: JSON.stringify({
+            details: {
+              clientCpf: '529.982.247-25',
+              rentalTerms: { guaranteeType: 'fiador' },
+            },
+          }),
+        }),
+      ]])
+      .mockResolvedValueOnce([[]])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([{ affectedRows: 1 }])
+      .mockResolvedValueOnce([[{ id: 'contract-rent-1' }]]);
+
+    await createContractFromApprovedNegotiation('neg-1', null);
+
+    const buyerInfo = JSON.parse(String(txMock.query.mock.calls[3]?.[1]?.[4] ?? '{}')) as Record<
+      string,
+      unknown
+    >;
+    expect(buyerInfo).toMatchObject({
+      cpf: null,
+      garantia_locacao: 'fiador',
+    });
+    expect(buyerInfo.cpf_ciphertext).toEqual(expect.any(String));
   });
 
   it('returns existing contract when already created', async () => {

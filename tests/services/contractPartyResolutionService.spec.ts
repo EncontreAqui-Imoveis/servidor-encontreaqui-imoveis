@@ -54,6 +54,40 @@ describe('contractPartyResolutionService', () => {
     expect(result.metadata.partyResolution.buyer.nameSource).toBe('proposal_legal_data');
   });
 
+  it('prioriza o CPF jurídico válido informado na proposta sobre o CPF do perfil', () => {
+    const result = resolveContractParties({
+      ...sellerInitiatedInput,
+      negotiation: {
+        ...sellerInitiatedInput.negotiation,
+        buyerCpf: '529.982.247-25',
+      },
+    });
+
+    expect(result.buyerInfo.cpf).toBe('52998224725');
+    expect(result.metadata.partyResolution.buyer.cpfSource).toBe('proposal_legal_data');
+  });
+
+  it('usa o CPF válido do perfil somente como fallback quando a proposta não o informa', () => {
+    const result = resolveContractParties({
+      ...sellerInitiatedInput,
+      negotiation: { ...sellerInitiatedInput.negotiation, buyerCpf: null },
+    });
+
+    expect(result.buyerInfo.cpf).toBe('12345678909');
+    expect(result.metadata.partyResolution.buyer.cpfSource).toBe('verified_email_profile');
+  });
+
+  it('não persiste CPF jurídico inválido quando não há fallback válido', () => {
+    const result = resolveContractParties({
+      ...sellerInitiatedInput,
+      negotiation: { ...sellerInitiatedInput.negotiation, buyerCpf: '111.111.111-11' },
+      relatedUsers: { ...sellerInitiatedInput.relatedUsers, legalBuyer: null },
+    });
+
+    expect(result.buyerInfo.cpf).toBeNull();
+    expect(result.metadata.partyResolution.buyer.cpfSource).toBe('missing');
+  });
+
   it('mantém somente dados textuais quando o e-mail não resolve uma conta verificada', () => {
     const result = resolveContractParties({
       ...sellerInitiatedInput,

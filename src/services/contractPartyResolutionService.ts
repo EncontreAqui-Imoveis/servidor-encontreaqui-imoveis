@@ -1,3 +1,5 @@
+import { isValidCpf } from '../utils/cpfValidator';
+
 export type ContractInitiatorSide = 'buyer' | 'seller' | null;
 
 export type ContractPartyProfile = {
@@ -58,6 +60,16 @@ function text(value: unknown): string | null {
   return normalized || null;
 }
 
+/**
+ * Contract identity data is persisted only after its legal CPF has been
+ * normalized and validated. Keeping this here makes the proposal and profile
+ * sources follow the same rule before a contract is created.
+ */
+export function normalizeValidCpf(value: unknown): string | null {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length === 11 && isValidCpf(digits) ? digits : null;
+}
+
 function profileInfo(profile: ContractPartyProfile | null): Record<string, string | null> {
   return {
     nome: text(profile?.name),
@@ -83,12 +95,16 @@ export function resolveContractParties(
   if (!sellerInitiated) {
     const buyerFromProfile = profileInfo(input.relatedUsers.proposer);
     const buyerName = text(input.negotiation.buyerName) ?? buyerFromProfile.nome;
+    const proposalBuyerCpf = normalizeValidCpf(input.negotiation.buyerCpf);
+    const profileBuyerCpf = normalizeValidCpf(buyerFromProfile.cpf);
+    const buyerCpf = proposalBuyerCpf ?? profileBuyerCpf;
     return {
       sellerInfo,
       buyerInfo: {
         ...buyerFromProfile,
         // The proposal defines the legal buyer; the profile only identifies access.
         nome: buyerName,
+        cpf: buyerCpf,
       },
       legalBuyerUserId: input.negotiation.legalBuyerUserId,
       metadata: {
@@ -105,7 +121,11 @@ export function resolveContractParties(
               : buyerFromProfile.nome
                 ? 'proposer_profile'
                 : 'missing',
-            cpfSource: buyerFromProfile.cpf ? 'proposer_profile' : 'missing',
+            cpfSource: proposalBuyerCpf
+              ? 'proposal_legal_data'
+              : profileBuyerCpf
+                ? 'proposer_profile'
+                : 'missing',
             profileLinkedBy: null,
           },
           identityCapabilities: {
@@ -114,7 +134,7 @@ export function resolveContractParties(
               canEditName: text(input.negotiation.buyerName)
                 ? true
                 : !buyerFromProfile.nome,
-              canEditCpf: !buyerFromProfile.cpf,
+              canEditCpf: !profileBuyerCpf,
             },
           },
         },
@@ -124,10 +144,12 @@ export function resolveContractParties(
 
   const buyerFromProfile = profileInfo(input.relatedUsers.legalBuyer);
   const linked = input.relatedUsers.legalBuyer != null;
+  const proposalBuyerCpf = normalizeValidCpf(input.negotiation.buyerCpf);
+  const profileBuyerCpf = normalizeValidCpf(buyerFromProfile.cpf);
   const buyerInfo = {
     // The e-mail lookup links an account but cannot replace the legal name.
     nome: text(input.negotiation.buyerName) ?? buyerFromProfile.nome,
-    cpf: buyerFromProfile.cpf ?? text(input.negotiation.buyerCpf),
+    cpf: proposalBuyerCpf ?? profileBuyerCpf,
     email: buyerFromProfile.email ?? text(input.negotiation.buyerEmail),
     telefone: buyerFromProfile.telefone,
   };
@@ -145,12 +167,16 @@ export function resolveContractParties(
           cpfSource: sellerFromProfile.cpf ? 'proposer_profile' : 'missing',
         },
         buyer: {
-            nameSource: text(input.negotiation.buyerName)
-              ? 'proposal_legal_data'
-              : buyerFromProfile.nome
-                ? 'verified_email_profile'
-                : 'missing',
-          cpfSource: buyerFromProfile.cpf ? 'verified_email_profile' : 'proposal_legal_data',
+          nameSource: text(input.negotiation.buyerName)
+            ? 'proposal_legal_data'
+            : buyerFromProfile.nome
+              ? 'verified_email_profile'
+              : 'missing',
+          cpfSource: proposalBuyerCpf
+            ? 'proposal_legal_data'
+            : profileBuyerCpf
+              ? 'verified_email_profile'
+              : 'missing',
           profileLinkedBy: linked ? 'verified_email' : null,
         },
         identityCapabilities: {
@@ -159,7 +185,7 @@ export function resolveContractParties(
             canEditName: text(input.negotiation.buyerName)
               ? true
               : !buyerFromProfile.nome,
-            canEditCpf: !buyerFromProfile.cpf,
+            canEditCpf: !profileBuyerCpf,
           },
         },
       },

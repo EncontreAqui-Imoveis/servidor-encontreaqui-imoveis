@@ -53,6 +53,17 @@ describe('PUT /contracts/:id/data', () => {
     contractController.updateData(req as any, res)
   );
 
+  const adminApp = express();
+  adminApp.use(express.json());
+  adminApp.use((req, _res, next) => {
+    (req as any).userId = 1;
+    (req as any).userRole = 'admin';
+    next();
+  });
+  adminApp.put('/contracts/:id/data', (req, res) =>
+    contractController.updateData(req as any, res)
+  );
+
   beforeEach(() => {
     vi.clearAllMocks();
     getConnectionMock.mockResolvedValue(txMock);
@@ -305,5 +316,125 @@ describe('PUT /contracts/:id/data', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.error).toContain('vendedor');
+  });
+
+  it('preserva CPF e garantia de locação do comprador em atualização parcial', async () => {
+    const contractState: MutableContractRow = {
+      id: 'contract-buyer-1',
+      negotiation_id: 'neg-buyer-1',
+      advertiser_id: 30003,
+      proposer_id: 30004,
+      initiator_side: 'buyer',
+      property_id: 101,
+      status: 'AWAITING_DOCS',
+      seller_cpf: null,
+      seller_info: {},
+      buyer_info: {
+        cpf: '52998224725',
+        garantia_locacao: 'fiador',
+        profissao: 'Analista',
+      },
+      commission_data: {},
+      seller_approval_status: 'PENDING',
+      buyer_approval_status: 'PENDING',
+      seller_approval_reason: null,
+      buyer_approval_reason: null,
+      created_at: '2026-02-20 10:00:00',
+      updated_at: '2026-02-20 10:00:00',
+      capturing_broker_id: 30003,
+      selling_broker_id: 30004,
+      property_title: 'Casa Teste',
+      property_purpose: 'Aluguel',
+      property_code: 'RV-101',
+      capturing_broker_name: 'Captador',
+      selling_broker_name: 'Vendedor',
+    };
+
+    txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
+        return [[{ ...contractState }]];
+      }
+      if (sql.includes('UPDATE contracts') && sql.includes('buyer_info')) {
+        const buyerPayload = JSON.parse(String(params[1] ?? '{}')) as Record<string, unknown>;
+        expect(buyerPayload).toMatchObject({
+          cpf: null,
+          garantia_locacao: 'fiador',
+          profissao: 'Corretor',
+        });
+        expect(buyerPayload.cpf_ciphertext).toEqual(expect.any(String));
+        contractState.buyer_info = buyerPayload;
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const response = await request(adminApp)
+      .put('/contracts/contract-buyer-1/data')
+      .send({ side: 'buyer', buyerInfo: { profissao: 'Corretor' } });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.buyerInfo).toMatchObject({
+      garantia_locacao: 'fiador',
+      profissao: 'Corretor',
+      cpf: expect.stringMatching(/^\d{11}$/),
+    });
+  });
+
+  it('normaliza CPF mascarado válido e rejeita CPF inválido nas atualizações do comprador', async () => {
+    const contractState: MutableContractRow = {
+      id: 'contract-buyer-2',
+      negotiation_id: 'neg-buyer-2',
+      advertiser_id: 30003,
+      proposer_id: 30004,
+      initiator_side: 'buyer',
+      property_id: 101,
+      status: 'AWAITING_DOCS',
+      seller_cpf: null,
+      seller_info: {},
+      buyer_info: {},
+      commission_data: {},
+      seller_approval_status: 'PENDING',
+      buyer_approval_status: 'PENDING',
+      seller_approval_reason: null,
+      buyer_approval_reason: null,
+      created_at: '2026-02-20 10:00:00',
+      updated_at: '2026-02-20 10:00:00',
+      capturing_broker_id: 30003,
+      selling_broker_id: 30004,
+      property_title: 'Casa Teste',
+      property_purpose: 'Venda',
+      property_code: 'RV-101',
+      capturing_broker_name: 'Captador',
+      selling_broker_name: 'Vendedor',
+    };
+    let updateCount = 0;
+
+    txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
+        return [[{ ...contractState }]];
+      }
+      if (sql.includes('UPDATE contracts') && sql.includes('buyer_info')) {
+        updateCount += 1;
+        const buyerPayload = JSON.parse(String(params[1] ?? '{}')) as Record<string, unknown>;
+        expect(buyerPayload.cpf).toBeNull();
+        expect(buyerPayload.cpf_ciphertext).toEqual(expect.any(String));
+        contractState.buyer_info = buyerPayload;
+        return [{ affectedRows: 1 }];
+      }
+      return [[]];
+    });
+
+    const validResponse = await request(adminApp)
+      .put('/contracts/contract-buyer-2/data')
+      .send({ side: 'buyer', buyerInfo: { cpf: '529.982.247-25' } });
+    expect(validResponse.status).toBe(200);
+    expect(updateCount).toBe(1);
+
+    const invalidResponse = await request(adminApp)
+      .put('/contracts/contract-buyer-2/data')
+      .send({ side: 'buyer', buyerInfo: { cpf: '111.111.111-11' } });
+    expect(invalidResponse.status).toBe(400);
+    expect(invalidResponse.body.error).toContain('CPF válido');
+    expect(updateCount).toBe(1);
   });
 });

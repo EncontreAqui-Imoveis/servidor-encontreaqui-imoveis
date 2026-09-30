@@ -70,6 +70,9 @@ describe('Contract response shape contracts', () => {
               telefone: '(62) 99999-0000',
             }),
             buyer_info: JSON.stringify({ maritalStatus: 'Solteiro' }),
+            payment_details: JSON.stringify({
+              details: { clientCpf: '52998224725' },
+            }),
             commission_data: JSON.stringify({ saleValue: 350000 }),
             workflow_metadata: JSON.stringify({
               signatureMethod: 'in_person',
@@ -135,7 +138,10 @@ describe('Contract response shape contracts', () => {
           nome: 'Proprietário',
           telefone: '(62) 99999-0000',
         },
-        buyerInfo: { maritalStatus: 'Solteiro' },
+        buyerInfo: {
+          maritalStatus: 'Solteiro',
+          cpf: expect.stringMatching(/^\d{11}$/),
+        },
         commissionData: { saleValue: 350000 },
         workflowMetadata: {
           signatureMethod: 'in_person',

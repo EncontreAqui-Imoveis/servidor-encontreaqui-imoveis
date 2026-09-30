@@ -70,6 +70,17 @@ function parseStoredPaymentDetails(value: unknown): Record<string, unknown> {
   }
 }
 
+function text(value: unknown): string | null {
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
+function resolveRentalGuarantee(paymentDetails: Record<string, unknown>): string | null {
+  const details = parseStoredPaymentDetails(paymentDetails.details);
+  const rentalTerms = parseStoredPaymentDetails(details.rentalTerms ?? details.rental_terms);
+  return text(rentalTerms.guaranteeType ?? rentalTerms.guarantee_type);
+}
+
 const ALLOWED_NEGOTIATION_STATUSES_FOR_CONTRACT = new Set([
   'IN_NEGOTIATION',
   'DOCUMENTATION_PHASE',
@@ -207,8 +218,12 @@ export async function createContractFromApprovedNegotiation(
     const protectedPaymentDetails = hydrateCpfFieldsInJson(
       parseStoredPaymentDetails(negotiation.payment_details),
       'negotiations:payment_details',
-    ) as { details?: { clientCpf?: string | null } };
-    negotiation.buyer_legal_cpf = protectedPaymentDetails.details?.clientCpf ?? null;
+    );
+    const paymentDetails = parseStoredPaymentDetails(protectedPaymentDetails);
+    const proposalDetails = parseStoredPaymentDetails(paymentDetails.details);
+    negotiation.buyer_legal_cpf = text(
+      proposalDetails.clientCpf ?? proposalDetails.client_cpf,
+    );
     negotiation.property_owner_cpf = resolveStoredCpf(
       negotiation.property_owner_cpf_ciphertext,
       negotiation.property_owner_cpf,
@@ -386,6 +401,13 @@ export async function createContractFromApprovedNegotiation(
       );
     }
 
+    const rentalGuarantee =
+      dealType === 'rent' ? resolveRentalGuarantee(paymentDetails) : null;
+    const buyerInfo = {
+      ...partyResolution.buyerInfo,
+      ...(rentalGuarantee ? { garantia_locacao: rentalGuarantee } : {}),
+    };
+
     const buyerHandshake = shouldCreateBuyerHandshake({
       initiatorSide: negotiation.initiator_side,
       legalBuyerUserId: partyResolution.legalBuyerUserId,
@@ -461,7 +483,7 @@ export async function createContractFromApprovedNegotiation(
         negotiation.property_id,
         dealType,
         JSON.stringify(protectCpfFieldsInJson(partyResolution.sellerInfo, 'contracts:seller_info')),
-        JSON.stringify(protectCpfFieldsInJson(partyResolution.buyerInfo, 'contracts:buyer_info')),
+        JSON.stringify(protectCpfFieldsInJson(buyerInfo, 'contracts:buyer_info')),
         JSON.stringify(workflowMetadata),
       ],
     );

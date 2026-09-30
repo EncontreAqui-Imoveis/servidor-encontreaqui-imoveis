@@ -33,6 +33,7 @@ import {
   createContractFromApprovedNegotiation,
   isContractCreationError,
 } from '../services/contractCreationService';
+import { normalizeValidCpf } from '../services/contractPartyResolutionService';
 import {
   deleteContractCommissionData,
   isContractCommissionMutationError,
@@ -218,7 +219,8 @@ export interface ContractRow extends RowDataPacket {
   handshake_attempts: number | null;
   seller_cpf: string | null;
   seller_cpf_ciphertext: string | null;
-  buyer_cpf: string | null;
+  buyer_cpf?: string | null;
+  payment_details?: unknown;
   client_name: string | null;
   property_title: string | null;
   property_purpose: string | null;
@@ -1127,7 +1129,7 @@ function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown
     'contracts:buyer_info',
   );
   const buyerName = String(row.client_name ?? '').trim();
-  const buyerCpf = String(row.buyer_cpf ?? '').trim();
+  const buyerCpf = normalizeValidCpf(row.buyer_cpf);
   const currentName = String(
     buyerInfo.nome ?? buyerInfo.clientName ?? buyerInfo.name ?? buyerInfo.fullName ?? ''
   ).trim();
@@ -1135,8 +1137,21 @@ function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown
   if (!currentName && buyerName) {
     buyerInfo.nome = buyerName;
   }
-  if (buyerCpf && !String(buyerInfo.cpf ?? buyerInfo.clientCpf ?? '').trim()) {
+  const persistedCpf = normalizeValidCpf(buyerInfo.cpf ?? buyerInfo.clientCpf);
+  if (persistedCpf) {
+    buyerInfo.cpf = persistedCpf;
+  } else if (buyerCpf) {
     buyerInfo.cpf = buyerCpf;
+  } else {
+    const paymentDetails = hydrateCpfFieldsInJson(
+      parseStoredJsonObject(row.payment_details),
+      'negotiations:payment_details',
+    );
+    const details = parseStoredJsonObject(paymentDetails.details);
+    const proposalCpf = normalizeValidCpf(details.clientCpf ?? details.client_cpf);
+    if (proposalCpf) {
+      buyerInfo.cpf = proposalCpf;
+    }
   }
   return buyerInfo;
 }
@@ -2075,7 +2090,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     n.client_name,
     owner_user.cpf AS seller_cpf,
     owner_user.cpf_ciphertext AS seller_cpf_ciphertext,
-    NULL AS buyer_cpf,
+    n.payment_details,
     p.title AS property_title,
     p.purpose AS property_purpose,
     COALESCE(NULLIF(TRIM(p.public_code), ''), p.code) AS property_code,

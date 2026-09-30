@@ -34,6 +34,7 @@ import {
   isContractCreationError,
 } from '../services/contractCreationService';
 import { normalizeValidCpf } from '../services/contractPartyResolutionService';
+import { normalizeDealType } from '../services/negotiationProposalSupportService';
 import {
   deleteContractCommissionData,
   isContractCommissionMutationError,
@@ -196,7 +197,8 @@ export interface ContractRow extends RowDataPacket {
   id: string;
   negotiation_id: string;
   property_id: number;
-  deal_type: 'sale' | 'rent' | null;
+  deal_type: string | null;
+  negotiation_deal_type?: unknown;
   status: string;
   seller_info: unknown;
   buyer_info: unknown;
@@ -1123,8 +1125,12 @@ function buildOwnerInfoFromContractRow(row: ContractRow): Record<string, unknown
   return fallback;
 }
 
+function resolveEffectiveContractDealType(row: ContractRow): 'sale' | 'rent' | null {
+  return normalizeDealType(row.deal_type) ?? normalizeDealType(row.negotiation_deal_type);
+}
+
 function resolveLegacyRentalGuarantee(row: ContractRow): string | null {
-  if (row.deal_type !== 'rent') {
+  if (resolveEffectiveContractDealType(row) !== 'rent') {
     return null;
   }
 
@@ -2104,6 +2110,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
     buyer_draft_review.reason AS buyer_draft_review_reason,
     buyer_draft_review.decided_at AS buyer_draft_review_at,
     n.capturing_broker_id,
+    n.deal_type AS negotiation_deal_type,
     n.selling_broker_id,
     n.advertiser_id,
     n.proposer_id,

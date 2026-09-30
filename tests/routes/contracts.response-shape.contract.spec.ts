@@ -58,11 +58,13 @@ describe('Contract response shape contracts', () => {
   function mockContractDetail(overrides: Record<string, unknown>) {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
+        expect(sql).toContain('n.deal_type AS negotiation_deal_type');
         return [[{
           id: 'contract-rental-guarantee',
           negotiation_id: 'neg-rental-guarantee',
           property_id: 101,
-          deal_type: 'rent',
+          deal_type: null,
+          negotiation_deal_type: 'rent',
           status: 'AWAITING_DOCS',
           seller_info: JSON.stringify({}),
           buyer_info: JSON.stringify({}),
@@ -228,6 +230,7 @@ describe('Contract response shape contracts', () => {
 
   it('keeps the guarantee persisted on a newer rental contract over the proposal fallback', async () => {
     mockContractDetail({
+      deal_type: 'rent',
       buyer_info: JSON.stringify({ garantia_locacao: 'Seguro-fiança' }),
       payment_details: JSON.stringify({
         details: { rentalTerms: { guaranteeType: 'Fiador' } },
@@ -252,9 +255,42 @@ describe('Contract response shape contracts', () => {
     expect(response.body.contract.buyerInfo).not.toHaveProperty('garantia_locacao');
   });
 
+  it('uses the negotiation type for a legacy rental contract without a contract type', async () => {
+    mockContractDetail({
+      deal_type: null,
+      negotiation_deal_type: 'rent',
+      buyer_info: JSON.stringify({}),
+      payment_details: JSON.stringify({
+        details: { rentalTerms: { guaranteeType: 'Fiador' } },
+      }),
+    });
+
+    const response = await request(app).get('/contracts/contract-rental-guarantee');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.buyerInfo.garantia_locacao).toBe('Fiador');
+  });
+
+  it('uses the negotiation type when a legacy contract type is not canonical', async () => {
+    mockContractDetail({
+      deal_type: 'legacy',
+      negotiation_deal_type: 'Aluguel',
+      buyer_info: JSON.stringify({}),
+      payment_details: JSON.stringify({
+        details: { rentalTerms: { guaranteeType: 'Caução' } },
+      }),
+    });
+
+    const response = await request(app).get('/contracts/contract-rental-guarantee');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.buyerInfo.garantia_locacao).toBe('Caução');
+  });
+
   it('does not infer a rental guarantee for a sale contract', async () => {
     mockContractDetail({
-      deal_type: 'sale',
+      deal_type: null,
+      negotiation_deal_type: 'sale',
       buyer_info: JSON.stringify({}),
       payment_details: JSON.stringify({
         details: { rentalTerms: { guaranteeType: 'Fiador' } },

@@ -1123,6 +1123,19 @@ function buildOwnerInfoFromContractRow(row: ContractRow): Record<string, unknown
   return fallback;
 }
 
+function resolveLegacyRentalGuarantee(row: ContractRow): string | null {
+  if (row.deal_type !== 'rent') {
+    return null;
+  }
+
+  const paymentDetails = parseStoredJsonObject(row.payment_details);
+  const details = parseStoredJsonObject(paymentDetails.details);
+  const rentalTerms = parseStoredJsonObject(
+    details.rentalTerms ?? details.rental_terms,
+  );
+  return readMetadataText(rentalTerms, ['guaranteeType', 'guarantee_type']);
+}
+
 function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown> {
   const buyerInfo = hydrateCpfFieldsInJson(
     parseStoredJsonObject(row.buyer_info),
@@ -1153,6 +1166,18 @@ function buildBuyerInfoFromContractRow(row: ContractRow): Record<string, unknown
       buyerInfo.cpf = proposalCpf;
     }
   }
+
+  const persistedGuarantee = readMetadataText(buyerInfo, [
+    'garantia_locacao',
+    'garantiaLocacao',
+  ]);
+  if (!persistedGuarantee) {
+    const legacyGuarantee = resolveLegacyRentalGuarantee(row);
+    if (legacyGuarantee) {
+      buyerInfo.garantia_locacao = legacyGuarantee;
+    }
+  }
+
   return buyerInfo;
 }
 

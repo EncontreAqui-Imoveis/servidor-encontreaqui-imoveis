@@ -55,6 +55,40 @@ describe('Contract response shape contracts', () => {
     vi.clearAllMocks();
   });
 
+  function mockContractDetail(overrides: Record<string, unknown>) {
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
+        return [[{
+          id: 'contract-rental-guarantee',
+          negotiation_id: 'neg-rental-guarantee',
+          property_id: 101,
+          deal_type: 'rent',
+          status: 'AWAITING_DOCS',
+          seller_info: JSON.stringify({}),
+          buyer_info: JSON.stringify({}),
+          payment_details: JSON.stringify({ details: {} }),
+          commission_data: JSON.stringify({}),
+          workflow_metadata: JSON.stringify({}),
+          seller_approval_status: 'PENDING',
+          buyer_approval_status: 'PENDING',
+          seller_approval_reason: null,
+          buyer_approval_reason: null,
+          created_at: '2026-09-01 10:00:00',
+          updated_at: '2026-09-01 10:00:00',
+          capturing_broker_id: 30003,
+          responsible_user_ids: '30003',
+          ...overrides,
+        }]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[]];
+      }
+
+      return [[]];
+    });
+  }
+
   it('returns the detail payload shape consumed by the mobile contract screen', async () => {
     queryMock.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM contracts c') && sql.includes('WHERE c.id = ?')) {
@@ -71,7 +105,10 @@ describe('Contract response shape contracts', () => {
             }),
             buyer_info: JSON.stringify({ maritalStatus: 'Solteiro' }),
             payment_details: JSON.stringify({
-              details: { clientCpf: '52998224725' },
+              details: {
+                clientCpf: '52998224725',
+                rentalTerms: { guaranteeType: 'Fiador' },
+              },
             }),
             commission_data: JSON.stringify({ saleValue: 350000 }),
             workflow_metadata: JSON.stringify({
@@ -141,6 +178,7 @@ describe('Contract response shape contracts', () => {
         buyerInfo: {
           maritalStatus: 'Solteiro',
           cpf: expect.stringMatching(/^\d{11}$/),
+          garantia_locacao: 'Fiador',
         },
         commissionData: { saleValue: 350000 },
         workflowMetadata: {
@@ -186,6 +224,47 @@ describe('Contract response shape contracts', () => {
         downloadUrl: null,
       }),
     ]));
+  });
+
+  it('keeps the guarantee persisted on a newer rental contract over the proposal fallback', async () => {
+    mockContractDetail({
+      buyer_info: JSON.stringify({ garantia_locacao: 'Seguro-fiança' }),
+      payment_details: JSON.stringify({
+        details: { rentalTerms: { guaranteeType: 'Fiador' } },
+      }),
+    });
+
+    const response = await request(app).get('/contracts/contract-rental-guarantee');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.buyerInfo.garantia_locacao).toBe('Seguro-fiança');
+  });
+
+  it('keeps a rental guarantee absent when neither contract nor proposal has one', async () => {
+    mockContractDetail({
+      buyer_info: JSON.stringify({}),
+      payment_details: JSON.stringify({ details: { rentalTerms: {} } }),
+    });
+
+    const response = await request(app).get('/contracts/contract-rental-guarantee');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.buyerInfo).not.toHaveProperty('garantia_locacao');
+  });
+
+  it('does not infer a rental guarantee for a sale contract', async () => {
+    mockContractDetail({
+      deal_type: 'sale',
+      buyer_info: JSON.stringify({}),
+      payment_details: JSON.stringify({
+        details: { rentalTerms: { guaranteeType: 'Fiador' } },
+      }),
+    });
+
+    const response = await request(app).get('/contracts/contract-rental-guarantee');
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.buyerInfo).not.toHaveProperty('garantia_locacao');
   });
 
   it('blocks the proposal initiator when it has no contract-side or responsible binding', async () => {

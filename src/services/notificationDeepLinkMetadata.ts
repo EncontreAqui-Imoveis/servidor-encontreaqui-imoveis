@@ -1,4 +1,7 @@
 export const NOTIFICATION_TARGETS = [
+  'none',
+  'home',
+  'notifications',
   'property_details',
   'proposal_list',
   'proposal_details',
@@ -69,6 +72,12 @@ function resolveNotificationRoute(input: {
   contractId: string;
 }): string {
   switch (input.target) {
+    case 'none':
+      return '';
+    case 'home':
+      return '/';
+    case 'notifications':
+      return '/notifications';
     case 'property_details':
       return input.propertyId ? `/properties/${input.propertyId}` : '/properties';
     case 'proposal_list':

@@ -38,4 +38,39 @@ describe('notificationDeepLinkMetadata', () => {
       'Invalid notification target'
     );
   });
+
+  it.each([
+    ['none', ''],
+    ['home', '/'],
+    ['notifications', '/notifications'],
+  ] as const)('builds canonical metadata for administrative target %s', (target, route) => {
+    expect(buildNotificationDeepLinkMetadata({ target })).toEqual({
+      schema_version: '1',
+      target,
+      entity_id: '',
+      property_id: '',
+      negotiation_id: '',
+      contract_id: '',
+      notification_id: '',
+      route,
+    });
+  });
+
+  it('builds property_details metadata from the explicit property_id', () => {
+    expect(buildNotificationDeepLinkMetadata({
+      target: 'property_details',
+      metadata: { property_id: '42' },
+    })).toMatchObject({
+      target: 'property_details',
+      entity_id: '42',
+      property_id: '42',
+      route: '/properties/42',
+    });
+  });
+
+  it('preserves automatic notification target defaults', () => {
+    expect(resolveNotificationTarget(undefined, 'property')).toBe('property_details');
+    expect(resolveNotificationTarget(undefined, 'negotiation')).toBe('proposal_details');
+    expect(resolveNotificationTarget(undefined, 'announcement')).toBe('proposal_list');
+  });
 });

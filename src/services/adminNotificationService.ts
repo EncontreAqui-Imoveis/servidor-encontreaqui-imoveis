@@ -24,9 +24,11 @@ export type AdminNotificationRequestBody = {
   recipientIds?: unknown;
   related_entity_type?: unknown;
   related_entity_id?: unknown;
+  property_id?: unknown;
   audience?: unknown;
   pushAction?: unknown;
   target?: unknown;
+  route?: unknown;
   title?: unknown;
 };
 
@@ -35,9 +37,53 @@ export type AdminNotificationResponse = {
   body: {
     message?: string;
     error?: string;
+    code?: string;
     push?: PushNotificationResult;
   };
 };
+
+const ADMIN_NOTIFICATION_ERROR_CODES = {
+  routeNotAllowed: 'ADMIN_NOTIFICATION_ROUTE_NOT_ALLOWED',
+  targetInvalid: 'ADMIN_NOTIFICATION_TARGET_INVALID',
+  propertyIdRequired: 'ADMIN_NOTIFICATION_PROPERTY_ID_REQUIRED',
+  propertyIdInvalid: 'ADMIN_NOTIFICATION_PROPERTY_ID_INVALID',
+  propertyIdNotAllowed: 'ADMIN_NOTIFICATION_PROPERTY_ID_NOT_ALLOWED',
+  propertyNotFound: 'ADMIN_NOTIFICATION_PROPERTY_NOT_FOUND',
+} as const;
+
+const ADMIN_NOTIFICATION_TARGETS = new Set<NotificationTarget>([
+  'none',
+  'home',
+  'notifications',
+  'proposal_list',
+  'contracts_tab',
+  'property_details',
+]);
+
+function hasOwnField(input: Record<string, unknown>, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(input, field);
+}
+
+function parsePositiveInteger(value: unknown): number | null {
+  const normalized = typeof value === 'number'
+    ? String(value)
+    : typeof value === 'string'
+      ? value.trim()
+      : '';
+  if (!/^[1-9]\d*$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function propertyExists(propertyId: number): Promise<boolean> {
+  const [rows] = await adminDb.query<RowDataPacket[]>(
+    'SELECT id FROM properties WHERE id = ? LIMIT 1',
+    [propertyId],
+  );
+  return (rows ?? []).some((row) => Number(row.id) === propertyId);
+}
 
 function normalizeEntityType(value: unknown): AdminNotificationEntityType {
   const allowedTypes = new Set<AdminNotificationEntityType>([
@@ -178,15 +224,85 @@ export async function sendAdminNotification(
   const audience = normalizeAudience(body.audience);
   const normalizedRecipients = normalizeRecipients(body.recipientId, body.recipientIds);
   const numericEntityId = entityId != null && Number.isFinite(entityId) ? Number(entityId) : null;
+  if (hasOwnField(body, 'route')) {
+    return {
+      statusCode: 400,
+      body: {
+        code: ADMIN_NOTIFICATION_ERROR_CODES.routeNotAllowed,
+        error: 'A rota é definida internamente pelo destino da notificação.',
+      },
+    };
+  }
+
   let target: NotificationTarget;
   try {
-    target = resolveNotificationTarget(body.target, entityType);
+    // Requests administrativos sem destino não devem herdar o fallback de
+    // propostas usado por notificações automáticas legadas.
+    target = body.target == null || String(body.target).trim() === ''
+      ? 'home'
+      : resolveNotificationTarget(body.target, entityType);
   } catch (error) {
     return {
       statusCode: 400,
-      body: { error: error instanceof Error ? error.message : 'Target de notificação inválido.' },
+      body: {
+        code: ADMIN_NOTIFICATION_ERROR_CODES.targetInvalid,
+        error: error instanceof Error ? error.message : 'Target de notificação inválido.',
+      },
     };
   }
+
+  if (!ADMIN_NOTIFICATION_TARGETS.has(target)) {
+    return {
+      statusCode: 400,
+      body: {
+        code: ADMIN_NOTIFICATION_ERROR_CODES.targetInvalid,
+        error: 'Target não é permitido para notificações administrativas.',
+      },
+    };
+  }
+
+  const propertyIdProvided = hasOwnField(body, 'property_id');
+  let propertyId: number | null = null;
+  if (target === 'property_details') {
+    if (!propertyIdProvided) {
+      return {
+        statusCode: 400,
+        body: {
+          code: ADMIN_NOTIFICATION_ERROR_CODES.propertyIdRequired,
+          error: 'property_id é obrigatório para property_details.',
+        },
+      };
+    }
+    propertyId = parsePositiveInteger(body.property_id);
+    if (propertyId == null) {
+      return {
+        statusCode: 400,
+        body: {
+          code: ADMIN_NOTIFICATION_ERROR_CODES.propertyIdInvalid,
+          error: 'property_id deve ser um inteiro positivo.',
+        },
+      };
+    }
+    if (!(await propertyExists(propertyId))) {
+      return {
+        statusCode: 400,
+        body: {
+          code: ADMIN_NOTIFICATION_ERROR_CODES.propertyNotFound,
+          error: 'Imóvel informado não foi encontrado.',
+        },
+      };
+    }
+  } else if (propertyIdProvided) {
+    return {
+      statusCode: 400,
+      body: {
+        code: ADMIN_NOTIFICATION_ERROR_CODES.propertyIdNotAllowed,
+        error: 'property_id só pode ser usado com property_details.',
+      },
+    };
+  }
+
+  const metadata = propertyId == null ? null : { property_id: String(propertyId) };
 
   let notificationRecipients: number[];
   try {
@@ -236,6 +352,7 @@ export async function sendAdminNotification(
       pushAction: normalizeOptionalText(body.pushAction),
       title: normalizeOptionalText(body.title),
       target,
+      metadata,
     });
     if (summary) {
       summaries.push(summary);
@@ -252,6 +369,7 @@ export async function sendAdminNotification(
       pushAction: normalizeOptionalText(body.pushAction),
       title: normalizeOptionalText(body.title),
       target,
+      metadata,
     });
     if (summary) {
       summaries.push(summary);

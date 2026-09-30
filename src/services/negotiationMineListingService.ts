@@ -107,7 +107,11 @@ function parseRentalTerms(value: unknown) {
     return {
       monthlyRent: toFiniteNumber(terms.monthlyRent ?? terms.monthly_rent),
       guaranteeType: toTextOrNull(terms.guaranteeType ?? terms.guarantee_type),
+      leaseTermType: parseLeaseTermType(terms.leaseTermType ?? terms.lease_term_type),
       leaseTermMonths: toFiniteNumber(terms.leaseTermMonths ?? terms.lease_term_months),
+      monthlyDueDayType: parseMonthlyDueDayType(
+        terms.monthlyDueDayType ?? terms.monthly_due_day_type
+      ),
       monthlyDueDay: toFiniteNumber(terms.monthlyDueDay ?? terms.monthly_due_day),
       observations: toTextOrNull(terms.observations),
     };
@@ -120,6 +124,14 @@ function toFiniteNumber(value: unknown): number | null {
   if (value === undefined || value === null || String(value).trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseLeaseTermType(value: unknown): 'fixed' | 'indeterminate' | undefined {
+  return value === 'fixed' || value === 'indeterminate' ? value : undefined;
+}
+
+function parseMonthlyDueDayType(value: unknown): 'fixed' | 'to_be_defined' | undefined {
+  return value === 'fixed' || value === 'to_be_defined' ? value : undefined;
 }
 
 function toTextOrNull(value: unknown): string | null {

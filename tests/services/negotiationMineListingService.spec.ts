@@ -189,7 +189,10 @@ describe('negotiationMineListingService.listMine', () => {
               rentalTerms: {
                 monthlyRent: 2500,
                 guaranteeType: 'Caução',
+                leaseTermType: 'fixed',
                 leaseTermMonths: 30,
+                monthlyDueDayType: 'fixed',
+                monthlyDueDay: 10,
               },
             },
           }),
@@ -210,7 +213,10 @@ describe('negotiationMineListingService.listMine', () => {
         rentalTerms: expect.objectContaining({
           monthlyRent: 2500,
           guaranteeType: 'Caução',
+          leaseTermType: 'fixed',
           leaseTermMonths: 30,
+          monthlyDueDayType: 'fixed',
+          monthlyDueDay: 10,
         }),
       })],
     }));

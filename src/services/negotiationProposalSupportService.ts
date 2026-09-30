@@ -70,8 +70,12 @@ interface RentalTermsBody {
   monthly_rent?: unknown;
   guaranteeType?: unknown;
   guarantee_type?: unknown;
+  leaseTermType?: unknown;
+  lease_term_type?: unknown;
   leaseTermMonths?: unknown;
   lease_term_months?: unknown;
+  monthlyDueDayType?: unknown;
+  monthly_due_day_type?: unknown;
   monthlyDueDay?: unknown;
   monthly_due_day?: unknown;
   observations?: unknown;
@@ -209,20 +213,80 @@ function parseOptionalDueDay(input: unknown): number | null {
   return value;
 }
 
+function parseOptionalRentalTermType<T extends string>(
+  input: unknown,
+  fieldName: string,
+  allowed: readonly T[]
+): T | undefined {
+  if (input === undefined || input === null || String(input).trim() === '') {
+    return undefined;
+  }
+
+  const value = String(input).trim();
+  if (!allowed.includes(value as T)) {
+    throw new Error(`${fieldName} invalido.`);
+  }
+  return value as T;
+}
+
+function assertRentalTermValueAbsent(input: unknown, fieldName: string): void {
+  if (input !== undefined && input !== null) {
+    throw new Error(`${fieldName} deve estar ausente ou nulo para este tipo.`);
+  }
+}
+
 function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalProposalTerms | null {
   if (dealType !== 'rent') {
     return null;
   }
 
   const raw = body.rentalTerms ?? body.rental_terms ?? {};
+  const rawLeaseTermMonths = raw.leaseTermMonths ?? raw.lease_term_months;
+  const rawMonthlyDueDay = raw.monthlyDueDay ?? raw.monthly_due_day;
+  const leaseTermType = parseOptionalRentalTermType(
+    raw.leaseTermType ?? raw.lease_term_type,
+    'rentalTerms.leaseTermType',
+    ['fixed', 'indeterminate'] as const
+  );
+  const monthlyDueDayType = parseOptionalRentalTermType(
+    raw.monthlyDueDayType ?? raw.monthly_due_day_type,
+    'rentalTerms.monthlyDueDayType',
+    ['fixed', 'to_be_defined'] as const
+  );
+
+  let leaseTermMonths: number | null;
+  if (leaseTermType === 'fixed') {
+    leaseTermMonths = parseOptionalPositiveInteger(rawLeaseTermMonths, 'rentalTerms.leaseTermMonths');
+    if (leaseTermMonths === null) {
+      throw new Error('rentalTerms.leaseTermMonths e obrigatorio para leaseTermType fixed.');
+    }
+  } else if (leaseTermType === 'indeterminate') {
+    assertRentalTermValueAbsent(rawLeaseTermMonths, 'rentalTerms.leaseTermMonths');
+    leaseTermMonths = null;
+  } else {
+    leaseTermMonths = parseOptionalPositiveInteger(rawLeaseTermMonths, 'rentalTerms.leaseTermMonths');
+  }
+
+  let monthlyDueDay: number | null;
+  if (monthlyDueDayType === 'fixed') {
+    monthlyDueDay = parseOptionalDueDay(rawMonthlyDueDay);
+    if (monthlyDueDay === null) {
+      throw new Error('rentalTerms.monthlyDueDay e obrigatorio para monthlyDueDayType fixed.');
+    }
+  } else if (monthlyDueDayType === 'to_be_defined') {
+    assertRentalTermValueAbsent(rawMonthlyDueDay, 'rentalTerms.monthlyDueDay');
+    monthlyDueDay = null;
+  } else {
+    monthlyDueDay = parseOptionalDueDay(rawMonthlyDueDay);
+  }
+
   return {
     monthlyRent: parseOptionalNonNegativeNumber(raw.monthlyRent ?? raw.monthly_rent, 'rentalTerms.monthlyRent'),
     guaranteeType: parseOptionalText(raw.guaranteeType ?? raw.guarantee_type, 'rentalTerms.guaranteeType', 80),
-    leaseTermMonths: parseOptionalPositiveInteger(
-      raw.leaseTermMonths ?? raw.lease_term_months,
-      'rentalTerms.leaseTermMonths'
-    ),
-    monthlyDueDay: parseOptionalDueDay(raw.monthlyDueDay ?? raw.monthly_due_day),
+    ...(leaseTermType ? { leaseTermType } : {}),
+    leaseTermMonths,
+    ...(monthlyDueDayType ? { monthlyDueDayType } : {}),
+    monthlyDueDay,
     observations: parseOptionalText(raw.observations, 'rentalTerms.observations', 1000),
   };
 }

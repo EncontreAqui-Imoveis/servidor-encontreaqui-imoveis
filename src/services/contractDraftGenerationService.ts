@@ -88,6 +88,14 @@ function number(value: unknown): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
+function optionalPositiveInteger(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function firstText(source: Record<string, unknown>, keys: readonly string[]): string {
   for (const key of keys) {
     const value = text(source[key]);
@@ -137,8 +145,22 @@ function resolvePaymentInput(row: ContractDraftRow, dealType: ContractDealType):
         rental.monthlyRent ?? rental.monthly_rent ?? paymentDetails.amount ?? details.amount
       ),
       guaranteeType: text(rental.guaranteeType ?? rental.guarantee_type) || null,
-      leaseTermMonths: number(rental.leaseTermMonths ?? rental.lease_term_months),
-      monthlyDueDay: number(rental.monthlyDueDay ?? rental.monthly_due_day),
+      leaseTermType:
+        rental.leaseTermType === 'fixed' || rental.leaseTermType === 'indeterminate'
+          ? rental.leaseTermType
+          : rental.lease_term_type === 'fixed' || rental.lease_term_type === 'indeterminate'
+            ? rental.lease_term_type
+          : undefined,
+      leaseTermMonths: optionalPositiveInteger(
+        rental.leaseTermMonths ?? rental.lease_term_months
+      ),
+      monthlyDueDayType:
+        rental.monthlyDueDayType === 'fixed' || rental.monthlyDueDayType === 'to_be_defined'
+          ? rental.monthlyDueDayType
+          : rental.monthly_due_day_type === 'fixed' || rental.monthly_due_day_type === 'to_be_defined'
+            ? rental.monthly_due_day_type
+          : undefined,
+      monthlyDueDay: optionalPositiveInteger(rental.monthlyDueDay ?? rental.monthly_due_day),
       observations: text(rental.observations) || null,
     },
   };

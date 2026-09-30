@@ -1,7 +1,7 @@
 import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 
 import connection from '../database/connection';
-import type { ProposalData } from '../modules/negotiations/domain/states/NegotiationState';
+import type { ProposalData, RentalProposalTerms } from '../modules/negotiations/domain/states/NegotiationState';
 import { ExternalPdfService } from '../modules/negotiations/infra/ExternalPdfService';
 import { NegotiationDocumentsRepository } from '../modules/negotiations/infra/NegotiationDocumentsRepository';
 import type { SqlExecutor } from '../modules/negotiations/infra/NegotiationRepository';
@@ -93,6 +93,18 @@ function readOptionalNumber(value: unknown): number | null {
 function readOptionalText(value: unknown): string | null {
   const text = String(value ?? '').trim();
   return text || null;
+}
+
+type RentalTermType =
+  | NonNullable<RentalProposalTerms['leaseTermType']>
+  | NonNullable<RentalProposalTerms['monthlyDueDayType']>;
+
+function readRentalTermType<T extends RentalTermType>(
+  value: unknown,
+  allowed: readonly T[]
+): T | undefined {
+  const text = String(value ?? '').trim();
+  return allowed.includes(text as T) ? (text as T) : undefined;
 }
 
 export async function queryNegotiationRows<T extends RowDataPacket>(
@@ -193,8 +205,16 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
         monthlyRent:
           readOptionalNumber(rentalDetails.monthlyRent ?? rentalDetails.monthly_rent) ?? normalizedFinalValue,
         guaranteeType: readOptionalText(rentalDetails.guaranteeType ?? rentalDetails.guarantee_type),
+        leaseTermType: readRentalTermType(
+          rentalDetails.leaseTermType ?? rentalDetails.lease_term_type,
+          ['fixed', 'indeterminate'] as const
+        ),
         leaseTermMonths: readOptionalNumber(
           rentalDetails.leaseTermMonths ?? rentalDetails.lease_term_months
+        ),
+        monthlyDueDayType: readRentalTermType(
+          rentalDetails.monthlyDueDayType ?? rentalDetails.monthly_due_day_type,
+          ['fixed', 'to_be_defined'] as const
         ),
         monthlyDueDay: readOptionalNumber(rentalDetails.monthlyDueDay ?? rentalDetails.monthly_due_day),
         observations: readOptionalText(rentalDetails.observations),

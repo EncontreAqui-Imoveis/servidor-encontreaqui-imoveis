@@ -23,7 +23,9 @@ export type ContractDraftPdfInput = {
   rentalTerms: {
     monthlyRent: number;
     guaranteeType?: string | null;
+    leaseTermType?: 'fixed' | 'indeterminate';
     leaseTermMonths?: number | null;
+    monthlyDueDayType?: 'fixed' | 'to_be_defined';
     monthlyDueDay?: number | null;
     observations?: string | null;
   };
@@ -36,6 +38,14 @@ function text(value: unknown): string {
 function nonNegative(value: unknown): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+function optionalPositiveInteger(value: unknown): number | null {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function party(source: ContractDraftPdfInput['seller']) {
@@ -64,8 +74,8 @@ export function buildContractPdfPayload(data: ContractDraftPdfInput): Record<str
     rental_terms: {
       monthly_rent: nonNegative(data.rentalTerms.monthlyRent),
       guarantee_type: text(data.rentalTerms.guaranteeType),
-      lease_term_months: Math.trunc(nonNegative(data.rentalTerms.leaseTermMonths)),
-      monthly_due_day: Math.trunc(nonNegative(data.rentalTerms.monthlyDueDay)),
+      lease_term_months: optionalPositiveInteger(data.rentalTerms.leaseTermMonths),
+      monthly_due_day: optionalPositiveInteger(data.rentalTerms.monthlyDueDay),
       observations: text(data.rentalTerms.observations),
     },
   };

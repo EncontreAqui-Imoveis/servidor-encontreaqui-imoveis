@@ -19,7 +19,9 @@ export type DealType = 'sale' | 'rent';
 export interface RentalProposalTerms {
   monthlyRent?: number | null;
   guaranteeType?: string | null;
+  leaseTermType?: 'fixed' | 'indeterminate';
   leaseTermMonths?: number | null;
+  monthlyDueDayType?: 'fixed' | 'to_be_defined';
   monthlyDueDay?: number | null;
   observations?: string | null;
 }

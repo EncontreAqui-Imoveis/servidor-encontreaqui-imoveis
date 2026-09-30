@@ -209,6 +209,9 @@ export async function getNegotiationProposalDataById(negotiationId: string): Pro
           rentalDetails.leaseTermType ?? rentalDetails.lease_term_type,
           ['fixed', 'indeterminate'] as const
         ),
+        leaseEndDate: readOptionalText(
+          rentalDetails.leaseEndDate ?? rentalDetails.lease_end_date
+        ),
         leaseTermMonths: readOptionalNumber(
           rentalDetails.leaseTermMonths ?? rentalDetails.lease_term_months
         ),

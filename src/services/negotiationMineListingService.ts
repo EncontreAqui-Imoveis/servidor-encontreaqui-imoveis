@@ -108,6 +108,7 @@ function parseRentalTerms(value: unknown) {
       monthlyRent: toFiniteNumber(terms.monthlyRent ?? terms.monthly_rent),
       guaranteeType: toTextOrNull(terms.guaranteeType ?? terms.guarantee_type),
       leaseTermType: parseLeaseTermType(terms.leaseTermType ?? terms.lease_term_type),
+      leaseEndDate: toTextOrNull(terms.leaseEndDate ?? terms.lease_end_date),
       leaseTermMonths: toFiniteNumber(terms.leaseTermMonths ?? terms.lease_term_months),
       monthlyDueDayType: parseMonthlyDueDayType(
         terms.monthlyDueDayType ?? terms.monthly_due_day_type

@@ -34,6 +34,11 @@ function toOptionalNumber(value: unknown, fieldName: string): number | null {
   return parsed;
 }
 
+function toOptionalPositiveInteger(value: unknown, fieldName: string): number | null {
+  const parsed = toOptionalNumber(value, fieldName);
+  return parsed !== null && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 export function buildProposalPdfPayload(data: ProposalData): {
   clientName: string;
   clientCpf: string;
@@ -53,7 +58,10 @@ export function buildProposalPdfPayload(data: ProposalData): {
   rental_terms?: {
     monthly_rent: number;
     guarantee_type: string | null;
+    lease_term_type?: 'fixed' | 'indeterminate';
+    lease_end_date?: string | null;
     lease_term_months: number | null;
+    monthly_due_day_type?: 'fixed' | 'to_be_defined';
     monthly_due_day: number | null;
     observations: string | null;
   };
@@ -85,11 +93,27 @@ export function buildProposalPdfPayload(data: ProposalData): {
             monthly_rent: toOptionalNumber(rentalTerms?.monthlyRent, 'rentalTerms.monthlyRent') ??
               toRequiredNumber(data.value, 'value'),
             guarantee_type: toOptionalText(rentalTerms?.guaranteeType),
-            lease_term_months: toOptionalNumber(
+            ...(rentalTerms?.leaseTermType === 'fixed' ||
+                    rentalTerms?.leaseTermType === 'indeterminate'
+                ? { lease_term_type: rentalTerms.leaseTermType }
+                : {}),
+            ...((rentalTerms?.leaseEndDate?.trim() ?? '') !== ''
+                ? { lease_end_date: rentalTerms!.leaseEndDate!.trim() }
+                : rentalTerms?.leaseTermType === 'indeterminate'
+                ? { lease_end_date: null }
+                : {}),
+            lease_term_months: toOptionalPositiveInteger(
               rentalTerms?.leaseTermMonths,
               'rentalTerms.leaseTermMonths'
             ),
-            monthly_due_day: toOptionalNumber(rentalTerms?.monthlyDueDay, 'rentalTerms.monthlyDueDay'),
+            ...(rentalTerms?.monthlyDueDayType === 'fixed' ||
+                    rentalTerms?.monthlyDueDayType === 'to_be_defined'
+                ? { monthly_due_day_type: rentalTerms.monthlyDueDayType }
+                : {}),
+            monthly_due_day: toOptionalPositiveInteger(
+              rentalTerms?.monthlyDueDay,
+              'rentalTerms.monthlyDueDay'
+            ),
             observations: toOptionalText(rentalTerms?.observations),
           },
         }

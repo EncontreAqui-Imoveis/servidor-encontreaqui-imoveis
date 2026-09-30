@@ -72,6 +72,8 @@ interface RentalTermsBody {
   guarantee_type?: unknown;
   leaseTermType?: unknown;
   lease_term_type?: unknown;
+  leaseEndDate?: unknown;
+  lease_end_date?: unknown;
   leaseTermMonths?: unknown;
   lease_term_months?: unknown;
   monthlyDueDayType?: unknown;
@@ -235,12 +237,45 @@ function assertRentalTermValueAbsent(input: unknown, fieldName: string): void {
   }
 }
 
+function parseOptionalFutureIsoDate(input: unknown, fieldName: string): string | null {
+  if (input === undefined || input === null || String(input).trim() === '') {
+    return null;
+  }
+
+  const value = String(input).trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    throw new Error(`${fieldName} deve estar no formato YYYY-MM-DD.`);
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    throw new Error(`${fieldName} invalida.`);
+  }
+
+  const startOfTomorrow = new Date();
+  startOfTomorrow.setHours(0, 0, 0, 0);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+  if (date.getTime() < startOfTomorrow.getTime()) {
+    throw new Error(`${fieldName} deve ser futura.`);
+  }
+  return value;
+}
+
 function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalProposalTerms | null {
   if (dealType !== 'rent') {
     return null;
   }
 
   const raw = body.rentalTerms ?? body.rental_terms ?? {};
+  const rawLeaseEndDate = raw.leaseEndDate ?? raw.lease_end_date;
   const rawLeaseTermMonths = raw.leaseTermMonths ?? raw.lease_term_months;
   const rawMonthlyDueDay = raw.monthlyDueDay ?? raw.monthly_due_day;
   const leaseTermType = parseOptionalRentalTermType(
@@ -254,16 +289,31 @@ function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalP
     ['fixed', 'to_be_defined'] as const
   );
 
+  let leaseEndDate: string | null;
   let leaseTermMonths: number | null;
   if (leaseTermType === 'fixed') {
-    leaseTermMonths = parseOptionalPositiveInteger(rawLeaseTermMonths, 'rentalTerms.leaseTermMonths');
-    if (leaseTermMonths === null) {
-      throw new Error('rentalTerms.leaseTermMonths e obrigatorio para leaseTermType fixed.');
+    leaseEndDate = parseOptionalFutureIsoDate(rawLeaseEndDate, 'rentalTerms.leaseEndDate');
+    leaseTermMonths = parseOptionalPositiveInteger(
+      rawLeaseTermMonths,
+      'rentalTerms.leaseTermMonths'
+    );
+    if (leaseEndDate !== null && leaseTermMonths !== null) {
+      throw new Error('rentalTerms.leaseTermMonths deve estar ausente ou nulo quando leaseEndDate for informada.');
+    }
+    // fixed + months was emitted by older app versions and remains valid.
+    if (leaseEndDate === null && leaseTermMonths === null) {
+      throw new Error('rentalTerms.leaseEndDate e obrigatoria para leaseTermType fixed.');
     }
   } else if (leaseTermType === 'indeterminate') {
+    assertRentalTermValueAbsent(rawLeaseEndDate, 'rentalTerms.leaseEndDate');
     assertRentalTermValueAbsent(rawLeaseTermMonths, 'rentalTerms.leaseTermMonths');
+    leaseEndDate = null;
     leaseTermMonths = null;
   } else {
+    if (rawLeaseEndDate !== undefined && rawLeaseEndDate !== null) {
+      throw new Error('rentalTerms.leaseTermType fixed e obrigatorio quando leaseEndDate for informada.');
+    }
+    leaseEndDate = null;
     leaseTermMonths = parseOptionalPositiveInteger(rawLeaseTermMonths, 'rentalTerms.leaseTermMonths');
   }
 
@@ -284,6 +334,7 @@ function parseRentalTerms(body: ProposalWizardBody, dealType: DealType): RentalP
     monthlyRent: parseOptionalNonNegativeNumber(raw.monthlyRent ?? raw.monthly_rent, 'rentalTerms.monthlyRent'),
     guaranteeType: parseOptionalText(raw.guaranteeType ?? raw.guarantee_type, 'rentalTerms.guaranteeType', 80),
     ...(leaseTermType ? { leaseTermType } : {}),
+    leaseEndDate,
     leaseTermMonths,
     ...(monthlyDueDayType ? { monthlyDueDayType } : {}),
     monthlyDueDay,

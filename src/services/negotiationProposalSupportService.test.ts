@@ -79,11 +79,11 @@ describe('negotiationProposalSupportService', () => {
     ).toThrow('buyerEmail e obrigatorio e deve ser valido.');
   });
 
-  it('accepts fixed rental terms with valid numeric values', () => {
+  it('accepts a new fixed rental term with a future end date', () => {
     const parsed = parseProposalWizardBody(
       rentalWizardPayload({
         leaseTermType: 'fixed',
-        leaseTermMonths: 30,
+        leaseEndDate: '2099-12-30',
         monthlyDueDayType: 'fixed',
         monthlyDueDay: 10,
       })
@@ -91,19 +91,48 @@ describe('negotiationProposalSupportService', () => {
 
     expect(parsed.rentalTerms).toMatchObject({
       leaseTermType: 'fixed',
-      leaseTermMonths: 30,
+      leaseEndDate: '2099-12-30',
+      leaseTermMonths: null,
       monthlyDueDayType: 'fixed',
       monthlyDueDay: 10,
     });
   });
 
-  it('rejects fixed lease terms without months', () => {
+  it('rejects invalid, past, or missing end dates for new fixed terms', () => {
     expect(() =>
       parseProposalWizardBody(rentalWizardPayload({ leaseTermType: 'fixed' }))
-    ).toThrow('rentalTerms.leaseTermMonths e obrigatorio para leaseTermType fixed.');
+    ).toThrow('rentalTerms.leaseEndDate e obrigatoria para leaseTermType fixed.');
+    expect(() =>
+      parseProposalWizardBody(
+        rentalWizardPayload({ leaseTermType: 'fixed', leaseEndDate: '2025-02-30' })
+      )
+    ).toThrow('rentalTerms.leaseEndDate invalida.');
+    expect(() =>
+      parseProposalWizardBody(
+        rentalWizardPayload({ leaseTermType: 'fixed', leaseEndDate: '2000-01-01' })
+      )
+    ).toThrow('rentalTerms.leaseEndDate deve ser futura.');
   });
 
-  it('accepts an indeterminate lease only when months are absent', () => {
+  it('keeps previously deployed fixed-by-months payloads compatible', () => {
+    expect(
+      parseProposalWizardBody(
+        rentalWizardPayload({ leaseTermType: 'fixed', leaseTermMonths: 30 })
+      ).rentalTerms
+    ).toMatchObject({ leaseTermType: 'fixed', leaseTermMonths: 30, leaseEndDate: null });
+
+    expect(() =>
+      parseProposalWizardBody(
+        rentalWizardPayload({
+          leaseTermType: 'fixed',
+          leaseEndDate: '2099-12-30',
+          leaseTermMonths: 30,
+        })
+      )
+    ).toThrow('rentalTerms.leaseTermMonths deve estar ausente ou nulo quando leaseEndDate for informada.');
+  });
+
+  it('accepts an indeterminate lease only when date and months are absent', () => {
     expect(
       parseProposalWizardBody(
         rentalWizardPayload({ leaseTermType: 'indeterminate', leaseTermMonths: null })
@@ -115,6 +144,11 @@ describe('negotiationProposalSupportService', () => {
         rentalWizardPayload({ leaseTermType: 'indeterminate', leaseTermMonths: 30 })
       )
     ).toThrow('rentalTerms.leaseTermMonths deve estar ausente ou nulo para este tipo.');
+    expect(() =>
+      parseProposalWizardBody(
+        rentalWizardPayload({ leaseTermType: 'indeterminate', leaseEndDate: '2099-12-30' })
+      )
+    ).toThrow('rentalTerms.leaseEndDate deve estar ausente ou nulo para este tipo.');
   });
 
   it('rejects fixed due days without a day', () => {

@@ -20,6 +20,9 @@ export interface RentalProposalTerms {
   monthlyRent?: number | null;
   guaranteeType?: string | null;
   leaseTermType?: 'fixed' | 'indeterminate';
+  /** ISO calendar date for new fixed rental terms. */
+  leaseEndDate?: string | null;
+  /** Kept for historical fixed terms that were expressed in months. */
   leaseTermMonths?: number | null;
   monthlyDueDayType?: 'fixed' | 'to_be_defined';
   monthlyDueDay?: number | null;

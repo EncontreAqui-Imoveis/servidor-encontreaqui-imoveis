@@ -151,6 +151,7 @@ function resolvePaymentInput(row: ContractDraftRow, dealType: ContractDealType):
           : rental.lease_term_type === 'fixed' || rental.lease_term_type === 'indeterminate'
             ? rental.lease_term_type
           : undefined,
+      leaseEndDate: text(rental.leaseEndDate ?? rental.lease_end_date) || null,
       leaseTermMonths: optionalPositiveInteger(
         rental.leaseTermMonths ?? rental.lease_term_months
       ),

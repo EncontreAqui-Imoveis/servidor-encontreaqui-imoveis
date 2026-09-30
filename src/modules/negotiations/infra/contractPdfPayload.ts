@@ -24,6 +24,8 @@ export type ContractDraftPdfInput = {
     monthlyRent: number;
     guaranteeType?: string | null;
     leaseTermType?: 'fixed' | 'indeterminate';
+    /** ISO calendar date accepted by the external PDF service. */
+    leaseEndDate?: string | null;
     leaseTermMonths?: number | null;
     monthlyDueDayType?: 'fixed' | 'to_be_defined';
     monthlyDueDay?: number | null;
@@ -74,7 +76,20 @@ export function buildContractPdfPayload(data: ContractDraftPdfInput): Record<str
     rental_terms: {
       monthly_rent: nonNegative(data.rentalTerms.monthlyRent),
       guarantee_type: text(data.rentalTerms.guaranteeType),
+      ...(data.rentalTerms.leaseTermType === 'fixed' ||
+              data.rentalTerms.leaseTermType === 'indeterminate'
+          ? { lease_term_type: data.rentalTerms.leaseTermType }
+          : {}),
+      ...(text(data.rentalTerms.leaseEndDate)
+          ? { lease_end_date: text(data.rentalTerms.leaseEndDate) }
+          : data.rentalTerms.leaseTermType === 'indeterminate'
+          ? { lease_end_date: null }
+          : {}),
       lease_term_months: optionalPositiveInteger(data.rentalTerms.leaseTermMonths),
+      ...(data.rentalTerms.monthlyDueDayType === 'fixed' ||
+              data.rentalTerms.monthlyDueDayType === 'to_be_defined'
+          ? { monthly_due_day_type: data.rentalTerms.monthlyDueDayType }
+          : {}),
       monthly_due_day: optionalPositiveInteger(data.rentalTerms.monthlyDueDay),
       observations: text(data.rentalTerms.observations),
     },

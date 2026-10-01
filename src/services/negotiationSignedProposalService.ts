@@ -4,6 +4,7 @@ import { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { AuthRequest } from '../middlewares/auth';
 import { createAdminNotification } from './notificationService';
 import {
+  findLatestSignedProposalDocument,
   findLatestNegotiationDocumentByType,
   getNegotiationDbConnection,
   saveNegotiationSignedProposalDocument,
@@ -33,6 +34,64 @@ const SIGNED_PROPOSAL_ALLOWED_CURRENT_STATUS = new Set([
   'DOCUMENTATION_PHASE',
   'AWAITING_SIGNATURES',
 ]);
+
+async function resolveAuthorizedProposalDownload(
+  req: AuthRequest,
+  res: Response
+): Promise<string | null> {
+  const negotiationId = String(req.params.id ?? '').trim();
+  if (!negotiationId) {
+    res.status(400).json({ error: 'ID de negociação inválido.' });
+    return null;
+  }
+
+  const userId = Number(req.userId);
+  if (!Number.isFinite(userId) || userId <= 0) {
+    res.status(401).json({ error: 'Usuário não autenticado.' });
+    return null;
+  }
+
+  const role = String(req.userRole ?? '').trim().toLowerCase();
+  const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
+    `
+      SELECT id, proposer_id, advertiser_id
+      FROM negotiations
+      WHERE id = ?
+      LIMIT 1
+    `,
+    [negotiationId]
+  );
+  const negotiation = negotiationRows[0];
+  if (!negotiation) {
+    res.status(404).json({ error: 'Negociação não encontrada.' });
+    return null;
+  }
+
+  if (!isNegotiationAdmin(role) && !isNegotiationActor(userId, negotiation)) {
+    res.status(403).json({ error: 'Acesso negado à proposta.' });
+    return null;
+  }
+
+  return negotiationId;
+}
+
+function sendProposalPdfDownload(
+  res: Response,
+  document: { id: number; fileContent: Buffer },
+  filename: string
+): Response {
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Length', document.fileContent.length.toString());
+  res.setHeader('X-Document-Id', String(document.id));
+  res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', 'sandbox');
+
+  res.end(document.fileContent);
+  return res;
+}
 
 function toRowArray<T>(result: unknown): T[] {
   if (!Array.isArray(result)) {
@@ -225,55 +284,38 @@ export async function downloadLatestProposal(
   req: AuthRequest,
   res: Response
 ): Promise<Response> {
-  const negotiationId = String(req.params.id ?? '').trim();
-  if (!negotiationId) {
-    return res.status(400).json({ error: 'ID de negociação inválido.' });
-  }
-
-  const userId = Number(req.userId);
-  if (!Number.isFinite(userId) || userId <= 0) {
-    return res.status(401).json({ error: 'Usuário não autenticado.' });
-  }
-
-  const role = String(req.userRole ?? '').trim().toLowerCase();
-
   try {
-    const negotiationRows = await queryNegotiationRows<NegotiationAccessRow>(
-      `
-        SELECT id, proposer_id, advertiser_id
-        FROM negotiations
-        WHERE id = ?
-        LIMIT 1
-      `,
-      [negotiationId]
-    );
-    const negotiation = negotiationRows[0];
-    if (!negotiation) {
-      return res.status(404).json({ error: 'Negociação não encontrada.' });
-    }
-
-    if (!isNegotiationAdmin(role) && !isNegotiationActor(userId, negotiation)) {
-      return res.status(403).json({ error: 'Acesso negado à proposta.' });
-    }
+    const negotiationId = await resolveAuthorizedProposalDownload(req, res);
+    if (!negotiationId) return res;
 
     const document = await findLatestNegotiationDocumentByType(negotiationId, 'proposal');
     if (!document) {
       return res.status(404).json({ error: 'Nenhuma proposta encontrada para esta negociação.' });
     }
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="proposta.pdf"');
-    res.setHeader('Content-Length', document.fileContent.length.toString());
-    res.setHeader('X-Document-Id', String(document.id));
-    res.setHeader('Cache-Control', 'private, no-store, max-age=0');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', 'sandbox');
-
-    res.end(document.fileContent);
-    return res;
+    return sendProposalPdfDownload(res, document, 'proposta.pdf');
   } catch (error) {
     console.error('Erro ao baixar proposta da negociação:', error);
     return res.status(500).json({ error: 'Falha ao baixar proposta.' });
+  }
+}
+
+export async function downloadSignedProposal(
+  req: AuthRequest,
+  res: Response
+): Promise<Response> {
+  try {
+    const negotiationId = await resolveAuthorizedProposalDownload(req, res);
+    if (!negotiationId) return res;
+
+    const document = await findLatestSignedProposalDocument(negotiationId);
+    if (!document) {
+      return res.status(404).json({ error: 'Proposta assinada não encontrada.' });
+    }
+
+    return sendProposalPdfDownload(res, document, 'proposta_assinada.pdf');
+  } catch (error) {
+    console.error('Erro ao baixar proposta assinada da negociação:', error);
+    return res.status(500).json({ error: 'Falha ao baixar proposta assinada.' });
   }
 }

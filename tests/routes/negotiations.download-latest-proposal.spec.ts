@@ -2,14 +2,20 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { queryMock, findLatestNegotiationDocumentByTypeMock } = vi.hoisted(() => ({
+const {
+  queryMock,
+  findLatestNegotiationDocumentByTypeMock,
+  findLatestSignedProposalDocumentMock,
+} = vi.hoisted(() => ({
   queryMock: vi.fn(),
   findLatestNegotiationDocumentByTypeMock: vi.fn(),
+  findLatestSignedProposalDocumentMock: vi.fn(),
 }));
 
 vi.mock('../../src/services/negotiationPersistenceService', () => ({
   queryNegotiationRows: queryMock,
   findLatestNegotiationDocumentByType: findLatestNegotiationDocumentByTypeMock,
+  findLatestSignedProposalDocument: findLatestSignedProposalDocumentMock,
 }));
 
 vi.mock('../../src/middlewares/auth', () => ({
@@ -87,5 +93,31 @@ describe('GET /negotiations/:id/proposals/download', () => {
 
     expect(response.status).toBe(404);
     expect(response.body.error).toBe('Nenhuma proposta encontrada para esta negociação.');
+  });
+
+  it('downloads the signed proposal from its dedicated endpoint', async () => {
+    queryMock.mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        proposer_id: 30003,
+        advertiser_id: 40001,
+      },
+    ]);
+    findLatestSignedProposalDocumentMock.mockResolvedValueOnce({
+      id: 101,
+      fileContent: Buffer.from('%PDF-signed-proposal%'),
+      type: 'other',
+    });
+
+    const response = await request(app).get(
+      '/negotiations/neg-1/proposals/signed/download'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('application/pdf');
+    expect(response.headers['content-disposition']).toContain('proposta_assinada.pdf');
+    expect(response.headers['x-document-id']).toBe('101');
+    expect(response.body.toString()).toContain('%PDF-signed-proposal%');
+    expect(findLatestNegotiationDocumentByTypeMock).not.toHaveBeenCalled();
   });
 });

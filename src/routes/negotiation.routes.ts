@@ -41,6 +41,10 @@ negotiationRoutes.get('/:id/proposals/download', authMiddleware, (req, res) =>
   negotiationController.downloadLatestProposal(req, res)
 );
 
+negotiationRoutes.get('/:id/proposals/signed/download', authMiddleware, (req, res) =>
+  negotiationController.downloadSignedProposal(req, res)
+);
+
 negotiationRoutes.post(
   '/:id/proposals/signed',
   authMiddleware,

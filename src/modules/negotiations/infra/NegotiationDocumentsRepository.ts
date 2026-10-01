@@ -180,6 +180,47 @@ export class NegotiationDocumentsRepository
     };
   }
 
+  async findLatestSignedProposal(
+    negotiationId: string,
+    trx?: SqlExecutor
+  ): Promise<{ id: number; fileContent: Buffer; type: string } | null> {
+    const executor = trx ?? this.executor;
+    const sql = `
+      SELECT
+        id,
+        negotiation_id,
+        type,
+        document_type,
+        metadata_json,
+        storage_provider,
+        storage_bucket,
+        storage_key,
+        storage_content_type,
+        storage_size_bytes,
+        storage_etag
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND type = 'other'
+        AND document_type = 'contrato_assinado'
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1
+    `;
+
+    const rows = toRows<NegotiationDocumentRow>(
+      await executor.execute<NegotiationDocumentRow[]>(sql, [negotiationId])
+    );
+    const row = rows?.[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      id: Number(row.id),
+      fileContent: await readNegotiationDocumentObject(row),
+      type: row.type,
+    };
+  }
+
   private async saveDocument(params: {
     negotiationId: string;
     pdfBuffer: Buffer;

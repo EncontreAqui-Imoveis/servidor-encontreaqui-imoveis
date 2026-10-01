@@ -8,6 +8,7 @@ const {
   saveSignedProposalMock,
   createAdminNotificationMock,
   findLatestNegotiationDocumentByTypeMock,
+  findLatestSignedProposalDocumentMock,
   authState,
 } = vi.hoisted(() => {
   const tx = {
@@ -26,6 +27,7 @@ const {
     saveSignedProposalMock: vi.fn(),
     createAdminNotificationMock: vi.fn(),
     findLatestNegotiationDocumentByTypeMock: vi.fn(),
+    findLatestSignedProposalDocumentMock: vi.fn(),
     authState: {
       userId: 30003,
       userRole: 'broker',
@@ -37,6 +39,7 @@ vi.mock('../../src/services/negotiationPersistenceService', () => ({
   getNegotiationDbConnection: getConnectionMock,
   queryNegotiationRows: queryMock,
   findLatestNegotiationDocumentByType: findLatestNegotiationDocumentByTypeMock,
+  findLatestSignedProposalDocument: findLatestSignedProposalDocumentMock,
   saveNegotiationSignedProposalDocument: saveSignedProposalMock,
   findNegotiationDocumentById: vi.fn(),
   generateNegotiationProposalPdf: vi.fn(),
@@ -49,6 +52,7 @@ vi.mock('../../src/services/notificationService', () => ({
 
 import {
   downloadLatestProposal,
+  downloadSignedProposal,
   uploadSignedProposal,
 } from '../../src/services/negotiationSignedProposalService';
 
@@ -201,6 +205,104 @@ describe('negotiationSignedProposalService', () => {
     expect(res.json).toHaveBeenCalledWith({ error: 'Acesso negado à proposta.' });
     expect(findLatestNegotiationDocumentByTypeMock).not.toHaveBeenCalled();
     expect(res.end).not.toHaveBeenCalled();
+  });
+
+  it('downloads only the signed proposal document for an authorized actor', async () => {
+    queryMock.mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        proposer_id: 30003,
+        advertiser_id: 40004,
+      },
+    ]);
+    findLatestSignedProposalDocumentMock.mockResolvedValueOnce({
+      id: 988,
+      fileContent: Buffer.from('%PDF-signed-proposal%'),
+      type: 'other',
+    });
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'neg-1' },
+    } as any;
+    const res = createMockResponse();
+
+    await downloadSignedProposal(req, res);
+
+    expect(findLatestSignedProposalDocumentMock).toHaveBeenCalledWith('neg-1');
+    expect(findLatestNegotiationDocumentByTypeMock).not.toHaveBeenCalled();
+    expect(res.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      'attachment; filename="proposta_assinada.pdf"'
+    );
+    expect(res.setHeader).toHaveBeenCalledWith('X-Document-Id', '988');
+    expect(res.end).toHaveBeenCalledWith(Buffer.from('%PDF-signed-proposal%'));
+  });
+
+  it('returns 404 when the signed proposal does not exist', async () => {
+    queryMock.mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        proposer_id: 30003,
+        advertiser_id: 40004,
+      },
+    ]);
+    findLatestSignedProposalDocumentMock.mockResolvedValueOnce(null);
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'neg-1' },
+    } as any;
+    const res = createMockResponse();
+
+    await downloadSignedProposal(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'Proposta assinada não encontrada.',
+    });
+    expect(findLatestNegotiationDocumentByTypeMock).not.toHaveBeenCalled();
+  });
+
+  it('denies an unrelated account before looking up the signed proposal', async () => {
+    queryMock.mockResolvedValueOnce([
+      {
+        id: 'neg-1',
+        proposer_id: 30003,
+        advertiser_id: 40004,
+      },
+    ]);
+
+    const req = {
+      userId: 99999,
+      userRole: 'client',
+      params: { id: 'neg-1' },
+    } as any;
+    const res = createMockResponse();
+
+    await downloadSignedProposal(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(findLatestSignedProposalDocumentMock).not.toHaveBeenCalled();
+  });
+
+  it('returns 404 for a missing negotiation before looking up the signed proposal', async () => {
+    queryMock.mockResolvedValueOnce([]);
+
+    const req = {
+      userId: 30003,
+      userRole: 'broker',
+      params: { id: 'missing' },
+    } as any;
+    const res = createMockResponse();
+
+    await downloadSignedProposal(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Negociação não encontrada.' });
+    expect(findLatestSignedProposalDocumentMock).not.toHaveBeenCalled();
   });
 
   it('returns 400 when uploaded file is not a PDF', async () => {

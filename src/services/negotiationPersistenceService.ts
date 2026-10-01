@@ -285,3 +285,13 @@ export function findLatestNegotiationDocumentByType(
     trx ? (trx as unknown as SqlExecutor) : undefined
   );
 }
+
+export function findLatestSignedProposalDocument(
+  negotiationId: string,
+  trx?: PoolConnection | null
+) {
+  return negotiationDocumentsRepository.findLatestSignedProposal(
+    negotiationId,
+    trx ? (trx as unknown as SqlExecutor) : undefined
+  );
+}

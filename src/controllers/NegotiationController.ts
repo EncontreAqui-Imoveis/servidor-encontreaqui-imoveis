@@ -9,6 +9,7 @@ import { generateProposal as generateProposalService } from '../services/negotia
 import { generateProposalFromProperty as generateProposalFromPropertyService } from '../services/negotiationProposalGenerationService';
 import {
   downloadLatestProposal as downloadLatestProposalService,
+  downloadSignedProposal as downloadSignedProposalService,
   uploadSignedProposal as uploadSignedProposalService,
 } from '../services/negotiationSignedProposalService';
 import { downloadDocument as downloadDocumentService } from '../services/negotiationDocumentDownloadService';
@@ -39,6 +40,10 @@ class NegotiationController {
 
   async downloadLatestProposal(req: AuthRequest, res: Response): Promise<Response> {
     return downloadLatestProposalService(req, res);
+  }
+
+  async downloadSignedProposal(req: AuthRequest, res: Response): Promise<Response> {
+    return downloadSignedProposalService(req, res);
   }
 
   async lookupClientByCpf(req: AuthRequest, res: Response): Promise<Response> {

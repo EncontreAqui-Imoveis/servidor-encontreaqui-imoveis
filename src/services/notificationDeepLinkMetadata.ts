@@ -18,6 +18,7 @@ export type NotificationDeepLinkMetadata = Record<
   | 'property_id'
   | 'negotiation_id'
   | 'contract_id'
+  | 'document_id'
   | 'notification_id'
   | 'route',
   string
@@ -29,6 +30,7 @@ export interface NotificationDeepLinkInput {
   propertyId?: unknown;
   negotiationId?: unknown;
   contractId?: unknown;
+  documentId?: unknown;
   metadata?: Record<string, unknown> | null;
   relatedEntityType?: string | null;
   relatedEntityId?: unknown;
@@ -127,6 +129,9 @@ export function buildNotificationDeepLinkMetadata(
   const contractId =
     readIdentifier(input.contractId) ||
     readMetadataIdentifier(metadata, 'contract_id', 'contractId');
+  const documentId =
+    readIdentifier(input.documentId) ||
+    readMetadataIdentifier(metadata, 'document_id', 'documentId');
   const routedEntityId =
     target === 'contract_details'
       ? contractId
@@ -151,6 +156,7 @@ export function buildNotificationDeepLinkMetadata(
     property_id: propertyId,
     negotiation_id: negotiationId,
     contract_id: contractId,
+    document_id: documentId,
     notification_id: '',
     route: resolveNotificationRoute({ target, propertyId, negotiationId, contractId }),
   };

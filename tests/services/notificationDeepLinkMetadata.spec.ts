@@ -15,6 +15,7 @@ describe('notificationDeepLinkMetadata', () => {
         contractId: 'contract-7',
         negotiationId: 'negotiation-8',
         propertyId: 42,
+        documentId: 501,
         cpf: '12345678901',
         name: 'Dado privado',
         signedUrl: 'https://private.example/document.pdf',
@@ -28,6 +29,7 @@ describe('notificationDeepLinkMetadata', () => {
       property_id: '42',
       negotiation_id: 'negotiation-8',
       contract_id: 'contract-7',
+      document_id: '501',
       notification_id: '99',
       route: '/contracts/contract-7',
     });
@@ -51,6 +53,7 @@ describe('notificationDeepLinkMetadata', () => {
       property_id: '',
       negotiation_id: '',
       contract_id: '',
+      document_id: '',
       notification_id: '',
       route,
     });

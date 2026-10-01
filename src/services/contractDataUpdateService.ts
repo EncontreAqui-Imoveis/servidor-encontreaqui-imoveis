@@ -16,7 +16,11 @@ import {
   hydrateCpfFieldsInJson,
   protectCpfFieldsInJson,
 } from '../security/personalDataProtection';
-import { normalizeValidCpf } from './contractPartyResolutionService';
+import {
+  normalizeContractPartyQualification,
+  validateDifferentPartyCpfs,
+  type ContractPartyValidationFields,
+} from './contractPartyQualificationValidation';
 
 class ContractDataUpdateError extends Error {
   statusCode: number;
@@ -238,28 +242,11 @@ function validateQualificationAllowlist(
   }
 }
 
-const CPF_FIELD_KEYS = new Set([
-  'cpf',
-  'clientCpf',
-  'conjuge_cpf',
-  'conjugeCpf',
-  'spouse_cpf',
-  'spouseCpf',
-]);
-
-function normalizeCpfFields(value: Record<string, unknown>, fieldName: string): void {
-  for (const key of CPF_FIELD_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-    const raw = value[key];
-    // Null is an explicit field-clearing instruction used by the spouse flow.
-    // Omitted fields are preserved by mergeQualification below.
-    if (raw === null) continue;
-    const cpf = normalizeValidCpf(raw);
-    if (!cpf) {
-      throw mutationError(400, `${fieldName}.${key} deve conter um CPF válido de 11 dígitos.`);
-    }
-    value[key] = cpf;
-  }
+function validationError(fields: ContractPartyValidationFields): ContractDataUpdateError {
+  return mutationError(400, 'Revise os campos informados.', {
+    code: 'VALIDATION_ERROR',
+    fields,
+  });
 }
 
 function normalizeJsonObject(
@@ -482,12 +469,14 @@ export async function updateContractData(
   if (side === 'seller' && sellerPatch) {
     rejectCrossSideBlocks(sellerPatch, side, 'sellerInfo');
     validateQualificationAllowlist(sellerPatch, side, 'sellerInfo');
-    normalizeCpfFields(sellerPatch, 'sellerInfo');
+    const fields = normalizeContractPartyQualification(sellerPatch, 'sellerInfo');
+    if (Object.keys(fields).length > 0) throw validationError(fields);
   }
   if (side === 'buyer' && buyerPatch) {
     rejectCrossSideBlocks(buyerPatch, side, 'buyerInfo');
     validateQualificationAllowlist(buyerPatch, side, 'buyerInfo');
-    normalizeCpfFields(buyerPatch, 'buyerInfo');
+    const fields = normalizeContractPartyQualification(buyerPatch, 'buyerInfo');
+    if (Object.keys(fields).length > 0) throw validationError(fields);
   }
 
   const contract = await fetchContractForUpdate(tx, params.contractId);
@@ -546,6 +535,8 @@ export async function updateContractData(
           'buyerInfo'
         )
       : buyerInfo;
+  const cpfFields = validateDifferentPartyCpfs(nextSellerInfo, nextBuyerInfo);
+  if (Object.keys(cpfFields).length > 0) throw validationError(cpfFields);
   const status = String(contract.status ?? '').trim().toUpperCase();
   const workflowMetadata =
     context.userRole === 'admin' && status !== 'AWAITING_DOCS'

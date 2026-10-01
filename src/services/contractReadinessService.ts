@@ -43,6 +43,8 @@ function missingQualificationFields(
 ): string[] {
   const missing: string[] = [];
   const common: Array<[string, string[]]> = [
+    ['nome', ['nome', 'name', 'full_name', 'fullName', 'clientName']],
+    ['cpf', ['cpf', 'clientCpf']],
     ['profissao', ['profissao']],
     ['email', ['email']],
     ['telefone', ['telefone', 'phone']],

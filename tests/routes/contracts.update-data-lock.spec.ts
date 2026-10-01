@@ -434,7 +434,11 @@ describe('PUT /contracts/:id/data', () => {
       .put('/contracts/contract-buyer-2/data')
       .send({ side: 'buyer', buyerInfo: { cpf: '111.111.111-11' } });
     expect(invalidResponse.status).toBe(400);
-    expect(invalidResponse.body.error).toContain('CPF válido');
+    expect(invalidResponse.body).toMatchObject({
+      error: 'Revise os campos informados.',
+      code: 'VALIDATION_ERROR',
+      fields: { 'buyerInfo.cpf': 'Informe um CPF válido.' },
+    });
     expect(updateCount).toBe(1);
   });
 });

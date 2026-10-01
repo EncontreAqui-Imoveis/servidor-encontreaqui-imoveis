@@ -9,6 +9,19 @@ import {
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
 import { createUserNotification } from './notificationService';
+import {
+  DOCUMENT_ALREADY_APPROVED_CODE,
+  DOCUMENT_ALREADY_APPROVED_MESSAGE,
+  findApprovedContractDocument,
+} from './contractApprovedDocumentInvariant';
+import {
+  resolveDocumentCategoryFromType,
+  type ContractDocumentSide,
+} from '../modules/contracts/domain/contractDocumentValidation';
+import type {
+  ContractDocumentCategoryCode,
+  ContractDocumentType,
+} from '../modules/contracts/domain/contract.types';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
@@ -53,15 +66,21 @@ type ContractDocumentReviewResult = {
 
 class ContractDocumentReviewError extends Error {
   statusCode: number;
+  code?: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, code?: string) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
-function documentReviewError(statusCode: number, message: string): ContractDocumentReviewError {
-  return new ContractDocumentReviewError(statusCode, message);
+function documentReviewError(
+  statusCode: number,
+  message: string,
+  code?: string
+): ContractDocumentReviewError {
+  return new ContractDocumentReviewError(statusCode, message, code);
 }
 
 export function isContractDocumentReviewError(
@@ -121,6 +140,24 @@ function normalizeReviewReason(reason: unknown): string {
 function readPositiveUserId(value: unknown): number | null {
   const parsed = Number(value ?? 0);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function readDocumentSide(metadata: Record<string, unknown>): ContractDocumentSide | null {
+  const side = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
+  return side === 'seller' || side === 'buyer' ? side : null;
+}
+
+function readDocumentCategory(
+  metadata: Record<string, unknown>,
+  documentType: string | null
+): ContractDocumentCategoryCode | null {
+  const category = String(
+    metadata.documentCategory ?? metadata.document_category ?? ''
+  ).trim().toLowerCase();
+  if (category) return category as ContractDocumentCategoryCode;
+  return resolveDocumentCategoryFromType(
+    String(documentType ?? '').trim().toLowerCase() as ContractDocumentType
+  );
 }
 
 export async function reviewContractDocument(
@@ -206,6 +243,28 @@ export async function reviewContractDocument(
   const ownerSideValue = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
   const ownerSide = ownerSideValue === 'seller' || ownerSideValue === 'buyer' ? ownerSideValue : null;
   const documentLabel = String(metadata.label ?? metadata.documentLabel ?? '').trim() || null;
+
+  if (status === 'APPROVED' || status === 'APPROVED_WITH_RES') {
+    const side = readDocumentSide(metadata);
+    const category = readDocumentCategory(metadata, document.document_type);
+    if (side && category && documentType) {
+      const approvedDocumentId = await findApprovedContractDocument(tx, {
+        contractId,
+        negotiationId: contract.negotiation_id,
+        side,
+        category,
+        documentType,
+        excludeDocumentId: documentId,
+      });
+      if (approvedDocumentId !== null) {
+        throw documentReviewError(
+          409,
+          DOCUMENT_ALREADY_APPROVED_MESSAGE,
+          DOCUMENT_ALREADY_APPROVED_CODE
+        );
+      }
+    }
+  }
 
   if (status === 'REJECTED') {
     const workflowMetadata = appendWorkflowAuditEvent(contract.workflow_metadata, {

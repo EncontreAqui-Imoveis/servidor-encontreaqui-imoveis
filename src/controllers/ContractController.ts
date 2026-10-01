@@ -2520,7 +2520,10 @@ class ContractController {
     } catch (error) {
       await tx.rollback();
       if (isContractDocumentReviewError(error)) {
-        return res.status(error.statusCode).json({ error: error.message });
+        return res.status(error.statusCode).json({
+          error: error.message,
+          ...(error.code ? { code: error.code } : {}),
+        });
       }
       console.error('Erro ao revisar documento do contrato:', error);
       return res.status(500).json({ error: 'Falha ao revisar documento.' });

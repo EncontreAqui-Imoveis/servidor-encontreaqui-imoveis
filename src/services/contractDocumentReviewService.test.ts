@@ -4,10 +4,17 @@ import type { PoolConnection } from 'mysql2/promise';
 import { reviewContractDocument } from './contractDocumentReviewService';
 import type { ContractRow } from '../controllers/ContractController';
 
-const { enqueueDeletionMock } = vi.hoisted(() => ({ enqueueDeletionMock: vi.fn() }));
+const { enqueueDeletionMock, createUserNotificationMock } = vi.hoisted(() => ({
+  enqueueDeletionMock: vi.fn(),
+  createUserNotificationMock: vi.fn(),
+}));
 
 vi.mock('./negotiationDocumentDeletionService', () => ({
   enqueueNegotiationDocumentDeletion: enqueueDeletionMock,
+}));
+
+vi.mock('./notificationService', () => ({
+  createUserNotification: createUserNotificationMock,
 }));
 
 function createTxMock() {
@@ -42,7 +49,7 @@ describe('reviewContractDocument', () => {
         ],
         [],
       ])
-      .mockResolvedValueOnce([{}, []])
+      .mockResolvedValueOnce([[], []])
       .mockResolvedValueOnce([{}, []]);
 
     const result = await reviewContractDocument(tx, {
@@ -56,8 +63,8 @@ describe('reviewContractDocument', () => {
     });
 
     expect(result.message).toBe('Documento aprovado com sucesso.');
-    expect(tx.query).toHaveBeenCalledTimes(3);
-    const updateCall = tx.query.mock.calls[1];
+    expect(tx.query).toHaveBeenCalledTimes(4);
+    const updateCall = tx.query.mock.calls[2];
     expect(String(updateCall[0])).toContain('UPDATE negotiation_documents');
     const serializedMetadata = String(updateCall[1][0]);
     expect(serializedMetadata).toContain('"categoryStatus":"APPROVED"');
@@ -143,5 +150,61 @@ describe('reviewContractDocument', () => {
       uploadedByUserId: 42,
       deletionJobId: 71,
     });
+  });
+
+  it('não aprova um pendente quando outra versão da mesma categoria já está aprovada', async () => {
+    const tx = createTxMock();
+    const contract = {
+      id: 'contract-1',
+      negotiation_id: 'neg-1',
+    } as ContractRow;
+
+    tx.query
+      .mockResolvedValueOnce([[
+        {
+          id: 12,
+          type: 'other',
+          document_type: 'doc_identidade',
+          metadata_json: {
+            contractId: 'contract-1',
+            documentCategory: 'identidade',
+            owner_side: 'buyer',
+            categoryStatus: 'PENDING',
+          },
+        },
+      ], []])
+      .mockResolvedValueOnce([[
+        {
+          id: 11,
+          document_type: 'doc_identidade',
+          metadata_json: {
+            contractId: 'contract-1',
+            documentCategory: 'identidade',
+            owner_side: 'buyer',
+            categoryStatus: 'APPROVED',
+          },
+        },
+      ], []]);
+
+    await expect(
+      reviewContractDocument(tx, {
+        contractIdInput: 'contract-1',
+        documentIdInput: '12',
+        statusInput: 'APPROVED',
+        reasonInput: '',
+        userIdInput: 55,
+        userRoleInput: 'admin',
+        loadContractForUpdate: vi.fn().mockResolvedValue(contract),
+      })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'DOCUMENT_ALREADY_APPROVED',
+    });
+
+    expect(tx.query).toHaveBeenCalledTimes(2);
+    expect(
+      tx.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE negotiation_documents'))
+    ).toBe(false);
+    expect(createUserNotificationMock).not.toHaveBeenCalled();
   });
 });

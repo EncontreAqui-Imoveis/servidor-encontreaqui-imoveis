@@ -28,6 +28,11 @@ import {
   assertParticipantMutationAllowed,
   isContractWorkflowGuardError,
 } from './contractWorkflowGuard';
+import {
+  DOCUMENT_ALREADY_APPROVED_CODE,
+  DOCUMENT_ALREADY_APPROVED_MESSAGE,
+  findApprovedContractDocument,
+} from './contractApprovedDocumentInvariant';
 import type {
   ContractDocumentCategoryCode,
   ContractDocumentType,
@@ -345,6 +350,21 @@ export async function uploadContractDocument(
     throw mutationError(422, 'Documento inválido para a categoria informada.', {
       validationResult: uploadValidation,
     });
+  }
+
+  if (resolvedDocumentCategory && !isSignedDocumentType(normalizedDocumentType) && !isAdminSupplemental) {
+    const approvedDocumentId = await findApprovedContractDocument(tx, {
+      contractId: params.contractId,
+      negotiationId: params.contract.negotiation_id,
+      side: resolvedSide,
+      category: resolvedDocumentCategory,
+      documentType: normalizedDocumentType,
+    });
+    if (approvedDocumentId !== null) {
+      throw mutationError(409, DOCUMENT_ALREADY_APPROVED_MESSAGE, {
+        code: DOCUMENT_ALREADY_APPROVED_CODE,
+      });
+    }
   }
 
   const uploadEvent: ContractAuditEvent = {

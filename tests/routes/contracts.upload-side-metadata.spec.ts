@@ -31,6 +31,7 @@ vi.mock('../../src/database/connection', () => ({
 
 vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   storeNegotiationDocumentToR2: storeNegotiationDocumentToR2Mock,
+  isInvalidNegotiationDocumentContentError: () => false,
   readNegotiationDocumentObject: vi.fn(),
   deleteNegotiationDocumentObject: vi.fn(),
   parseNegotiationDocumentMetadata: (value: unknown) =>
@@ -72,6 +73,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     selling_broker_name: 'Vendedor',
   };
   let actingUserId = 30003;
+  let approvedDocuments: Array<Record<string, unknown>> = [];
   app.use((req, _res, next) => {
     (req as any).userId = actingUserId;
     (req as any).userRole = 'client';
@@ -96,6 +98,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     actingUserId = 30003;
+    approvedDocuments = [];
     activeContract = {
       id: 'contract-1',
       negotiation_id: 'neg-1',
@@ -157,6 +160,10 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
 
       if (sql.includes('UPDATE contracts')) {
         return [{ affectedRows: 1 }];
+      }
+
+      if (sql.includes('FROM negotiation_documents') && sql.includes('FOR UPDATE')) {
+        return [approvedDocuments, []];
       }
 
       return [[]];
@@ -231,5 +238,68 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
 
     expect(response.status).toBe(403);
     expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia novo upload quando a mesma categoria e lado já possuem aprovação', async () => {
+    approvedDocuments = [
+      {
+        id: 501,
+        document_type: 'doc_identidade',
+        metadata_json: {
+          contractId: 'contract-1',
+          owner_side: 'seller',
+          documentCategory: 'identidade',
+          categoryStatus: 'APPROVED',
+        },
+      },
+      {
+        id: 502,
+        document_type: 'doc_identidade',
+        metadata_json: {
+          contractId: 'contract-1',
+          owner_side: 'seller',
+          documentCategory: 'identidade',
+          categoryStatus: 'PENDING',
+        },
+      },
+    ];
+
+    const response = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'doc_identidade')
+      .field('side', 'seller')
+      .attach('file', Buffer.alloc(2048, 'a'), 'nova-identidade.pdf');
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'DOCUMENT_ALREADY_APPROVED',
+      error: 'Este documento já foi aprovado. Para substituí-lo, é necessário reabrir a análise.',
+    });
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+    expect(approvedDocuments).toHaveLength(2);
+  });
+
+  it('preserva upload para uma nova versão quando não há aprovação', async () => {
+    approvedDocuments = [
+      {
+        id: 502,
+        document_type: 'doc_identidade',
+        metadata_json: {
+          contractId: 'contract-1',
+          owner_side: 'seller',
+          documentCategory: 'identidade',
+          categoryStatus: 'PENDING',
+        },
+      },
+    ];
+
+    const response = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'doc_identidade')
+      .field('side', 'seller')
+      .attach('file', Buffer.alloc(2048, 'a'), 'identidade.pdf');
+
+    expect(response.status).toBe(201);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
   });
 });

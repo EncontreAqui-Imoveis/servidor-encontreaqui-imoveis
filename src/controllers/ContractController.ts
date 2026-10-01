@@ -103,6 +103,10 @@ import {
   reviewContractDocument,
 } from '../services/contractDocumentReviewService';
 import {
+  isContractDocumentReopenError,
+  reopenContractDocument,
+} from '../services/contractDocumentReopenService';
+import {
   isContractDealType,
   isContractApprovalStatus,
   isContractDocumentCategoryStatus,
@@ -2527,6 +2531,46 @@ class ContractController {
       }
       console.error('Erro ao revisar documento do contrato:', error);
       return res.status(500).json({ error: 'Falha ao revisar documento.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async reopenDocumentReview(req: AuthRequest, res: Response): Promise<Response> {
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+      const result = await reopenContractDocument(tx, {
+        contractIdInput: req.params.id,
+        documentIdInput: req.params.documentId,
+        userIdInput: req.userId,
+        userRoleInput: req.userRole,
+        loadContractForUpdate: fetchContractForUpdate,
+      });
+      await tx.commit();
+
+      if (result.changed && result.document) {
+        const recipientId = result.document.uploadedByUserId ??
+          (result.document.side === 'seller' ? Number(result.contract.advertiser_id ?? 0) : Number(result.contract.proposer_id ?? 0));
+        if (recipientId > 0) {
+          const categoryLabel = CONTRACT_DOCUMENT_CATEGORY_LABELS[result.document.category] ?? 'Documento';
+          void createUserNotification({
+            type: 'negotiation',
+            title: 'Documento em nova análise',
+            message: `O documento ${categoryLabel} foi reaberto para revisão. Você pode substituí-lo se necessário.`,
+            recipientId,
+            relatedEntityId: Number(result.contract.negotiation_id) || null,
+            target: 'contract_details',
+            metadata: { contractId: result.contract.id, negotiationId: result.contract.negotiation_id, documentId: result.document.id },
+          }).catch((error) => console.error('Falha ao notificar reabertura de documento:', error));
+        }
+      }
+      return res.status(200).json({ message: result.message, changed: result.changed, contract: mapContract(result.contract, req) });
+    } catch (error) {
+      await tx.rollback();
+      if (isContractDocumentReopenError(error)) return res.status(error.statusCode).json({ error: error.message });
+      console.error('Erro ao reabrir análise de documento:', error);
+      return res.status(500).json({ error: 'Falha ao reabrir análise do documento.' });
     } finally {
       tx.release();
     }

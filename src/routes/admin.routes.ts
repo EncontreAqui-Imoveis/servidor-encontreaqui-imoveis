@@ -118,6 +118,9 @@ adminRoutes.put('/contracts/:id/evaluate-category', requireAdminCapability('mana
 adminRoutes.put('/contracts/:id/documents/:documentId/review', requireAdminCapability('review_documents'), (req, res) =>
   contractController.reviewDocument(req, res)
 );
+adminRoutes.put('/contracts/:id/documents/:documentId/reopen-review', requireAdminCapability('review_documents'), (req, res) =>
+  contractController.reopenDocumentReview(req, res)
+);
 adminRoutes.get('/contracts/:id/document-rejections', (req, res) =>
   contractController.listDocumentRejections(req, res)
 );
@@ -412,4 +415,3 @@ adminRoutes.get('/stats/dashboard', async (req, res) => {
 });
 
 export default adminRoutes;
-

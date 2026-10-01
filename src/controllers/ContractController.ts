@@ -2556,8 +2556,8 @@ class ContractController {
           const categoryLabel = CONTRACT_DOCUMENT_CATEGORY_LABELS[result.document.category] ?? 'Documento';
           void createUserNotification({
             type: 'negotiation',
-            title: 'Documento em nova análise',
-            message: `O documento ${categoryLabel} foi reaberto para revisão. Você pode substituí-lo se necessário.`,
+            title: 'Nova versão necessária',
+            message: `A equipe responsável solicitou uma nova versão do documento ${categoryLabel}. Envie o arquivo atualizado para continuar o processo.`,
             recipientId,
             relatedEntityId: Number(result.contract.negotiation_id) || null,
             target: 'contract_details',

@@ -24,6 +24,35 @@ function createTxMock() {
 }
 
 describe('reviewContractDocument', () => {
+  it('bloqueia revisão individual quando o lado do documento já está aprovado', async () => {
+    const tx = createTxMock();
+    const contract = {
+      id: 'contract-1',
+      negotiation_id: 'neg-1',
+      buyer_approval_status: 'APPROVED',
+      seller_approval_status: 'PENDING',
+    } as ContractRow;
+    tx.query.mockResolvedValueOnce([[
+      {
+        id: 11,
+        type: 'other',
+        document_type: 'doc_identidade',
+        metadata_json: { owner_side: 'buyer', documentCategory: 'identidade' },
+      },
+    ], []]);
+
+    await expect(reviewContractDocument(tx, {
+      contractIdInput: 'contract-1', documentIdInput: 11, statusInput: 'REJECTED',
+      reasonInput: 'Documento ilegível', userIdInput: 55, userRoleInput: 'admin',
+      loadContractForUpdate: vi.fn().mockResolvedValue(contract),
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'SIDE_ALREADY_APPROVED',
+      message: 'Este lado já foi aprovado. Reinicie a análise antes de fazer alterações.',
+    });
+    expect(tx.query).toHaveBeenCalledTimes(1);
+  });
+
   it('notifica somente o lado buyer, não o corretor que enviou o arquivo', async () => {
     const tx = createTxMock();
     const contract = {

@@ -27,6 +27,11 @@ import {
   resolveContractDocumentNotificationCategoryLabel,
   resolveContractDocumentNotificationPropertyTitle,
 } from './contractDocumentNotificationSupport';
+import {
+  isContractSideApproved,
+  SIDE_ALREADY_APPROVED_CODE,
+  SIDE_ALREADY_APPROVED_MESSAGE,
+} from './contractSideApprovalGuard';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
@@ -220,6 +225,14 @@ export async function reviewContractDocument(
   }
 
   const metadata = parseStoredJsonObject(document.metadata_json);
+  const documentSide = readDocumentSide(metadata);
+  if (documentSide && isContractSideApproved(contract, documentSide)) {
+    throw documentReviewError(
+      409,
+      SIDE_ALREADY_APPROVED_MESSAGE,
+      SIDE_ALREADY_APPROVED_CODE
+    );
+  }
   const now = new Date().toISOString();
   const userId = Number(params.userIdInput ?? 0);
   const actorId = Number.isFinite(userId) && userId > 0 ? userId : null;

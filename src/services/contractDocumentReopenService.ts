@@ -11,6 +11,11 @@ import type {
   ContractDocumentCategoryCode,
   ContractDocumentType,
 } from '../modules/contracts/domain/contract.types';
+import {
+  isContractSideApproved,
+  SIDE_ALREADY_APPROVED_CODE,
+  SIDE_ALREADY_APPROVED_MESSAGE,
+} from './contractSideApprovalGuard';
 
 type DocumentRow = RowDataPacket & {
   id: number | string;
@@ -34,7 +39,7 @@ export type ReopenContractDocumentResult = {
 };
 
 class ContractDocumentReopenError extends Error {
-  constructor(readonly statusCode: number, message: string) {
+  constructor(readonly statusCode: number, message: string, readonly code?: string) {
     super(message);
   }
 }
@@ -43,8 +48,8 @@ export function isContractDocumentReopenError(error: unknown): error is Contract
   return error instanceof ContractDocumentReopenError;
 }
 
-function reopenError(statusCode: number, message: string): ContractDocumentReopenError {
-  return new ContractDocumentReopenError(statusCode, message);
+function reopenError(statusCode: number, message: string, code?: string): ContractDocumentReopenError {
+  return new ContractDocumentReopenError(statusCode, message, code);
 }
 
 function parseMetadata(value: unknown): Record<string, unknown> {
@@ -106,6 +111,10 @@ export async function reopenContractDocument(
   const side = documentSide(metadata);
   const category = documentCategory(metadata, document.document_type);
   if (!side || !category) throw reopenError(409, 'O documento não possui categoria e lado válidos para reabertura.');
+
+  if (isContractSideApproved(contract, side)) {
+    throw reopenError(409, SIDE_ALREADY_APPROVED_MESSAGE, SIDE_ALREADY_APPROVED_CODE);
+  }
 
   const currentStatus = approvedStatus(metadata);
   if (currentStatus === 'PENDING') {

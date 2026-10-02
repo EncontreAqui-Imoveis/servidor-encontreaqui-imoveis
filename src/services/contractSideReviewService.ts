@@ -23,6 +23,11 @@ import {
   resolveDocumentCategoryFromType,
   type ContractDocumentSide,
 } from '../modules/contracts/domain/contractDocumentValidation';
+import {
+  isContractSideApproved,
+  SIDE_ALREADY_APPROVED_CODE,
+  SIDE_ALREADY_APPROVED_MESSAGE,
+} from './contractSideApprovalGuard';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
@@ -58,15 +63,17 @@ type ContractApprovalSideReviewResult = {
 
 class ContractSideReviewError extends Error {
   statusCode: number;
+  code?: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, code?: string) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
-function contractSideReviewError(statusCode: number, message: string): ContractSideReviewError {
-  return new ContractSideReviewError(statusCode, message);
+function contractSideReviewError(statusCode: number, message: string, code?: string): ContractSideReviewError {
+  return new ContractSideReviewError(statusCode, message, code);
 }
 
 export function isContractSideReviewError(error: unknown): error is ContractSideReviewError {
@@ -657,6 +664,18 @@ export async function evaluateContractSide(
       throw contractSideReviewError(
         400,
         'A avaliação granular só é permitida em AWAITING_DOCS.'
+      );
+    }
+
+    if (
+      nextSideStatus !== 'PENDING' &&
+      isContractSideApproved(contract, side as ContractDocumentSide)
+    ) {
+      await tx.rollback();
+      throw contractSideReviewError(
+        409,
+        SIDE_ALREADY_APPROVED_MESSAGE,
+        SIDE_ALREADY_APPROVED_CODE
       );
     }
 

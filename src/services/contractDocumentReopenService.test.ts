@@ -10,7 +10,7 @@ function txMock() {
 
 const contract = {
   id: 'contract-1', negotiation_id: 'neg-1', status: 'AWAITING_DOCS', workflow_metadata: {},
-  seller_approval_status: 'APPROVED', buyer_approval_status: 'APPROVED',
+  seller_approval_status: 'PENDING', buyer_approval_status: 'PENDING',
 } as ContractRow;
 
 function approvedDocument(status = 'APPROVED') {
@@ -23,6 +23,20 @@ function approvedDocument(status = 'APPROVED') {
 }
 
 describe('reopenContractDocument', () => {
+  it('bloqueia reabertura individual quando o lado já está aprovado', async () => {
+    const tx = txMock();
+    tx.query.mockResolvedValueOnce([[approvedDocument()], []]);
+
+    await expect(reopenContractDocument(tx, {
+      contractIdInput: 'contract-1', documentIdInput: 19, userIdInput: 99, userRoleInput: 'admin',
+      loadContractForUpdate: vi.fn().mockResolvedValue({ ...contract, seller_approval_status: 'APPROVED' }),
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'SIDE_ALREADY_APPROVED',
+      message: 'Este lado já foi aprovado. Reinicie a análise antes de fazer alterações.',
+    });
+  });
+
   it.each(['APPROVED', 'APPROVED_WITH_RES'])('returns approved document %s to PENDING without changing the side or contract workflow', async (status) => {
     const tx = txMock();
     tx.query.mockResolvedValueOnce([[approvedDocument(status)], []]).mockResolvedValue([{}, []]);

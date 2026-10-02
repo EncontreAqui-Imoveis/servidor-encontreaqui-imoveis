@@ -33,6 +33,11 @@ import {
   DOCUMENT_ALREADY_APPROVED_MESSAGE,
   findApprovedContractDocument,
 } from './contractApprovedDocumentInvariant';
+import {
+  isContractSideApproved,
+  SIDE_ALREADY_APPROVED_CODE,
+  SIDE_ALREADY_APPROVED_MESSAGE,
+} from './contractSideApprovalGuard';
 import type {
   ContractDocumentCategoryCode,
   ContractDocumentType,
@@ -256,6 +261,12 @@ export async function uploadContractDocument(
       400,
       'Informe o dono do documento (side: seller|buyer).'
     );
+  }
+
+  if (isContractSideApproved(params.contract, resolvedSide)) {
+    throw mutationError(409, SIDE_ALREADY_APPROVED_MESSAGE, {
+      code: SIDE_ALREADY_APPROVED_CODE,
+    });
   }
 
   if (resolvedSide === 'seller' && !context.canEditSeller) {
@@ -503,6 +514,12 @@ export async function deleteContractDocument(
   }
   const isUploader = Number(metadata.uploadedBy) === Number(params.req.userId);
   const isAdmin = context.userRole === 'admin';
+
+  if (side && isContractSideApproved(params.contract, side)) {
+    throw mutationError(409, SIDE_ALREADY_APPROVED_MESSAGE, {
+      code: SIDE_ALREADY_APPROVED_CODE,
+    });
+  }
 
   if (side === 'seller' && !context.canEditSeller && !isAdmin) {
     throw mutationError(403, 'Seu acesso não permite remover documentos do lado vendedor nesta etapa.');

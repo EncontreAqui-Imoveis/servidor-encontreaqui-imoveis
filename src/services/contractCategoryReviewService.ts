@@ -22,6 +22,11 @@ import {
   resolveDocumentCategoryFromType,
   type ContractDocumentSide,
 } from '../modules/contracts/domain/contractDocumentValidation';
+import {
+  isContractSideApproved,
+  SIDE_ALREADY_APPROVED_CODE,
+  SIDE_ALREADY_APPROVED_MESSAGE,
+} from './contractSideApprovalGuard';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
@@ -58,18 +63,21 @@ type ContractCategoryReviewResult = {
 
 class ContractCategoryReviewError extends Error {
   statusCode: number;
+  code?: string;
 
-  constructor(statusCode: number, message: string) {
+  constructor(statusCode: number, message: string, code?: string) {
     super(message);
     this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
 function contractCategoryReviewError(
   statusCode: number,
-  message: string
+  message: string,
+  code?: string
 ): ContractCategoryReviewError {
-  return new ContractCategoryReviewError(statusCode, message);
+  return new ContractCategoryReviewError(statusCode, message, code);
 }
 
 export function isContractCategoryReviewError(
@@ -516,6 +524,14 @@ export async function evaluateContractCategory(
       throw contractCategoryReviewError(
         400,
         'Revisão por categoria só é permitida em AWAITING_DOCS.'
+      );
+    }
+    if (isContractSideApproved(contract, side)) {
+      await tx.rollback();
+      throw contractCategoryReviewError(
+        409,
+        SIDE_ALREADY_APPROVED_MESSAGE,
+        SIDE_ALREADY_APPROVED_CODE
       );
     }
 

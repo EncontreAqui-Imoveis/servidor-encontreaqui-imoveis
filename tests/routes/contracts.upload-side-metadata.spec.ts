@@ -73,6 +73,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     selling_broker_name: 'Vendedor',
   };
   let actingUserId = 30003;
+  let expectedOriginalFileName = 'identidade.pdf';
   let approvedDocuments: Array<Record<string, unknown>> = [];
   app.use((req, _res, next) => {
     (req as any).userId = actingUserId;
@@ -98,6 +99,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     actingUserId = 30003;
+    expectedOriginalFileName = 'identidade.pdf';
     approvedDocuments = [];
     activeContract = {
       id: 'contract-1',
@@ -137,7 +139,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       if (String(params.documentType ?? '') === 'doc_identidade') {
         expect(params.metadataJson.owner_side).toBe('seller');
         expect(params.metadataJson.side).toBe('seller');
-        expect(String(params.metadataJson.originalFileName ?? '')).toBe('identidade.pdf');
+        expect(String(params.metadataJson.originalFileName ?? '')).toBe(expectedOriginalFileName);
       }
       if (String(params.documentType ?? '') === 'cliente_outro_01') {
         expect(params.metadataJson.documentCategory).toBe('outro');
@@ -185,6 +187,25 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       ownerSide: 'seller',
       originalFileName: 'identidade.pdf',
     });
+  });
+
+  it('preserva filename UTF-8 no metadata e na resposta do upload', async () => {
+    expectedOriginalFileName = 'Certidão de Estado Civil.pdf';
+    const response = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'doc_identidade')
+      .field('side', 'seller')
+      .attach('file', Buffer.alloc(2048, 'a'), expectedOriginalFileName);
+
+    expect(response.status).toBe(201);
+    expect(response.body.document.originalFileName).toBe(expectedOriginalFileName);
+    expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadataJson: expect.objectContaining({
+          originalFileName: expectedOriginalFileName,
+        }),
+      })
+    );
   });
 
   it('accepts outro slots for seller in AWAITING_DOCS', async () => {

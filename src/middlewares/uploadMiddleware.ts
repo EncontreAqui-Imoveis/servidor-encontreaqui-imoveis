@@ -120,6 +120,7 @@ function isAllowedContractDocument(mime: string, originalname: string): boolean 
 
 export const mediaUpload = multer({
   storage: mediaStorage,
+  defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_MEDIA_FILE_MB * ONE_MB_IN_BYTES,
     files: 21,
@@ -156,6 +157,7 @@ export const mediaUpload = multer({
 
 export const brokerDocsUpload = multer({
   storage: documentStorage,
+  defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_BROKER_DOC_FILE_MB * ONE_MB_IN_BYTES,
     files: 3,
@@ -185,6 +187,7 @@ export const brokerDocsUpload = multer({
 
 export const signedProposalUpload = multer({
   storage: documentStorage,
+  defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_SIGNED_PROPOSAL_FILE_MB * ONE_MB_IN_BYTES,
     files: 1,
@@ -207,6 +210,7 @@ export const signedProposalUpload = multer({
 
 export const contractDraftUpload = multer({
   storage: documentStorage,
+  defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_CONTRACT_DRAFT_FILE_MB * ONE_MB_IN_BYTES,
     files: 1,
@@ -229,6 +233,7 @@ export const contractDraftUpload = multer({
 
 export const contractDocumentUpload = multer({
   storage: documentStorage,
+  defParamCharset: 'utf8',
   limits: {
     fileSize: MAX_CONTRACT_DOCUMENT_FILE_MB * ONE_MB_IN_BYTES,
     files: 1,

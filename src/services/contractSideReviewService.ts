@@ -759,7 +759,6 @@ export async function evaluateContractSide(
     const nextContractStatus: ContractStatus = canMoveToDraft
       ? 'IN_DRAFT'
       : 'AWAITING_DOCS';
-    const shouldReleasePropertyAvailability = nextSideStatus === 'REJECTED';
     const nextWorkflowMetadata = appendWorkflowAuditEvent(
       contract.workflow_metadata,
       reviewAuditEvent
@@ -788,30 +787,6 @@ export async function evaluateContractSide(
         contractId,
       ]
     );
-
-    if (shouldReleasePropertyAvailability) {
-      await tx.query(
-        `
-          UPDATE negotiations
-          SET status = 'IN_NEGOTIATION'
-          WHERE id = ?
-        `,
-        [contract.negotiation_id]
-      );
-      await tx.query(
-        `
-          UPDATE properties
-          SET
-            status = 'approved',
-            visibility = 'PUBLIC',
-            lifecycle_status = 'AVAILABLE'
-          WHERE id = ?
-            AND lifecycle_status NOT IN ('SOLD', 'RENTED')
-            AND status NOT IN ('sold', 'rented')
-        `,
-        [contract.property_id]
-      );
-    }
 
     const updated = await input.loadContractForUpdate(tx, contractId);
     await tx.commit();
@@ -858,7 +833,7 @@ export async function evaluateContractSide(
           await createUserNotification({
             type: 'negotiation',
             title: 'Documentação rejeitada',
-            message: `A documentação (${sideLabel}) do contrato do imóvel "${propertyTitle}" foi rejeitada. Motivo: ${reasonText}. O contrato não aparecerá mais na sua lista até nova análise, se aplicável.`,
+            message: `A documentação (${sideLabel}) do contrato do imóvel "${propertyTitle}" foi rejeitada. Motivo: ${reasonText}. Corrija e envie novamente os documentos para continuar o processo.`,
             recipientId,
             relatedEntityId: Number(contract.property_id),
             metadata: {

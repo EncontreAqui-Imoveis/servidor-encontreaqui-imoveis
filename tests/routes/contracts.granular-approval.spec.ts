@@ -213,6 +213,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
       label: 'Em análise',
       nextStep: 'Aguardando aprovação do comprador',
     });
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
   });
 
   it('does not mirror seller rejection onto buyer', async () => {
@@ -229,6 +234,41 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
     expect(response.body.movedToDraft).toBe(false);
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
+    expect(createUserNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Documentação rejeitada',
+        message: expect.stringContaining('Corrija e envie novamente os documentos'),
+      })
+    );
+    expect(createUserNotificationMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('não aparecerá mais') })
+    );
+  });
+
+  it('does not mirror buyer rejection onto seller or release negotiation/property', async () => {
+    const response = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'buyer',
+        status: 'REJECTED',
+        reason: 'Documento do comprador inconsistente.',
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.sellerApprovalStatus).toBe('PENDING');
+    expect(response.body.contract.buyerApprovalStatus).toBe('REJECTED');
+    expect(response.body.contract.status).toBe('AWAITING_DOCS');
+    expect(response.body.movedToDraft).toBe(false);
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
   });
 
   it('moves to IN_DRAFT when approvals are complete despite documentary pending items', async () => {
@@ -262,6 +302,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
       label: 'Aprovado com ressalvas',
       nextStep: 'Minuta liberada',
     });
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Contrato aprovado com ressalvas',
@@ -300,6 +345,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(buyerResponse.body.contract.status).toBe('IN_DRAFT');
     expect(buyerResponse.body.contract.sellerApprovalStatus).toBe('APPROVED_WITH_RES');
     expect(buyerResponse.body.contract.buyerApprovalStatus).toBe('APPROVED_WITH_RES');
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
     expect(ensureContractDraftGenerated).toHaveBeenCalledWith('contract-1');
     expect(buyerResponse.body.draftGeneration).toMatchObject({
       generated: true,
@@ -409,7 +459,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     );
   });
 
-  it('when rejected, keeps contract in AWAITING_DOCS and releases property availability', async () => {
+  it('keeps negotiation/property untouched when a side is rejected', async () => {
     const response = await request(app)
       .put('/admin/contracts/contract-1/evaluate-side')
       .send({
@@ -420,13 +470,79 @@ describe('Contract granular approval and signed docs endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
-    expect(txMock.query).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE negotiations'),
-      ['neg-1']
-    );
-    expect(txMock.query).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE properties'),
-      [101]
-    );
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
   });
+
+  it('keeps negotiation/property untouched when resetting an approved side', async () => {
+    contractState = createInitialContractState({ seller_approval_status: 'APPROVED' });
+
+    const response = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({ side: 'seller', status: 'PENDING' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.sellerApprovalStatus).toBe('PENDING');
+    expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
+    expect(response.body.contract.status).toBe('AWAITING_DOCS');
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
+      )
+    ).toBe(false);
+  });
+
+  it.each(['seller', 'buyer'] as const)(
+    'writes REJECTED to the reviewed %s documents only',
+    async (side) => {
+    const defaultQuery = txMock.query.getMockImplementation();
+    txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('FROM negotiation_documents')) {
+        const side = String(params.at(-1));
+        return [[{
+          id: 91,
+          type: 'other',
+          document_type: 'doc_identidade',
+          metadata_json: {
+            owner_side: side,
+            side,
+            documentCategory: 'identidade',
+            categoryStatus: 'PENDING',
+          },
+          created_at: '2026-02-19 10:00:00',
+        }]];
+      }
+      return defaultQuery?.(sql, params) ?? [[]];
+    });
+
+      const response = await request(app)
+        .put('/admin/contracts/contract-1/evaluate-side')
+        .send({
+          side,
+          status: 'REJECTED',
+          reason: 'Documento ilegível.',
+        });
+
+      expect(response.status).toBe(200);
+      const updateCall = txMock.query.mock.calls.find(([sql]) =>
+        String(sql).includes('UPDATE negotiation_documents')
+      );
+      const metadata = JSON.parse(String(updateCall?.[1]?.[0] ?? '{}'));
+      expect(metadata).toMatchObject({
+        owner_side: side,
+        categoryStatus: 'REJECTED',
+        reviewStatus: 'REJECTED',
+        validationStatus: 'REJECTED',
+      });
+      expect(response.body.contract.sellerApprovalStatus).toBe(
+        side === 'seller' ? 'REJECTED' : 'PENDING'
+      );
+      expect(response.body.contract.buyerApprovalStatus).toBe(
+        side === 'buyer' ? 'REJECTED' : 'PENDING'
+      );
+    }
+  );
 });

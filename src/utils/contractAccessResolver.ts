@@ -42,6 +42,50 @@ function responsibleIds(value: ContractAccessRecord['responsible_user_ids']): Se
   );
 }
 
+function resolveParticipantIdsBySide(contract: ContractAccessRecord): {
+  sellerIds: Set<string>;
+  buyerIds: Set<string>;
+} {
+  const advertiserId = normalizePositiveId(contract.advertiser_id);
+  const propertyOwnerId = normalizePositiveId(contract.property_owner_id);
+  const propertyBrokerId = normalizePositiveId(contract.property_broker_id);
+  const proposerId = normalizePositiveId(contract.proposer_id);
+  const legalBuyerUserId = normalizePositiveId(contract.legal_buyer_user_id);
+  const initiatorSide = String(contract.initiator_side ?? '').trim().toLowerCase();
+  const sellerIds = new Set<string>();
+  const buyerIds = new Set<string>();
+
+  if (propertyOwnerId) sellerIds.add(propertyOwnerId);
+  if (advertiserId) sellerIds.add(advertiserId);
+  if (propertyBrokerId) sellerIds.add(propertyBrokerId);
+  if (initiatorSide === 'seller') {
+    if (proposerId) sellerIds.add(proposerId);
+  } else if (initiatorSide === 'buyer') {
+    if (proposerId) buyerIds.add(proposerId);
+  } else if (proposerId) {
+    // Legacy negotiations predate initiator_side. Preserve the former mapping.
+    buyerIds.add(proposerId);
+  }
+  if (legalBuyerUserId) buyerIds.add(legalBuyerUserId);
+
+  return { sellerIds, buyerIds };
+}
+
+/**
+ * Resolves only the participant accounts for one contractual side. It shares
+ * the exact side mapping used by contract authorization, so document events
+ * cannot leak from buyer to seller (or the reverse).
+ */
+export function resolveContractParticipantIdsForSide(
+  contract: ContractAccessRecord,
+  side: 'seller' | 'buyer'
+): number[] {
+  const participantIds = side === 'seller'
+    ? resolveParticipantIdsBySide(contract).sellerIds
+    : resolveParticipantIdsBySide(contract).buyerIds;
+  return Array.from(participantIds, (id) => Number(id));
+}
+
 function buildContext(
   contractId: string,
   userId: string,
@@ -101,12 +145,8 @@ export function resolveContractAccessContext(
   }
 
   const requestRole = String(user.role ?? '').trim().toLowerCase();
-  const advertiserId = normalizePositiveId(contract.advertiser_id);
-  const propertyOwnerId = normalizePositiveId(contract.property_owner_id);
-  const propertyBrokerId = normalizePositiveId(contract.property_broker_id);
   const proposerId = normalizePositiveId(contract.proposer_id);
   const legalBuyerUserId = normalizePositiveId(contract.legal_buyer_user_id);
-  const initiatorSide = String(contract.initiator_side ?? '').trim().toLowerCase();
   const handshakeStatusRaw = String(contract.handshake_status ?? '').trim().toUpperCase();
   const handshakeStatus =
     handshakeStatusRaw === 'PENDING' ||
@@ -120,25 +160,7 @@ export function resolveContractAccessContext(
     return buildContext(contractId, userId, 'admin', true, workflowStatus);
   }
 
-  const sellerIds = new Set<string>();
-  const buyerIds = new Set<string>();
-
-  // The property owner and the property's explicitly assigned advertiser/broker
-  // operate the seller side. Negotiation broker fields are not enough for
-  // contract access: brokers must be linked through negotiation_responsibles.
-  if (propertyOwnerId) sellerIds.add(propertyOwnerId);
-  if (advertiserId) sellerIds.add(advertiserId);
-  if (propertyBrokerId) sellerIds.add(propertyBrokerId);
-  if (initiatorSide === 'seller') {
-    if (proposerId) sellerIds.add(proposerId);
-  } else if (initiatorSide === 'buyer') {
-    if (proposerId) buyerIds.add(proposerId);
-  } else if (proposerId) {
-    // Legacy negotiations predate initiator_side. Preserve the former mapping
-    // without using textual legal qualification as an authorization source.
-    buyerIds.add(proposerId);
-  }
-  if (legalBuyerUserId) buyerIds.add(legalBuyerUserId);
+  const { sellerIds, buyerIds } = resolveParticipantIdsBySide(contract);
 
   let role: ContractRole = 'none';
   if (responsibleIds(contract.responsible_user_ids).has(userId)) {

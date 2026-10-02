@@ -24,6 +24,120 @@ function createTxMock() {
 }
 
 describe('reviewContractDocument', () => {
+  it('notifica somente o lado buyer, não o corretor que enviou o arquivo', async () => {
+    const tx = createTxMock();
+    const contract = {
+      id: 'contract-uuid-interno',
+      negotiation_id: 'neg-1',
+      property_title: 'Apartamento Teste',
+      advertiser_id: 10,
+      property_owner_id: 11,
+      proposer_id: 20,
+      initiator_side: 'seller',
+      legal_buyer_user_id: 30,
+    } as ContractRow;
+    createUserNotificationMock.mockResolvedValue(undefined);
+    tx.query
+      .mockResolvedValueOnce([[
+        {
+          id: 11,
+          type: 'other',
+          document_type: 'comprovante_renda',
+          metadata_json: {
+            contractId: 'contract-uuid-interno',
+            documentCategory: 'comprovante_renda',
+            owner_side: 'buyer',
+            uploadedBy: 99,
+            auditTrail: [],
+          },
+        },
+      ], []])
+      .mockResolvedValueOnce([[], []])
+      .mockResolvedValueOnce([{}, []])
+      .mockResolvedValueOnce([{}, []]);
+
+    await reviewContractDocument(tx, {
+      contractIdInput: contract.id,
+      documentIdInput: '11',
+      statusInput: 'APPROVED',
+      reasonInput: '',
+      userIdInput: 55,
+      userRoleInput: 'admin',
+      loadContractForUpdate: vi.fn().mockResolvedValue(contract),
+    });
+    await Promise.resolve();
+
+    expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
+    expect(createUserNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientId: 30,
+        title: 'Documento aprovado',
+        message:
+          'O documento Comprovante de Renda do contrato do imóvel Apartamento Teste foi aprovado.',
+        metadata: expect.objectContaining({
+          contractId: 'contract-uuid-interno',
+          documentId: 11,
+        }),
+      })
+    );
+  });
+
+  it('notifica somente participantes seller deduplicados e usa fallback humano do imóvel', async () => {
+    const tx = createTxMock();
+    const contract = {
+      id: 'contract-uuid-interno',
+      negotiation_id: 'neg-1',
+      property_title: null,
+      advertiser_id: 10,
+      property_owner_id: 10,
+      property_broker_id: 11,
+      proposer_id: 20,
+      initiator_side: 'seller',
+      legal_buyer_user_id: 30,
+    } as ContractRow;
+    createUserNotificationMock.mockResolvedValue(undefined);
+    tx.query
+      .mockResolvedValueOnce([[
+        {
+          id: 12,
+          type: 'other',
+          document_type: 'seguro_incendio',
+          metadata_json: {
+            contractId: 'contract-uuid-interno',
+            documentCategory: 'seguro_incendio',
+            owner_side: 'seller',
+            uploadedBy: 99,
+            auditTrail: [],
+          },
+        },
+      ], []])
+      .mockResolvedValueOnce([[], []])
+      .mockResolvedValueOnce([{}, []])
+      .mockResolvedValueOnce([{}, []]);
+
+    await reviewContractDocument(tx, {
+      contractIdInput: contract.id,
+      documentIdInput: '12',
+      statusInput: 'APPROVED',
+      reasonInput: '',
+      userIdInput: 55,
+      userRoleInput: 'admin',
+      loadContractForUpdate: vi.fn().mockResolvedValue(contract),
+    });
+    await Promise.resolve();
+
+    expect(createUserNotificationMock).toHaveBeenCalledTimes(3);
+    expect(
+      createUserNotificationMock.mock.calls.map(([input]) => input.recipientId)
+    ).toEqual([10, 11, 20]);
+    for (const [input] of createUserNotificationMock.mock.calls) {
+      expect(input.message).toBe(
+        'O documento Apólice/Comprovante de Seguro Incêndio do contrato do imóvel seu imóvel foi aprovado.'
+      );
+      expect(input.message).not.toContain(contract.id);
+    }
+  });
+
   it('persists approval metadata for an individual document', async () => {
     const tx = createTxMock();
     const contract = {
@@ -146,8 +260,9 @@ describe('reviewContractDocument', () => {
     );
     expect(result.rejectedDocument).toMatchObject({
       id: 11,
+      side: 'buyer',
+      category: 'identidade',
       originalFileName: 'identidade.pdf',
-      uploadedByUserId: 42,
       deletionJobId: 71,
     });
   });

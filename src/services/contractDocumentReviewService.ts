@@ -5,6 +5,7 @@ import type { ContractRow } from '../controllers/ContractController';
 import {
   isContractDocumentCategoryStatus,
   type ContractDocumentCategoryStatus,
+  type ContractDocumentCategoryCode,
 } from '../modules/contracts/domain/contract.types';
 import { enqueueNegotiationDocumentDeletion } from './negotiationDocumentDeletionService';
 import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
@@ -19,9 +20,13 @@ import {
   type ContractDocumentSide,
 } from '../modules/contracts/domain/contractDocumentValidation';
 import type {
-  ContractDocumentCategoryCode,
   ContractDocumentType,
 } from '../modules/contracts/domain/contract.types';
+import { resolveContractParticipantIdsForSide } from '../utils/contractAccessResolver';
+import {
+  resolveContractDocumentNotificationCategoryLabel,
+  resolveContractDocumentNotificationPropertyTitle,
+} from './contractDocumentNotificationSupport';
 
 type ContractDocumentRow = RowDataPacket & {
   id: number | string;
@@ -58,8 +63,9 @@ type ContractDocumentReviewResult = {
   rejectedDocument?: {
     id: number;
     documentType: string | null;
+    side: ContractDocumentSide | null;
+    category: ContractDocumentCategoryCode | null;
     originalFileName: string | null;
-    uploadedByUserId: number | null;
     deletionJobId: number | null;
   };
 };
@@ -242,6 +248,7 @@ export async function reviewContractDocument(
   const uploadedByUserId = readPositiveUserId(metadata.uploadedBy);
   const ownerSideValue = String(metadata.owner_side ?? metadata.side ?? '').trim().toLowerCase();
   const ownerSide = ownerSideValue === 'seller' || ownerSideValue === 'buyer' ? ownerSideValue : null;
+  const documentCategory = readDocumentCategory(metadata, document.document_type);
   const documentLabel = String(metadata.label ?? metadata.documentLabel ?? '').trim() || null;
 
   if (status === 'APPROVED' || status === 'APPROVED_WITH_RES') {
@@ -340,8 +347,9 @@ export async function reviewContractDocument(
       rejectedDocument: {
         id: documentId,
         documentType,
+        side: ownerSide,
+        category: documentCategory,
         originalFileName,
-        uploadedByUserId,
         deletionJobId,
       },
     };
@@ -390,20 +398,19 @@ export async function reviewContractDocument(
   );
 
   if (status === 'APPROVED' || status === 'APPROVED_WITH_RES') {
-    const docName = String(metadata.label ?? metadata.originalFileName ?? documentType ?? 'Documento').trim();
-    const recipientIds = new Set<number>();
-    if (uploadedByUserId && uploadedByUserId > 0) {
-      recipientIds.add(uploadedByUserId);
-    } else {
-      if (contract.buyer_client_id) recipientIds.add(Number(contract.buyer_client_id));
-      if (contract.owner_id) recipientIds.add(Number(contract.owner_id));
-    }
+    const recipientIds = ownerSide
+      ? resolveContractParticipantIdsForSide(contract, ownerSide)
+      : [];
+    const categoryLabel = resolveContractDocumentNotificationCategoryLabel(
+      documentCategory
+    );
+    const propertyTitle = resolveContractDocumentNotificationPropertyTitle(contract);
 
     for (const recipientId of recipientIds) {
       void createUserNotification({
         type: 'negotiation',
-        title: 'Documento Aprovado',
-        message: `O seu documento "${docName}" do contrato #${contractId} foi analisado e aprovado com sucesso.`,
+        title: 'Documento aprovado',
+        message: `O documento ${categoryLabel} do contrato do imóvel ${propertyTitle} foi aprovado.`,
         recipientId,
         relatedEntityId: Number(contract.negotiation_id) || null,
         target: 'contract_details',

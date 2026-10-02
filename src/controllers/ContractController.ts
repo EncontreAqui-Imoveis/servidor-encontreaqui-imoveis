@@ -107,6 +107,10 @@ import {
   reopenContractDocument,
 } from '../services/contractDocumentReopenService';
 import {
+  resolveContractDocumentNotificationCategoryLabel,
+  resolveContractDocumentNotificationPropertyTitle,
+} from '../services/contractDocumentNotificationSupport';
+import {
   isContractDealType,
   isContractApprovalStatus,
   isContractDocumentCategoryStatus,
@@ -143,6 +147,7 @@ import {
 } from '../services/contractWorkflowMetadata';
 import {
   resolveContractAccessContext,
+  resolveContractParticipantIdsForSide,
 } from '../utils/contractAccessResolver';
 import type { ContractAccessContext } from '../types/contractAuth';
 import { resolveSellerPartyId } from '../utils/contractIdentity';
@@ -233,6 +238,7 @@ export interface ContractRow extends RowDataPacket {
   property_code: string | null;
   property_image_url: string | null;
   property_owner_id: number | null;
+  property_broker_id?: number | null;
   property_owner_name: string | null;
   property_owner_phone: string | null;
   proposal_initiator_user_id: number | null;
@@ -2138,6 +2144,7 @@ export const CONTRACT_SELECT_BASE_SQL = `
       LIMIT 1
     ) AS property_image_url,
     p.owner_id AS property_owner_id,
+    p.broker_id AS property_broker_id,
     COALESCE(owner_user.name, p.owner_name) AS property_owner_name,
     p.owner_phone AS property_owner_phone,
     COALESCE(
@@ -2492,26 +2499,38 @@ class ContractController {
           console.error('Erro ao excluir imediatamente documento rejeitado:', deletionError);
         }
       }
-      if (result.rejectedDocument?.uploadedByUserId) {
-        const documentName =
-          result.rejectedDocument.originalFileName ??
-          result.rejectedDocument.documentType ??
-          'enviado';
+      const rejectedDocument = result.rejectedDocument;
+      const reviewedContract = result.contract;
+      if (rejectedDocument?.side && reviewedContract) {
+        const categoryLabel = resolveContractDocumentNotificationCategoryLabel(
+          rejectedDocument.category
+        );
+        const propertyTitle = resolveContractDocumentNotificationPropertyTitle(
+          reviewedContract
+        );
+        const recipientIds = resolveContractParticipantIdsForSide(
+          reviewedContract,
+          rejectedDocument.side
+        );
         try {
-          await createUserNotification({
-            type: 'negotiation',
-            title: 'Documento rejeitado',
-            message: `O documento ${documentName} foi rejeitado. Motivo: ${String(req.body?.description ?? req.body?.reason ?? '').trim()}. Por favor, envie novamente.`,
-            recipientId: result.rejectedDocument.uploadedByUserId,
-            relatedEntityId: Number(result.contract?.property_id ?? 0) || null,
-            metadata: {
-              contractId: String(result.contract?.id ?? req.params.id),
-              negotiationId: result.contract?.negotiation_id ?? null,
-              propertyId: Number(result.contract?.property_id ?? 0) || null,
-              documentId: result.rejectedDocument.id,
-            },
-            target: 'contract_details',
-          });
+          await Promise.all(
+            recipientIds.map((recipientId) =>
+              createUserNotification({
+                type: 'negotiation',
+                title: 'Documento rejeitado',
+                message: `O documento ${categoryLabel} do contrato do imóvel ${propertyTitle} foi rejeitado. Motivo: ${String(req.body?.description ?? req.body?.reason ?? '').trim()}. Por favor, envie novamente.`,
+                recipientId,
+                relatedEntityId: Number(reviewedContract.property_id ?? 0) || null,
+                metadata: {
+                  contractId: String(reviewedContract.id ?? req.params.id),
+                  negotiationId: reviewedContract.negotiation_id ?? null,
+                  propertyId: Number(reviewedContract.property_id ?? 0) || null,
+                  documentId: rejectedDocument.id,
+                },
+                target: 'contract_details',
+              })
+            )
+          );
         } catch (notifyError) {
           console.error('Erro ao notificar rejeição de documento:', notifyError);
         }
@@ -2549,20 +2568,26 @@ class ContractController {
       });
       await tx.commit();
 
-      if (result.changed && result.document) {
-        const recipientId = result.document.uploadedByUserId ??
-          (result.document.side === 'seller' ? Number(result.contract.advertiser_id ?? 0) : Number(result.contract.proposer_id ?? 0));
-        if (recipientId > 0) {
-          const categoryLabel = CONTRACT_DOCUMENT_CATEGORY_LABELS[result.document.category] ?? 'Documento';
-          void createUserNotification({
-            type: 'negotiation',
-            title: 'Nova versão necessária',
-            message: `A equipe responsável solicitou uma nova versão do documento ${categoryLabel}. Envie o arquivo atualizado para continuar o processo.`,
-            recipientId,
-            relatedEntityId: Number(result.contract.negotiation_id) || null,
-            target: 'contract_details',
-            metadata: { contractId: result.contract.id, negotiationId: result.contract.negotiation_id, documentId: result.document.id },
-          }).catch((error) => console.error('Falha ao notificar reabertura de documento:', error));
+      const reopenedDocument = result.document;
+      if (result.changed && reopenedDocument) {
+        const recipientIds = resolveContractParticipantIdsForSide(
+          result.contract,
+          reopenedDocument.side
+        );
+        if (recipientIds.length > 0) {
+          const categoryLabel = resolveContractDocumentNotificationCategoryLabel(reopenedDocument.category);
+          const propertyTitle = resolveContractDocumentNotificationPropertyTitle(result.contract);
+          void Promise.all(recipientIds.map((recipientId) =>
+            createUserNotification({
+              type: 'negotiation',
+              title: 'Nova versão necessária',
+              message: `A equipe responsável solicitou uma nova versão do documento ${categoryLabel} do contrato do imóvel ${propertyTitle}. Envie o arquivo atualizado para continuar o processo.`,
+              recipientId,
+              relatedEntityId: Number(result.contract.negotiation_id) || null,
+              target: 'contract_details',
+              metadata: { contractId: result.contract.id, negotiationId: result.contract.negotiation_id, documentId: reopenedDocument.id },
+            })
+          )).catch((error) => console.error('Falha ao notificar reabertura de documento:', error));
         }
       }
       return res.status(200).json({ message: result.message, changed: result.changed, contract: mapContract(result.contract, req) });

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveContractAccessContext } from '../../src/utils/contractAccessResolver';
+import {
+  resolveContractAccessContext,
+  resolveContractParticipantIdsForSide,
+} from '../../src/utils/contractAccessResolver';
 
 const baseContract = {
   id: 'contract-1',
@@ -12,6 +15,25 @@ const baseContract = {
 };
 
 describe('resolveContractAccessContext', () => {
+  it('resolve participantes por lado sem cruzar buyer e seller e deduplica IDs', () => {
+    const contract = {
+      ...baseContract,
+      advertiser_id: 10,
+      property_owner_id: 10,
+      property_broker_id: 11,
+      proposer_id: 20,
+      initiator_side: 'seller',
+      legal_buyer_user_id: 30,
+    };
+
+    expect(resolveContractParticipantIdsForSide(contract, 'seller')).toEqual([
+      10,
+      11,
+      20,
+    ]);
+    expect(resolveContractParticipantIdsForSide(contract, 'buyer')).toEqual([30]);
+  });
+
   it('reconhece comprador exclusivamente pelo proposer_id', () => {
     const context = resolveContractAccessContext(
       { id: 20, role: 'client' },

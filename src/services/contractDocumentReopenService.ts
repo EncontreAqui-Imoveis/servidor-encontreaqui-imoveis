@@ -30,7 +30,7 @@ export type ReopenContractDocumentResult = {
   message: string;
   contract: ContractRow;
   changed: boolean;
-  document?: { id: number; side: ContractDocumentSide; category: ContractDocumentCategoryCode; uploadedByUserId: number | null };
+  document?: { id: number; side: ContractDocumentSide; category: ContractDocumentCategoryCode };
 };
 
 class ContractDocumentReopenError extends Error {
@@ -138,11 +138,10 @@ export async function reopenContractDocument(
   const workflowMetadata = appendWorkflowAuditEvent(contract.workflow_metadata, auditEvent);
   await tx.query(`UPDATE contracts SET workflow_metadata = CAST(? AS JSON), updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [JSON.stringify(workflowMetadata), contractId]);
 
-  const uploadedBy = Number(metadata.uploadedBy ?? 0);
   return {
     message: 'Análise do documento reaberta com sucesso.',
     contract,
     changed: true,
-    document: { id: documentId, side, category, uploadedByUserId: Number.isInteger(uploadedBy) && uploadedBy > 0 ? uploadedBy : null },
+    document: { id: documentId, side, category },
   };
 }

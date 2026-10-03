@@ -57,6 +57,8 @@ interface UploadContractDocumentBody {
   documentCategory?: unknown;
   document_category?: unknown;
   side?: unknown;
+  replaceDocumentId?: unknown;
+  replace_document_id?: unknown;
 }
 
 interface ContractAuditEvent {
@@ -99,6 +101,8 @@ interface ContractDocumentForDeleteRow extends ContractDocumentRow {
   storage_etag: string | null;
 }
 
+interface ReplacedContractDocumentRow extends ContractDocumentForDeleteRow {}
+
 function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   if (value == null) return {};
   if (typeof value === 'string') {
@@ -115,6 +119,12 @@ function parseStoredJsonObject(value: unknown): Record<string, unknown> {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function readDocumentCategoryStatus(metadata: Record<string, unknown>): string {
+  return String(metadata.categoryStatus ?? metadata.reviewStatus ?? metadata.status ?? 'PENDING')
+    .trim()
+    .toUpperCase();
 }
 
 function normalizeContractDocumentCategory(
@@ -220,6 +230,7 @@ export async function uploadContractDocument(
     originalFileName: string | null;
     contractId: string;
   };
+  replacedDocument: ReplacedContractDocumentRow | null;
 }> {
   const documentCategoryInput = normalizeContractDocumentCategory(
     params.body.documentCategory ?? params.body.document_category
@@ -269,6 +280,25 @@ export async function uploadContractDocument(
     });
   }
 
+  const replaceDocumentIdRaw =
+    params.body.replaceDocumentId ?? params.body.replace_document_id;
+  const replaceDocumentId = Number(replaceDocumentIdRaw);
+  if (
+    replaceDocumentIdRaw != null &&
+    (!Number.isInteger(replaceDocumentId) || replaceDocumentId <= 0)
+  ) {
+    throw mutationError(400, 'ID do documento a substituir inválido.');
+  }
+  const isDocumentOperator =
+    params.req.userRole === 'admin' &&
+    params.req.adminValidated === true &&
+    params.req.adminRole === 'document_operator';
+  if (isDocumentOperator && !Number.isInteger(replaceDocumentId)) {
+    throw mutationError(403, 'A conta administrativa documental só pode substituir documentos pendentes.', {
+      code: 'ADMIN_DOCUMENT_CREATE_FORBIDDEN',
+    });
+  }
+
   if (resolvedSide === 'seller' && !context.canEditSeller) {
     throw mutationError(403, 'Seu acesso não permite anexar documentos do lado vendedor nesta etapa.');
   }
@@ -295,6 +325,52 @@ export async function uploadContractDocument(
   const resolvedDocumentCategory =
     documentCategoryInput ??
     resolveDocumentCategoryFromType(normalizedDocumentType as ContractDocumentType);
+
+  let replacedDocument: ReplacedContractDocumentRow | null = null;
+  if (Number.isInteger(replaceDocumentId) && replaceDocumentId > 0) {
+    const [replacementRows] = await tx.query<ReplacedContractDocumentRow[]>(
+      `
+        SELECT id, type, document_type, metadata_json, created_at,
+               storage_provider, storage_bucket, storage_key, storage_content_type,
+               storage_size_bytes, storage_etag
+        FROM negotiation_documents
+        WHERE id = ? AND negotiation_id = ?
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [replaceDocumentId, params.contract.negotiation_id]
+    );
+    const candidate = replacementRows[0];
+    if (!candidate) {
+      throw mutationError(404, 'Documento a substituir não encontrado neste contrato.');
+    }
+    const candidateMetadata = parseStoredJsonObject(candidate.metadata_json);
+    const candidateSide = readDocumentOwnerSide(candidateMetadata);
+    const candidateType = String(candidate.document_type ?? '').trim().toLowerCase();
+    const candidateCategory =
+      normalizeContractDocumentCategory(candidateMetadata.documentCategory) ??
+      resolveDocumentCategoryFromType(candidateType as ContractDocumentType);
+    const currentSideStatus = String(
+      resolvedSide === 'seller'
+        ? params.contract.seller_approval_status
+        : params.contract.buyer_approval_status
+    ).trim().toUpperCase();
+    if (
+      String(candidateMetadata.contractId ?? '').trim() !== params.contractId ||
+      candidateSide !== resolvedSide ||
+      candidateType !== normalizedDocumentType ||
+      candidateCategory !== resolvedDocumentCategory
+    ) {
+      throw mutationError(409, 'O documento a substituir não pertence ao mesmo slot do contrato.');
+    }
+    if (readDocumentCategoryStatus(candidateMetadata) !== 'PENDING') {
+      throw mutationError(409, 'Somente documentos pendentes podem ser substituídos.');
+    }
+    if (currentSideStatus !== 'PENDING') {
+      throw mutationError(409, 'Reinicie a análise deste lado antes de substituir documentos.');
+    }
+    replacedDocument = candidate;
+  }
   if (
     !bypassesWorkflowStage &&
     !isSignedDocumentType(normalizedDocumentType) &&
@@ -379,8 +455,9 @@ export async function uploadContractDocument(
   }
 
   const uploadEvent: ContractAuditEvent = {
-    action:
-      role === 'admin' && currentStatus !== 'AWAITING_DOCS'
+    action: replacedDocument
+      ? 'document_replaced'
+      : role === 'admin' && currentStatus !== 'AWAITING_DOCS'
         ? 'admin_read_only_bypass_document_upload'
         : 'document_upload',
     at: new Date().toISOString(),
@@ -390,6 +467,7 @@ export async function uploadContractDocument(
       side: resolvedSide,
       documentType: normalizedDocumentType,
       category: resolvedDocumentCategory,
+      ...(replacedDocument ? { replacedDocumentId: Number(replacedDocument.id) } : {}),
     },
   };
 
@@ -427,6 +505,18 @@ export async function uploadContractDocument(
     throw error;
   }
 
+  if (replacedDocument) {
+    await tx.query(
+      'DELETE FROM negotiation_documents WHERE id = ? AND negotiation_id = ? LIMIT 1',
+      [replacedDocument.id, params.contract.negotiation_id]
+    );
+    await enqueueNegotiationDocumentDeletion(tx, replacedDocument, {
+      negotiationId: params.contract.negotiation_id,
+      requestedByUserId: Number(params.req.userId ?? 0) || null,
+      requestSource: 'contract_document_replace',
+    });
+  }
+
   const shouldMarkOnlineSignatureMethod =
     role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
   const nextWorkflowMetadata = appendWorkflowAuditEvent(
@@ -455,6 +545,7 @@ export async function uploadContractDocument(
       originalFileName: params.uploadedFile.originalname ?? null,
       contractId: params.contractId,
     },
+    replacedDocument,
   };
 }
 

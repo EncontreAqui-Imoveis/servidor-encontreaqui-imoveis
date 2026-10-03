@@ -4193,6 +4193,14 @@ class ContractController {
 
       await tx.commit();
 
+      if (result.replacedDocument) {
+        await cleanupContractDocumentAssets([result.replacedDocument], {
+          action: 'replace_contract_document',
+          contractId,
+          negotiationId: contract.negotiation_id,
+        });
+      }
+
       return res.status(201).json({
         message: 'Documento enviado com sucesso.',
         document: result.document,

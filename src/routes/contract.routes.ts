@@ -3,8 +3,8 @@ import { Router } from 'express';
 import { contractController } from '../controllers/ContractController';
 import { authMiddleware, isAdmin } from '../middlewares/auth';
 import {
-  forbidRestrictedAdminDocumentCreate,
   requireAdminCapability,
+  requireRestrictedAdminDocumentReplacement,
   restrictAdminManualDeletion,
 } from '../middlewares/adminCapabilities';
 import { contractAuthMiddleware } from '../middlewares/contractAuth.middleware';
@@ -73,7 +73,7 @@ contractRoutes.post(
   authMiddleware,
   contractAuthMiddleware,
   contractDocumentUpload.single('file'),
-  forbidRestrictedAdminDocumentCreate,
+  requireRestrictedAdminDocumentReplacement,
   (req, res) => contractController.uploadDocument(req, res)
 );
 

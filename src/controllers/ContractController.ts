@@ -142,6 +142,7 @@ import {
   mapProperty as mapPropertyFromDiscovery,
 } from '../services/propertyDiscoveryService';
 import {
+  hasAwaitingDocumentResubmission,
   mergeWorkflowMetadata,
   resetWorkflowMetadata,
 } from '../services/contractWorkflowMetadata';
@@ -606,6 +607,17 @@ function summarizeContractApprovalProgress(row: ContractRow): ContractApprovalPr
   const buyerProgress = approvalStatusAllowsProgress(buyerStatus);
   const hasSellerDecision = sellerStatus !== 'PENDING';
   const hasBuyerDecision = buyerStatus !== 'PENDING';
+
+  if (
+    resolveContractStatus(row.status) === 'AWAITING_DOCS' &&
+    hasAwaitingDocumentResubmission(row.workflow_metadata)
+  ) {
+    return {
+      status: 'IN_PROGRESS',
+      label: 'Aguardando reenvio documental',
+      nextStep: 'Aguardando novos documentos do lado solicitado',
+    };
+  }
 
   if (sellerStatus === 'REJECTED' || buyerStatus === 'REJECTED') {
     return {
@@ -2405,6 +2417,16 @@ class ContractController {
         userRoleInput: req.userRole,
         loadContractForUpdate: fetchContractForUpdate,
       });
+
+      for (const jobId of result.documentDeletionJobIds) {
+        try {
+          await processNegotiationDocumentDeletionJob(jobId);
+        } catch (deletionError) {
+          // The queued job remains available to the worker. A successful side
+          // review must not be rolled back because storage cleanup is delayed.
+          console.error('Erro ao excluir documento rejeitado pelo lado:', deletionError);
+        }
+      }
 
       // Reaching IN_DRAFT is the point at which both sides have been
       // administratively released. Generate the canonical minute immediately;

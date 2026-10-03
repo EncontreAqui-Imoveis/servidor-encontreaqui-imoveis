@@ -84,14 +84,29 @@ describe('uploadContractDocument', () => {
     }
   );
 
-  it('allows a rejected side to upload a new pending version', async () => {
+  it('allows a side awaiting resubmission to upload a new pending version and clears only its marker', async () => {
     const contract = {
       id: 'contract-1',
       negotiation_id: 'neg-1',
       status: 'AWAITING_DOCS',
-      seller_approval_status: 'REJECTED',
+      seller_approval_status: 'PENDING',
       buyer_approval_status: 'PENDING',
-      workflow_metadata: {},
+      workflow_metadata: {
+        awaiting_document_resubmission: {
+          seller: {
+            reason: 'Documento ilegível.',
+            requestedAt: '2026-10-03T12:00:00.000Z',
+            requestedBy: 1,
+            rejectedDocumentIds: [88],
+          },
+          buyer: {
+            reason: 'Aguardando comprovante.',
+            requestedAt: '2026-10-03T12:00:00.000Z',
+            requestedBy: 2,
+            rejectedDocumentIds: [99],
+          },
+        },
+      },
     } as ContractRow;
     const tx = {
       query: vi.fn().mockResolvedValue([[]]),
@@ -124,6 +139,15 @@ describe('uploadContractDocument', () => {
         }),
       })
     );
+    const workflowUpdate = (tx.query as any).mock.calls.find(([sql]: [string]) =>
+      sql.includes('workflow_metadata = CAST(? AS JSON)')
+    );
+    expect(JSON.parse(String(workflowUpdate[1][0]))).toMatchObject({
+      awaiting_document_resubmission: {
+        buyer: expect.any(Object),
+      },
+    });
+    expect(JSON.parse(String(workflowUpdate[1][0])).awaiting_document_resubmission.seller).toBeUndefined();
   });
 
   it('replaces only the current pending document in the same slot', async () => {

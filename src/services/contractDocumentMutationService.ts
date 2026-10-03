@@ -14,6 +14,7 @@ import {
 } from '../controllers/ContractController';
 import {
   appendWorkflowAuditEvent,
+  clearAwaitingDocumentResubmission,
   mergeWorkflowMetadata,
 } from './contractWorkflowMetadata';
 import { resolveContractAccessContext } from '../utils/contractAccessResolver';
@@ -519,9 +520,12 @@ export async function uploadContractDocument(
 
   const shouldMarkOnlineSignatureMethod =
     role !== 'admin' && normalizedDocumentType === 'contrato_assinado';
-  const nextWorkflowMetadata = appendWorkflowAuditEvent(
+  const nextWorkflowMetadata = clearAwaitingDocumentResubmission(
+    appendWorkflowAuditEvent(
     params.contract.workflow_metadata,
     uploadEvent
+    ),
+    resolvedSide
   );
 
   if (shouldMarkOnlineSignatureMethod) {

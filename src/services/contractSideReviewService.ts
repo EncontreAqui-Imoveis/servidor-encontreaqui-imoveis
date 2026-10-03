@@ -3,7 +3,12 @@ import type { PoolConnection } from 'mysql2/promise';
 
 import { createUserNotification } from './notificationService';
 import { getContractDbConnection } from './contractPersistenceService';
-import { appendWorkflowAuditEvent } from './contractWorkflowMetadata';
+import {
+  appendWorkflowAuditEvent,
+  markAwaitingDocumentResubmission,
+} from './contractWorkflowMetadata';
+import { rejectActiveContractDocumentsForSide } from './contractDocumentReviewService';
+import { resolveContractParticipantIdsForSide } from '../utils/contractAccessResolver';
 import { calculateContractReadiness } from './contractReadinessService';
 import type { ContractRow } from '../controllers/ContractController';
 import {
@@ -59,6 +64,7 @@ type ContractApprovalSideReviewResult = {
   message: string;
   contract: ContractRow | null;
   movedToDraft: boolean;
+  documentDeletionJobIds: number[];
 };
 
 class ContractSideReviewError extends Error {
@@ -282,7 +288,9 @@ function resolveApprovalSideLabel(
   contract: ContractRow,
   side: 'seller' | 'buyer'
 ): string {
-  return side === 'seller' ? 'documentação do proprietário' : 'documentação do comprador';
+  const isRental = String(contract.deal_type ?? '').trim().toLowerCase() === 'rent';
+  if (isRental) return side === 'seller' ? 'Locador' : 'Locatário';
+  return side === 'seller' ? 'Vendedor' : 'Comprador';
 }
 
 function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
@@ -608,6 +616,12 @@ async function fetchRowsForSide(
         AND COALESCE(document_type, '') <> 'proposal'
         AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
         AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.side')) = ?
+        AND UPPER(COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.categoryStatus')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+          'PENDING'
+        )) <> 'REJECTED'
       ORDER BY id DESC
     `,
     [contract.negotiation_id, String(contract.id), side]
@@ -718,6 +732,23 @@ export async function evaluateContractSide(
       nextBuyerReason = sideReason;
     }
 
+    const isSideDocumentRejection = nextSideStatus === 'REJECTED';
+    let rejectedDocuments: Awaited<ReturnType<typeof rejectActiveContractDocumentsForSide>> = [];
+    if (isSideDocumentRejection) {
+      // A side rejection requests new versions; it is not an operational
+      // terminal state. The rejected files are archived then removed from the
+      // active slots before the side returns to PENDING.
+      if (side === 'seller') nextSellerStatus = 'PENDING';
+      else nextBuyerStatus = 'PENDING';
+      rejectedDocuments = await rejectActiveContractDocumentsForSide(tx, {
+        contract,
+        contractId,
+        side: side as ContractDocumentSide,
+        reason: reasonText,
+        actorId: Number.isFinite(evaluatedBy) ? evaluatedBy : null,
+      });
+    }
+
     // Keep individual documents in the same state as the side review.
     // An approval with reservations is not a plain approval.
     const normalizedCategoryStatus: ContractDocumentCategoryStatus = nextSideStatus;
@@ -780,10 +811,22 @@ export async function evaluateContractSide(
     const nextContractStatus: ContractStatus = canMoveToDraft
       ? 'IN_DRAFT'
       : 'AWAITING_DOCS';
-    const nextWorkflowMetadata = appendWorkflowAuditEvent(
+    let nextWorkflowMetadata = appendWorkflowAuditEvent(
       contract.workflow_metadata,
       reviewAuditEvent
     );
+    if (isSideDocumentRejection) {
+      nextWorkflowMetadata = markAwaitingDocumentResubmission(
+        nextWorkflowMetadata,
+        side as ContractDocumentSide,
+        {
+          reason: reasonText,
+          requestedAt: reviewAuditEvent.at,
+          requestedBy: reviewAuditEvent.by,
+          rejectedDocumentIds: rejectedDocuments.map((document) => document.id),
+        }
+      );
+    }
 
     await tx.query(
       `
@@ -845,7 +888,10 @@ export async function evaluateContractSide(
     }
 
     if (nextSideStatus === 'REJECTED' && reasonText.length > 0) {
-      const recipientIds = resolveContractNotificationRecipientIds(contract);
+      const recipientIds = resolveContractParticipantIdsForSide(
+        contract,
+        side as ContractDocumentSide
+      );
       const propertyTitle = resolveContractPropertyTitle(contract);
       const sideLabel = resolveApprovalSideLabel(contract, side as 'seller' | 'buyer');
 
@@ -854,7 +900,7 @@ export async function evaluateContractSide(
           await createUserNotification({
             type: 'negotiation',
             title: 'Documentação rejeitada',
-            message: `A documentação (${sideLabel}) do contrato do imóvel "${propertyTitle}" foi rejeitada. Motivo: ${reasonText}. Corrija e envie novamente os documentos para continuar o processo.`,
+            message: `A documentação do ${sideLabel} do contrato do imóvel ${propertyTitle} precisa ser reenviada. Motivo: ${reasonText}. Envie os documentos atualizados para continuar o processo.`,
             recipientId,
             relatedEntityId: Number(contract.property_id),
             metadata: {
@@ -880,6 +926,9 @@ export async function evaluateContractSide(
       message: 'Avaliação do lado atualizada com sucesso.',
       contract: updated,
       movedToDraft: canMoveToDraft,
+      documentDeletionJobIds: rejectedDocuments
+        .map((document) => document.deletionJobId)
+        .filter((jobId): jobId is number => jobId != null),
     };
   } catch (error) {
     await tx.rollback();

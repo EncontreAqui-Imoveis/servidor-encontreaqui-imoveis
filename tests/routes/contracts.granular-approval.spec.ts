@@ -8,6 +8,8 @@ const {
   queryMock,
   createUserNotificationMock,
   storeNegotiationDocumentToR2Mock,
+  enqueueNegotiationDocumentDeletionMock,
+  processNegotiationDocumentDeletionJobMock,
 } = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
@@ -24,6 +26,8 @@ const {
     queryMock: vi.fn(),
     createUserNotificationMock: vi.fn(),
     storeNegotiationDocumentToR2Mock: vi.fn(),
+    enqueueNegotiationDocumentDeletionMock: vi.fn(),
+    processNegotiationDocumentDeletionJobMock: vi.fn(),
   };
 });
 
@@ -47,6 +51,11 @@ vi.mock('../../src/services/negotiationDocumentStorageService', () => ({
   deleteNegotiationDocumentObject: vi.fn(),
   parseNegotiationDocumentMetadata: (value: unknown) =>
     value && typeof value === 'object' ? value : {},
+}));
+
+vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
+  enqueueNegotiationDocumentDeletion: enqueueNegotiationDocumentDeletionMock,
+  processNegotiationDocumentDeletionJob: processNegotiationDocumentDeletionJobMock,
 }));
 
 vi.mock('../../src/services/contractDraftGenerationService', () => ({
@@ -86,6 +95,9 @@ type MutableContractState = {
   property_code: string;
   capturing_broker_name: string;
   selling_broker_name: string;
+  property_owner_id?: number;
+  proposer_id?: number;
+  initiator_side?: 'seller' | 'buyer';
 };
 
 function createInitialContractState(
@@ -113,6 +125,9 @@ function createInitialContractState(
     property_code: 'RV-101',
     capturing_broker_name: 'Captador Teste',
     selling_broker_name: 'Vendedor Teste',
+    property_owner_id: 40001,
+    proposer_id: 50001,
+    initiator_side: 'buyer',
     ...overrides,
   };
 }
@@ -148,6 +163,8 @@ describe('Contract granular approval and signed docs endpoints', () => {
     txMock.rollback.mockResolvedValue(undefined);
     txMock.release.mockResolvedValue(undefined);
     createUserNotificationMock.mockResolvedValue(undefined);
+    enqueueNegotiationDocumentDeletionMock.mockResolvedValue(70001);
+    processNegotiationDocumentDeletionJobMock.mockResolvedValue(true);
     storeNegotiationDocumentToR2Mock.mockResolvedValue(90001);
     vi.mocked(ensureContractDraftGenerated).mockResolvedValue({
       contractId: 'contract-1',
@@ -230,14 +247,14 @@ describe('Contract granular approval and signed docs endpoints', () => {
       });
 
     expect(response.status).toBe(200);
-    expect(response.body.contract.sellerApprovalStatus).toBe('REJECTED');
+    expect(response.body.contract.sellerApprovalStatus).toBe('PENDING');
     expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
     expect(response.body.movedToDraft).toBe(false);
     expect(response.body.contract.approvalProgress).toMatchObject({
       status: 'IN_PROGRESS',
-      label: 'Aguardando correção documental',
-      nextStep: 'Aguardando correção do lado rejeitado',
+      label: 'Aguardando reenvio documental',
+      nextStep: 'Aguardando novos documentos do lado solicitado',
     });
     expect(
       txMock.query.mock.calls.some(([sql]) =>
@@ -247,11 +264,15 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Documentação rejeitada',
-        message: expect.stringContaining('Corrija e envie novamente os documentos'),
+        recipientId: 40001,
+        message: expect.stringContaining('precisa ser reenviada'),
       })
     );
     expect(createUserNotificationMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('não aparecerá mais') })
+    );
+    expect(createUserNotificationMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recipientId: 50001 })
     );
   });
 
@@ -266,18 +287,29 @@ describe('Contract granular approval and signed docs endpoints', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.contract.sellerApprovalStatus).toBe('PENDING');
-    expect(response.body.contract.buyerApprovalStatus).toBe('REJECTED');
+    expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
     expect(response.body.movedToDraft).toBe(false);
     expect(response.body.contract.approvalProgress).toMatchObject({
       status: 'IN_PROGRESS',
-      label: 'Aguardando correção documental',
+      label: 'Aguardando reenvio documental',
     });
     expect(
       txMock.query.mock.calls.some(([sql]) =>
         String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
       )
     ).toBe(false);
+    expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
+    expect(createUserNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Documentação rejeitada',
+        recipientId: 50001,
+        message: expect.stringContaining('precisa ser reenviada'),
+      })
+    );
+    expect(createUserNotificationMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recipientId: 40001 })
+    );
   });
 
   it('requires restarting a rejected side before approving it again', async () => {
@@ -541,25 +573,52 @@ describe('Contract granular approval and signed docs endpoints', () => {
     ).toBe(false);
   });
 
-  it.each(['seller', 'buyer'] as const)(
-    'writes REJECTED to the reviewed %s documents only',
-    async (side) => {
+  it('does not resurrect legacy rejected documents when reopening a legacy rejected side', async () => {
+    contractState = createInitialContractState({ seller_approval_status: 'REJECTED' });
     const defaultQuery = txMock.query.getMockImplementation();
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('FROM negotiation_documents')) {
-        const side = String(params.at(-1));
-        return [[{
-          id: 91,
-          type: 'other',
-          document_type: 'doc_identidade',
-          metadata_json: {
-            owner_side: side,
-            side,
-            documentCategory: 'identidade',
-            categoryStatus: 'PENDING',
-          },
-          created_at: '2026-02-19 10:00:00',
-        }]];
+        expect(sql).toContain(")) <> 'REJECTED'");
+        // The database condition excludes retained legacy REJECTED rows.
+        return [[]];
+      }
+      return defaultQuery?.(sql, params) ?? [[]];
+    });
+
+    const response = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({ side: 'seller', status: 'PENDING' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.contract.sellerApprovalStatus).toBe('PENDING');
+    expect(
+      txMock.query.mock.calls.some(([sql]) => String(sql).includes('UPDATE negotiation_documents'))
+    ).toBe(false);
+  });
+
+  it.each(['seller', 'buyer'] as const)(
+    'archives every active %s document and leaves the side ready for resubmission',
+    async (side) => {
+    const defaultQuery = txMock.query.getMockImplementation();
+    let activeDocuments = [
+      {
+        id: 91, type: 'other', document_type: 'doc_identidade',
+        metadata_json: { contractId: 'contract-1', owner_side: side, side, documentCategory: 'identidade', categoryStatus: 'PENDING', uploadedBy: 9001 },
+        storage_provider: 'r2', storage_bucket: 'documents', storage_key: 'identity.pdf', created_at: '2026-02-19 10:00:00',
+      },
+      {
+        id: 92, type: 'other', document_type: 'cliente_outro_01',
+        metadata_json: { contractId: 'contract-1', owner_side: side, side, documentCategory: 'outro', categoryStatus: 'PENDING', uploadedBy: 9001 },
+        storage_provider: 'r2', storage_bucket: 'documents', storage_key: 'other.pdf', created_at: '2026-02-19 10:00:00',
+      },
+    ];
+    txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (sql.includes('DELETE FROM negotiation_documents')) {
+        activeDocuments = activeDocuments.filter((document) => document.id !== Number(params[0]));
+        return [{ affectedRows: 1 }];
+      }
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[...activeDocuments]];
       }
       return defaultQuery?.(sql, params) ?? [[]];
     });
@@ -573,22 +632,21 @@ describe('Contract granular approval and signed docs endpoints', () => {
         });
 
       expect(response.status).toBe(200);
-      const updateCall = txMock.query.mock.calls.find(([sql]) =>
-        String(sql).includes('UPDATE negotiation_documents')
-      );
-      const metadata = JSON.parse(String(updateCall?.[1]?.[0] ?? '{}'));
-      expect(metadata).toMatchObject({
-        owner_side: side,
-        categoryStatus: 'REJECTED',
-        reviewStatus: 'REJECTED',
-        validationStatus: 'REJECTED',
-      });
+      expect(activeDocuments).toEqual([]);
+      expect(txMock.query.mock.calls.filter(([sql]) => String(sql).includes('INSERT INTO contract_document_rejections'))).toHaveLength(2);
+      expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(2);
+      expect(processNegotiationDocumentDeletionJobMock).toHaveBeenCalledTimes(2);
       expect(response.body.contract.sellerApprovalStatus).toBe(
-        side === 'seller' ? 'REJECTED' : 'PENDING'
+        'PENDING'
       );
       expect(response.body.contract.buyerApprovalStatus).toBe(
-        side === 'buyer' ? 'REJECTED' : 'PENDING'
+        'PENDING'
       );
+      expect(response.body.contract.workflowMetadata.awaiting_document_resubmission[side]).toMatchObject({
+        reason: 'Documento ilegível.',
+        rejectedDocumentIds: [91, 92],
+      });
+      expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
     }
   );
 });

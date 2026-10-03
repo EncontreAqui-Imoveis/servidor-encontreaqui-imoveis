@@ -75,6 +75,14 @@ type ContractDocumentReviewResult = {
   };
 };
 
+export type SideDocumentRejection = {
+  id: number;
+  documentType: string | null;
+  category: ContractDocumentCategoryCode | null;
+  originalFileName: string | null;
+  deletionJobId: number | null;
+};
+
 class ContractDocumentReviewError extends Error {
   statusCode: number;
   code?: string;
@@ -169,6 +177,104 @@ function readDocumentCategory(
   return resolveDocumentCategoryFromType(
     String(documentType ?? '').trim().toLowerCase() as ContractDocumentType
   );
+}
+
+function rejectionDetails(
+  document: ContractDocumentRow,
+  metadata: Record<string, unknown>
+): {
+  documentType: string | null;
+  originalFileName: string | null;
+  uploadedByUserId: number | null;
+  ownerSide: ContractDocumentSide | null;
+  documentCategory: ContractDocumentCategoryCode | null;
+  documentLabel: string | null;
+} {
+  const documentType = String(document.document_type ?? '').trim().toLowerCase() || null;
+  const rawOriginalFileName = String(
+    metadata.originalFileName ?? metadata.original_file_name ?? metadata.fileName ?? metadata.file_name ?? metadata.name ?? ''
+  ).trim();
+  let originalFileName: string | null = rawOriginalFileName || null;
+  if (!originalFileName && document.storage_key) {
+    const cleanName = (String(document.storage_key).split('/').pop() ?? '').replace(/^\d+[-_]/, '');
+    originalFileName = cleanName || null;
+  }
+  const ownerSide = readDocumentSide(metadata);
+  return {
+    documentType,
+    originalFileName,
+    uploadedByUserId: readPositiveUserId(metadata.uploadedBy),
+    ownerSide,
+    documentCategory: readDocumentCategory(metadata, document.document_type),
+    documentLabel: String(metadata.label ?? metadata.documentLabel ?? '').trim() || null,
+  };
+}
+
+/**
+ * Persists the same rejection history and deferred storage cleanup used by an
+ * individual review, without emitting per-document notifications.
+ */
+export async function rejectActiveContractDocumentsForSide(
+  tx: PoolConnection,
+  params: {
+    contract: ContractRow;
+    contractId: string;
+    side: ContractDocumentSide;
+    reason: string;
+    actorId: number | null;
+  }
+): Promise<SideDocumentRejection[]> {
+  const [rows] = await tx.query<ContractDocumentRow[]>(
+    `
+      SELECT id, type, document_type, metadata_json, storage_provider, storage_bucket, storage_key, created_at
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+        AND COALESCE(
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.owner_side')),
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.side'))
+        ) = ?
+        AND COALESCE(document_type, '') <> 'proposal'
+      FOR UPDATE
+    `,
+    [params.contract.negotiation_id, params.contractId, params.side]
+  );
+  const now = new Date().toISOString();
+  const rejections: SideDocumentRejection[] = [];
+  for (const document of rows) {
+    const metadata = parseStoredJsonObject(document.metadata_json);
+    if (resolveReviewStatus(metadata.categoryStatus ?? metadata.reviewStatus ?? metadata.status) === 'REJECTED') {
+      continue;
+    }
+    const details = rejectionDetails(document, metadata);
+    await tx.query(
+      `
+        INSERT INTO contract_document_rejections (
+          contract_id, negotiation_id, source_document_id, document_type, document_label,
+          original_file_name, owner_side, reason, uploaded_by_user_id, rejected_by_admin_id, rejected_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        params.contractId, params.contract.negotiation_id, document.id,
+        details.documentType, details.documentLabel, details.originalFileName, details.ownerSide,
+        params.reason, details.uploadedByUserId, params.actorId, now,
+      ]
+    );
+    await tx.query(
+      'DELETE FROM negotiation_documents WHERE id = ? AND negotiation_id = ? LIMIT 1',
+      [document.id, params.contract.negotiation_id]
+    );
+    const deletionJobId = await enqueueNegotiationDocumentDeletion(tx, document, {
+      negotiationId: params.contract.negotiation_id,
+      requestedByUserId: params.actorId,
+      requestSource: 'contract_side_documents_rejected',
+    });
+    rejections.push({
+      id: Number(document.id), documentType: details.documentType, category: details.documentCategory,
+      originalFileName: details.originalFileName, deletionJobId,
+    });
+  }
+  return rejections;
 }
 
 export async function reviewContractDocument(

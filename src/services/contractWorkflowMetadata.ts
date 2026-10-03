@@ -71,6 +71,52 @@ export function appendWorkflowAuditEvent(
   };
 }
 
+type ContractDocumentSide = 'seller' | 'buyer';
+
+export function markAwaitingDocumentResubmission(
+  source: unknown,
+  side: ContractDocumentSide,
+  details: Record<string, unknown>
+): Record<string, unknown> {
+  const metadata = parseWorkflowMetadata(source);
+  const current =
+    metadata.awaiting_document_resubmission &&
+    typeof metadata.awaiting_document_resubmission === 'object' &&
+    !Array.isArray(metadata.awaiting_document_resubmission)
+      ? (metadata.awaiting_document_resubmission as Record<string, unknown>)
+      : {};
+  return {
+    ...metadata,
+    awaiting_document_resubmission: { ...current, [side]: details },
+  };
+}
+
+export function clearAwaitingDocumentResubmission(
+  source: unknown,
+  side: ContractDocumentSide
+): Record<string, unknown> {
+  const metadata = parseWorkflowMetadata(source);
+  const current =
+    metadata.awaiting_document_resubmission &&
+    typeof metadata.awaiting_document_resubmission === 'object' &&
+    !Array.isArray(metadata.awaiting_document_resubmission)
+      ? { ...(metadata.awaiting_document_resubmission as Record<string, unknown>) }
+      : {};
+  delete current[side];
+  if (Object.keys(current).length === 0) {
+    delete metadata.awaiting_document_resubmission;
+  } else {
+    metadata.awaiting_document_resubmission = current;
+  }
+  return metadata;
+}
+
+export function hasAwaitingDocumentResubmission(source: unknown): boolean {
+  const metadata = parseWorkflowMetadata(source);
+  const marker = metadata.awaiting_document_resubmission;
+  return Boolean(marker && typeof marker === 'object' && !Array.isArray(marker) && Object.keys(marker).length > 0);
+}
+
 export function resetWorkflowMetadata(
   source: unknown,
   keysToRemove: readonly string[] = WORKFLOW_METADATA_RESET_KEYS
@@ -84,4 +130,3 @@ export function resetWorkflowMetadata(
 
   return Object.keys(nextMetadata).length > 0 ? nextMetadata : null;
 }
-

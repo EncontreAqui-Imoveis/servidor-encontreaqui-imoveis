@@ -234,6 +234,11 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.body.contract.buyerApprovalStatus).toBe('PENDING');
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
     expect(response.body.movedToDraft).toBe(false);
+    expect(response.body.contract.approvalProgress).toMatchObject({
+      status: 'IN_PROGRESS',
+      label: 'Aguardando correção documental',
+      nextStep: 'Aguardando correção do lado rejeitado',
+    });
     expect(
       txMock.query.mock.calls.some(([sql]) =>
         String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
@@ -264,11 +269,52 @@ describe('Contract granular approval and signed docs endpoints', () => {
     expect(response.body.contract.buyerApprovalStatus).toBe('REJECTED');
     expect(response.body.contract.status).toBe('AWAITING_DOCS');
     expect(response.body.movedToDraft).toBe(false);
+    expect(response.body.contract.approvalProgress).toMatchObject({
+      status: 'IN_PROGRESS',
+      label: 'Aguardando correção documental',
+    });
     expect(
       txMock.query.mock.calls.some(([sql]) =>
         String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
       )
     ).toBe(false);
+  });
+
+  it('requires restarting a rejected side before approving it again', async () => {
+    contractState = createInitialContractState({
+      seller_approval_status: 'REJECTED',
+    });
+
+    const approved = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({ side: 'seller', status: 'APPROVED' });
+    expect(approved.status).toBe(409);
+    expect(approved.body).toMatchObject({
+      code: 'SIDE_RESTART_REQUIRED',
+      error: 'Reinicie a análise deste lado antes de aprová-lo novamente.',
+    });
+
+    const approvedWithReservations = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({
+        side: 'seller',
+        status: 'APPROVED_WITH_RES',
+        reason: 'Ressalva após rejeição.',
+      });
+    expect(approvedWithReservations.status).toBe(409);
+    expect(approvedWithReservations.body.code).toBe('SIDE_RESTART_REQUIRED');
+
+    const restarted = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({ side: 'seller', status: 'PENDING' });
+    expect(restarted.status).toBe(200);
+    expect(restarted.body.contract.sellerApprovalStatus).toBe('PENDING');
+
+    const approvedAfterRestart = await request(app)
+      .put('/admin/contracts/contract-1/evaluate-side')
+      .send({ side: 'seller', status: 'APPROVED' });
+    expect(approvedAfterRestart.status).toBe(200);
+    expect(approvedAfterRestart.body.contract.sellerApprovalStatus).toBe('APPROVED');
   });
 
   it('moves to IN_DRAFT when approvals are complete despite documentary pending items', async () => {

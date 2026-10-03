@@ -609,8 +609,11 @@ function summarizeContractApprovalProgress(row: ContractRow): ContractApprovalPr
 
   if (sellerStatus === 'REJECTED' || buyerStatus === 'REJECTED') {
     return {
-      status: 'REJECTED',
-      label: 'Rejeitado',
+      // A rejection here belongs to one documentary side.  While the
+      // contract remains in AWAITING_DOCS it is a corrective step, never a
+      // terminal contract outcome.
+      status: 'IN_PROGRESS',
+      label: 'Aguardando correção documental',
       nextStep: 'Aguardando correção do lado rejeitado',
     };
   }

@@ -85,6 +85,10 @@ const APPROVAL_GRANTS_PROGRESS = new Set<ContractApprovalStatus>([
   'APPROVED_WITH_RES',
 ]);
 
+export const SIDE_RESTART_REQUIRED_CODE = 'SIDE_RESTART_REQUIRED';
+export const SIDE_RESTART_REQUIRED_MESSAGE =
+  'Reinicie a análise deste lado antes de aprová-lo novamente.';
+
 function parseStoredJsonObject(value: unknown): Record<string, unknown> {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return { ...(value as Record<string, unknown>) };
@@ -676,6 +680,23 @@ export async function evaluateContractSide(
         409,
         SIDE_ALREADY_APPROVED_MESSAGE,
         SIDE_ALREADY_APPROVED_CODE
+      );
+    }
+
+    const currentSideStatus = resolveContractApprovalStatus(
+      side === 'seller'
+        ? contract.seller_approval_status
+        : contract.buyer_approval_status
+    );
+    if (
+      currentSideStatus === 'REJECTED' &&
+      nextSideStatus !== 'PENDING'
+    ) {
+      await tx.rollback();
+      throw contractSideReviewError(
+        409,
+        SIDE_RESTART_REQUIRED_MESSAGE,
+        SIDE_RESTART_REQUIRED_CODE
       );
     }
 

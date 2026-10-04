@@ -39,11 +39,20 @@ vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
 import { contractController } from '../../src/controllers/ContractController';
 
 describe('DELETE /contracts/:id/documents/:documentId', () => {
+  let userRole: 'admin' | 'client';
+  let contractStatus: 'AWAITING_DOCS' | 'IN_DRAFT' | 'AWAITING_MINUTE_REVIEW';
+  let activeDraftDocumentId: number | null;
+  let storedDocument: {
+    id: number;
+    type: string;
+    document_type: string;
+    metadata_json: string;
+  };
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     (req as any).userId = 30003;
-    (req as any).userRole = 'client';
+    (req as any).userRole = userRole;
     (req as any).contractContext = {
       userRole: 'seller',
       canReadMeta: true,
@@ -61,6 +70,15 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    userRole = 'client';
+    contractStatus = 'AWAITING_DOCS';
+    activeDraftDocumentId = null;
+    storedDocument = {
+      id: 501,
+      type: 'contract',
+      document_type: 'doc_identidade',
+      metadata_json: JSON.stringify({ owner_side: 'seller', side: 'seller' }),
+    };
     getConnectionMock.mockResolvedValue(txMock);
     queryMock.mockResolvedValue([[]]);
     txMock.beginTransaction.mockResolvedValue(undefined);
@@ -82,13 +100,15 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
               proposer_id: 30004,
               initiator_side: 'buyer',
               property_id: 101,
-              status: 'AWAITING_DOCS',
+              status: contractStatus,
+              draft_review_revision_id: activeDraftDocumentId ? 71 : null,
+              draft_review_document_id: activeDraftDocumentId,
               seller_cpf: '111.111.111-11',
               buyer_cpf: '222.222.222-22',
               seller_info: {},
               buyer_info: {},
               commission_data: {},
-              seller_approval_status: 'APPROVED',
+              seller_approval_status: 'PENDING',
               buyer_approval_status: 'PENDING',
               seller_approval_reason: null,
               buyer_approval_reason: null,
@@ -112,12 +132,7 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
       ) {
         return [
           [
-            {
-              id: 501,
-              type: 'contract',
-              document_type: 'doc_identidade',
-              metadata_json: JSON.stringify({ owner_side: 'seller', side: 'seller' }),
-            },
+            storedDocument,
           ],
         ];
       }
@@ -140,6 +155,77 @@ describe('DELETE /contracts/:id/documents/:documentId', () => {
       String(sql).includes('DELETE FROM negotiation_documents')
     );
     expect(deleteCalls).toHaveLength(1);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks direct deletion of the active draft while it is under review', async () => {
+    userRole = 'admin';
+    contractStatus = 'AWAITING_MINUTE_REVIEW';
+    activeDraftDocumentId = 501;
+    storedDocument = {
+      id: 501,
+      type: 'contract',
+      document_type: 'contrato_minuta',
+      metadata_json: JSON.stringify({
+        contractId: 'contract-1',
+        documentKind: 'contract_draft',
+        isActiveContractDraft: true,
+      }),
+    };
+
+    const response = await request(app).delete(
+      '/contracts/contract-1/documents/501'
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      error:
+        'A minuta em revisão não pode ser excluída diretamente. Substitua a minuta ou volte a etapa do contrato antes de removê-la.',
+      code: 'CONTRACT_DRAFT_IN_REVIEW',
+    });
+    expect(contractStatus).toBe('AWAITING_MINUTE_REVIEW');
+    expect(activeDraftDocumentId).toBe(501);
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('DELETE FROM negotiation_documents')
+      )
+    ).toBe(false);
+    expect(enqueueNegotiationDocumentDeletionMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps deletion of a draft in IN_DRAFT unchanged', async () => {
+    userRole = 'admin';
+    contractStatus = 'IN_DRAFT';
+    activeDraftDocumentId = 501;
+    storedDocument = {
+      id: 501,
+      type: 'contract',
+      document_type: 'contrato_minuta',
+      metadata_json: JSON.stringify({
+        contractId: 'contract-1',
+        documentKind: 'contract_draft',
+        isActiveContractDraft: true,
+      }),
+    };
+
+    const response = await request(app).delete(
+      '/contracts/contract-1/documents/501'
+    );
+
+    expect(response.status).toBe(200);
+    expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not block a non-draft document during minute review', async () => {
+    userRole = 'admin';
+    contractStatus = 'AWAITING_MINUTE_REVIEW';
+    activeDraftDocumentId = 700;
+
+    const response = await request(app).delete(
+      '/contracts/contract-1/documents/501'
+    );
+
+    expect(response.status).toBe(200);
     expect(enqueueNegotiationDocumentDeletionMock).toHaveBeenCalledTimes(1);
   });
 });

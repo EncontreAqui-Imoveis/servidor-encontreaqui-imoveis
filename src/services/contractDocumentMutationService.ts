@@ -617,6 +617,20 @@ export async function deleteContractDocument(
   if (context.userRole === 'none') {
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
+
+  const status = resolveContractStatus(params.contract.status);
+  const isActiveDraftUnderReview =
+    status === 'AWAITING_MINUTE_REVIEW' &&
+    documentType === 'contrato_minuta' &&
+    Number(params.contract.draft_review_document_id ?? 0) === Number(document.id);
+  if (isActiveDraftUnderReview) {
+    throw mutationError(
+      409,
+      'A minuta em revisão não pode ser excluída diretamente. Substitua a minuta ou volte a etapa do contrato antes de removê-la.',
+      { code: 'CONTRACT_DRAFT_IN_REVIEW' }
+    );
+  }
+
   try {
     assertParticipantMutationAllowed(params.contract, context, 'document_delete');
   } catch (error) {
@@ -658,7 +672,6 @@ export async function deleteContractDocument(
     requestSource: 'contract_document_delete',
   });
 
-  const status = resolveContractStatus(params.contract.status);
   const workflowMetadata =
     context.userRole === 'admin' && status !== 'AWAITING_DOCS'
       ? appendWorkflowAuditEvent(params.contract.workflow_metadata, {

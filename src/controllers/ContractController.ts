@@ -907,6 +907,16 @@ function resolveNegotiationBrokerRecipientIds(contract: ContractRow): number[] {
   );
 }
 
+function normalizeNotificationRecipientIds(values: unknown[]): number[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => Number(value))
+        .filter((value) => Number.isSafeInteger(value) && value > 0)
+    )
+  );
+}
+
 /** Corretores envolvidos + cliente comprador (quando existir), para notificações de contrato. */
 function resolveContractNotificationRecipientIds(contract: ContractRow): number[] {
   const brokers = resolveNegotiationBrokerRecipientIds(contract);
@@ -3028,35 +3038,31 @@ class ContractController {
 
       const propertyTitle =
         (contract.property_title ?? '').trim() || 'Imóvel sem título';
-      const brokerRecipientIds = Array.from(
-        new Set(
-          [contract.capturing_broker_id, contract.selling_broker_id].filter(
-            (value): value is number =>
-              value != null && Number.isFinite(Number(value))
-          )
-        )
-      );
-      const sellerRecipientIds = Array.from(
-        new Set(
-          [
-            updatedContract?.advertiser_id,
-            updatedContract?.property_owner_id,
-            updatedContract?.initiator_side === 'seller'
-              ? updatedContract?.proposer_id
-              : null,
-          ].filter((value): value is number => value != null && Number.isFinite(Number(value)))
-        )
-      );
-      const buyerRecipientIds = Array.from(
-        new Set(
-          [
+      const sellerRecipientIds = normalizeNotificationRecipientIds([
+        updatedContract?.advertiser_id,
+        updatedContract?.property_owner_id,
+        updatedContract?.initiator_side === 'seller'
+          ? updatedContract?.proposer_id
+          : null,
+      ]);
+      const handshakeStatus = String(updatedContract?.handshake_status ?? '').trim().toUpperCase();
+      const buyerRecipientIds = handshakeStatus === 'REJECTED'
+        ? []
+        : normalizeNotificationRecipientIds([
             updatedContract?.legal_buyer_user_id,
             updatedContract?.initiator_side === 'buyer'
               ? updatedContract?.proposer_id
               : null,
-          ].filter((value): value is number => value != null && Number.isFinite(Number(value)))
-        )
-      );
+          ]);
+      const participantRecipientIds = normalizeNotificationRecipientIds([
+        ...sellerRecipientIds,
+        ...buyerRecipientIds,
+      ]);
+      const participantRecipientIdSet = new Set(participantRecipientIds);
+      const brokerRecipientIds = normalizeNotificationRecipientIds([
+        contract.capturing_broker_id,
+        contract.selling_broker_id,
+      ]).filter((recipientId) => !participantRecipientIdSet.has(recipientId));
 
       for (const recipientId of brokerRecipientIds) {
         try {
@@ -3080,8 +3086,7 @@ class ContractController {
         }
       }
 
-      const handshakeStatus = String(updatedContract?.handshake_status ?? '').trim().toUpperCase();
-      for (const recipientId of sellerRecipientIds) {
+      for (const recipientId of participantRecipientIds) {
         try {
           await createUserNotification({
             type: 'negotiation',
@@ -3097,28 +3102,7 @@ class ContractController {
             target: 'contract_details',
           });
         } catch (notificationError) {
-          console.error('Falha ao notificar vendedor sobre minuta:', notificationError);
-        }
-      }
-      if (handshakeStatus !== 'REJECTED') {
-        for (const recipientId of buyerRecipientIds) {
-          try {
-            await createUserNotification({
-              type: 'negotiation',
-              title: 'Minuta pronta para revisão',
-              message: `A minuta do contrato do imóvel ${propertyTitle} está disponível para a sua conferência.`,
-              recipientId,
-              relatedEntityId: Number(contract.property_id),
-              metadata: {
-                contractId,
-                negotiationId: contract.negotiation_id,
-                propertyId: Number(contract.property_id),
-              },
-              target: 'contract_details',
-            });
-          } catch (notificationError) {
-            console.error('Falha ao notificar comprador sobre minuta:', notificationError);
-          }
+          console.error('Falha ao notificar participante sobre minuta:', notificationError);
         }
       }
 

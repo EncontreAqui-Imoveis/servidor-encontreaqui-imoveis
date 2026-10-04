@@ -81,6 +81,12 @@ type MutableContractState = {
   updated_at: string;
   capturing_broker_id: number;
   selling_broker_id: number;
+  advertiser_id?: number | string | null;
+  property_owner_id?: number | string | null;
+  proposer_id?: number | string | null;
+  initiator_side?: 'seller' | 'buyer' | null;
+  legal_buyer_user_id?: number | string | null;
+  handshake_status?: string | null;
   property_title: string;
   property_purpose: string;
   property_code: string;
@@ -325,6 +331,97 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       })
     );
     expect(createUserNotificationMock).toHaveBeenCalled();
+  });
+
+  it('notifies a broker who is also the seller only as a participant', async () => {
+    contractState = createContractState({
+      capturing_broker_id: 90002,
+      selling_broker_id: 90002,
+      advertiser_id: '90002',
+      legal_buyer_user_id: 90003,
+    });
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 draft%'), 'minuta.pdf');
+
+    expect(response.status).toBe(200);
+    const notificationsForSeller = createUserNotificationMock.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.recipientId === 90002);
+    expect(notificationsForSeller).toHaveLength(1);
+    expect(notificationsForSeller[0]).toMatchObject({
+      title: 'Minuta pronta para revisão',
+      target: 'contract_details',
+    });
+  });
+
+  it('notifies a broker who is also the buyer only as a participant', async () => {
+    contractState = createContractState({
+      capturing_broker_id: 90003,
+      selling_broker_id: 90003,
+      advertiser_id: 90002,
+      legal_buyer_user_id: '90003',
+    });
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 draft%'), 'minuta.pdf');
+
+    expect(response.status).toBe(200);
+    const notificationsForBuyer = createUserNotificationMock.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.recipientId === 90003);
+    expect(notificationsForBuyer).toHaveLength(1);
+    expect(notificationsForBuyer[0]).toMatchObject({
+      title: 'Minuta pronta para revisão',
+      target: 'contract_details',
+    });
+  });
+
+  it('notifies each distinct broker and participant once', async () => {
+    contractState = createContractState({
+      capturing_broker_id: 90001,
+      selling_broker_id: 90001,
+      advertiser_id: 90002,
+      legal_buyer_user_id: 90003,
+    });
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 draft%'), 'minuta.pdf');
+
+    expect(response.status).toBe(200);
+    expect(createUserNotificationMock.mock.calls.map(([input]) => input.recipientId).sort()).toEqual([
+      90001,
+      90002,
+      90003,
+    ]);
+    expect(createUserNotificationMock.mock.calls.map(([input]) => input).find(
+      (input) => input.recipientId === 90001
+    )).toMatchObject({ title: 'Minuta pronta para conferência', recipientRole: 'broker' });
+  });
+
+  it('notifies a repeated capturing and selling broker once when not a participant', async () => {
+    contractState = createContractState({
+      capturing_broker_id: 90001,
+      selling_broker_id: 90001,
+      advertiser_id: 90002,
+      legal_buyer_user_id: 90003,
+    });
+
+    await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 draft%'), 'minuta.pdf');
+
+    const notificationsForBroker = createUserNotificationMock.mock.calls
+      .map(([input]) => input)
+      .filter((input) => input.recipientId === 90001);
+    expect(notificationsForBroker).toHaveLength(1);
+    expect(notificationsForBroker[0]).toMatchObject({
+      title: 'Minuta pronta para conferência',
+      recipientRole: 'broker',
+    });
   });
 
   it.each([

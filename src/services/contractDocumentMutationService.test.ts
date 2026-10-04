@@ -174,6 +174,51 @@ describe('uploadContractDocument', () => {
     );
   });
 
+  it('rejects a generic upload when the slot already has a pending document', async () => {
+    const contract = {
+      id: 'contract-1', negotiation_id: 'neg-1', status: 'AWAITING_DOCS',
+      seller_approval_status: 'PENDING', buyer_approval_status: 'PENDING', workflow_metadata: {},
+    } as ContractRow;
+    const tx = { query: vi.fn().mockResolvedValue([[pendingReplacementRow()]]) } as unknown as PoolConnection;
+    storeNegotiationDocumentToR2Mock.mockClear();
+
+    await expect(uploadContractDocument(tx, {
+      req: buildRequest(), contract, contractId: 'contract-1',
+      body: { side: 'seller', documentCategory: 'identidade', documentType: 'doc_identidade' },
+      uploadedFile: file,
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      body: { code: 'DOCUMENT_PENDING_ALREADY_EXISTS' },
+      message: 'Já existe um documento em análise neste campo. Substitua a versão existente para enviar outro arquivo.',
+    });
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+  });
+
+  it('keeps pending documents independent across sides and Outro slots', async () => {
+    const contract = {
+      id: 'contract-1', negotiation_id: 'neg-1', status: 'AWAITING_DOCS',
+      seller_approval_status: 'PENDING', buyer_approval_status: 'PENDING', workflow_metadata: {},
+    } as ContractRow;
+    const sellerPending = pendingReplacementRow({
+      document_type: 'cliente_outro_01',
+      metadata_json: {
+        contractId: 'contract-1', owner_side: 'seller', documentCategory: 'outro', categoryStatus: 'PENDING',
+      },
+    });
+    const tx = { query: vi.fn().mockResolvedValue([[sellerPending]]) } as unknown as PoolConnection;
+    storeNegotiationDocumentToR2Mock.mockResolvedValue(102);
+
+    await expect(uploadContractDocument(tx, {
+      req: buildRequest(), contract, contractId: 'contract-1',
+      body: { side: 'seller', documentCategory: 'outro', documentType: 'cliente_outro_02' }, uploadedFile: file,
+    })).resolves.toMatchObject({ document: { id: 102 } });
+
+    await expect(uploadContractDocument(tx, {
+      req: buildRequest(), contract, contractId: 'contract-1',
+      body: { side: 'buyer', documentCategory: 'outro', documentType: 'cliente_outro_01' }, uploadedFile: file,
+    })).resolves.toMatchObject({ document: { id: 102 } });
+  });
+
   it.each([
     ['another contract', pendingReplacementRow({ metadata_json: { contractId: 'contract-2', owner_side: 'seller', documentCategory: 'identidade', categoryStatus: 'PENDING' } })],
     ['another side', pendingReplacementRow({ metadata_json: { contractId: 'contract-1', owner_side: 'buyer', documentCategory: 'identidade', categoryStatus: 'PENDING' } })],

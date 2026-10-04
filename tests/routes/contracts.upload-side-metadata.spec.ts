@@ -300,7 +300,7 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
     expect(approvedDocuments).toHaveLength(2);
   });
 
-  it('preserva upload para uma nova versão quando não há aprovação', async () => {
+  it('bloqueia um novo upload genérico quando o slot já possui documento pendente', async () => {
     approvedDocuments = [
       {
         id: 502,
@@ -320,7 +320,46 @@ describe('POST /contracts/:id/documents stores side metadata', () => {
       .field('side', 'seller')
       .attach('file', Buffer.alloc(2048, 'a'), 'identidade.pdf');
 
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'DOCUMENT_PENDING_ALREADY_EXISTS',
+      error: 'Já existe um documento em análise neste campo. Substitua a versão existente para enviar outro arquivo.',
+    });
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+  });
+
+  it('mantém uma única versão PENDING ao processar uploads serializados pelo lock do contrato', async () => {
+    let nextDocumentId = 1000;
+    storeNegotiationDocumentToR2Mock.mockImplementation(async (params: any) => {
+      approvedDocuments.push({
+        id: nextDocumentId,
+        document_type: params.documentType,
+        metadata_json: params.metadataJson,
+      });
+      return nextDocumentId++;
+    });
+
+    const first = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'doc_identidade')
+      .field('documentCategory', 'identidade')
+      .field('side', 'seller')
+      .attach('file', Buffer.alloc(2048, 'a'), 'primeiro.pdf');
+    const second = await request(app)
+      .post('/contracts/contract-1/documents')
+      .field('documentType', 'doc_identidade')
+      .field('documentCategory', 'identidade')
+      .field('side', 'seller')
+      .attach('file', Buffer.alloc(2048, 'b'), 'segundo.pdf');
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe('DOCUMENT_PENDING_ALREADY_EXISTS');
     expect(storeNegotiationDocumentToR2Mock).toHaveBeenCalledTimes(1);
+    expect(approvedDocuments).toHaveLength(1);
+    expect(txMock.query).toHaveBeenCalledWith(
+      expect.stringContaining('FROM contracts c'),
+      ['contract-1']
+    );
   });
 });

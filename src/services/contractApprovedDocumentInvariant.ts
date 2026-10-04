@@ -67,6 +67,17 @@ function isApproved(metadata: Record<string, unknown>): boolean {
   return status === 'APPROVED' || status === 'APPROVED_WITH_RES';
 }
 
+function isPending(metadata: Record<string, unknown>): boolean {
+  const status = String(
+    metadata.categoryStatus ??
+      metadata.reviewStatus ??
+      metadata.validationStatus ??
+      metadata.status ??
+      ''
+  ).trim().toUpperCase();
+  return status === 'PENDING';
+}
+
 function hasSameDocumentIdentity(
   document: ApprovedDocumentRow,
   metadata: Record<string, unknown>,
@@ -148,4 +159,45 @@ export async function findApprovedContractDocument(
   });
 
   return approvedDocument ? Number(approvedDocument.id) : null;
+}
+
+export async function findPendingContractDocument(
+  tx: PoolConnection,
+  params: {
+    contractId: string;
+    negotiationId: string | number;
+    side: ContractDocumentSide;
+    category: ContractDocumentCategoryCode | null;
+    documentType: string;
+  }
+): Promise<number | null> {
+  const [rows] = await tx.query<ApprovedDocumentRow[]>(
+    `
+      SELECT id, document_type, metadata_json
+      FROM negotiation_documents
+      WHERE negotiation_id = ?
+        AND (
+          JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.contractId')) = ?
+          OR JSON_EXTRACT(metadata_json, '$.contractId') IS NULL
+        )
+        AND UPPER(
+          COALESCE(
+            JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.categoryStatus')),
+            JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.reviewStatus')),
+            JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.validationStatus')),
+            JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.status')),
+            ''
+          )
+        ) = 'PENDING'
+      FOR UPDATE
+    `,
+    [params.negotiationId, params.contractId]
+  );
+
+  const pendingDocument = rows.find((document) => {
+    const metadata = parseMetadata(document.metadata_json);
+    return isPending(metadata) && hasSameDocumentIdentity(document, metadata, params);
+  });
+
+  return pendingDocument ? Number(pendingDocument.id) : null;
 }

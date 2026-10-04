@@ -33,6 +33,7 @@ import {
   DOCUMENT_ALREADY_APPROVED_CODE,
   DOCUMENT_ALREADY_APPROVED_MESSAGE,
   findApprovedContractDocument,
+  findPendingContractDocument,
 } from './contractApprovedDocumentInvariant';
 import {
   isContractSideApproved,
@@ -452,6 +453,23 @@ export async function uploadContractDocument(
       throw mutationError(409, DOCUMENT_ALREADY_APPROVED_MESSAGE, {
         code: DOCUMENT_ALREADY_APPROVED_CODE,
       });
+    }
+
+    if (!replacedDocument) {
+      const pendingDocumentId = await findPendingContractDocument(tx, {
+        contractId: params.contractId,
+        negotiationId: params.contract.negotiation_id,
+        side: resolvedSide,
+        category: resolvedDocumentCategory,
+        documentType: normalizedDocumentType,
+      });
+      if (pendingDocumentId !== null) {
+        throw mutationError(
+          409,
+          'Já existe um documento em análise neste campo. Substitua a versão existente para enviar outro arquivo.',
+          { code: 'DOCUMENT_PENDING_ALREADY_EXISTS' }
+        );
+      }
     }
   }
 

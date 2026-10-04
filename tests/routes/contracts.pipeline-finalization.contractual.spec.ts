@@ -62,6 +62,7 @@ vi.mock('../../src/services/negotiationDocumentDeletionService', () => ({
 
 import { contractController } from '../../src/controllers/ContractController';
 import { contractDraftUpload } from '../../src/middlewares/uploadMiddleware';
+import { globalErrorHandler } from '../../src/middlewares/errorHandler';
 
 type MutableContractState = {
   id: string;
@@ -142,6 +143,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     };
     return contractController.reviewDraft(req as any, res);
   });
+  app.use(globalErrorHandler);
 
   let contractState: MutableContractState;
   let evidenceCounts: {
@@ -323,6 +325,30 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       })
     );
     expect(createUserNotificationMock).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['JPG', 'minuta.jpg', 'image/jpeg'],
+    ['PNG', 'minuta.png', 'image/png'],
+    ['WEBP', 'minuta.webp', 'image/webp'],
+  ])('rejects %s uploads for a contract draft', async (_label, filename, contentType) => {
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('not-a-pdf'), { filename, contentType });
+
+    expect(response.status).toBe(422);
+    expect(response.body.error).toBe('Arquivo inválido. Envie apenas PDF da minuta.');
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+  });
+
+  it('does not allow reuse when IN_DRAFT has no canonical draft', async () => {
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .field('reuseCurrentDraft', 'true');
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain('Não há minuta canônica');
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
   });
 
   it('permite prosseguir com a mesma minuta sem reenviar arquivo quando já existe PDF', async () => {

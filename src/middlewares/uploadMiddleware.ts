@@ -114,6 +114,15 @@ function isAllowedPdf(mime: string, originalname: string): boolean {
   return ext === 'pdf';
 }
 
+function isAllowedContractDraftPdf(mime: string, originalname: string): boolean {
+  const normalized = (mime || '').toLowerCase();
+  const ext = getExtLower(originalname);
+  return (
+    ext === 'pdf' &&
+    (!normalized || normalized === 'application/pdf' || normalized === 'application/octet-stream')
+  );
+}
+
 function isAllowedContractDocument(mime: string, originalname: string): boolean {
   return isAllowedPdf(mime, originalname) || isAllowedImage(mime, originalname);
 }
@@ -222,12 +231,17 @@ export const contractDraftUpload = multer({
     const mime = (file.mimetype || '').toLowerCase();
     const name = file.originalname || '';
 
-    if (isAllowedContractDocument(mime, name)) {
+    if (isAllowedContractDraftPdf(mime, name)) {
       cb(null, true);
       return;
     }
 
-    cb(new Error('Arquivo invalido. Envie um PDF ou imagem (JPG, PNG, WEBP) da minuta.'));
+    cb(
+      Object.assign(new Error('Arquivo inválido. Envie apenas PDF da minuta.'), {
+        statusCode: 422,
+        code: 'CONTRACT_DRAFT_PDF_REQUIRED',
+      })
+    );
   },
 });
 

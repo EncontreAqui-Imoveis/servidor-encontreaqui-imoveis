@@ -2428,23 +2428,10 @@ class ContractController {
         }
       }
 
-      // Reaching IN_DRAFT is the point at which both sides have been
-      // administratively released. Generate the canonical minute immediately;
-      // the manual action remains available as a recovery path for PDF outages.
-      let draftGeneration = null;
-      if (result.movedToDraft && result.contract?.id) {
-        try {
-          draftGeneration = await ensureContractDraftGenerated(result.contract.id);
-        } catch (draftError) {
-          console.error('Erro ao gerar automaticamente a minuta do contrato:', draftError);
-        }
-      }
-
       return res.status(200).json({
         message: result.message,
         contract: result.contract ? mapContract(result.contract, req) : null,
         movedToDraft: result.movedToDraft,
-        draftGeneration,
       });
     } catch (error) {
       if (isContractSideReviewError(error)) {

@@ -261,6 +261,13 @@ describe('Contract granular approval and signed docs endpoints', () => {
         String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
       )
     ).toBe(false);
+    expect(ensureContractDraftGenerated).not.toHaveBeenCalled();
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+    expect(contractState.workflow_metadata?.auditTrail ?? []).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'contract_draft_generated' }),
+      ])
+    );
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Documentação rejeitada',
@@ -380,6 +387,14 @@ describe('Contract granular approval and signed docs endpoints', () => {
       label: 'Aprovado com ressalvas',
       nextStep: 'Minuta liberada',
     });
+    expect(ensureContractDraftGenerated).not.toHaveBeenCalled();
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+    expect(secondResponse.body.draftGeneration).toBeUndefined();
+    expect(contractState.workflow_metadata?.auditTrail ?? []).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'contract_draft_generated' }),
+      ])
+    );
     expect(
       txMock.query.mock.calls.some(([sql]) =>
         String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
@@ -398,7 +413,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     );
   });
 
-  it('moves to IN_DRAFT when both sides are explicitly approved with reservations', async () => {
+  it('moves to IN_DRAFT without generating a draft when both sides are explicitly approved with reservations', async () => {
     const sellerResponse = await request(app)
       .put('/admin/contracts/contract-1/evaluate-side')
       .send({
@@ -428,11 +443,14 @@ describe('Contract granular approval and signed docs endpoints', () => {
         String(sql).includes('UPDATE negotiations') || String(sql).includes('UPDATE properties')
       )
     ).toBe(false);
-    expect(ensureContractDraftGenerated).toHaveBeenCalledWith('contract-1');
-    expect(buyerResponse.body.draftGeneration).toMatchObject({
-      generated: true,
-      templateKey: 'sale',
-    });
+    expect(ensureContractDraftGenerated).not.toHaveBeenCalled();
+    expect(storeNegotiationDocumentToR2Mock).not.toHaveBeenCalled();
+    expect(buyerResponse.body.draftGeneration).toBeUndefined();
+    expect(contractState.workflow_metadata?.auditTrail ?? []).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'contract_draft_generated' }),
+      ])
+    );
   });
 
   it('persiste APPROVED_WITH_RES nos documentos quando a avaliação do lado tem ressalvas', async () => {

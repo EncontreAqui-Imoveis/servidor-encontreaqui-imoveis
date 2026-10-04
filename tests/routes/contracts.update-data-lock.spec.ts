@@ -64,6 +64,48 @@ describe('PUT /contracts/:id/data', () => {
     contractController.updateData(req as any, res)
   );
 
+  function configureLockedContract(status: string): MutableContractRow {
+    const contractState: MutableContractRow = {
+      id: 'contract-1',
+      negotiation_id: 'neg-1',
+      advertiser_id: 30003,
+      proposer_id: 30004,
+      initiator_side: 'buyer',
+      property_id: 101,
+      status,
+      seller_cpf: '111.111.111-11',
+      buyer_cpf: '222.222.222-22',
+      seller_info: { email: 'old@test.com' },
+      buyer_info: { email: 'buyer-old@test.com' },
+      commission_data: {},
+      seller_approval_status: 'APPROVED',
+      buyer_approval_status: 'APPROVED',
+      seller_approval_reason: null,
+      buyer_approval_reason: null,
+      created_at: '2026-02-20 10:00:00',
+      updated_at: '2026-02-20 10:00:00',
+      capturing_broker_id: 30003,
+      selling_broker_id: 30004,
+      property_title: 'Casa Teste',
+      property_purpose: 'Venda',
+      property_code: 'RV-101',
+      capturing_broker_name: 'Captador',
+      selling_broker_name: 'Vendedor',
+    };
+
+    txMock.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
+        return [[{ ...contractState }]];
+      }
+      if (sql.includes('UPDATE contracts') && sql.includes('seller_info')) {
+        throw new Error('não deveria atualizar');
+      }
+      return [[]];
+    });
+
+    return contractState;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     getConnectionMock.mockResolvedValue(txMock);
@@ -74,7 +116,7 @@ describe('PUT /contracts/:id/data', () => {
     txMock.release.mockResolvedValue(undefined);
   });
 
-  it('bloqueia atualização do vendedor quando contrato está em assinatura', async () => {
+  it('mantém o participante bloqueado quando contrato entra em confecção', async () => {
     txMock.query.mockImplementation(async (sql: string) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
         return [[
@@ -85,7 +127,7 @@ describe('PUT /contracts/:id/data', () => {
             proposer_id: 30004,
             initiator_side: 'buyer',
             property_id: 101,
-            status: 'AWAITING_SIGNATURES',
+            status: 'IN_DRAFT',
             seller_cpf: '111.111.111-11',
             buyer_cpf: '222.222.222-22',
             seller_info: { email: 'old@test.com' },
@@ -124,12 +166,44 @@ describe('PUT /contracts/:id/data', () => {
         },
       });
 
-    expect(response.status).toBe(403);
-    expect(response.body.error).toContain('modo somente leitura');
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      error:
+        'Os dados do contrato não podem ser alterados após o início da confecção da minuta. Volte o contrato para a etapa anterior antes de corrigir os dados.',
+      code: 'CONTRACT_DATA_LOCKED',
+    });
     const updateCalls = txMock.query.mock.calls.filter(([sql]) =>
       String(sql).includes('UPDATE contracts') && String(sql).includes('seller_info')
     );
     expect(updateCalls).toHaveLength(0);
+  });
+
+  it.each([
+    'IN_DRAFT',
+    'AWAITING_MINUTE_REVIEW',
+    'AWAITING_SIGNATURES',
+    'FINALIZED',
+  ])('bloqueia o bypass administrativo em %s sem alterar os dados', async (status) => {
+    const contractState = configureLockedContract(status);
+
+    const response = await request(adminApp)
+      .put('/contracts/contract-1/data')
+      .send({
+        side: 'seller',
+        sellerInfo: { email: 'new@test.com' },
+      });
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({
+      code: 'CONTRACT_DATA_LOCKED',
+    });
+    expect(contractState.seller_info).toEqual({ email: 'old@test.com' });
+    expect(contractState.buyer_info).toEqual({ email: 'buyer-old@test.com' });
+    expect(
+      txMock.query.mock.calls.some(([sql]) =>
+        String(sql).includes('UPDATE contracts') && String(sql).includes('seller_info')
+      )
+    ).toBe(false);
   });
 
   it('preserva os campos existentes do vendedor em salvamento parcial', async () => {

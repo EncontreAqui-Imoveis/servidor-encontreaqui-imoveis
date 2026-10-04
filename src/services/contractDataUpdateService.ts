@@ -50,6 +50,16 @@ const BUYER_BLOCK_KEYS = new Set([
   'owner_info',
 ]);
 
+const CONTRACT_DATA_LOCKED_STATUSES = new Set([
+  'IN_DRAFT',
+  'AWAITING_MINUTE_REVIEW',
+  'AWAITING_SIGNATURES',
+  'FINALIZED',
+]);
+const CONTRACT_DATA_LOCKED_CODE = 'CONTRACT_DATA_LOCKED';
+const CONTRACT_DATA_LOCKED_MESSAGE =
+  'Os dados do contrato não podem ser alterados após o início da confecção da minuta. Volte o contrato para a etapa anterior antes de corrigir os dados.';
+
 export type ContractDataSide = 'seller' | 'buyer';
 
 interface ContractPartyQualificationBase {
@@ -493,6 +503,13 @@ export async function updateContractData(
     throw mutationError(403, 'Acesso negado ao contrato.');
   }
 
+  const status = String(contract.status ?? '').trim().toUpperCase();
+  if (CONTRACT_DATA_LOCKED_STATUSES.has(status)) {
+    throw mutationError(409, CONTRACT_DATA_LOCKED_MESSAGE, {
+      code: CONTRACT_DATA_LOCKED_CODE,
+    });
+  }
+
   try {
     assertParticipantMutationAllowed(contract, context, 'data_update');
   } catch (error) {
@@ -537,7 +554,6 @@ export async function updateContractData(
       : buyerInfo;
   const cpfFields = validateDifferentPartyCpfs(nextSellerInfo, nextBuyerInfo);
   if (Object.keys(cpfFields).length > 0) throw validationError(cpfFields);
-  const status = String(contract.status ?? '').trim().toUpperCase();
   const workflowMetadata =
     context.userRole === 'admin' && status !== 'AWAITING_DOCS'
       ? appendWorkflowAuditEvent(contract.workflow_metadata, {

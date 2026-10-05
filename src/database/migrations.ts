@@ -947,10 +947,48 @@ async function ensureContractDraftReviewTables(): Promise<void> {
       reviewer_side ENUM('seller', 'buyer') NOT NULL,
       decision ENUM('CONSENTED', 'CHANGES_REQUESTED') NOT NULL,
       reason TEXT NULL,
+      decision_sequence INT UNSIGNED NOT NULL DEFAULT 1,
       decided_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (id),
-      UNIQUE KEY uq_contract_draft_review_side (revision_id, reviewer_side),
+      UNIQUE KEY uq_contract_draft_review_side_sequence (revision_id, reviewer_side, decision_sequence),
       KEY idx_contract_draft_review_contract (contract_id, revision_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+  `);
+
+  if (!(await columnExists('contract_draft_reviews', 'decision_sequence'))) {
+    await connection.query(
+      'ALTER TABLE contract_draft_reviews ADD COLUMN decision_sequence INT UNSIGNED NOT NULL DEFAULT 1 AFTER reason'
+    );
+  }
+  if (await indexExists('contract_draft_reviews', 'uq_contract_draft_review_side')) {
+    await connection.query('ALTER TABLE contract_draft_reviews DROP INDEX uq_contract_draft_review_side');
+  }
+  if (!(await indexExists('contract_draft_reviews', 'uq_contract_draft_review_side_sequence'))) {
+    await connection.query(
+      'ALTER TABLE contract_draft_reviews ADD UNIQUE KEY uq_contract_draft_review_side_sequence (revision_id, reviewer_side, decision_sequence)'
+    );
+  }
+
+  await connection.query(`
+    CREATE TABLE IF NOT EXISTS contract_draft_review_resolutions (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      contract_id CHAR(36) COLLATE utf8mb4_0900_ai_ci NOT NULL,
+      revision_id BIGINT UNSIGNED NOT NULL,
+      change_request_review_id BIGINT UNSIGNED NOT NULL,
+      requester_side ENUM('seller', 'buyer') NOT NULL,
+      resolved_by_admin_id INT NOT NULL,
+      resolution ENUM('KEPT_CURRENT_DRAFT') NOT NULL,
+      reason TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_contract_draft_review_resolution_request (change_request_review_id),
+      KEY idx_contract_draft_review_resolution_revision (contract_id, revision_id),
+      CONSTRAINT fk_contract_draft_review_resolution_contract
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE,
+      CONSTRAINT fk_contract_draft_review_resolution_revision
+        FOREIGN KEY (revision_id) REFERENCES contract_draft_revisions(id) ON DELETE CASCADE,
+      CONSTRAINT fk_contract_draft_review_resolution_request
+        FOREIGN KEY (change_request_review_id) REFERENCES contract_draft_reviews(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
   `);
 }

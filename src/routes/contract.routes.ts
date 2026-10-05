@@ -69,6 +69,14 @@ contractRoutes.post('/contracts/:id/draft-review', authMiddleware, contractAuthM
 );
 
 contractRoutes.post(
+  '/admin/contracts/:id/draft-review-requests/:reviewId/keep',
+  authMiddleware,
+  isAdmin,
+  requireAdminCapability('manage_contract_workflow'),
+  (req, res) => contractController.keepCurrentDraft(req, res)
+);
+
+contractRoutes.post(
   '/contracts/:id/documents',
   authMiddleware,
   contractAuthMiddleware,

@@ -118,6 +118,7 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     'security_audit_events',
     'contract_draft_revisions',
     'contract_draft_reviews',
+    'contract_draft_review_resolutions',
   ] as const;
 
   for (const tableName of requiredTables) {
@@ -203,6 +204,10 @@ export async function verifyCriticalSchemaState(): Promise<SchemaVerificationSum
     ['contract_draft_revisions', 'is_active'],
     ['contract_draft_reviews', 'reviewer_side'],
     ['contract_draft_reviews', 'decision'],
+    ['contract_draft_reviews', 'decision_sequence'],
+    ['contract_draft_review_resolutions', 'change_request_review_id'],
+    ['contract_draft_review_resolutions', 'resolution'],
+    ['contract_draft_review_resolutions', 'reason'],
   ] as const;
 
   for (const [tableName, columnName] of requiredColumns) {

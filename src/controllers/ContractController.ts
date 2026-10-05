@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { PoolConnection } from 'mysql2/promise';
 
 import { deleteCloudinaryAsset, optimizeCloudinaryImageUrl } from '../config/cloudinary';
@@ -259,9 +259,27 @@ export interface ContractRow extends RowDataPacket {
   seller_draft_review_decision?: 'CONSENTED' | 'CHANGES_REQUESTED' | null;
   seller_draft_review_reason?: string | null;
   seller_draft_review_at?: Date | string | null;
+  seller_draft_review_sequence?: number | null;
+  seller_draft_change_request_id?: number | null;
+  seller_draft_change_request_reason?: string | null;
+  seller_draft_change_request_at?: Date | string | null;
+  seller_draft_resolution_id?: number | null;
+  seller_draft_resolution?: 'KEPT_CURRENT_DRAFT' | null;
+  seller_draft_resolution_reason?: string | null;
+  seller_draft_resolution_at?: Date | string | null;
+  seller_draft_resolution_admin_id?: number | null;
   buyer_draft_review_decision?: 'CONSENTED' | 'CHANGES_REQUESTED' | null;
   buyer_draft_review_reason?: string | null;
   buyer_draft_review_at?: Date | string | null;
+  buyer_draft_review_sequence?: number | null;
+  buyer_draft_change_request_id?: number | null;
+  buyer_draft_change_request_reason?: string | null;
+  buyer_draft_change_request_at?: Date | string | null;
+  buyer_draft_resolution_id?: number | null;
+  buyer_draft_resolution?: 'KEPT_CURRENT_DRAFT' | null;
+  buyer_draft_resolution_reason?: string | null;
+  buyer_draft_resolution_at?: Date | string | null;
+  buyer_draft_resolution_admin_id?: number | null;
 }
 
 export interface ContractDocumentRow extends RowDataPacket {
@@ -917,6 +935,83 @@ function normalizeNotificationRecipientIds(values: unknown[]): number[] {
   );
 }
 
+const DRAFT_REVIEW_REASON_MIN_LENGTH = 3;
+const DRAFT_REVIEW_REASON_MAX_LENGTH = 5000;
+
+function validateDraftReviewReason(value: unknown):
+  | { valid: true; value: string }
+  | { valid: false; error: string } {
+  if (typeof value !== 'string') {
+    return {
+      valid: false,
+      error: 'O motivo deve ser informado como texto.',
+    };
+  }
+
+  const normalized = value.trim();
+  const meaningfulLength = Array.from(normalized.replace(/\s/g, '')).length;
+  if (meaningfulLength < DRAFT_REVIEW_REASON_MIN_LENGTH) {
+    return {
+      valid: false,
+      error: `O motivo deve ter ao menos ${DRAFT_REVIEW_REASON_MIN_LENGTH} caracteres.`,
+    };
+  }
+  if (Array.from(normalized).length > DRAFT_REVIEW_REASON_MAX_LENGTH) {
+    return {
+      valid: false,
+      error: `O motivo deve ter no máximo ${DRAFT_REVIEW_REASON_MAX_LENGTH} caracteres.`,
+    };
+  }
+  return { valid: true, value: normalized };
+}
+
+function draftReviewSideData(
+  row: ContractRow,
+  side: 'seller' | 'buyer'
+) {
+  const prefix = side === 'seller' ? 'seller' : 'buyer';
+  const decision = row[`${prefix}_draft_review_decision` as keyof ContractRow] as
+    | 'CONSENTED'
+    | 'CHANGES_REQUESTED'
+    | null
+    | undefined;
+  const resolution = row[`${prefix}_draft_resolution` as keyof ContractRow] as
+    | 'KEPT_CURRENT_DRAFT'
+    | null
+    | undefined;
+  const canDecideAgain =
+    decision === 'CHANGES_REQUESTED' && resolution === 'KEPT_CURRENT_DRAFT';
+  const effectiveDecision = decision === 'CONSENTED' ? 'CONSENTED' : null;
+  const requestId = Number(row[`${prefix}_draft_change_request_id` as keyof ContractRow] ?? 0) || null;
+  const resolutionId = Number(row[`${prefix}_draft_resolution_id` as keyof ContractRow] ?? 0) || null;
+
+  return {
+    decision,
+    effectiveDecision,
+    canDecideAgain,
+    changeRequest: requestId
+      ? {
+          id: requestId,
+          reviewerSide: side,
+          decision: 'CHANGES_REQUESTED' as const,
+          reason: row[`${prefix}_draft_change_request_reason` as keyof ContractRow] ?? null,
+          requestedAt: row[`${prefix}_draft_change_request_at` as keyof ContractRow] ?? null,
+          pendingResolution: !resolutionId,
+          resolution: resolutionId
+            ? {
+                id: resolutionId,
+                resolution,
+                reason: row[`${prefix}_draft_resolution_reason` as keyof ContractRow] ?? null,
+                resolvedAt: row[`${prefix}_draft_resolution_at` as keyof ContractRow] ?? null,
+                resolvedByAdminId:
+                  Number(row[`${prefix}_draft_resolution_admin_id` as keyof ContractRow] ?? 0) || null,
+              }
+            : null,
+        }
+      : null,
+  };
+}
+
 /** Corretores envolvidos + cliente comprador (quando existir), para notificações de contrato. */
 function resolveContractNotificationRecipientIds(contract: ContractRow): number[] {
   const brokers = resolveNegotiationBrokerRecipientIds(contract);
@@ -1324,9 +1419,20 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
     : viewerSide === 'buyer'
       ? row.buyer_draft_review_reason ?? null
       : null;
+  const sellerDraftReview = draftReviewSideData(row, 'seller');
+  const buyerDraftReview = draftReviewSideData(row, 'buyer');
   const bothSidesConsented =
-    row.seller_draft_review_decision === 'CONSENTED' &&
-    row.buyer_draft_review_decision === 'CONSENTED';
+    sellerDraftReview.effectiveDecision === 'CONSENTED' &&
+    buyerDraftReview.effectiveDecision === 'CONSENTED';
+  const canReadDraftSide = (side: 'seller' | 'buyer') =>
+    readContext?.userRole === 'admin' ||
+    readContext?.userRole === 'responsible' ||
+    viewerSide === side;
+  const viewerDraftCanDecideAgain = viewerSide === 'seller'
+    ? sellerDraftReview.canDecideAgain
+    : viewerSide === 'buyer'
+      ? buyerDraftReview.canDecideAgain
+      : false;
   const capabilities = readContext
     ? {
         canReadMeta: readContext.canReadMeta,
@@ -1379,29 +1485,24 @@ export function mapContract(row: ContractRow, req: AuthRequest | null = null) {
           canReview:
             status === 'AWAITING_MINUTE_REVIEW' &&
             (viewerSide === 'seller' || viewerSide === 'buyer') &&
-            viewerDraftDecision == null,
+            (viewerDraftDecision == null || viewerDraftCanDecideAgain),
           viewerDecision: viewerDraftDecision,
           viewerReason: viewerDraftReason,
-          sellerDecision: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
-            ? row.seller_draft_review_decision ?? null
-            : viewerSide === 'seller'
-              ? row.seller_draft_review_decision ?? null
-              : null,
-          sellerReason: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
-            ? row.seller_draft_review_reason ?? null
-            : viewerSide === 'seller'
-              ? row.seller_draft_review_reason ?? null
-              : null,
-          buyerDecision: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
-            ? row.buyer_draft_review_decision ?? null
+          viewerEffectiveDecision: viewerSide === 'seller'
+            ? sellerDraftReview.effectiveDecision
             : viewerSide === 'buyer'
-              ? row.buyer_draft_review_decision ?? null
+              ? buyerDraftReview.effectiveDecision
               : null,
-          buyerReason: readContext?.userRole === 'admin' || readContext?.userRole === 'responsible'
-            ? row.buyer_draft_review_reason ?? null
-            : viewerSide === 'buyer'
-              ? row.buyer_draft_review_reason ?? null
-              : null,
+          sellerDecision: canReadDraftSide('seller') ? sellerDraftReview.decision : null,
+          sellerReason: canReadDraftSide('seller') ? row.seller_draft_review_reason ?? null : null,
+          sellerDecisionAt: canReadDraftSide('seller') ? row.seller_draft_review_at ?? null : null,
+          sellerEffectiveDecision: canReadDraftSide('seller') ? sellerDraftReview.effectiveDecision : null,
+          sellerChangeRequest: canReadDraftSide('seller') ? sellerDraftReview.changeRequest : null,
+          buyerDecision: canReadDraftSide('buyer') ? buyerDraftReview.decision : null,
+          buyerReason: canReadDraftSide('buyer') ? row.buyer_draft_review_reason ?? null : null,
+          buyerDecisionAt: canReadDraftSide('buyer') ? row.buyer_draft_review_at ?? null : null,
+          buyerEffectiveDecision: canReadDraftSide('buyer') ? buyerDraftReview.effectiveDecision : null,
+          buyerChangeRequest: canReadDraftSide('buyer') ? buyerDraftReview.changeRequest : null,
           allConsented: bothSidesConsented,
         }
       : null,
@@ -2141,9 +2242,27 @@ export const CONTRACT_SELECT_BASE_SQL = `
     seller_draft_review.decision AS seller_draft_review_decision,
     seller_draft_review.reason AS seller_draft_review_reason,
     seller_draft_review.decided_at AS seller_draft_review_at,
+    seller_draft_review.decision_sequence AS seller_draft_review_sequence,
+    seller_draft_change_request.id AS seller_draft_change_request_id,
+    seller_draft_change_request.reason AS seller_draft_change_request_reason,
+    seller_draft_change_request.decided_at AS seller_draft_change_request_at,
+    seller_draft_resolution.id AS seller_draft_resolution_id,
+    seller_draft_resolution.resolution AS seller_draft_resolution,
+    seller_draft_resolution.reason AS seller_draft_resolution_reason,
+    seller_draft_resolution.created_at AS seller_draft_resolution_at,
+    seller_draft_resolution.resolved_by_admin_id AS seller_draft_resolution_admin_id,
     buyer_draft_review.decision AS buyer_draft_review_decision,
     buyer_draft_review.reason AS buyer_draft_review_reason,
     buyer_draft_review.decided_at AS buyer_draft_review_at,
+    buyer_draft_review.decision_sequence AS buyer_draft_review_sequence,
+    buyer_draft_change_request.id AS buyer_draft_change_request_id,
+    buyer_draft_change_request.reason AS buyer_draft_change_request_reason,
+    buyer_draft_change_request.decided_at AS buyer_draft_change_request_at,
+    buyer_draft_resolution.id AS buyer_draft_resolution_id,
+    buyer_draft_resolution.resolution AS buyer_draft_resolution,
+    buyer_draft_resolution.reason AS buyer_draft_resolution_reason,
+    buyer_draft_resolution.created_at AS buyer_draft_resolution_at,
+    buyer_draft_resolution.resolved_by_admin_id AS buyer_draft_resolution_admin_id,
     n.capturing_broker_id,
     n.deal_type AS negotiation_deal_type,
     n.selling_broker_id,
@@ -2213,9 +2332,47 @@ export const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN contract_draft_reviews seller_draft_review
     ON seller_draft_review.revision_id = active_draft_revision.id
    AND seller_draft_review.reviewer_side = 'seller'
+   AND seller_draft_review.decision_sequence = (
+      SELECT MAX(latest_seller_draft_review.decision_sequence)
+      FROM contract_draft_reviews latest_seller_draft_review
+      WHERE latest_seller_draft_review.revision_id = active_draft_revision.id
+        AND latest_seller_draft_review.reviewer_side = 'seller'
+    )
+  LEFT JOIN contract_draft_reviews seller_draft_change_request
+    ON seller_draft_change_request.revision_id = active_draft_revision.id
+   AND seller_draft_change_request.reviewer_side = 'seller'
+   AND seller_draft_change_request.decision = 'CHANGES_REQUESTED'
+   AND seller_draft_change_request.decision_sequence = (
+      SELECT MAX(latest_seller_change_request.decision_sequence)
+      FROM contract_draft_reviews latest_seller_change_request
+      WHERE latest_seller_change_request.revision_id = active_draft_revision.id
+        AND latest_seller_change_request.reviewer_side = 'seller'
+        AND latest_seller_change_request.decision = 'CHANGES_REQUESTED'
+    )
+  LEFT JOIN contract_draft_review_resolutions seller_draft_resolution
+    ON seller_draft_resolution.change_request_review_id = seller_draft_change_request.id
   LEFT JOIN contract_draft_reviews buyer_draft_review
     ON buyer_draft_review.revision_id = active_draft_revision.id
    AND buyer_draft_review.reviewer_side = 'buyer'
+   AND buyer_draft_review.decision_sequence = (
+      SELECT MAX(latest_buyer_draft_review.decision_sequence)
+      FROM contract_draft_reviews latest_buyer_draft_review
+      WHERE latest_buyer_draft_review.revision_id = active_draft_revision.id
+        AND latest_buyer_draft_review.reviewer_side = 'buyer'
+    )
+  LEFT JOIN contract_draft_reviews buyer_draft_change_request
+    ON buyer_draft_change_request.revision_id = active_draft_revision.id
+   AND buyer_draft_change_request.reviewer_side = 'buyer'
+   AND buyer_draft_change_request.decision = 'CHANGES_REQUESTED'
+   AND buyer_draft_change_request.decision_sequence = (
+      SELECT MAX(latest_buyer_change_request.decision_sequence)
+      FROM contract_draft_reviews latest_buyer_change_request
+      WHERE latest_buyer_change_request.revision_id = active_draft_revision.id
+        AND latest_buyer_change_request.reviewer_side = 'buyer'
+        AND latest_buyer_change_request.decision = 'CHANGES_REQUESTED'
+    )
+  LEFT JOIN contract_draft_review_resolutions buyer_draft_resolution
+    ON buyer_draft_resolution.change_request_review_id = buyer_draft_change_request.id
 `;
 
 let negotiationResponsiblesTableCache: boolean | null = null;
@@ -3127,14 +3284,20 @@ class ContractController {
     const context = req.contractContext;
     const body = (req.body ?? {}) as Record<string, unknown>;
     const decision = String(body.decision ?? '').trim().toUpperCase();
-    const reason = String(body.reason ?? '').trim().slice(0, 2000);
     if (!contractId) return res.status(400).json({ error: 'ID do contrato inválido.' });
     if (decision !== 'CONSENTED' && decision !== 'CHANGES_REQUESTED') {
       return res.status(400).json({ error: 'Decisão inválida para conferência da minuta.' });
     }
-    if (decision === 'CHANGES_REQUESTED' && !reason) {
-      return res.status(400).json({ error: 'Informe o motivo da solicitação de correção.' });
+    const reasonValidation = decision === 'CHANGES_REQUESTED'
+      ? validateDraftReviewReason(body.reason)
+      : null;
+    if (reasonValidation && !reasonValidation.valid) {
+      return res.status(422).json({
+        error: reasonValidation.error,
+        code: 'DRAFT_REVIEW_REASON_INVALID',
+      });
     }
+    const reason = reasonValidation?.valid ? reasonValidation.value : null;
     if (!context || (context.userRole !== 'seller' && context.userRole !== 'buyer')) {
       return res.status(403).json({ error: 'Apenas comprador ou vendedor podem conferir a minuta.' });
     }
@@ -3167,36 +3330,75 @@ class ContractController {
         await tx.rollback();
         return res.status(409).json({ error: 'A minuta ativa não possui uma revisão válida.' });
       }
-      const [existingReviewRows] = await tx.query<Array<RowDataPacket & { id: number }>>(
+      const [existingReviewRows] = await tx.query<Array<RowDataPacket & {
+        id: number;
+        decision: 'CONSENTED' | 'CHANGES_REQUESTED';
+        decision_sequence: number;
+      }>>(
         `
-          SELECT id
+          SELECT id, decision, decision_sequence
           FROM contract_draft_reviews
           WHERE revision_id = ? AND reviewer_side = ?
+          ORDER BY decision_sequence DESC
           LIMIT 1
           FOR UPDATE
         `,
         [revisionId, side]
       );
-      if (existingReviewRows.length > 0) {
-        await tx.rollback();
-        return res.status(409).json({
-          error: 'Sua decisão para esta versão da minuta já foi registrada.',
-          code: 'DRAFT_REVIEW_ALREADY_DECIDED',
-        });
+      const latestReview = existingReviewRows[0] ?? null;
+      let nextDecisionSequence = 1;
+      if (latestReview) {
+        nextDecisionSequence = Number(latestReview.decision_sequence ?? 0) + 1;
+        if (latestReview.decision !== 'CHANGES_REQUESTED') {
+          await tx.rollback();
+          return res.status(409).json({
+            error: 'Sua decisão para esta versão da minuta já foi registrada.',
+            code: 'DRAFT_REVIEW_ALREADY_DECIDED',
+          });
+        }
+
+        const [resolutionRows] = await tx.query<Array<RowDataPacket & {
+          id: number;
+          resolution: 'KEPT_CURRENT_DRAFT';
+        }>>(
+          `
+            SELECT id, resolution
+            FROM contract_draft_review_resolutions
+            WHERE change_request_review_id = ?
+            LIMIT 1
+            FOR UPDATE
+          `,
+          [latestReview.id]
+        );
+        if (resolutionRows[0]?.resolution !== 'KEPT_CURRENT_DRAFT') {
+          await tx.rollback();
+          return res.status(409).json({
+            error: 'A solicitação de correção ainda aguarda análise da administração.',
+            code: 'DRAFT_CHANGE_REQUEST_PENDING_RESOLUTION',
+          });
+        }
       }
       await tx.query(
         `
           INSERT INTO contract_draft_reviews (
-            revision_id, contract_id, reviewer_user_id, reviewer_side, decision, reason, decided_at
-          ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            revision_id, contract_id, reviewer_user_id, reviewer_side,
+            decision, reason, decision_sequence, decided_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `,
-        [revisionId, contractId, Number(req.userId), side, decision, reason || null]
+        [revisionId, contractId, Number(req.userId), side, decision, reason, nextDecisionSequence]
       );
       const [decisionRows] = await tx.query<Array<RowDataPacket & { consent_count: number }>>(
         `
           SELECT COUNT(*) AS consent_count
-          FROM contract_draft_reviews
-          WHERE revision_id = ? AND decision = 'CONSENTED'
+          FROM contract_draft_reviews current_review
+          WHERE current_review.revision_id = ?
+            AND current_review.decision = 'CONSENTED'
+            AND current_review.decision_sequence = (
+              SELECT MAX(latest_review.decision_sequence)
+              FROM contract_draft_reviews latest_review
+              WHERE latest_review.revision_id = current_review.revision_id
+                AND latest_review.reviewer_side = current_review.reviewer_side
+            )
         `,
         [revisionId]
       );
@@ -3215,7 +3417,7 @@ class ContractController {
           title: decision === 'CONSENTED' ? 'Minuta conferida' : 'Correção solicitada na minuta',
           message: decision === 'CONSENTED'
             ? `A parte ${side === 'seller' ? 'vendedora' : 'compradora'} conferiu a minuta do contrato ${contractId}.`
-            : `A parte ${side === 'seller' ? 'vendedora' : 'compradora'} solicitou correção na minuta: ${reason}`,
+            : `A parte ${side === 'seller' ? 'vendedora' : 'compradora'} solicitou correção na minuta. Consulte os detalhes do contrato.`,
           relatedEntityId: Number(contract.property_id),
           metadata: {
             contractId,
@@ -3240,6 +3442,173 @@ class ContractController {
       await tx.rollback();
       console.error('Erro ao registrar conferência da minuta:', error);
       return res.status(500).json({ error: 'Falha ao registrar conferência da minuta.' });
+    } finally {
+      tx.release();
+    }
+  }
+
+  async keepCurrentDraft(req: AuthRequest, res: Response): Promise<Response> {
+    const contractId = String(req.params.id ?? '').trim();
+    const changeRequestReviewId = Number(req.params.reviewId);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const reasonValidation = validateDraftReviewReason(body.reason);
+    if (!contractId) return res.status(400).json({ error: 'ID do contrato inválido.' });
+    if (!Number.isSafeInteger(changeRequestReviewId) || changeRequestReviewId <= 0) {
+      return res.status(400).json({ error: 'Solicitação de correção inválida.' });
+    }
+    if (!reasonValidation.valid) {
+      return res.status(422).json({
+        error: reasonValidation.error,
+        code: 'DRAFT_REVIEW_REASON_INVALID',
+      });
+    }
+
+    const tx = await getContractDbConnection();
+    try {
+      await tx.beginTransaction();
+      const contract = await fetchContractForUpdate(tx, contractId);
+      if (!contract) {
+        await tx.rollback();
+        return res.status(404).json({ error: 'Contrato não encontrado.' });
+      }
+      if (resolveContractStatus(contract.status) !== 'AWAITING_MINUTE_REVIEW') {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'A minuta não está disponível para análise nesta etapa.',
+          code: 'DRAFT_CHANGE_REQUEST_NOT_FOUND',
+        });
+      }
+
+      const [revisionRows] = await tx.query<Array<RowDataPacket & { id: number }>>(
+        `SELECT id FROM contract_draft_revisions WHERE contract_id = ? AND is_active = 1 LIMIT 1 FOR UPDATE`,
+        [contractId]
+      );
+      const revisionId = Number(revisionRows[0]?.id ?? 0);
+      if (!revisionId) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'A minuta ativa não possui uma revisão válida.',
+          code: 'DRAFT_CHANGE_REQUEST_NOT_FOUND',
+        });
+      }
+
+      const [requestRows] = await tx.query<Array<RowDataPacket & {
+        id: number;
+        reviewer_user_id: number;
+        reviewer_side: 'seller' | 'buyer';
+        decision_sequence: number;
+      }>>(
+        `
+          SELECT id, reviewer_user_id, reviewer_side, decision_sequence
+          FROM contract_draft_reviews
+          WHERE id = ?
+            AND contract_id = ?
+            AND revision_id = ?
+            AND decision = 'CHANGES_REQUESTED'
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [changeRequestReviewId, contractId, revisionId]
+      );
+      const changeRequest = requestRows[0] ?? null;
+      if (!changeRequest) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'A solicitação de correção não pertence à minuta ativa.',
+          code: 'DRAFT_CHANGE_REQUEST_NOT_FOUND',
+        });
+      }
+
+      const [laterDecisionRows] = await tx.query<Array<RowDataPacket & { id: number }>>(
+        `
+          SELECT id
+          FROM contract_draft_reviews
+          WHERE revision_id = ?
+            AND reviewer_side = ?
+            AND decision_sequence > ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [revisionId, changeRequest.reviewer_side, changeRequest.decision_sequence]
+      );
+      if (laterDecisionRows.length > 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'A solicitação de correção já possui uma decisão posterior.',
+          code: 'DRAFT_CHANGE_REQUEST_ALREADY_RESOLVED',
+        });
+      }
+
+      const [existingResolutionRows] = await tx.query<Array<RowDataPacket & { id: number }>>(
+        `
+          SELECT id
+          FROM contract_draft_review_resolutions
+          WHERE change_request_review_id = ?
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [changeRequest.id]
+      );
+      if (existingResolutionRows.length > 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: 'Esta solicitação de correção já foi analisada.',
+          code: 'DRAFT_CHANGE_REQUEST_ALREADY_RESOLVED',
+        });
+      }
+
+      const [insertResult] = await tx.query<ResultSetHeader>(
+        `
+          INSERT INTO contract_draft_review_resolutions (
+            contract_id, revision_id, change_request_review_id, requester_side,
+            resolved_by_admin_id, resolution, reason, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'KEPT_CURRENT_DRAFT', ?, CURRENT_TIMESTAMP)
+        `,
+        [
+          contractId,
+          revisionId,
+          changeRequest.id,
+          changeRequest.reviewer_side,
+          Number(req.userId),
+          reasonValidation.value,
+        ]
+      );
+      const resolutionId = Number(insertResult.insertId ?? 0) || null;
+      const updatedContract = await fetchContractForUpdate(tx, contractId);
+      await tx.commit();
+
+      const recipientId = Number(changeRequest.reviewer_user_id ?? 0);
+      if (Number.isSafeInteger(recipientId) && recipientId > 0) {
+        try {
+          await createUserNotification({
+            type: 'negotiation',
+            title: 'Solicitação de correção analisada',
+            message: 'A imobiliária decidiu manter a minuta atual. Consulte os detalhes.',
+            recipientId,
+            relatedEntityId: Number(contract.property_id),
+            metadata: {
+              contractId,
+              negotiationId: contract.negotiation_id,
+              propertyId: Number(contract.property_id),
+              draftRevisionId: revisionId,
+              draftReviewId: changeRequest.id,
+              draftReviewResolutionId: resolutionId,
+            },
+            target: 'contract_details',
+          });
+        } catch (notificationError) {
+          console.error('Falha ao notificar participante sobre análise da correção da minuta:', notificationError);
+        }
+      }
+
+      return res.status(200).json({
+        message: 'Solicitação analisada. A minuta atual foi mantida para nova decisão da parte solicitante.',
+        contract: updatedContract ? mapContract(updatedContract, req) : null,
+      });
+    } catch (error) {
+      await tx.rollback();
+      console.error('Erro ao manter minuta após solicitação de correção:', error);
+      return res.status(500).json({ error: 'Falha ao analisar a solicitação de correção da minuta.' });
     } finally {
       tx.release();
     }

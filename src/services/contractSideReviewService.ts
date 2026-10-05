@@ -657,7 +657,7 @@ export async function evaluateContractSide(
   ) {
     throw contractSideReviewError(
       400,
-      'Motivo é obrigatório para aprovação com ressalvas e rejeição.'
+      'Motivo é obrigatório para aprovação com observação e rejeição.'
     );
   }
 
@@ -864,8 +864,8 @@ export async function evaluateContractSide(
         try {
           await createUserNotification({
             type: 'negotiation',
-            title: 'Contrato aprovado com ressalvas',
-            message: `O admin aprovou com ressalvas a ${sideLabel} do contrato do imóvel "${propertyTitle}". Observação: ${reasonText}`,
+            title: 'Contrato aprovado com observação',
+            message: `O admin aprovou a ${sideLabel} do contrato do imóvel "${propertyTitle}" com observação: ${reasonText}`,
             recipientId,
             relatedEntityId: Number(contract.property_id),
             metadata: {

@@ -384,7 +384,7 @@ describe('Contract granular approval and signed docs endpoints', () => {
     );
     expect(secondResponse.body.contract.approvalProgress).toMatchObject({
       status: 'APPROVED_WITH_RES',
-      label: 'Aprovado com ressalvas',
+      label: 'Aprovado com observação',
       nextStep: 'Minuta liberada',
     });
     expect(ensureContractDraftGenerated).not.toHaveBeenCalled();
@@ -402,7 +402,10 @@ describe('Contract granular approval and signed docs endpoints', () => {
     ).toBe(false);
     expect(createUserNotificationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Contrato aprovado com ressalvas',
+        title: 'Contrato aprovado com observação',
+        message: expect.stringContaining(
+          'com observação: Documentos válidos com ressalva contratual.'
+        ),
         recipientId: 30001,
         metadata: expect.objectContaining({
           contractId: 'contract-1',

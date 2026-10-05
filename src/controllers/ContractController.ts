@@ -638,7 +638,7 @@ function summarizeContractApprovalProgress(row: ContractRow): ContractApprovalPr
         : 'Aguardando liberação para minuta';
     return {
       status: hasRes ? 'APPROVED_WITH_RES' : 'APPROVED',
-      label: hasRes ? 'Aprovado com ressalvas' : 'Aprovado',
+      label: hasRes ? 'Aprovado com observação' : 'Aprovado',
       nextStep,
     };
   }

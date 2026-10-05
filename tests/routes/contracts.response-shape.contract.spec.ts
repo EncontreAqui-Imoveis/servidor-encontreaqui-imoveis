@@ -191,7 +191,7 @@ describe('Contract response shape contracts', () => {
         buyerApprovalStatus: 'APPROVED_WITH_RES',
         approvalProgress: {
           status: 'APPROVED_WITH_RES',
-          label: 'Aprovado com ressalvas',
+          label: 'Aprovado com observação',
           nextStep: 'Aguardando liberação para minuta',
         },
         propertyTitle: 'Casa Centro',

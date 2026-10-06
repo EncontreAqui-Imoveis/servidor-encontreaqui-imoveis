@@ -2329,48 +2329,56 @@ export const CONTRACT_SELECT_BASE_SQL = `
   LEFT JOIN contract_draft_revisions active_draft_revision
     ON active_draft_revision.contract_id = c.id
    AND active_draft_revision.is_active = 1
+  LEFT JOIN (
+    SELECT revision_id, reviewer_side, MAX(decision_sequence) AS decision_sequence
+    FROM contract_draft_reviews
+    GROUP BY revision_id, reviewer_side
+  ) seller_draft_review_latest
+    ON seller_draft_review_latest.revision_id = active_draft_revision.id
+   AND seller_draft_review_latest.reviewer_side = 'seller'
   LEFT JOIN contract_draft_reviews seller_draft_review
-    ON seller_draft_review.revision_id = active_draft_revision.id
+    ON seller_draft_review.revision_id = seller_draft_review_latest.revision_id
    AND seller_draft_review.reviewer_side = 'seller'
-   AND seller_draft_review.decision_sequence = (
-      SELECT MAX(latest_seller_draft_review.decision_sequence)
-      FROM contract_draft_reviews latest_seller_draft_review
-      WHERE latest_seller_draft_review.revision_id = active_draft_revision.id
-        AND latest_seller_draft_review.reviewer_side = 'seller'
-    )
+   AND seller_draft_review.decision_sequence = seller_draft_review_latest.decision_sequence
+  LEFT JOIN (
+    SELECT revision_id, reviewer_side, MAX(decision_sequence) AS decision_sequence
+    FROM contract_draft_reviews
+    WHERE decision = 'CHANGES_REQUESTED'
+    GROUP BY revision_id, reviewer_side
+  ) seller_draft_change_request_latest
+    ON seller_draft_change_request_latest.revision_id = active_draft_revision.id
+   AND seller_draft_change_request_latest.reviewer_side = 'seller'
   LEFT JOIN contract_draft_reviews seller_draft_change_request
-    ON seller_draft_change_request.revision_id = active_draft_revision.id
+    ON seller_draft_change_request.revision_id = seller_draft_change_request_latest.revision_id
    AND seller_draft_change_request.reviewer_side = 'seller'
    AND seller_draft_change_request.decision = 'CHANGES_REQUESTED'
-   AND seller_draft_change_request.decision_sequence = (
-      SELECT MAX(latest_seller_change_request.decision_sequence)
-      FROM contract_draft_reviews latest_seller_change_request
-      WHERE latest_seller_change_request.revision_id = active_draft_revision.id
-        AND latest_seller_change_request.reviewer_side = 'seller'
-        AND latest_seller_change_request.decision = 'CHANGES_REQUESTED'
-    )
+   AND seller_draft_change_request.decision_sequence = seller_draft_change_request_latest.decision_sequence
   LEFT JOIN contract_draft_review_resolutions seller_draft_resolution
     ON seller_draft_resolution.change_request_review_id = seller_draft_change_request.id
+  LEFT JOIN (
+    SELECT revision_id, reviewer_side, MAX(decision_sequence) AS decision_sequence
+    FROM contract_draft_reviews
+    GROUP BY revision_id, reviewer_side
+  ) buyer_draft_review_latest
+    ON buyer_draft_review_latest.revision_id = active_draft_revision.id
+   AND buyer_draft_review_latest.reviewer_side = 'buyer'
   LEFT JOIN contract_draft_reviews buyer_draft_review
-    ON buyer_draft_review.revision_id = active_draft_revision.id
+    ON buyer_draft_review.revision_id = buyer_draft_review_latest.revision_id
    AND buyer_draft_review.reviewer_side = 'buyer'
-   AND buyer_draft_review.decision_sequence = (
-      SELECT MAX(latest_buyer_draft_review.decision_sequence)
-      FROM contract_draft_reviews latest_buyer_draft_review
-      WHERE latest_buyer_draft_review.revision_id = active_draft_revision.id
-        AND latest_buyer_draft_review.reviewer_side = 'buyer'
-    )
+   AND buyer_draft_review.decision_sequence = buyer_draft_review_latest.decision_sequence
+  LEFT JOIN (
+    SELECT revision_id, reviewer_side, MAX(decision_sequence) AS decision_sequence
+    FROM contract_draft_reviews
+    WHERE decision = 'CHANGES_REQUESTED'
+    GROUP BY revision_id, reviewer_side
+  ) buyer_draft_change_request_latest
+    ON buyer_draft_change_request_latest.revision_id = active_draft_revision.id
+   AND buyer_draft_change_request_latest.reviewer_side = 'buyer'
   LEFT JOIN contract_draft_reviews buyer_draft_change_request
-    ON buyer_draft_change_request.revision_id = active_draft_revision.id
+    ON buyer_draft_change_request.revision_id = buyer_draft_change_request_latest.revision_id
    AND buyer_draft_change_request.reviewer_side = 'buyer'
    AND buyer_draft_change_request.decision = 'CHANGES_REQUESTED'
-   AND buyer_draft_change_request.decision_sequence = (
-      SELECT MAX(latest_buyer_change_request.decision_sequence)
-      FROM contract_draft_reviews latest_buyer_change_request
-      WHERE latest_buyer_change_request.revision_id = active_draft_revision.id
-        AND latest_buyer_change_request.reviewer_side = 'buyer'
-        AND latest_buyer_change_request.decision = 'CHANGES_REQUESTED'
-    )
+   AND buyer_draft_change_request.decision_sequence = buyer_draft_change_request_latest.decision_sequence
   LEFT JOIN contract_draft_review_resolutions buyer_draft_resolution
     ON buyer_draft_resolution.change_request_review_id = buyer_draft_change_request.id
 `;

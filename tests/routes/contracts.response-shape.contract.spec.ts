@@ -437,6 +437,104 @@ describe('Contract response shape contracts', () => {
     });
   });
 
+  it('lists the latest effective draft decision without TiDB-incompatible ON subqueries', async () => {
+    const buyerApp = express();
+    buyerApp.use(express.json());
+    buyerApp.use((req, _res, next) => {
+      (req as any).userId = 70001;
+      (req as any).userRole = 'buyer';
+      next();
+    });
+    buyerApp.get('/contracts/me', (req, res) =>
+      contractController.listMyContracts(req as any, res)
+    );
+
+    queryMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('COUNT(*) AS total')) {
+        return [[{ total: 1 }]];
+      }
+
+      if (sql.includes('FROM contracts c') && sql.includes('LIMIT ? OFFSET ?')) {
+        expect(sql).toContain('GROUP BY revision_id, reviewer_side');
+        expect(sql).toContain('seller_draft_review_latest');
+        expect(sql).toContain('buyer_draft_review_latest');
+        expect(sql).not.toContain(
+          'seller_draft_review.decision_sequence = (',
+        );
+        expect(sql).not.toContain(
+          'buyer_draft_review.decision_sequence = (',
+        );
+        expect(sql).not.toContain(
+          'seller_draft_change_request.decision_sequence = (',
+        );
+        expect(sql).not.toContain(
+          'buyer_draft_change_request.decision_sequence = (',
+        );
+        return [[{
+          id: 'contract-current-draft-decision',
+          negotiation_id: 'neg-current-draft-decision',
+          property_id: 202,
+          deal_type: 'rent',
+          status: 'AWAITING_MINUTE_REVIEW',
+          seller_info: JSON.stringify({}),
+          buyer_info: JSON.stringify({}),
+          commission_data: JSON.stringify({}),
+          workflow_metadata: JSON.stringify({}),
+          seller_approval_status: 'APPROVED',
+          buyer_approval_status: 'APPROVED',
+          seller_approval_reason: null,
+          buyer_approval_reason: null,
+          created_at: '2026-10-01 09:00:00',
+          updated_at: '2026-10-06 10:00:00',
+          proposer_id: 70001,
+          legal_buyer_user_id: 70001,
+          draft_review_revision_id: 81,
+          draft_review_revision_number: 2,
+          draft_review_document_id: 901,
+          draft_review_original_file_name: 'minuta-atual.pdf',
+          seller_draft_review_decision: 'CONSENTED',
+          seller_draft_review_sequence: 1,
+          buyer_draft_review_decision: 'CONSENTED',
+          buyer_draft_review_sequence: 3,
+          buyer_draft_change_request_id: 321,
+          buyer_draft_change_request_reason: 'Ajustar a cláusula de prazo.',
+          buyer_draft_change_request_at: '2026-10-04 10:00:00',
+          buyer_draft_resolution_id: 654,
+          buyer_draft_resolution: 'KEPT_CURRENT_DRAFT',
+          buyer_draft_resolution_reason: 'A minuta atual reflete o acordo.',
+          buyer_draft_resolution_at: '2026-10-05 11:00:00',
+        }]];
+      }
+
+      if (sql.includes('FROM negotiation_documents')) {
+        return [[]];
+      }
+
+      return [[]];
+    });
+
+    const response = await request(buyerApp).get('/contracts/me');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0]).toMatchObject({
+      id: 'contract-current-draft-decision',
+      draftReview: {
+        revisionId: 81,
+        viewerDecision: 'CONSENTED',
+        viewerEffectiveDecision: 'CONSENTED',
+        buyerChangeRequest: {
+          id: 321,
+          pendingResolution: false,
+          resolution: {
+            id: 654,
+            resolution: 'KEPT_CURRENT_DRAFT',
+          },
+        },
+      },
+    });
+  });
+
   it('does not list contracts started by the user without a contract-side or responsible binding', async () => {
     const initiatorApp = express();
     initiatorApp.use(express.json());

@@ -26,6 +26,7 @@ import {
   processNegotiationDocumentDeletionJob,
 } from '../services/negotiationDocumentDeletionService';
 import {
+  countPendingDraftReviewRequests,
   getContractHubCounters,
   listContractsForAdmin,
   listMyContractsForUser,
@@ -2491,6 +2492,16 @@ async function fetchContractForUpdate(
 }
 
 class ContractController {
+  async getPendingDraftReviewRequestCount(_req: Request, res: Response): Promise<Response> {
+    try {
+      const total = await countPendingDraftReviewRequests();
+      return res.status(200).json({ total });
+    } catch (error) {
+      console.error('Erro ao contar solicitações de correção de minuta pendentes:', error);
+      return res.status(500).json({ error: 'Falha ao contar solicitações de correção de minuta pendentes.' });
+    }
+  }
+
   async listCommissions(req: Request, res: Response): Promise<Response> {
     try {
       const commissionSummary = await listCommissionSummary(req.query.month, req.query.year);

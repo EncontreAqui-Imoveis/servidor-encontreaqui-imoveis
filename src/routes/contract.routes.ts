@@ -12,6 +12,14 @@ import { contractDocumentUpload } from '../middlewares/uploadMiddleware';
 
 const contractRoutes = Router();
 
+contractRoutes.get(
+  '/admin/contracts/draft-review-requests/pending-count',
+  authMiddleware,
+  isAdmin,
+  requireAdminCapability('manage_contract_workflow'),
+  (req, res) => contractController.getPendingDraftReviewRequestCount(req, res)
+);
+
 contractRoutes.post('/admin/negotiations/:id/contract', authMiddleware, isAdmin, requireAdminCapability('manage_contract_workflow'), (req, res) =>
   contractController.createFromApprovedNegotiation(req, res)
 );

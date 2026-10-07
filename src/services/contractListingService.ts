@@ -15,6 +15,27 @@ import {
 } from '../controllers/ContractController';
 import { resolveContractAccessContext } from '../utils/contractAccessResolver';
 
+export async function countPendingDraftReviewRequests(): Promise<number> {
+  const rows = await queryContractRows<RowDataPacket>(
+    `
+      SELECT COUNT(*) AS total
+      FROM contract_draft_reviews review
+      JOIN contract_draft_revisions revision
+        ON revision.id = review.revision_id
+       AND revision.contract_id = review.contract_id
+      JOIN contracts c ON c.id = review.contract_id
+      LEFT JOIN contract_draft_review_resolutions resolution
+        ON resolution.change_request_review_id = review.id
+      WHERE review.decision = 'CHANGES_REQUESTED'
+        AND revision.is_active = 1
+        AND c.status = 'AWAITING_MINUTE_REVIEW'
+        AND resolution.id IS NULL
+    `,
+    [],
+  );
+  return Number(rows[0]?.total ?? 0);
+}
+
 function buildDocumentsByNegotiation(documentRows: ContractDocumentListRow[]) {
   const documentsByNegotiation = new Map<string, ContractDocumentListRow[]>();
   for (const row of documentRows) {

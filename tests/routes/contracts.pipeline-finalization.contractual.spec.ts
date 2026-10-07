@@ -88,6 +88,7 @@ type MutableContractState = {
   initiator_side?: 'seller' | 'buyer' | null;
   legal_buyer_user_id?: number | string | null;
   handshake_status?: string | null;
+  draft_review_revision_id?: number | null;
   property_title: string;
   property_purpose: string;
   property_code: string;
@@ -414,6 +415,15 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       recipientRole: 'broker',
       metadata: expect.objectContaining({ draftRevisionId: 92 }),
     });
+    for (const recipientId of [90002, 90003]) {
+      expect(createUserNotificationMock.mock.calls.map(([input]) => input).find(
+        (input) => input.recipientId === recipientId
+      )).toMatchObject({
+        title: 'Minuta pronta para revisão',
+        message: 'A minuta do contrato do imóvel Casa Centro está disponível para a sua conferência.',
+        metadata: expect.objectContaining({ draftRevisionId: 92 }),
+      });
+    }
   });
 
   it('notifies a repeated capturing and selling broker once when not a participant', async () => {
@@ -441,6 +451,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
   it('publishes a new revision after a correction request without reusing historical decisions', async () => {
     contractState = createContractState({
       status: 'AWAITING_MINUTE_REVIEW',
+      draft_review_revision_id: 91,
       advertiser_id: 7001,
       legal_buyer_user_id: 7002,
       capturing_broker_id: 7001,
@@ -460,7 +471,40 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(notifications.filter((input) => input.recipientId === 30002)).toHaveLength(1);
     for (const notification of notifications) {
       expect(notification.metadata).toEqual(expect.objectContaining({ draftRevisionId: 92 }));
+      expect(notification.title).toBe('Minuta substituída');
+      expect(notification.message).toBe(notification.recipientRole === 'broker'
+        ? 'Uma nova versão da minuta do contrato do imóvel Casa Centro foi publicada para conferência das partes.'
+        : 'Uma nova versão da minuta do contrato do imóvel Casa Centro foi publicada. Confira a nova versão e registre sua decisão.');
     }
+    const revisionInsert = txMock.query.mock.calls.find(([sql]) =>
+      String(sql).includes('INSERT INTO contract_draft_revisions'));
+    expect(revisionInsert).toBeDefined();
+    expect(txMock.query.mock.calls.some(([sql]) =>
+      String(sql).includes('UPDATE contract_draft_revisions') &&
+      String(sql).includes('SET is_active = 0'))).toBe(true);
+    expect(txMock.query.mock.calls.some(([sql]) =>
+      /(?:DELETE FROM|UPDATE) contract_draft_reviews\b/.test(String(sql)))).toBe(false);
+  });
+
+  it('uses the previous active revision rather than status to identify replacement and preserves rejected handshake', async () => {
+    contractState = createContractState({
+      status: 'IN_DRAFT',
+      draft_review_revision_id: 91,
+      advertiser_id: 7001,
+      legal_buyer_user_id: 7002,
+      handshake_status: 'REJECTED',
+      capturing_broker_id: 7001,
+      selling_broker_id: 30002,
+    });
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 replacement%'), 'minuta-nova.pdf');
+
+    expect(response.status).toBe(200);
+    const notifications = createUserNotificationMock.mock.calls.map(([input]) => input);
+    expect(notifications.map((input) => input.recipientId).sort()).toEqual([30002, 7001]);
+    expect(notifications.every((input) => input.title === 'Minuta substituída')).toBe(true);
+    expect(notifications.every((input) => input.metadata.draftRevisionId === 92)).toBe(true);
   });
 
   it.each([

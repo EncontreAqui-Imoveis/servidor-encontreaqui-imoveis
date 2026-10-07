@@ -321,14 +321,19 @@ describe('draft review change-request resolution', () => {
     expect(createUserNotificationMock).toHaveBeenCalledTimes(1);
     expect(createUserNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
       recipientId: 101,
-      title: 'Solicitação de correção analisada',
-      message: 'A imobiliária manteve a minuta atual. Abra a minuta novamente para conferir e registrar sua nova decisão.',
+      title: 'Minuta mantida pela imobiliária',
+      message: 'A imobiliária analisou sua solicitação e manteve a minuta atual. Consulte a resposta e registre sua decisão.',
       metadata: expect.objectContaining({
         draftRevisionId: 7001,
         draftReviewId: requestId,
         draftReviewResolutionId: 1,
       }),
     }));
+
+    const notification = createUserNotificationMock.mock.calls[0][0];
+    expect(notification.message).not.toMatch(/abra|confira novamente/i);
+    expect(JSON.stringify(notification)).not.toContain('Corrigir a cláusula de prazo.');
+    expect(JSON.stringify(notification)).not.toContain('A redação atual corresponde ao acordo aprovado.');
 
     const sellerConsent = await requestReview('seller', { decision: 'CONSENTED' });
     expect(sellerConsent.status).toBe(200);

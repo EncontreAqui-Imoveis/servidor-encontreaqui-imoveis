@@ -3071,6 +3071,8 @@ class ContractController {
         });
       }
 
+      const isDraftReplacement = Number(contract.draft_review_revision_id ?? 0) > 0;
+
       const existingDraftDocuments = (
         await fetchDocumentsForContractScope(tx, contract, 'linked_or_legacy')
       ).filter(
@@ -3235,8 +3237,10 @@ class ContractController {
         try {
           await createUserNotification({
             type: 'negotiation',
-            title: 'Minuta pronta para conferência',
-            message: `A minuta do contrato do imóvel ${propertyTitle} está pronta para conferência pelas partes.`,
+            title: isDraftReplacement ? 'Minuta substituída' : 'Minuta pronta para conferência',
+            message: isDraftReplacement
+              ? `Uma nova versão da minuta do contrato do imóvel ${propertyTitle} foi publicada para conferência das partes.`
+              : `A minuta do contrato do imóvel ${propertyTitle} está pronta para conferência pelas partes.`,
             recipientId,
             relatedEntityId: Number(contract.property_id),
             recipientRole: 'broker',
@@ -3258,8 +3262,10 @@ class ContractController {
         try {
           await createUserNotification({
             type: 'negotiation',
-            title: 'Minuta pronta para revisão',
-            message: `A minuta do contrato do imóvel ${propertyTitle} está disponível para a sua conferência.`,
+            title: isDraftReplacement ? 'Minuta substituída' : 'Minuta pronta para revisão',
+            message: isDraftReplacement
+              ? `Uma nova versão da minuta do contrato do imóvel ${propertyTitle} foi publicada. Confira a nova versão e registre sua decisão.`
+              : `A minuta do contrato do imóvel ${propertyTitle} está disponível para a sua conferência.`,
             recipientId,
             relatedEntityId: Number(contract.property_id),
             metadata: {
@@ -3608,8 +3614,8 @@ class ContractController {
         try {
           await createUserNotification({
             type: 'negotiation',
-            title: 'Solicitação de correção analisada',
-            message: 'A imobiliária manteve a minuta atual. Abra a minuta novamente para conferir e registrar sua nova decisão.',
+            title: 'Minuta mantida pela imobiliária',
+            message: 'A imobiliária analisou sua solicitação e manteve a minuta atual. Consulte a resposta e registre sua decisão.',
             recipientId,
             relatedEntityId: Number(contract.property_id),
             metadata: {

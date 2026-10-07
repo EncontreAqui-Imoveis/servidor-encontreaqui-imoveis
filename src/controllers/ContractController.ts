@@ -9,6 +9,7 @@ import { hydrateCpfFieldsInJson, resolveStoredCpf } from '../security/personalDa
 import {
   createAdminNotification,
   createUserNotification,
+  createWorkflowAdminNotification,
 } from '../services/notificationService';
 import {
   getContractDbConnection,
@@ -3156,7 +3157,7 @@ class ContractController {
         `,
         [contractId]
       );
-      await tx.query(
+      const [draftRevisionInsertResult] = await tx.query<ResultSetHeader>(
         `
           INSERT INTO contract_draft_revisions (
             contract_id, negotiation_id, document_id, revision_number,
@@ -3172,6 +3173,7 @@ class ContractController {
           Number((req as AuthRequest).userId ?? 0) || null,
         ]
       );
+      const draftRevisionId = Number(draftRevisionInsertResult.insertId ?? 0) || null;
 
       await tx.query(
         `
@@ -3243,6 +3245,7 @@ class ContractController {
               negotiationId: contract.negotiation_id,
               propertyId: Number(contract.property_id),
               stage: 'AWAITING_MINUTE_REVIEW',
+              draftRevisionId,
             },
             target: 'contract_details',
           });
@@ -3263,6 +3266,7 @@ class ContractController {
               contractId,
               negotiationId: contract.negotiation_id,
               propertyId: Number(contract.property_id),
+              draftRevisionId,
             },
             target: 'contract_details',
           });
@@ -3386,7 +3390,7 @@ class ContractController {
           });
         }
       }
-      await tx.query(
+      const [insertReviewResult] = await tx.query<ResultSetHeader>(
         `
           INSERT INTO contract_draft_reviews (
             revision_id, contract_id, reviewer_user_id, reviewer_side,
@@ -3395,6 +3399,7 @@ class ContractController {
         `,
         [revisionId, contractId, Number(req.userId), side, decision, reason, nextDecisionSequence]
       );
+      const draftReviewId = Number(insertReviewResult.insertId ?? 0) || null;
       const [decisionRows] = await tx.query<Array<RowDataPacket & { consent_count: number }>>(
         `
           SELECT COUNT(*) AS consent_count
@@ -3420,8 +3425,8 @@ class ContractController {
       const updatedContract = await fetchContractForUpdate(tx, contractId);
       await tx.commit();
       try {
-        await createAdminNotification({
-          type: 'negotiation',
+        const notification = {
+          type: 'negotiation' as const,
           title: decision === 'CONSENTED' ? 'Minuta conferida' : 'Correção solicitada na minuta',
           message: decision === 'CONSENTED'
             ? `A parte ${side === 'seller' ? 'vendedora' : 'compradora'} conferiu a minuta do contrato ${contractId}.`
@@ -3433,8 +3438,21 @@ class ContractController {
             propertyId: Number(contract.property_id),
             stage: allConsented ? 'AWAITING_SIGNATURES' : 'AWAITING_MINUTE_REVIEW',
           },
-          target: 'contract_details',
-        });
+          target: 'contract_details' as const,
+        };
+        if (decision === 'CHANGES_REQUESTED') {
+          await createWorkflowAdminNotification({
+            ...notification,
+            excludeUserIds: [Number(req.userId)],
+            metadata: {
+              ...notification.metadata,
+              draftRevisionId: revisionId,
+              draftReviewId,
+            },
+          });
+        } else {
+          await createAdminNotification(notification);
+        }
       } catch (notificationError) {
         console.error('Falha ao notificar administração sobre conferência da minuta:', notificationError);
       }
@@ -3591,7 +3609,7 @@ class ContractController {
           await createUserNotification({
             type: 'negotiation',
             title: 'Solicitação de correção analisada',
-            message: 'A imobiliária decidiu manter a minuta atual. Consulte os detalhes.',
+            message: 'A imobiliária manteve a minuta atual. Abra a minuta novamente para conferir e registrar sua nova decisão.',
             recipientId,
             relatedEntityId: Number(contract.property_id),
             metadata: {

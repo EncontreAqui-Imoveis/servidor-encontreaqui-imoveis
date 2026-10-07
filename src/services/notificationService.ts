@@ -7,6 +7,10 @@ import {
   type NotificationDeepLinkMetadata,
   type NotificationTarget,
 } from './notificationDeepLinkMetadata';
+import {
+  hasAdminCapability,
+  normalizeAdminPanelRole,
+} from '../middlewares/adminCapabilities';
 
 type RelatedEntityType =
   | 'property'
@@ -21,6 +25,12 @@ interface AdminRow {
   id: number;
 }
 
+interface WorkflowAdminRow extends RowDataPacket, AdminRow {
+  role?: string | null;
+  is_active?: number | boolean | null;
+  user_id?: number | null;
+}
+
 interface CreateAdminNotificationInput {
   type: RelatedEntityType;
   title: string;
@@ -28,6 +38,11 @@ interface CreateAdminNotificationInput {
   relatedEntityId?: number | null;
   metadata?: Record<string, unknown> | null;
   target?: NotificationTarget;
+}
+
+interface CreateWorkflowAdminNotificationInput extends CreateAdminNotificationInput {
+  /** IDs de usuários que não podem receber a notificação administrativa. */
+  excludeUserIds?: number[];
 }
 
 interface CreateUserNotificationInput {
@@ -137,6 +152,115 @@ export async function createAdminNotification({
       })
     )
   );
+}
+
+/**
+ * Notifica somente contas administrativas ativas que podem atuar no fluxo
+ * contratual. A notificação continua pertencendo à caixa administrativa; o
+ * push, quando houver uma identidade de usuário vinculada pelo e-mail, reutiliza
+ * exatamente a mesma notificação persistida e sua metadata canônica.
+ */
+export async function createWorkflowAdminNotification({
+  type,
+  title,
+  message,
+  relatedEntityId = null,
+  metadata = null,
+  target,
+  excludeUserIds = [],
+}: CreateWorkflowAdminNotificationInput): Promise<void> {
+  if (!isValidRelatedEntityType(type)) {
+    throw new Error(`Invalid related entity type: ${type}`);
+  }
+
+  const trimmedTitle = title.trim();
+  const trimmedMessage = message.trim();
+  if (!trimmedTitle || !trimmedMessage) {
+    return;
+  }
+
+  const excludedUserIds = new Set(
+    excludeUserIds
+      .map((id) => Number(id))
+      .filter((id) => Number.isSafeInteger(id) && id > 0),
+  );
+  const [rows] = await connection.query<WorkflowAdminRow[]>(
+    `
+      SELECT a.id, a.role, a.is_active, u.id AS user_id
+      FROM admins a
+      LEFT JOIN users u ON LOWER(TRIM(u.email)) = LOWER(TRIM(a.email))
+    `,
+  );
+  const normalizedEntityId =
+    relatedEntityId != null && Number.isFinite(relatedEntityId)
+      ? Number(relatedEntityId)
+      : null;
+  const recipientIdentityKeys = new Set<string>();
+  const persistedNotifications: Array<{ recipientId: number; metadata: NotificationDeepLinkMetadata }> = [];
+
+  for (const row of rows ?? []) {
+    const adminId = Number(row.id);
+    if (!Number.isSafeInteger(adminId) || adminId <= 0) continue;
+    const isActive = row.is_active == null || row.is_active === true || Number(row.is_active) === 1;
+    if (!isActive || !hasAdminCapability(normalizeAdminPanelRole(row.role), 'manage_contract_workflow')) {
+      continue;
+    }
+
+    const linkedUserId = Number(row.user_id);
+    const hasLinkedUser = Number.isSafeInteger(linkedUserId) && linkedUserId > 0;
+    if (hasLinkedUser && excludedUserIds.has(linkedUserId)) {
+      continue;
+    }
+
+    const identityKey = hasLinkedUser ? `user:${linkedUserId}` : `admin:${adminId}`;
+    if (recipientIdentityKeys.has(identityKey)) {
+      continue;
+    }
+    recipientIdentityKeys.add(identityKey);
+
+    const persisted = await persistNotification({
+      title: trimmedTitle,
+      message: trimmedMessage,
+      type,
+      relatedEntityId: normalizedEntityId,
+      metadata,
+      target,
+      recipientId: adminId,
+      recipientType: 'admin',
+      recipientRole: 'admin',
+    });
+    if (hasLinkedUser) {
+      persistedNotifications.push({ recipientId: linkedUserId, metadata: persisted.metadata });
+    }
+  }
+
+  if (persistedNotifications.length === 0) {
+    return;
+  }
+
+  try {
+    const pushSummary = await sendPushNotifications({
+      message: trimmedMessage,
+      recipients: persistedNotifications,
+      title: trimmedTitle,
+    });
+    console.info('create_workflow_admin_notification_push_dispatched', {
+      recipientCount: persistedNotifications.length,
+      relatedEntityType: type,
+      relatedEntityId: normalizedEntityId,
+      requested: pushSummary.requested,
+      success: pushSummary.success,
+      failure: pushSummary.failure,
+      errorCodes: pushSummary.errorCodes,
+    });
+  } catch (pushError) {
+    console.error('Falha ao enviar push em createWorkflowAdminNotification:', {
+      recipientCount: persistedNotifications.length,
+      relatedEntityType: type,
+      relatedEntityId: normalizedEntityId,
+      error: pushError,
+    });
+  }
 }
 
 async function resolveRecipientRole(recipientId: number): Promise<'client' | 'broker'> {

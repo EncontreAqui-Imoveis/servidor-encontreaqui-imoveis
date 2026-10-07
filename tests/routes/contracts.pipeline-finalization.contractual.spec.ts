@@ -45,6 +45,7 @@ vi.mock('../../src/database/connection', () => ({
 vi.mock('../../src/services/notificationService', () => ({
   createUserNotification: createUserNotificationMock,
   createAdminNotification: vi.fn(),
+  createWorkflowAdminNotification: vi.fn(),
   notifyAdmins: vi.fn(),
 }));
 
@@ -221,6 +222,10 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
           return [[{ id: 91 }]];
         }
 
+        if (sql.includes('INSERT INTO contract_draft_revisions')) {
+          return [{ insertId: 92, affectedRows: 1 }];
+        }
+
         if (
           sql.includes('FROM contract_draft_reviews') &&
           sql.includes('reviewer_side = ?') &&
@@ -331,6 +336,9 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       })
     );
     expect(createUserNotificationMock).toHaveBeenCalled();
+    expect(createUserNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ draftRevisionId: 92 }),
+    }));
   });
 
   it('notifies a broker who is also the seller only as a participant', async () => {
@@ -353,6 +361,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(notificationsForSeller[0]).toMatchObject({
       title: 'Minuta pronta para revisão',
       target: 'contract_details',
+      metadata: expect.objectContaining({ draftRevisionId: 92 }),
     });
   });
 
@@ -376,6 +385,7 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     expect(notificationsForBuyer[0]).toMatchObject({
       title: 'Minuta pronta para revisão',
       target: 'contract_details',
+      metadata: expect.objectContaining({ draftRevisionId: 92 }),
     });
   });
 
@@ -399,7 +409,11 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
     ]);
     expect(createUserNotificationMock.mock.calls.map(([input]) => input).find(
       (input) => input.recipientId === 90001
-    )).toMatchObject({ title: 'Minuta pronta para conferência', recipientRole: 'broker' });
+    )).toMatchObject({
+      title: 'Minuta pronta para conferência',
+      recipientRole: 'broker',
+      metadata: expect.objectContaining({ draftRevisionId: 92 }),
+    });
   });
 
   it('notifies a repeated capturing and selling broker once when not a participant', async () => {
@@ -422,6 +436,31 @@ describe('Contractual compliance: contract pipeline and finalization', () => {
       title: 'Minuta pronta para conferência',
       recipientRole: 'broker',
     });
+  });
+
+  it('publishes a new revision after a correction request without reusing historical decisions', async () => {
+    contractState = createContractState({
+      status: 'AWAITING_MINUTE_REVIEW',
+      advertiser_id: 7001,
+      legal_buyer_user_id: 7002,
+      capturing_broker_id: 7001,
+      selling_broker_id: 30002,
+    });
+    draftReviewDecisions = { seller: 'CHANGES_REQUESTED', buyer: 'CONSENTED' };
+
+    const response = await request(app)
+      .post('/admin/contracts/contract-1/draft')
+      .attach('file', Buffer.from('%PDF-1.4 replacement%'), 'minuta-nova.pdf');
+
+    expect(response.status).toBe(200);
+    expect(draftReviewDecisions).toEqual({ seller: 'CHANGES_REQUESTED', buyer: 'CONSENTED' });
+    const notifications = createUserNotificationMock.mock.calls.map(([input]) => input);
+    expect(notifications.filter((input) => input.recipientId === 7001)).toHaveLength(1);
+    expect(notifications.filter((input) => input.recipientId === 7002)).toHaveLength(1);
+    expect(notifications.filter((input) => input.recipientId === 30002)).toHaveLength(1);
+    for (const notification of notifications) {
+      expect(notification.metadata).toEqual(expect.objectContaining({ draftRevisionId: 92 }));
+    }
   });
 
   it.each([

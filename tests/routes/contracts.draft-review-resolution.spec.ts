@@ -2,7 +2,13 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { txMock, getConnectionMock, createAdminNotificationMock, createUserNotificationMock } = vi.hoisted(() => {
+const {
+  txMock,
+  getConnectionMock,
+  createAdminNotificationMock,
+  createUserNotificationMock,
+  createWorkflowAdminNotificationMock,
+} = vi.hoisted(() => {
   const tx = {
     beginTransaction: vi.fn(),
     commit: vi.fn(),
@@ -15,6 +21,7 @@ const { txMock, getConnectionMock, createAdminNotificationMock, createUserNotifi
     getConnectionMock: vi.fn(),
     createAdminNotificationMock: vi.fn(),
     createUserNotificationMock: vi.fn(),
+    createWorkflowAdminNotificationMock: vi.fn(),
     tx,
   };
 });
@@ -27,6 +34,7 @@ vi.mock('../../src/database/connection', () => ({
 vi.mock('../../src/services/notificationService', () => ({
   createAdminNotification: createAdminNotificationMock,
   createUserNotification: createUserNotificationMock,
+  createWorkflowAdminNotification: createWorkflowAdminNotificationMock,
   notifyAdmins: vi.fn(),
 }));
 
@@ -147,6 +155,7 @@ describe('draft review change-request resolution', () => {
     txMock.release.mockResolvedValue(undefined);
     createAdminNotificationMock.mockResolvedValue(undefined);
     createUserNotificationMock.mockResolvedValue(undefined);
+    createWorkflowAdminNotificationMock.mockResolvedValue(undefined);
     txMock.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       if (sql.includes('FROM contracts c') && sql.includes('FOR UPDATE')) {
         return [[contractRow()]];
@@ -247,6 +256,33 @@ describe('draft review change-request resolution', () => {
     expect(decisions[0]).toMatchObject({ decision: 'CHANGES_REQUESTED', reason: reason.trim() });
   });
 
+  it('notifies only workflow administration about a correction with review metadata', async () => {
+    const reason = 'Corrigir a cláusula de prazo sem expor este texto no push.';
+
+    const response = await requestReview('seller', {
+      decision: 'CHANGES_REQUESTED',
+      reason,
+    });
+
+    expect(response.status).toBe(200);
+    expect(createUserNotificationMock).not.toHaveBeenCalled();
+    expect(createAdminNotificationMock).not.toHaveBeenCalled();
+    expect(createWorkflowAdminNotificationMock).toHaveBeenCalledTimes(1);
+    expect(createWorkflowAdminNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Correção solicitada na minuta',
+      excludeUserIds: [101],
+      metadata: expect.objectContaining({
+        contractId: 'contract-review-1',
+        negotiationId: 'neg-review-1',
+        propertyId: 901,
+        stage: 'AWAITING_MINUTE_REVIEW',
+        draftRevisionId: 7001,
+        draftReviewId: 1,
+      }),
+    }));
+    expect(createWorkflowAdminNotificationMock.mock.calls[0][0].message).not.toContain(reason);
+  });
+
   it('preserves the other consent and permits only the requester to decide again after keep', async () => {
     expect((await requestReview('buyer', { decision: 'CONSENTED' })).status).toBe(200);
     expect((await requestReview('seller', {
@@ -286,8 +322,12 @@ describe('draft review change-request resolution', () => {
     expect(createUserNotificationMock).toHaveBeenCalledWith(expect.objectContaining({
       recipientId: 101,
       title: 'Solicitação de correção analisada',
-      message: 'A imobiliária decidiu manter a minuta atual. Consulte os detalhes.',
-      metadata: expect.objectContaining({ draftRevisionId: 7001, draftReviewId: requestId }),
+      message: 'A imobiliária manteve a minuta atual. Abra a minuta novamente para conferir e registrar sua nova decisão.',
+      metadata: expect.objectContaining({
+        draftRevisionId: 7001,
+        draftReviewId: requestId,
+        draftReviewResolutionId: 1,
+      }),
     }));
 
     const sellerConsent = await requestReview('seller', { decision: 'CONSENTED' });
